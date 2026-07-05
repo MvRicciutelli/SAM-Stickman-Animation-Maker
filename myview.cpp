@@ -1,4 +1,5 @@
 ﻿#include "myview.h"
+#include <QtAlgorithms>
 #include <math.h>
 #include <QDebug>
 #include <QGraphicsRotation>
@@ -26,7 +27,6 @@ float   lengthBuffer;
 float zoomLvlBuf;
 bool clearUndoFlag = false;
 Frame* stickLibraryBuffer;
-QList<Frame*> stickLibraryList;
 bool undoFlag = false;
 bool libFlag = false;
 extern QSpinBox * onionSkinSB;
@@ -113,6 +113,10 @@ void myView::deleteStickFigure()
             myAnimation->updateSelection(ns);
             myStickFigureWidgetList->clearSelection();
             ns->linkedItem->setSelected(true);
+            // senza questo, currentRow() poteva restare sulla riga che Qt seleziona di default dopo
+            // takeItem() invece che su quella di ns: un successivo Move Layer Up/Down avrebbe quindi
+            // spostato una riga diversa da quella su cui viene applicata la Z (CURRENTSTICKFIGURE)
+            myStickFigureWidgetList->setCurrentRow(myStickFigureWidgetList->row(ns->linkedItem));
         }
         myAnimation->currentFrame->updateIcon();
         if(updateCurrentStickFigure){
@@ -339,6 +343,7 @@ void myView::mousePressEvent(QMouseEvent *event)
             {
                 storeUndo();
                 arrowSelection();
+                if(CS==nullptr) break; // niente da selezionare (nessuno stick nel frame)
                 lengthBuffer = CS->myLine.length();
                 break;
             }
@@ -346,6 +351,7 @@ void myView::mousePressEvent(QMouseEvent *event)
             {
                 storeUndo();
                 arrowSelection();
+                if(CS==nullptr) break; // niente da selezionare (nessuno stick nel frame)
                 lengthBuffer = CS->myLine.length();
 
                 break;
@@ -631,6 +637,14 @@ void myView::mouseReleaseEvent(QMouseEvent *event)
                 myStickFigureWidgetList->selectedItems()[0]->setIcon(*CURRENTSTICKFIGURE->stickFigureIcon);
                 myAnimation->currentFrame->updateIcon();
             }
+            if(tool == MOVESCENE || tool == ROTATESCENE || tool == SCALESCENE){
+                // questi strumenti modificano ogni stickfigure del frame: aggiorna l'icona di ognuno,
+                // non solo di quello selezionato, altrimenti le altre anteprime restano quelle pre-trascinamento
+                for(StickFigure* S: myAnimation->currentFrame->stickFigures){
+                    S->updateIcon();
+                    S->linkedItem->setIcon(*S->stickFigureIcon);
+                }
+            }
         }
     }else if(event->button()==Qt::RightButton){
         isRightPressed = false;
@@ -764,6 +778,10 @@ void myView::mouseMoveEvent(QMouseEvent *event)
 
                 float actualAngle = mouseToCenterNow.angle();// angolo assoluto del mouse ora rispetto al centro
                 float angle = actualAngle-startingAngle; // incremento in angolo rispetto a prima
+                // normalizza l'incremento: angle() torna un valore in [0,360), quindi attraversare lo
+                // 0/360 senza questo produce uno scatto di quasi un giro intero per un singolo frame
+                if(angle>180) angle -= 360;
+                else if(angle<-180) angle += 360;
                 startingCoord = coord; // le coordinate attuali vengono memorizzate per la prossima iterazione
                 for(StickFigure*S:myAnimation->currentFrame->stickFigures){
                     //check it is not an empty layer
@@ -796,6 +814,8 @@ void myView::mouseMoveEvent(QMouseEvent *event)
                 float dist = 0;
                 QPointF center(W/2,H/2);
                 float startDist = QLineF(startingCoord,center).length();
+                if(startDist<1) // evita una divisione per zero (o quasi) se si preme esattamente sul centro
+                    break;
                 dist = QLineF(coord,center).length();
                 scaleAmount = dist/startDist;
                 for(StickFigure * S:myAnimation->currentFrame->stickFigures){
@@ -974,9 +994,10 @@ void myView::moveToFrame(Frame* frame){
     if(playBack == false){
         myAnimation->currentFrame->linkedItem->setSelected(true);
         myFrameWidgetList->setCurrentItem(myAnimation->currentFrame->linkedItem);
-        if(!myAnimation->frameList.isEmpty() && !myAnimation->currentFrame->stickFigures.isEmpty()){
-            //CURRENTSTICKFIGURE->updateIcon();
-            myFrameWidgetList->selectedItems()[0]->setIcon(*myAnimation->currentFrame->frameIcon);
+        // niente guardia su stickFigures.isEmpty(): updateIcon() gestisce già correttamente un
+        // frame vuoto (lo riempie di bianco), senza di essa un frame appena creato restava senza
+        // anteprima invece di mostrare una tela bianca
+        if(!myAnimation->frameList.isEmpty()){
             myAnimation->currentFrame->updateIcon();
         }
         /*
@@ -1274,10 +1295,23 @@ void myView::saveLibrary(QString fileName){
     file.close();
     libFlag = false;
 }
+// libera davvero il precedente buffer di libreria: con libFlag attivo, ~StickFigure() salta sia la
+// pulizia degli stick sia quella di iconImg/stickFigureIcon (pensate per gli oggetti "di passaggio"
+// della (de)serializzazione, non per uno scarto definitivo come questo), quindi senza liberarli
+// esplicitamente ogni cambio di libreria perdeva la memoria di stick e icone di quella precedente
+static void freeLibraryFrame(Frame* f){
+    for(StickFigure* S: f->stickFigures){
+        qDeleteAll(S->stickList);
+        S->stickList.clear();
+        delete S->iconImg;
+        delete S->stickFigureIcon;
+    }
+    delete f;
+}
 void myView::clearCurrentLib(){
     libFlag = true;
     myCurrentLibraryWidget->clear();
-    delete stickLibraryBuffer;
+    freeLibraryFrame(stickLibraryBuffer);
     stickLibraryBuffer = new Frame();
     libFlag = false;
 }
@@ -1290,7 +1324,7 @@ void myView::loadLibrary(QString fileName, int mode){
     }
     QDataStream out(&file);
     myCurrentLibraryWidget->clear();
-    delete stickLibraryBuffer;
+    freeLibraryFrame(stickLibraryBuffer);
     stickLibraryBuffer = new Frame();
     out >> *stickLibraryBuffer;
     // aggiungi tutta gli stickfigure del nuovo frame alla lista del widget
@@ -1325,9 +1359,11 @@ StickFigure* myView::addStickFigureToLibrary(){
 
 }
 void myView::removeFromLibrary(){
-    libFlag = true;
     // get selected item
     int idx = myCurrentLibraryWidget->currentRow();
+    if(idx<0 || idx>=myCurrentLibraryWidget->count()) // niente selezionato: senza questo, takeItem(-1) torna nullptr e va in crash sotto
+        return;
+    libFlag = true;
     QListWidgetItem *itemToRemove = myCurrentLibraryWidget->takeItem(idx);
     // estrai il dato utente salvato in esso, puntatore ad uno stickfigure
     QVariant  retrievedData = (itemToRemove->data(Qt::UserRole));
@@ -1494,6 +1530,10 @@ void myView::preparePreview(){
     playBack = false;
 }
 void myView::displayPreview(int idx){
+    // rimuovi il pixmap del frame precedente: altrimenti si accumula uno per frame per tutta
+    // la riproduzione, invece di essere ripulito solo (tutto insieme) quando la riproduzione finisce
+    if(idx>0)
+        scene()->removeItem(previewList[idx-1]);
     QGraphicsPixmapItem* renderImg = previewList[idx];
 
     //item->setOffset(onionOffset);

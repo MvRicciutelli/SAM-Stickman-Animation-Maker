@@ -2,6 +2,8 @@
 #include <QListWidget>
 #include <QDebug>
 #include <QBuffer>
+#include <QPainter>
+#include <QFont>
 #include "uiItems.h"
 #define CS currentStickFigure->currentStick
 QListWidget * ListWidget;
@@ -130,16 +132,20 @@ StickFigure* Frame::addStickFigureToLibrary(StickFigure*S){
 
         addedItem->setData(Qt::UserRole,newData);
         addedItem->setData(Qt::DisplayRole,newStickFigure->name);
-        //addedItem->setIcon(*currentStickFigure->stickFigureIcon);
         int newIdx = myCurrentLibraryWidget->currentRow()+1;
         myCurrentLibraryWidget->insertItem(newIdx,addedItem);
 
         myCurrentLibraryWidget->clearSelection();
         addedItem->setSelected( true);
         myCurrentLibraryWidget->setCurrentRow(newIdx);
-        S->updateIcon();
+        // era S->updateIcon(): aggiornava l'icona dello stickfigure sorgente invece di quella del
+        // clone appena aggiunto alla libreria, che restava senza icona finché la libreria non
+        // veniva salvata e ricaricata da file (updateIcon() imposta anche addedItem->setIcon(...))
+        newStickFigure->updateIcon();
         delete byteArray;
+        return newStickFigure;
     }
+    return nullptr;
 }
 StickFigure* Frame::removeStickFigure(StickFigure* toRemove)
 {
@@ -279,6 +285,8 @@ QDataStream & operator>> (QDataStream& stream, Frame& myFrame){
     return stream;
 }
 float Frame::minMaxZ(int option){
+    if(totalSticks.isEmpty())
+        return 0;
     float peak = totalSticks[0]->Z;
     for(stick*s:totalSticks){
         if(option){
@@ -377,10 +385,21 @@ void Frame::updateIcon()
     QPainter painter(iconImg);
     // renderizza dalla scena sull'immagine mediante il painter
     icoScene.render(&painter);
+    // disegna il numero del frame direttamente sull'iconea (fascia scura semi-trasparente in basso,
+    // testo bianco sopra): affidarsi all'etichetta nativa della QListWidgetItem in IconMode non
+    // mostrava il numero in modo affidabile, quindi lo "cuociamo" nell'immagine stessa
+    QRectF numberBand(0, iconImg->height()-14, iconImg->width(), 14);
+    painter.fillRect(numberBand, QColor(0,0,0,160));
+    painter.setPen(Qt::white);
+    QFont numberFont = painter.font();
+    numberFont.setPointSize(8);
+    painter.setFont(numberFont);
+    painter.drawText(numberBand, Qt::AlignCenter, QString::number(frameNumber));
     // imposta l'iconea
     delete frameIcon;
     frameIcon = new QIcon(*iconImg);
     linkedItem->setIcon(*frameIcon);
+    linkedItem->setData(Qt::DisplayRole, QString()); // il numero è già nell'iconea: evita di mostrarlo due volte
 
     // i cloni vengono cancellati automaticamente dal distruttore di icoScene
     painter.end();
@@ -408,7 +427,15 @@ void Frame::updateRender(){
 }
 void Frame::clearFrame(){
     for(StickFigure *S:stickFigures){
-
+        // il frame viene svuotato per sempre qui: libera gli stick esplicitamente invece di
+        // affidarsi al distruttore di StickFigure, che salta la pulizia quando undoFlag/copyFlag/
+        // libFlag/clearUndoFlag sono attivi (pensati per gli oggetti "di passaggio" della
+        // (de)serializzazione, non per una cancellazione definitiva come questa - senza questo,
+        // ogni undo/redo che passa da qui perdeva la memoria del frame sovrascritto)
+        for(stick* s: S->stickList){
+            scene->removeItem(s);
+            delete s;
+        }
         delete S;
 
     }

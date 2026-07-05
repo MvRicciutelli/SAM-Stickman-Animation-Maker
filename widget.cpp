@@ -25,7 +25,8 @@
 #include <QJsonDocument>
 #include <QFile>
 #include <QMessageBox>
-#include <QMessageBox>
+#include <QtAlgorithms>
+#include <algorithm>
 #include "advancedtab.h"
 #include "advancedlinewidget.h"
 #include "advancedcirclewidget.h"
@@ -448,12 +449,16 @@ void Widget::on_deleteStickFigureBtn_clicked()
 
 void Widget::on_moveLayerUpBtn_clicked()
 {
-    view->moveStickFigureZ(1, MODE_UP);
+    // increment negativo = verso la riga 0 = verso l'alto nella lista: prima era invertito
+    // rispetto alla freccia dell'icona (spostava il layer verso il basso)
+    view->moveStickFigureZ(-1, MODE_UP);
 }
 
 void Widget::on_moveLayerDownBtn_clicked()
 {
-    view->moveStickFigureZ(-1, MODE_DOWN);
+    // increment positivo = verso l'ultima riga = verso il basso nella lista: prima era invertito
+    // rispetto alla freccia dell'icona (spostava il layer verso l'alto)
+    view->moveStickFigureZ(1, MODE_DOWN);
 }
 
 void Widget::on_drawCircleBtn_clicked()
@@ -768,13 +773,14 @@ void Widget::on_removeFromLibraryBtn_clicked()
 
 void Widget::on_addItemFromLibraryToSceneBtn_clicked()
 {
-    StickFigure * added = addStick();
     // get selected item
     int idx = myCurrentLibraryWidget->currentRow();
-
-    if(!myCurrentLibraryWidget->item(idx)->isSelected()){
+    // niente selezionato: controllato PRIMA di addStick(), altrimenti un click a vuoto aggiungeva
+    // comunque un layer vuoto indesiderato oltre a rischiare item(-1)->isSelected() in crash
+    if(idx<0 || idx>=myCurrentLibraryWidget->count() || !myCurrentLibraryWidget->item(idx)->isSelected()){
         return;
     }
+    StickFigure * added = addStick();
     QListWidgetItem *itemToAdd = myCurrentLibraryWidget->item(idx);
     // estrai il dato utente salvato in esso, puntatore ad uno stickfigure
     QVariant  retrievedData = (itemToAdd->data(Qt::UserRole));
@@ -1240,9 +1246,14 @@ void Widget::on_setAllDepthBtn_clicked()
         float val = depthSpinbox->value();
         for(stick* s:CURRENTSTICKFIGURE->stickList){
             s->Z = val;
+            s->setZValue(val); // mancava: senza setZValue() il riordino non si vedeva a schermo
         }
         CURRENTSTICKFIGURE->baseZ = val;
-        CURRENTSTICKFIGURE->refresh(0);
+        // riordina totalSticks in base alla nuova Z: usato da push-to-top/bottom e move-stick-up/down
+        // per trovare il vicino corretto, altrimenti restava nell'ordine (ormai sbagliato) precedente
+        std::sort(CURRENTFRAME->totalSticks.begin(),CURRENTFRAME->totalSticks.end(),
+                  [](stick* a, stick* b){ return a->Z < b->Z; });
+        CURRENTFRAME->refresh();
     }
 }
 
@@ -1253,7 +1264,11 @@ void Widget::on_setDepthBtn_clicked()
         view->storeUndo(CMD_SIMPLE);
         float val = depthSpinbox->value();
         CS->Z = val;
-        CURRENTSTICKFIGURE->refresh(0);
+        CS->setZValue(val); // mancava: senza setZValue() il riordino non si vedeva a schermo
+        // riordina totalSticks in base alla nuova Z, per lo stesso motivo di on_setAllDepthBtn_clicked
+        std::sort(CURRENTFRAME->totalSticks.begin(),CURRENTFRAME->totalSticks.end(),
+                  [](stick* a, stick* b){ return a->Z < b->Z; });
+        CURRENTFRAME->refresh();
     }
 }
 
@@ -1557,6 +1572,14 @@ void Widget::on_cpyFrame_clicked()
     QDataStream myStream2(&buffer2);
 
     if(frameCopyBuffer!=nullptr){
+        // il buffer di copia precedente va davvero liberato qui: con copyFlag attivo, ~StickFigure()
+        // salta la pulizia dei suoi stick (pensata per gli oggetti "di passaggio" della
+        // (de)serializzazione, non per uno scarto definitivo come questo), quindi senza liberarli
+        // esplicitamente ogni ri-copia perdeva la memoria della copia precedente
+        for(StickFigure* S: frameCopyBuffer->stickFigures){
+            qDeleteAll(S->stickList);
+            S->stickList.clear();
+        }
         delete frameCopyBuffer;
         frameCopyBuffer = new Frame;
     }
@@ -1578,7 +1601,9 @@ void Widget::on_pasteFrame_clicked()
         for(stick*s:added->stickList){
             CURRENTFRAME->totalSticks.append(s);
         }
+        view->addHandles(added); // mancava: senza questo i manici degli stick incollati non comparivano
         added->linkedItem->setData(Qt::DisplayRole,added->name);
+        added->updateIcon(); // mancava: l'icona del layer incollato restava quella vuota di addStick()
         if(frameCopyBuffer->stickFigures.last() == S){
             view->myAnimation->updateSelection(added);
             myStickFigureWidgetList->setCurrentRow(myStickFigureWidgetList->row(added->linkedItem));
@@ -1586,6 +1611,9 @@ void Widget::on_pasteFrame_clicked()
     }
     // move to new frame
     CURRENTFRAME->refresh();
+    // updateFrameOrder (sotto) NON aggiorna nessuna icona nonostante il commento originale:
+    // aggiorna solo stick::order/numOfItems. L'anteprima del frame va aggiornata esplicitamente qui.
+    CURRENTFRAME->updateIcon();
 
     // update list icons
     view->updateFrameOrder(CURRENTFRAME);

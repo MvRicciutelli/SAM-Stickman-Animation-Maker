@@ -32,6 +32,9 @@ void checkUpdate::run(){
             goto cleanup;
         }
         QStringList release = output.split(QLatin1Char(','), Qt::SkipEmptyParts);
+        if(release.count() < 3){
+            goto cleanup;
+        }
         int V = release[0].toInt();
         int SubV = release[1].toInt();
         int Rel = release[2].toInt();

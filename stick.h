@@ -71,7 +71,6 @@ public:
     QPointF imgOffset = QPointF(0,0);
     QRectF imgRect;
     QList<stick*> children;
-    QList<void*> linkedStickFigure;
     QList<QString> imgNameList;
     QPen Pen;
     QBrush Brush;

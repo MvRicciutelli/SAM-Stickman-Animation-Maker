@@ -337,7 +337,6 @@ void StickFigure::deleteStick(int idx)
             parent = parent->parent; // update parent pointer
         }
         delete childStick;
-        parentBuffer = nullptr;
     }
     // epura lo stick dalla lista sticklist
     stickList.removeAll(selectedStick);
@@ -802,7 +801,10 @@ void mergeStickFigures(StickFigure* mainStickFigure, stick* mainStick,StickFigur
     }
     QList<stick*> stepChildToRemove;
     for(stick* child:toJoin->masterStick->children){
-        if(child->stepchild)
+        // solo i figli DIRETTI del vecchio master vengono davvero riparentati a linker (vedi sopra
+        // "s->stepchild && s->parent->isMaster()"): un nipote stepchild più in profondità mantiene il
+        // suo parent originale, quindi resta un discendente legittimo del master clonato e non va tolto
+        if(child->stepchild && child->parent == toJoin->masterStick)
             stepChildToRemove.append(matchIndexes[toJoin->stickList.indexOf(child)]);
 
     }
@@ -921,6 +923,12 @@ void StickFigure::setStepChildAsMaster(stick* toMaster){
     }
     // importa il vecchio albero genialogico diretto fra i figli della catena genitoriale del nuovo master inverita e aggiornata
     oldDirectChain.removeAll(oldMaster);
+    // togli anche il resto della catena genitoriale stessa: senza questo ogni suo membro finisce per
+    // elencare se stesso e i propri (ex) antenati come propri discendenti (voci auto-referenziali/cicliche
+    // in children), dato che catenaGenitori è già interamente contenuta in oldDirectChain
+    for(stick* s: catenaGenitori){
+        oldDirectChain.removeAll(s);
+    }
     for(stick* s:catenaGenitori){
         s->children.append(oldDirectChain);
         //toMaster->children.append(s);
@@ -1059,8 +1067,8 @@ void StickFigure::setDirectChainAsMaster(stick* toMaster){
         s->stepchild = true;
         if(s != oldMaster){
             for(stick* c:s->children){
-                if(oldStepChild.contains(s))
-                        oldStepChild.removeAll(s);
+                if(oldStepChild.contains(c))
+                        oldStepChild.removeAll(c);
                 c->stepchild = true;
 
             }
@@ -1085,8 +1093,8 @@ void StickFigure::setDirectChainAsMaster(stick* toMaster){
             recursive = recursive->parent;
         }
         for(stick* c:s->children){
-            if(oldStepChild.contains(s))
-                    oldStepChild.removeAll(s);
+            if(oldStepChild.contains(c))
+                    oldStepChild.removeAll(c);
             c->stepchild = true;
         }
     }
@@ -1293,10 +1301,13 @@ void splitStickFigures(StickFigure* split, stick* origin,StickFigure* branch){
     int i = 0;
     // in un altro ciclo for, per ogni stick clonato aggiungere gli stessi parent e gli stessi children sfruttando l'indicizzazione
     for(stick* s: branch->stickList){
-        if(matchingIndex[i]->parent != origin->parent)
-            s->parent = branch->stickList[matchingIndex.indexOf(matchingIndex[i]->parent)];
+        int parentIdx = matchingIndex.indexOf(matchingIndex[i]->parent);
+        if(matchingIndex[i]->parent != origin->parent && parentIdx != -1)
+            s->parent = branch->stickList[parentIdx];
         for(stick*c: matchingIndex[i]->children){
-            s->children.append(branch->stickList[matchingIndex.indexOf(c)]);
+            int childIdx = matchingIndex.indexOf(c);
+            if(childIdx != -1) // c non fa parte del branch (es. voce spuria da una gerarchia children non pulita)
+                s->children.append(branch->stickList[childIdx]);
         }
         i++;
         split->scene->addItem(s);

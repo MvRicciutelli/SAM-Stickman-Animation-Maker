@@ -95,6 +95,8 @@ void advancedTaperWidget::on_taperWidthSpinbox_valueChanged(int arg1)
 
 void advancedTaperWidget::on_hardTopTaperCheck_stateChanged(int arg1)
 {
+    if(CS==nullptr)
+        return;
     V->storeUndo();
     CS->hardTop=((bool) arg1);
     CURRENTSTICKFIGURE->refresh();
@@ -103,6 +105,8 @@ void advancedTaperWidget::on_hardTopTaperCheck_stateChanged(int arg1)
 
 void advancedTaperWidget::on_hardBottomTaperCheck_stateChanged(int arg1)
 {
+   if(CS==nullptr)
+       return;
    V->storeUndo();
    CS->hardBottom=((bool) arg1);
    CURRENTSTICKFIGURE->refresh();

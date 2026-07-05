@@ -91,7 +91,7 @@ void Animation::updateSelection(QPointF point)
     if(currentFrame->stickFigures.isEmpty())
         return;
     scene->clearSelection();
-    StickFigure *selectedStickFigure;
+    StickFigure *selectedStickFigure = nullptr;
     if(CURRENTSTICKFIGURE != nullptr){
         CURRENTSTICKFIGURE->highlight(false);
         CURRENTSTICKFIGURE->refresh(0);
@@ -115,6 +115,8 @@ void Animation::updateSelection(QPointF point)
             }
         }
     }
+    if(selectedStickFigure == nullptr) // nessuno stickfigure nel frame ha almeno uno stick
+        return;
     if(CS){
         if(selectedStickFigure->stickList[selectedIdx]->stickType != CS->stickType){
             updateTab(selectedStickFigure->stickList[selectedIdx]->stickType );
@@ -319,11 +321,14 @@ QDataStream &operator>>(QDataStream& stream,Animation& myAnimation){
     stream>>frameNum;
     stream>>myAnimation.width;
     stream>>myAnimation.height;
-    //delete myRect;
-    //scene->clear();
-    //myRect = new QGraphicsRectItem(0, 0, W, H); // renew the rect
+    // applica subito le dimensioni appena lette: prima non veniva fatto, quindi caricare un file con
+    // una canvas di dimensioni diverse da quella corrente lasciava myRect/limitRect/onionOffset legati
+    // alla vecchia canvas (nessuno li ricalcolava finché l'utente non ridimensionava manualmente)
+    W = myAnimation.width;
+    H = myAnimation.height;
+    myRect->setRect(0,0,W,H);
     sceneRemover(scene);
-    //limitRect = new QGraphicsRectItem(-myRect->rect().width()/10, -myRect->rect().height()/10, myRect->rect().width()*1.1, myRect->rect().height()*1.1);
+    limitRect->setRect(-myRect->rect().width()/10, -myRect->rect().height()/10, myRect->rect().width()*1.1, myRect->rect().height()*1.1);
 
     scene->addItem(myRect);
     scene->setSceneRect(limitRect->rect());
