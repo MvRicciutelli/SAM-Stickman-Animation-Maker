@@ -1071,7 +1071,25 @@ void myView::updateOnionSkins(){
 
     onionRender = false;
 }
-#define MAXUNDO 1
+#define MAXUNDO 50
+// scarta completamente un frame "usa e getta" (voce di undo/redo, ecc.): i suoi stick non sono mai
+// stati aggiunti alla scena reale (operator>> lo salta quando undoFlag/clearUndoFlag è attivo,
+// esattamente il contesto in cui questi frame vengono creati), quindi NON si tocca frame->scene,
+// che per questi frame "di passaggio" non viene mai inizializzato ed è un puntatore indeterminato.
+// qDeleteAll libera comunque gli stick correttamente; il resto (icone incluse) lo fa ~Frame()/~StickFigure().
+static void discardScratchFrame(Frame* f){
+    // forza undoFlag qui: questa funzione viene chiamata anche da un contesto (invalidazione del
+    // redo buffer su una modifica nuova) in cui NESSUno dei flag di "oggetto di passaggio" è attivo,
+    // e senza undoFlag la pulizia di uno stick IMAGE toccherebbe imgListWidget (vedi stick::~stick())
+    bool prevUndoFlag = undoFlag;
+    undoFlag = true;
+    for(StickFigure* S: f->stickFigures){
+        qDeleteAll(S->stickList);
+        S->stickList.clear();
+    }
+    undoFlag = prevUndoFlag;
+    delete f;
+}
 // Questa funzione fa sia undo che redo, a seconda prende come sorgente un buffer diverso undoBuffe ro redoBuffer
 // copia dal Buffer,
 void myView::undoRedo(int mode){
@@ -1121,7 +1139,12 @@ void myView::undoRedo(int mode){
         // svuota il frame da popolare con il buffer
         myAnimation->frameList[undoFrame->frameNumber]->clearFrame();
         //popola il frame di destinazione con il buffer
+        // undoFlag va abbassato qui: il target è il frame VERO, non uno scartafaccio, quindi i suoi
+        // stick vanno davvero aggiunti alla scena (operator>> lo salta quando undoFlag è attivo,
+        // causando "item's scene (0x0)" e un crash appena qualcosa presume che siano in scena)
+        undoFlag = false;
         myAnimation->cloneFrame(myAnimation->frameList[undoFrame->frameNumber],undoFrame);
+        undoFlag = true;
         // spostati verso tale frame
         moveToFrame(myAnimation->frameList[undoFrame->frameNumber]);
     }
@@ -1130,7 +1153,9 @@ void myView::undoRedo(int mode){
         //svuota il frame di destinazione
         myAnimation->frameList[undoFrame->frameNumber]->clearFrame();
         // popolalo col buffer
+        undoFlag = false;
         myAnimation->cloneFrame(myAnimation->frameList[undoFrame->frameNumber],undoFrame);
+        undoFlag = true;
         // spostati sul frame di destinazione
         moveToFrame(myAnimation->frameList[undoFrame->frameNumber]);
     }
@@ -1140,7 +1165,9 @@ void myView::undoRedo(int mode){
         // routine di aggiunta del frame
         Frame* addedFrame = setUpFrame(undoFrame->frameNumber);
         // popola il frame aggiuntio col buffer
+        undoFlag = false;
         myAnimation->cloneFrame(addedFrame,undoFrame);
+        undoFlag = true;
         // spostati sulla destinazione
         moveToFrame(addedFrame);
 
@@ -1150,10 +1177,12 @@ void myView::undoRedo(int mode){
         sceneRemover(scene());
         //scene()->clear();
         //myRect = new QGraphicsRectItem(0,0,W,H); // RENEW IT
+        undoFlag = false;
         myAnimation->cloneFrame(myAnimation->currentFrame,undoFrame);
+        undoFlag = true;
         moveToFrame(myAnimation->currentFrame);
     }
-    delete undoFrame;
+    discardScratchFrame(undoFrame);
     undoFlag = false;
     //
 }
@@ -1165,6 +1194,16 @@ void myView::storeUndo(int command, int mode){
     if(myAnimation->frameList.isEmpty())
     {
         return;
+    }
+    // se undoFlag è ancora false qui, non siamo dentro undoRedo(): questa è una modifica nuova
+    // dell'utente, quindi il buffer di redo (che punterebbe a uno stato "futuro" ormai non più
+    // coerente) va invalidato. Se invece undoFlag è già true, questa chiamata è la registrazione
+    // interna che undoRedo() fa sull'ALTRO buffer durante un vero undo/redo: non toccarlo.
+    if(!undoFlag){
+        for(undoInfoStruct u: redoBuffer){
+            discardScratchFrame(u.frame);
+        }
+        redoBuffer.clear();
     }
     updateFrameOrder(CURRENTFRAME);
     opCount++;
@@ -1209,13 +1248,13 @@ void myView::storeUndo(int command, int mode){
     //popola il buffer appropriato
     if(mode == MODE_UNDO){
         if(undoBuffer.count()>=MAXUNDO){
-            delete undoBuffer.takeFirst().frame;
+            discardScratchFrame(undoBuffer.takeFirst().frame);
         }
         undoBuffer.append(myUndo);
     }
     else if(mode ==MODE_REDO){
         if(redoBuffer.count()>=MAXUNDO){
-            delete redoBuffer.takeFirst().frame;
+            discardScratchFrame(redoBuffer.takeFirst().frame);
         }
         redoBuffer.append(myUndo);
     }
@@ -1274,11 +1313,11 @@ void myView::removeHandles(StickFigure *S)
 void myView::clearUndo(){
     clearUndoFlag = true;
     for(undoInfoStruct u:undoBuffer){
-        delete u.frame;
+        discardScratchFrame(u.frame);
     }
     undoBuffer.clear();
     for(undoInfoStruct u:redoBuffer){
-        delete u.frame;
+        discardScratchFrame(u.frame);
     }
     redoBuffer.clear();
     clearUndoFlag = false;

@@ -1121,7 +1121,12 @@ void Widget::on_copyStickFigureBtn_clicked()
 {
     if(CURRENTSTICKFIGURE != nullptr){
         copyFlag = true;
-        // libera il buffer di copia precedente prima di sovrascriverlo, altrimenti va perso senza essere cancellato
+        // libera il buffer di copia precedente prima di sovrascriverlo: copyFlag è già attivo qui,
+        // quindi ~StickFigure() salta la pulizia dei suoi stick (vedi ~StickFigure()) e va fatta a mano
+        if(view->copyStickFigureBuffer){
+            qDeleteAll(view->copyStickFigureBuffer->stickList);
+            view->copyStickFigureBuffer->stickList.clear();
+        }
         delete view->copyStickFigureBuffer;
         view->copyStickFigureBuffer = new StickFigure();
 

@@ -11,6 +11,7 @@ extern QListWidget * myStickFigureWidgetList;
 extern bool undoFlag;
 extern bool libFlag;
 extern bool switchFrameFlag;
+extern bool loadingAnimationFlag;
 
 bool iconUpdateFlag = false;
 Frame::Frame()
@@ -73,7 +74,10 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     //aggiorna lo stickfigure corrente
     currentStickFigure = stickFigureBuffer;
     currentStickFigure->name = myName;
-    if(!undoFlag && !libFlag &&!copyFlag){
+    // switchFrameFlag mancava: senza di esso, duplicare un frame (on_copyFrame_clicked) inseriva
+    // ogni suo stickfigure in myStickFigureWidgetList durante il deserializzo, per poi vederselo
+    // subito buttare via dal clear()+rebuild che moveToFrame() fa comunque un attimo dopo
+    if(!undoFlag && !libFlag &&!copyFlag && !loadingAnimationFlag && !switchFrameFlag){
         QVariant newData(QVariant::fromValue(currentStickFigure));
         addedItem->setData(Qt::UserRole,newData);
         addedItem->setData(Qt::DisplayRole,myName);
@@ -85,7 +89,7 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
         currentStickFigure->highlight(false); //de highlight old selection
         currentStickFigure->highlight(true); //highlight new one
     }
-    if(!undoFlag && !switchFrameFlag && !copyFlag){
+    if(!undoFlag && !switchFrameFlag && !copyFlag && !loadingAnimationFlag){
         // update current stick
         if(!libFlag)
         {
@@ -228,6 +232,11 @@ QDataStream & operator<< (QDataStream& stream, const Frame& myFrame){
         }else{
             stream<<0;
         }
+    }else{
+        // operator>> legge SEMPRE un int qui (anche con libFlag), quindi va sempre scritto anche qui:
+        // altrimenti lo stream si desincronizza di un int ad ogni salvataggio/caricamento di libreria,
+        // corrompendo tutti i campi letti dopo (a partire dal primo StickFigure)
+        stream<<0;
     }
     for(StickFigure* S: myFrame.stickFigures){
         stream<< *S;
@@ -272,7 +281,11 @@ QDataStream & operator>> (QDataStream& stream, Frame& myFrame){
 
     for(StickFigure*S:myFrame.stickFigures){
         for(stick*s:S->stickList){
-            myFrame.totalSticks[s->order] = s;
+            // s->order presuppone di formare una permutazione perfetta 0..count-1: se per qualche
+            // motivo non lo è (es. mai passato da updateFrameOrder()), senza questo controllo si
+            // scrive fuori dai limiti di totalSticks (corruzione dell'heap, crash non immediato)
+            if(s->order>=0 && s->order<myFrame.totalSticks.count())
+                myFrame.totalSticks[s->order] = s;
         }
     }
     myFrame.currentStickFigure = nullptr;

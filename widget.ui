@@ -5716,7 +5716,7 @@ QPushButton:pressed{
                  <number>0</number>
                 </property>
                 <item>
-                 <widget class="QPushButton" name="pushStickFigureToBottom">
+                 <widget class="QPushButton" name="pushStickFigureToTop">
                   <property name="minimumSize">
                    <size>
                     <width>50</width>
@@ -5754,7 +5754,7 @@ QPushButton:pressed{
                  </widget>
                 </item>
                 <item>
-                 <widget class="QPushButton" name="pushStickFigureToTop">
+                 <widget class="QPushButton" name="pushStickFigureToBottom">
                   <property name="minimumSize">
                    <size>
                     <width>50</width>

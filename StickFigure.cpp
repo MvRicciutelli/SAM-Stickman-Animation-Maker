@@ -1,5 +1,6 @@
 #include "StickFigure.h"
 
+#include <QtAlgorithms>
 #include <QBuffer>
 #include <QDebug>
 #include <QFile>
@@ -370,6 +371,7 @@ QDataStream & operator<< (QDataStream& stream, const stick& myStick){
             stream<<imgSize;
         }
         stream<<myStick.imgAngle;
+        stream<<myStick.imgAngleOffset; // mancava: si azzerava a ogni save/load/clone (vedi paint(): imgAngle+imgAngleOffset)
         stream<<myStick.imgHScale;
         stream<<myStick.imgWScale;
         stream<<myStick.imgOffset;
@@ -409,6 +411,7 @@ QDataStream & operator>> (QDataStream& stream, stick& myStick){
             stream>>mysize;
         }
         stream>>myStick.imgAngle;
+        stream>>myStick.imgAngleOffset;
         stream>>myStick.imgHScale;
         stream>>myStick.imgWScale;
         stream>>myStick.imgOffset;
@@ -467,7 +470,13 @@ QDataStream & operator>> (QDataStream& stream,StickFigure& myStickFigure){
     stream>>myStickFigure.version;
     stream>>max; // quanti stick possiede?
     stream>>myStickFigure.name;
+    // difesa in profondità: ogni chiamante attuale passa sempre un target appena costruito con
+    // stickList già vuota, quindi qDeleteAll qui è oggi un no-op, ma senza di esso un futuro
+    // chiamante che riusi un oggetto vivo perderebbe (senza liberarli) i suoi stick precedenti
+    qDeleteAll(myStickFigure.stickList);
     myStickFigure.stickList.clear();
+    myStickFigure.masterStick = nullptr;
+    myStickFigure.currentStick = nullptr;
     // per ogni stick popola la lista sticklist
     for(int i = 0; i<max; i++){
         myStickFigure.currentStick = new stick(); // prepara il contenitore
@@ -510,7 +519,11 @@ QDataStream & operator>> (QDataStream& stream,StickFigure& myStickFigure){
     if(myStickFigure.stickList.count()>0){
         myStickFigure.currentStick = myStickFigure.stickList[0];
     }
-    if(!undoFlag && !copyFlag){
+    // libFlag e loadingAnimationFlag mancavano: senza libFlag, aggiungere uno stickfigure alla
+    // libreria calcolava l'icona due volte (qui e nella chiamata esplicita in
+    // Frame::addStickFigureToLibrary); senza loadingAnimationFlag, caricare un file renderizzava
+    // l'icona di OGNI stickfigure di OGNI frame invece che solo di quello mostrato
+    if(!undoFlag && !copyFlag && !libFlag && !loadingAnimationFlag){
         myStickFigure.updateIcon();
     }
     return stream;
@@ -533,16 +546,17 @@ void StickFigure::updateBoundingRects(){
 }
 void cloneStickFigure(StickFigure* dest, StickFigure*src){
 
-    // byte array stores serialized data
-    QByteArray* byteArray = new QByteArray();
+    // byte array stores serialized data (su stack, come le altre funzioni di clone: evita che
+    // buffer1/buffer2 restino aperti su una QByteArray già cancellata)
+    QByteArray byteArray;
     // buffer temporarily holds serialized data
-    QBuffer buffer1(byteArray);
+    QBuffer buffer1(&byteArray);
     // use this buffer to store data from the object
     buffer1.open(QIODevice::WriteOnly);
     QDataStream myStream(&buffer1);
     myStream<<*(src);
     // now create a seconds buffer from which to read data of the bytearray
-    QBuffer buffer2(byteArray);
+    QBuffer buffer2(&byteArray);
     buffer2.open(QIODevice::ReadOnly);
     // a new data stream to deserialize
     QDataStream myStream2(&buffer2);
@@ -554,7 +568,6 @@ void cloneStickFigure(StickFigure* dest, StickFigure*src){
     {
         dest->updateIcon();
     }
-    delete byteArray;
 }
 //this function join parent stick with its children
 QList<stick*> StickFigure::weld(stick* master){

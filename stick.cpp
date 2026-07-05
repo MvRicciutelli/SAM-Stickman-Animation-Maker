@@ -9,6 +9,8 @@ extern QPixmap * imageDrawBuffer ;
 extern QListWidget* imgListWidget;
 extern bool libFlag;
 extern bool undoFlag;
+extern bool copyFlag;
+extern bool clearUndoFlag;
 extern bool iconUpdateFlag;
 extern bool renderFlag;
 extern bool playBack;
@@ -87,13 +89,16 @@ stick::~stick(){
         for(QImage*i:stickImgList)
         {
             delete i;
-            if(!onionRender && !undoFlag && !libFlag && !iconUpdateFlag){
+            // mancavano copyFlag/clearUndoFlag: senza di essi, cancellare uno stick scartato da un
+            // buffer di copia o da clearUndo() (mai davvero mostrato) toccava comunque imgListWidget,
+            // che riflette invece lo stick IMAGE correntemente selezionato sullo schermo
+            if(!onionRender && !undoFlag && !libFlag && !copyFlag && !clearUndoFlag && !iconUpdateFlag){
                 QListWidgetItem * item= imgListWidget->takeItem(j);
                 delete  item;
             }
             j++;
         }
-        if(!onionRender && !undoFlag && !libFlag && !iconUpdateFlag)
+        if(!onionRender && !undoFlag && !libFlag && !copyFlag && !clearUndoFlag && !iconUpdateFlag)
         {
             stickImgList.clear();
         }

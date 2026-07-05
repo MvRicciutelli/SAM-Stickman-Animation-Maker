@@ -55,8 +55,7 @@ void myMainWindow::on_actionsave_triggered()
 {
     QString fileName = QFileDialog::getSaveFileName(this,tr("Save StickFigure"),
                        myStickFiguresFolder.path(), "Stickfigure (*.stck)");
-    if(fileName.length()>1){
-        QDataStream myStream;
+    if(fileName.length()>1 && CURRENTSTICKFIGURE){
         CURRENTSTICKFIGURE->saveStickFigure(fileName);
     }
 }
@@ -67,7 +66,7 @@ void myMainWindow::on_actionload_triggered()
     QString fileName = QFileDialog::getOpenFileName(this,tr("Load StickFigure"),
                        myStickFiguresFolder.path(), "Stickfigure (*.stck)");
     if(QFile::exists(fileName)){
-        QDataStream myStream;
+        view->storeUndo();
         centralW->addStick();
         CURRENTSTICKFIGURE->loadStickFigure(fileName);
         for(stick*s:CURRENTSTICKFIGURE->stickList){
@@ -81,8 +80,10 @@ void myMainWindow::on_actionsave_animation_triggered()
 {
     QString fileName = QFileDialog::getSaveFileName(this,tr("Save Animation"),
                        myAnimationsFolder.path(), "Marionetta Animation (*.mAnim)");
-    animationPath = fileName;
+    // animationPath va scritto solo qui dentro: se l'utente annulla la dialog, fileName e'
+    // vuoto e non deve invalidare il path del file gia' aperto (rompe autosave e "Save")
     if(fileName.length()>1){
+        animationPath = fileName;
         view->myAnimation->saveAnimation(fileName);
         opCount = 0;
     }
@@ -92,18 +93,18 @@ void myMainWindow::on_actionload_animation_triggered()
 {
     QString fileName = QFileDialog::getOpenFileName(this,tr("Load Animation"),
                        myAnimationsFolder.path(), "Marionetta Animation (*.mAnim)");
-     view->clearUndo();
-     animationPath = fileName;
+    // clearUndo/animationPath vanno toccati solo se l'utente conferma un file valido: annullare
+    // la dialog non deve cancellare la cronologia undo o il path dell'animazione corrente
     if(QFile::exists(fileName)){
+        view->clearUndo();
+        animationPath = fileName;
         loadFile = true;
-        QDataStream myStream;
         view->myAnimation->loadAnimation(fileName);
-        if(view->myAnimation->width != W || view->myAnimation->height != H){
-            W = view->myAnimation->width;
-            H = view->myAnimation->height;
-            view->sizeChange(NOREPO);
+        // Animation::operator>> gia' applica W/H/myRect dal file caricato; se il file e'
+        // corrotto puo' interrompersi lasciando frameList vuota, quindi va controllata qui
+        if(!view->myAnimation->frameList.isEmpty()){
+            view->moveToFrame(view->myAnimation->frameList[0]);
         }
-        view->moveToFrame(view->myAnimation->frameList[0]);
         loadFile = false;
         opCount = 0;
     }
@@ -202,6 +203,11 @@ void myMainWindow::on_actionNew_Blank_Animation_triggered()
                                     );
     if(ret == QMessageBox::Yes)
     {
+        // senza clearUndo() l'undo buffer terrebbe frame della vecchia animazione applicabili
+        // a questa nuova; senza azzerare animationPath, "Save" sovrascriverebbe silenziosamente
+        // il vecchio file salvato con la nuova animazione vuota
+        view->clearUndo();
+        animationPath.clear();
         view->myAnimation->clearAnimation();
         myWidget->addFrame();
         opCount = 0;

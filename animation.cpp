@@ -117,7 +117,10 @@ void Animation::updateSelection(QPointF point)
     }
     if(selectedStickFigure == nullptr) // nessuno stickfigure nel frame ha almeno uno stick
         return;
-    if(CS){
+    // CURRENTSTICKFIGURE va controllato PRIMA: espandere CS da solo deferenzia già
+    // currentStickFigure, che può essere nullptr dopo un ripristino di undo/redo il cui
+    // "stickfigure corrente" salvato era un layer vuoto (operator>> lo lascia nullptr in quel caso)
+    if(CURRENTSTICKFIGURE && CS){
         if(selectedStickFigure->stickList[selectedIdx]->stickType != CS->stickType){
             updateTab(selectedStickFigure->stickList[selectedIdx]->stickType );
         }
@@ -314,6 +317,7 @@ QDataStream &operator<<(QDataStream& stream, const Animation& myAnimation){
     for(Frame* f: myAnimation.frameList){
         stream<<*f;
     }
+    return stream;
 }
 QDataStream &operator>>(QDataStream& stream,Animation& myAnimation){
     int frameNum = 0;
@@ -333,12 +337,22 @@ QDataStream &operator>>(QDataStream& stream,Animation& myAnimation){
     scene->addItem(myRect);
     scene->setSceneRect(limitRect->rect());
     onionOffset = QPointF(-myRect->rect().width()/10,-myRect->rect().height()/10);
+    // un file valido non ha comunque un numero enorme di frame: senza questo controllo, un file
+    // troncato o corrotto (es. un int con qualche bit invertito) farebbe partire un ciclo che
+    // alloca centinaia di migliaia di Frame/QListWidgetItem prima di accorgersi che i dati non ci sono
+    if(stream.status() != QDataStream::Ok || frameNum < 0 || frameNum > 100000){
+        return stream;
+    }
     for(int i = 0;i<frameNum;i++){
         Frame* addedFrame = myAnimation.setupFrame(i);
         stream>>*addedFrame;
+        if(stream.status() != QDataStream::Ok){
+            // file troncato a metà frame: fermati qui, i frame già letti restano validi
+            break;
+        }
         addedFrame->updateIcon();
     }
-
+    return stream;
 }
 void Animation::saveAnimation(QString fileName){
     QFile file(fileName);
