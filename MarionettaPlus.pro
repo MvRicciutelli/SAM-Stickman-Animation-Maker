@@ -29,11 +29,9 @@ SOURCES += \
     imageexport.cpp \
     main.cpp \
     mymainwindow.cpp \
-    myrect.cpp \
     myview.cpp \
     sleeper.cpp \
     stick.cpp \
-    sticklib.cpp \
     widget.cpp
 
 HEADERS += \
@@ -49,11 +47,9 @@ HEADERS += \
     frame.h \
     imageexport.h \
     mymainwindow.h \
-    myrect.h \
     myview.h \
     sleeper.h \
     stick.h \
-    sticklib.h \
     style.h \
     uiItems.h \
     widget.h
@@ -66,7 +62,6 @@ FORMS += \
     animationoptions.ui \
     ffmpegexport.ui \
     mymainwindow.ui \
-    sticklib.ui \
     widget.ui
 
 # Default rules for deployment.

@@ -55,6 +55,7 @@ class myView : public QGraphicsView
     Q_OBJECT
 public:
     explicit myView(QWidget *parent = nullptr);
+    ~myView();
     unsigned int tool = NOTOOL;
     void setTool(int Tool);
     StickFigure *addStickFigure(QListWidgetItem* item);

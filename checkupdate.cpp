@@ -28,14 +28,15 @@ void checkUpdate::run(){
         output.remove(")",Qt::CaseSensitivity::CaseSensitive);
         output.remove("\r\n",Qt::CaseSensitivity::CaseSensitive);
         if(output.length()<3){
-            return;
+            // salta alla pulizia finale invece di uscire subito: altrimenti p (e questo thread) non vengono mai cancellati
+            goto cleanup;
         }
         QStringList release = output.split(QLatin1Char(','), Qt::SkipEmptyParts);
         int V = release[0].toInt();
         int SubV = release[1].toInt();
         int Rel = release[2].toInt();
         if(release[0].toInt() == -1){
-            return;
+            goto cleanup;
         }else{
             if(V> VERSION){
                 goto update;
@@ -53,6 +54,7 @@ void checkUpdate::run(){
             emit updatePresent(output);
 
     }
+    cleanup:
     delete p;
     quit();
     deleteLater();

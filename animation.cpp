@@ -40,7 +40,9 @@ Frame *Animation::addFrame(QListWidgetItem* item, int pos)
     //frameBuffer->renderImg = new QImage(scene->sceneRect().width(),scene->sceneRect().height(),QImage::Format_ARGB32);
 
     if(frameList.isEmpty())
+    {
         currentFrame = frameBuffer;
+    }
     frameList.insert(pos,frameBuffer);
     frameBuffer->linkedItem = item;
     return frameBuffer;
@@ -51,6 +53,9 @@ Frame *Animation::deleteFrame(Frame *frame){
         frameList.removeAll(frame);
         if(frame == currentFrame){
             for(StickFigure * S:frame->stickFigures){
+                // toglilo dalla lista prima di cancellarlo, altrimenti resta un
+                // puntatore pendente che viene cancellato di nuovo al prossimo clear()
+                myStickFigureWidgetList->takeItem(myStickFigureWidgetList->row(S->linkedItem));
                 delete S->linkedItem;
             }
         }
@@ -189,7 +194,9 @@ void Animation::updateSelection(StickFigure* S)
         return;
     // update current stickfigure
     if(CURRENTSTICKFIGURE !=nullptr)
+    {
         CURRENTSTICKFIGURE->highlight(false); //de highlight old selection
+    }
 
     CURRENTSTICKFIGURE = S; //update currentStickFigure buffer
 
@@ -331,7 +338,9 @@ QDataStream &operator>>(QDataStream& stream,Animation& myAnimation){
 void Animation::saveAnimation(QString fileName){
     QFile file(fileName);
     if(!file.open(QIODevice::WriteOnly))
+    {
         return;
+    }
     QDataStream out(&file);
     out << *this;
     file.close();
@@ -341,7 +350,9 @@ void Animation::loadAnimation(QString name)
 
     QFile file(name);
     if(!file.open(QIODevice::ReadOnly))
+    {
         return;
+    }
     QDataStream out(&file);
     clearAnimation();
     loadingAnimationFlag = true;

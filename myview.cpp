@@ -39,7 +39,6 @@ StickFigure* joinToStickFigure;
 StickFigure* splitToStickFigure;;
 stick* joinToStick;
 stick* splitToStick;
-QList<QGraphicsEllipseItem*> handles;
 extern QString imageNameBuffer;
 extern int W;
 extern int H;
@@ -62,6 +61,20 @@ myView::myView(QWidget *parent) : QGraphicsView(parent)
     myBrush.setColor(Qt::gray);
     myPen.setCapStyle(Qt::RoundCap);
     stickLibraryBuffer = new Frame();
+}
+
+myView::~myView()
+{
+    for (StickFigure* S : CURRENTFRAME->stickFigures)
+    {
+        removeHandles(S);
+    }
+    for ( Frame* f : myAnimation->frameList)
+    {
+        delete f;
+    }
+    delete myAnimation;
+    delete copyStickFigureBuffer;
 }
 
 void myView::setTool(int Tool)
@@ -233,7 +246,11 @@ void myView::mousePressEvent(QMouseEvent *event)
             case DRAWTAPER:
             case DRAWIMG:
             {
+                auto currentScene = scene();
+                auto num = currentScene->items();
                 drawCmd(&coord,(int)tool);
+
+                num = currentScene->items();
                 break;
             }
             case(ROTATE):
@@ -483,7 +500,6 @@ void myView::drawCmd(QPointF* point, int mode)
             // add it to the total scene list
             myAnimation->currentFrame->totalSticks.append(CS);
             myAnimation->updateSelection(CS);
-            handles.append((QGraphicsEllipseItem*)CS->stickHandle);
 
         }
     }
@@ -885,29 +901,30 @@ void myView::deleteFrame(Frame* frame){
 }
 // routine per passare da un frame ad un altro, svuota la scena, svuota le widget list, ripopola entrambi, aggiorna onion skins e selezioni
 void myView::moveToFrame(Frame* frame){
-    //myAnimation->currentFrame->updateRender();
-    QRectF myR = scene()->sceneRect();
-    stick* orderedStickList[frame->numOfItems];
-    int j = 0;
-    int r = 0;
     // rimuovi tutti gli stick dalla scena
+    auto currentScene = scene();
+    auto num = currentScene->items();
     if(myAnimation->frameList.count()>=1){
         for(StickFigure *S:myAnimation->currentFrame->stickFigures){
             removeHandles(S);
             for(stick * s: S->stickList){
                if(scene()->items().contains(s)){
-                    scene()->removeItem(s);
-                    //s->order = j;
-                    j++;
+                    currentScene->removeItem(s);
+
                }
             }
+
+
         }
     }
+    num = currentScene->items();
     // rimuovigli elementi dalla lista widget
     myStickFigureWidgetList->clear();
 
+
     // aggiungi tutta gli stickfigure del nuovo frame alla lista del widget
-    for(StickFigure *S:frame->stickFigures){
+    for(StickFigure *S:frame->stickFigures)
+    {
         QListWidgetItem * addedItem = new QListWidgetItem(myStickFigureWidgetList);
         QVariant newData(QVariant::fromValue(S));
         addedItem->setData(Qt::UserRole,newData);
@@ -922,10 +939,11 @@ void myView::moveToFrame(Frame* frame){
             addHandles(S);
         }
     }
-    scene()->clearSelection();
+    currentScene->clearSelection();
     myAnimation->currentFrame = frame;
-    for(int j = 0;j<frame->numOfItems;j++){
-        scene()->addItem(frame->totalSticks[j]);
+    for(int j = 0;j<frame->numOfItems;j++)
+    {
+        currentScene->addItem(frame->totalSticks[j]);
 
         //orderedStickList[frame->numOfItems-1-j]->refresh(0);
     }
@@ -945,20 +963,12 @@ void myView::moveToFrame(Frame* frame){
     }else{
         arrowSelection();
     }
-    /*
-    if(!myAnimation->currentFrame->stickFigures.isEmpty())
-        CURRENTSTICKFIGURE = myAnimation->currentFrame->stickFigures[0];
-    // forza la selezione dell' item in posizione 0
-    myStickFigureWidgetList->clearSelection();
-    myFrameWidgetList->clearSelection();
 
-    if(!myAnimation->currentFrame->stickFigures.isEmpty())
-        if(frame->numOfItems>0)
-            myAnimation->updateSelection(myAnimation->currentFrame->stickFigures.last());
-            */
     if(!playBack)
+    {
         updateOnionSkins();//aggiorna gli onion skins
-
+    }
+    num = currentScene->items();
     //scene()->update(myR);
     // se non siamo in modalità playback aggiorna le selezioni nelle widgetlists e delle iconee
     if(playBack == false){
@@ -969,18 +979,21 @@ void myView::moveToFrame(Frame* frame){
             myFrameWidgetList->selectedItems()[0]->setIcon(*myAnimation->currentFrame->frameIcon);
             myAnimation->currentFrame->updateIcon();
         }
+        /*
         if(myRect == nullptr){
             myRect = new QGraphicsRectItem(0,0,W,H);
             myRect->setPen(Qt::NoPen);
             myRect->setZValue(-100);
-            if(!scene()->items().contains(myRect))
-                scene()->addItem(myRect);
+            if(!currentScene->items().contains(myRect))
+            {
+                currentScene->addItem(myRect);
+            }
         }
-
+        */
 
     }
+    num = currentScene->items();
     CURRENTFRAME->refresh(0);
-
 }
 // routine per calcolare gli onion skins, prima cancellali, ridisegnali su un immagine, e aggiungi l'immagine alla scena
 void myView::updateOnionSkins(){
@@ -996,7 +1009,7 @@ void myView::updateOnionSkins(){
     onionRender = true;
     QGraphicsScene renderScene; // scena fittizia su cui renderizzare gli onionskins
     // immagine fittizia su cui registrare gli onion skins
-    QImage *renderImg = new QImage(scene()->sceneRect().width(),scene()->sceneRect().height(),QImage::Format_ARGB32);
+    QImage renderImg =  QImage(scene()->sceneRect().width(),scene()->sceneRect().height(),QImage::Format_ARGB32);
 
     renderScene.setSceneRect(scene()->sceneRect());
     // ora clona tutti gli stick nello stickfigure in una tempList, aggiungili alla scena fittizia
@@ -1005,24 +1018,26 @@ void myView::updateOnionSkins(){
     int skinNum = onionSkinSB->value();
     float opacityVal = 0;
     if(myAnimation->currentFrame->frameNumber<skinNum)
+    {
         skinNum = myAnimation->currentFrame->frameNumber;
+    }
     // disegna sulla scena fittizia gli stickfigures dei frame da onionskinnare che partono dal frame corrente- numero di skin calcolabili
     for(int i = myAnimation->currentFrame->frameNumber-skinNum; i<myAnimation->currentFrame->frameNumber; i++){
-
+        // todo anzichè copiare stickfigure per stickfigure, copiare l'intera scena
         for(stick *s:myAnimation->frameList[i]->totalSticks)
         {
             stick* clone = new stick(s);
             tempList.append(clone);
             renderScene.addItem(clone);
         }
-        QPainter painter(renderImg);
-        renderImg->fill(Qt::transparent);
+        QPainter painter(&renderImg);
+        renderImg.fill(Qt::transparent);
         painter.setBackground(QBrush(QColor(Qt::transparent)));
         renderScene.render(&painter);
         // più è vecchio l'onion skin più è trasparente, più è vicino al frame corrente più è opaco
         opacityVal += 0.5/skinNum;
         // trasferisci la scena renderizzata
-        QGraphicsPixmapItem* item = new QGraphicsPixmapItem(QPixmap::fromImage(*(renderImg)));
+        QGraphicsPixmapItem* item = new QGraphicsPixmapItem(QPixmap::fromImage((renderImg)));
         item->setOffset(onionOffset);
         item->setOpacity(opacityVal);
         item->setZValue(0);
@@ -1030,10 +1045,12 @@ void myView::updateOnionSkins(){
         scene()->addItem(item);
         renderScene.clear();
         painter.end();
+
     }
+
     onionRender = false;
 }
-#define MAXUNDO 25
+#define MAXUNDO 1
 // Questa funzione fa sia undo che redo, a seconda prende come sorgente un buffer diverso undoBuffe ro redoBuffer
 // copia dal Buffer,
 void myView::undoRedo(int mode){
@@ -1125,12 +1142,15 @@ extern int opCount;
 // inoltre incrementiamo il contatore delle operazioni e verifichiamo se possiamo innescare l'autosave
 void myView::storeUndo(int command, int mode){
     if(myAnimation->frameList.isEmpty())
+    {
         return;
+    }
     updateFrameOrder(CURRENTFRAME);
     opCount++;
     qDebug() << "beforetrigger autosav";
     // se il file è stato salvato, ed esiste, e sono passati un numero sufficiente di istruzioni, procedi con láutosave
-    if(QFile::exists(animationPath) && opCount%autoSaveInterval == 0){
+    if(QFile::exists(animationPath) && opCount%autoSaveInterval == 0)
+    {
         emit autoSaveTrigger();
     }
     qDebug() << "after trigger autosav";
@@ -1184,7 +1204,8 @@ void myView::storeUndo(int command, int mode){
 }
 void myView::updateFrameOrder(Frame* f){
     int j = 0;
-    for(stick*s:CURRENTFRAME->totalSticks){
+    for(stick*s:CURRENTFRAME->totalSticks)
+    {
         s->order = j;
         j++;
     }
@@ -1212,7 +1233,6 @@ void myView::addHandles(StickFigure *S)
     for(stick*s:S->stickList){
         scene()->addItem(s->stickHandle[0]);
         scene()->addItem(s->stickHandle[1]);
-        handles.append((QGraphicsEllipseItem*)s->stickHandle);
         if(s->isMaster()){ // todo master replacement
             s->stickHandle[0]->setBrush(QBrush(Qt::green));
             s->stickHandle[0]->setZValue(101);
@@ -1223,10 +1243,10 @@ void myView::addHandles(StickFigure *S)
 void myView::removeHandles(StickFigure *S)
 {
 
-    for(stick*s:S->stickList){
+    for(stick*s:S->stickList)
+    {
         scene()->removeItem(s->stickHandle[0]);
         scene()->removeItem(s->stickHandle[1]);
-        handles.removeAll((QGraphicsEllipseItem*)s->stickHandle);
     }
 }
 // cancella i buffer di undo e redo, da chiamare quando si carica un nuovo file
@@ -1291,12 +1311,18 @@ void myView::loadLibrary(QString fileName, int mode){
     libFlag = false;
 }
 StickFigure* myView::addStickFigureToLibrary(){
-    if(CURRENTSTICKFIGURE->stickList.count()>0){
+    if(CURRENTSTICKFIGURE->stickList.count()>0)
+    {
         libFlag = true;
         stickLibraryBuffer->addStickFigureToLibrary(CURRENTSTICKFIGURE);
 
         libFlag = false;
+        return CURRENTSTICKFIGURE;
+    }else
+    {
+        return nullptr;
     }
+
 }
 void myView::removeFromLibrary(){
     libFlag = true;
@@ -1321,13 +1347,18 @@ void myView::removeFromLibrary(){
 void myView::setGraphics(bool all, int attribute){
     storeUndo(CMD_SIMPLE);
     if(!all){
-        if(attribute == ATTRIBUTE_PENCOLOR){
+        if(attribute == ATTRIBUTE_PENCOLOR)
+        {
             CS->Pen.setColor(myPen.color());
         }
         else if(attribute== ATTRIBUTE_PENWIDTH)
+        {
             CS->Pen.setWidth(myPen.width());
+        }
         else if(attribute== ATTRIBUTE_BRUSHCOLOR)
+        {
             CS->Brush.setColor(myBrush.color());
+        }
         CS->refresh(0);
     }
     else{
@@ -1344,10 +1375,17 @@ void myView::setGraphics(bool all, int attribute){
 
     CURRENTSTICKFIGURE->updateIcon();
 }
+/**
+ * @brief myView::splitStickFigure
+ */
 void myView::splitStickFigure(){
     if(CURRENTSTICKFIGURE== nullptr || CS == nullptr)
+    {
+        QMessageBox::about(this,"error","No stick item selected");
         return;
-    if(CS->isMaster()){ // todo master replacement
+    }
+    if(CS->isMaster())
+    { // todo master replacement
         QMessageBox::about(this,"error","cannot split a stickfigure from his master node");
         return;
     }
@@ -1392,10 +1430,11 @@ void myView::sizeChange(int option){
     scene()->setSceneRect(limitRect->rect());
     float dx = newCenter.x()-oldCenter.x();
     float dy = newCenter.y()-oldCenter.y();
-    switch(option){
+    switch(option)
+    {
 
         case REPOSCALE:
-
+        {
             for(Frame*F:myAnimation->frameList){
                 scaleFrame(F,amount,oldRect);
                 for(StickFigure* S: F->stickFigures){
@@ -1404,13 +1443,16 @@ void myView::sizeChange(int option){
 
             }
             break;
+        }
         case REPO:
+        {
             for(Frame*F:myAnimation->frameList){
                 for(StickFigure* S: F->stickFigures){
                     S->traslate(dx,dy);
                 }
             }
             break;
+        }
         case NOREPO:
             break;
     }

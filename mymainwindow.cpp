@@ -29,9 +29,9 @@ int opCount = 0;
 bool renderFlag = false;
 QDir renderFolder;
 QString animationPath = "";
-animationOptions* myOptions;
+animationOptions* myOptions = nullptr;
 bool loadFile = false;
-imageExport *exporter;
+imageExport *exporter = nullptr;
 QString aviExportFolder;
 QStringList ffmpegOptions;
 myMainWindow::myMainWindow(QWidget *parent) :
@@ -169,7 +169,12 @@ void myMainWindow::exportAvi(){
 
 }
 void myMainWindow::exportImageSequence(QString path, int option){
-
+    // evita di avviare un secondo export mentre uno precedente è ancora in corso: altrimenti
+    // il puntatore globale exporter verrebbe sovrascritto e il thread precedente resterebbe orfano
+    if(exporter && exporter->isRunning()){
+        QMessageBox::information(this,"Export in progress","An export is already running, please wait for it to finish.");
+        return;
+    }
     exporter = new imageExport(this,path,option);
     QObject::connect(exporter,&imageExport::imageExportFinished,this,&myMainWindow::imageRenderOver);
     exporter->start();
@@ -210,14 +215,25 @@ void myMainWindow::getAnimationParams(int optionVal){
     view->sizeChange(optionVal);
     myWidget->writeJson();
     autoSaveInterval = myOptions->autoSaveInterval;
-    delete myOptions;
+    // deleteLater invece di delete: questo slot viene chiamato dal click handler del bottone
+    // OK dello stesso dialogo, quindi cancellarlo subito distruggerebbe l'oggetto mentre il suo
+    // stack di chiamata è ancora attivo
+    myOptions->deleteLater();
 }
 void myMainWindow::on_actionAnimation_Options_triggered()
 {
+    // se è già aperto, portalo in primo piano invece di aprirne un altro (perderesti il puntatore al precedente)
+    if(myOptions){
+        myOptions->raise();
+        myOptions->activateWindow();
+        return;
+    }
     myOptions = new animationOptions(nullptr,W,H,FPS,HANDLESIZE,autoSaveInterval);
-
+    // senza questo, chiudere la finestra senza premere OK la nasconde soltanto: non viene mai distrutta
+    myOptions->setAttribute(Qt::WA_DeleteOnClose);
     myOptions->show();
     QObject::connect(myOptions, &animationOptions::dialogOut,this, &myMainWindow::getAnimationParams);
+    QObject::connect(myOptions, &QObject::destroyed, this, [this](){ myOptions = nullptr; });
 }
 
 void myMainWindow::on_actionExport_video_using_FFMPEG_triggered()
@@ -239,11 +255,18 @@ void myMainWindow::on_actionExport_video_using_FFMPEG_triggered()
     }
 }
 
-ffmpegExport* ffmpegDialog;
+ffmpegExport* ffmpegDialog = nullptr;
 void myMainWindow::exportUsingFFMPEG(){
+    // se è già aperta, portala in primo piano invece di aprirne un'altra (perderesti il puntatore alla precedente)
+    if(ffmpegDialog){
+        ffmpegDialog->raise();
+        ffmpegDialog->activateWindow();
+        return;
+    }
     ffmpegDialog = new ffmpegExport;
     ffmpegDialog->show();
     QObject::connect(ffmpegDialog, &ffmpegExport::exportVideo,this, &myMainWindow::startffmpegRender);
+    QObject::connect(ffmpegDialog, &QObject::destroyed, this, [](){ ffmpegDialog = nullptr; });
 }
 
 void myMainWindow::startffmpegRender(QStringList options){
@@ -273,6 +296,8 @@ void myMainWindow::updatePresent(QString ver)
 void myMainWindow::imageRenderOver(int option){
     // added delete exporter
     delete exporter;
+    // azzeralo subito: la guardia in exportImageSequence legge questo puntatore, e dopo la delete sarebbe pendente
+    exporter = nullptr;
     switch(option){
     case NONE:
 
@@ -282,9 +307,10 @@ void myMainWindow::imageRenderOver(int option){
         break;
     case FFMPEG:
         QProcess *p = new QProcess(this);
-
+        // cancella il processo solo quando ha finito, non subito dopo start(): altrimenti il
+        // deleteLater() precedente distruggeva p mentre ffmpeg stava ancora incodificando il video
+        QObject::connect(p, &QProcess::finished, p, &QObject::deleteLater);
         p->start(FFMPEGPath,ffmpegOptions);
-        p->deleteLater();
         break;
     }
 }
@@ -303,6 +329,11 @@ void myMainWindow::doConnections(){
 }
 void myMainWindow::closeEvent(QCloseEvent *event)
 {
+    // se un export è ancora in corso, attendi che finisca prima di chiudere l'app: altrimenti
+    // il thread (ora figlio di questa finestra) verrebbe distrutto mentre è ancora in esecuzione
+    if(exporter && exporter->isRunning()){
+        exporter->wait();
+    }
     if(opCount>0){
         QMessageBox::StandardButton reply;
         reply = QMessageBox::question(this, "Save", "There is unsaved progress in your work, do you want to save your changes?",
@@ -354,7 +385,11 @@ void myMainWindow::on_actionTerms_and_Conditions_triggered()
         QMessageBox* confirm =  new QMessageBox(QMessageBox::Question, "Warning",
         " are you sure? (the program will be closed). \r\n" ,
                                       QMessageBox::Yes|QMessageBox::No);
-        if(confirm->exec() == QMessageBox::Yes){
+        // exec() è modale/bloccante, quindi possiamo cancellare confirm subito dopo che è tornato,
+        // prima ancora di decidere cosa fare col risultato (altrimenti si perdeva un'istanza ad ogni "No")
+        int ret = confirm->exec();
+        delete confirm;
+        if(ret == QMessageBox::Yes){
             exit(EXIT_FAILURE);
         }else{
             goto license_info_begin;

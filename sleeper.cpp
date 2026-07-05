@@ -4,6 +4,7 @@
 extern bool playBack;
 extern void sceneRemover(QGraphicsScene *sceneToClear);
 extern  bool busyPlay;
+extern mySleeper *play;
 bool pausePressed;
 int intervalTime = 0;
 imageExport *previewGenerator;
@@ -55,6 +56,9 @@ Q_SLOT void mySleeper::connected()
        v->previewList.clear();
        v->moveToFrame(v->myAnimation->frameList[counter-1]);
        busyPlay = false;
+       // evita che 'play' resti pendente dopo l'auto-distruzione (oggi busyPlay già impedisce
+       // che venga riletto prima del prossimo click su Play, ma così è sicuro anche in futuro)
+       play = nullptr;
        delete this;
        pausePressed = false;
    }

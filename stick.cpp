@@ -13,7 +13,6 @@ extern bool iconUpdateFlag;
 extern bool renderFlag;
 extern bool playBack;
 extern int HANDLESIZE;
-extern QList<QGraphicsEllipseItem*> handles;
 //lo stick si basa fondamentalmente su un QGraphicsLineObject, uno stick alloca una lineobject
 stick::stick(QLineF *line)
 {
@@ -29,7 +28,6 @@ stick::stick(QLineF *line)
     stickHandle[0]->setZValue(100);stickHandle[1]->setZValue(100);
     stickHandle[0]->setBrush(QBrush(Qt::red));
     stickHandle[1]->setBrush(QBrush(Qt::red));
-    handles.append((QGraphicsEllipseItem*)stickHandle);
 
 }
 stick::stick()
@@ -63,7 +61,9 @@ stick::stick(stick* S)
             for(QImage*i:S->stickImgList){
                 stickImgList.append(new QImage(*i));
                 if(i == S->stickImg)
+                {
                     stickImg = stickImgList.last();
+                }
             }
             imgNameList = S->imgNameList;
         }
@@ -84,7 +84,8 @@ stick::stick(stick* S)
 stick::~stick(){
     if(stickType == IMAGE){
         int j = 0;
-        for(QImage*i:stickImgList){
+        for(QImage*i:stickImgList)
+        {
             delete i;
             if(!onionRender && !undoFlag && !libFlag && !iconUpdateFlag){
                 QListWidgetItem * item= imgListWidget->takeItem(j);
@@ -92,7 +93,8 @@ stick::~stick(){
             }
             j++;
         }
-        if(!onionRender && !undoFlag && !libFlag && !iconUpdateFlag){
+        if(!onionRender && !undoFlag && !libFlag && !iconUpdateFlag)
+        {
             stickImgList.clear();
         }
         stickImg = nullptr;
@@ -283,11 +285,11 @@ QRectF stick::boundingRect() const
 
 QRectF calcImgRect(QLineF l,QSizeF s){
     float f = l.length()/s.width();
-    QRectF out = QRectF(QPointF                                                      // Upper left corner of rect =
+    QRectF out = QRectF(QPointF//                                Upper left corner of rect =
                    (l.p1().x()-abs(l.length())*0.5, //           line center X shifted by minus half line length
-                    l.p1().y()-abs(s.height()*f)*0.5), //          line center Y shifted by minus half line length (pushing top left)
-                   QPointF(l.p1().x()+abs(l.length())*0.5, // bottom right corner =
-                                       l.p1().y()+abs(s.height()*f)*0.5));// line center shifted by adding half line length (pushing bottom right)
+                    l.p1().y()-abs(s.height()*f)*0.5), //        line center Y shifted by minus half line length (pushing top left)
+                   QPointF(l.p1().x()+abs(l.length())*0.5, //    bottom right corner =
+                        l.p1().y()+abs(s.height()*f)*0.5));//    line center shifted by adding half line length (pushing bottom right)
 
     /*
     //questa cerca adattivamente quale sia il punto più in alto a sx
@@ -307,36 +309,26 @@ QRectF calcImgRect(QLineF l,QSizeF s){
 QImage stick::calcImg(){
     QSizeF offsetted;
     if(stickImg->width()>stickImg->height())
+    {
         offsetted = QSizeF(myLine.length()*imgWScale, stickImg->height()*myLine.length()/stickImg->width()*imgHScale);
+    }
     else
+    {
         offsetted = QSizeF(myLine.length()*stickImg->width()*imgWScale/stickImg->height(), myLine.length()*imgHScale);
+    }
 
     return  stickImg->scaled(offsetted.width(),offsetted.height());
 }
-//funzione per aggiornare il rettangolo di refresh del disegno della scena per l'item grafico
-QRectF stick::updateBr(int mode)
+
+/**
+ * @brief stick::constructBr builds the boudning rect (without taking into account scaling factors)
+ * @return
+ */
+QRectF stick::constructBr()
 {
-    QRectF newBr;
-    qreal oldP1x;
-    qreal oldP1y;
-    qreal oldP2x;
-    qreal oldP2y;
-    qreal newP1x;
-    qreal newP1y;
-    qreal newP2x;
-    qreal newP2y;
-    qreal fP1x;
-    qreal fP1y;
-    qreal fP2x;
-    qreal fP2y;
 
-    newBr = QRectF(QPointF                                                      // Upper left corner of rect =
-                   (0.5*(myLine.p1().x()+myLine.p2().x())-myLine.length()*0.5, //           line center X shifted by minus half line length
-                    0.5*(myLine.p1().y()+myLine.p2().y())-myLine.length()*0.5), //          line center Y shifted by minus half line length (pushing top left)
-                   QPointF(0.5*(myLine.p1().x()+myLine.p2().x())+myLine.length()*0.5, // bottom right corner =
-                                       0.5*(myLine.p1().y()+myLine.p2().y())+myLine.length()*0.5));     // line center shifted by adding half line length (pushing bottom right)
-
-    if((stickType == IMAGE || stickType == CIRCLE||stickType ==RECT || stickType == TRAPEZOID || stickType == TAPER ) && myLine.length()>0){
+    if((stickType == IMAGE || stickType == CIRCLE||stickType ==RECT || stickType == TRAPEZOID || stickType == TAPER ) && myLine.length()>0)
+    {
         float d = 0;
 
         if(stickType == IMAGE ){
@@ -349,53 +341,90 @@ QRectF stick::updateBr(int mode)
         else{
             d = sqrt(pow(2*myLine.length()*imgWScale,2)+pow(myLine.length()*imgHScale,2));
         }
-        newBr = QRectF(QPointF                                                      // Upper left corner of rect =
+        return  QRectF(QPointF                                                      // Upper left corner of rect =
                        (myLine.p1().x()-d, //           line center X shifted by minus half line length
                         myLine.p1().y()-d), //          line center Y shifted by minus half line length (pushing top left)
                        QPointF(myLine.p1().x()+d, // bottom right corner =
-                                           myLine.p1().y()+d));
+                               myLine.p1().y()+d));
+    }else
+    {
+        // il bounding rect sarà il bounding rect del CERCHIO di cui la linea dello stick è il RAGGIO! Questo per evitare che
+        // l'immagine sia tagliata (in qualsiasi direzione)
+        return  QRectF(QPointF                                                      // Upper left corner of rect =
+                       (0.5*(myLine.p1().x()+myLine.p2().x())-myLine.length()*0.5, //  line center X shifted by minus half line length
+                        0.5*(myLine.p1().y()+myLine.p2().y())-myLine.length()*0.5), // line center Y shifted by minus half line length (pushing top left)
+                       QPointF(0.5*(myLine.p1().x()+myLine.p2().x())+myLine.length()*0.5, // bottom right corner =
+                               0.5*(myLine.p1().y()+myLine.p2().y())+myLine.length()*0.5));     // line center shifted by adding half line length (pushing bottom right)
     }
-    /*
+}
+//funzione per aggiornare il rettangolo di refresh del disegno della scena per l'item grafico
+QRectF stick::updateBr(int mode)
+{
+    qreal oldP1x;
+    qreal oldP1y;
+    qreal oldP2x;
+    qreal oldP2y;
+    qreal newP1x;
+    qreal newP1y;
+    qreal newP2x;
+    qreal newP2y;
+    qreal fP1x;
+    qreal fP1y;
+    qreal fP2x;
+    qreal fP2y;
+    QRectF newBr = constructBr();
+
     // 1 Assicurati che a seconda della direzione della linea, il rettangolo abbia come P1 il punto più in alto a sx
     //      e come P2 il punto più in basso a destra
-        if(myLine.dy()>0 && myLine.dx()>0)
-            newBr = QRectF(myLine.p1(),myLine.p2());
-        else if(myLine.dy()>0 && myLine.dx()<=0)
-            newBr = QRectF(QPointF(myLine.p2().x(),myLine.p1().y()),
-                            QPointF(myLine.p1().x(),myLine.p2().y()));
-        else if(myLine.dy()<=0 && myLine.dx()>0)
-            newBr = QRectF(QPointF(myLine.p1().x(),myLine.p2().y()),
-                            QPointF(myLine.p2().x(),myLine.p1().y()));
+    newBr.setX(newBr.x()-Pen.width()-HANDLESIZE);newBr.setY(newBr.y()-Pen.width()-HANDLESIZE); // TODO padding proporzionale alla dimensione della Penna
+    newBr.setWidth(newBr.width()+Pen.width()+HANDLESIZE);
+    newBr.setHeight(newBr.height()+Pen.width()+HANDLESIZE);
+    this->br.getCoords(&oldP1x,&oldP1y,&oldP2x,&oldP2y);
+    // Se stiamo muovendo l'oggetto, teniamo conto anche del precedente bounding rect, e li fondiamo
+    // per creare un bounding rect che contenga sia quello nuovo che quello vecchio così da non generare ghosting
+    if(mode == 1)
+    {
+        newBr.getCoords(&newP1x,&newP1y,&newP2x,&newP2y);
+        if(oldP1x<=newP1x)
+        {
+            fP1x = oldP1x;
+        }
         else
-            newBr = QRectF(myLine.p2(),myLine.p1());*/
-        newBr.setX(newBr.x()-Pen.width()-HANDLESIZE);newBr.setY(newBr.y()-Pen.width()-HANDLESIZE); // TODO padding proporzionale alla dimensione della Penna
-        newBr.setWidth(newBr.width()+Pen.width()+HANDLESIZE);
-        newBr.setHeight(newBr.height()+Pen.width()+HANDLESIZE);
-        this->br.getCoords(&oldP1x,&oldP1y,&oldP2x,&oldP2y);
-        // Se stiamo muovendo l'oggetto, teniamo conto anche del precedente bounding rect, e li fondiamo
-        // per creare un bounding rect che contenga sia quello nuovo che quello vecchio così da non generare ghosting
-        if(mode == 1){
-            newBr.getCoords(&newP1x,&newP1y,&newP2x,&newP2y);
-            if(oldP1x<=newP1x)
-                fP1x = oldP1x;
-            else
-                fP1x = newP1x;
-            if(oldP1y<=newP1y)
-                fP1y = oldP1y;
-            else
-                fP1y = newP1y;
-            if(oldP2x>=newP2x)
-                fP2x = oldP2x;
-            else
-                fP2x = newP2x;
-            if(oldP2y>=newP2y)
-                fP2y = oldP2y;
-            else
-                fP2y = newP2y;
-            newBr = QRectF(QPointF(fP1x,fP1y),QPointF(fP2x,fP2y));
+        {
+            fP1x = newP1x;
         }
 
-        return newBr;
+        if(oldP1y<=newP1y)
+        {
+            fP1y = oldP1y;
+        }
+        else
+        {
+            fP1y = newP1y;
+        }
+
+        if(oldP2x>=newP2x)
+        {
+            fP2x = oldP2x;
+        }
+        else
+        {
+            fP2x = newP2x;
+        }
+
+        if(oldP2y>=newP2y)
+        {
+            fP2y = oldP2y;
+        }
+        else
+        {
+            fP2y = newP2y;
+        }
+
+        newBr = QRectF(QPointF(fP1x,fP1y),QPointF(fP2x,fP2y));
+    }
+
+    return newBr;
 
 }
 //lo stick misura l'angolo effettivo dell'oggetto linea rispetto al piano di disegno
@@ -625,7 +654,8 @@ void stick::populateImageListWidget(){
     if(stickType == stick::IMAGE){
         imgListWidget->clear();
         int j = 0;
-        for(QImage* img:stickImgList){
+        for(QImage* img:stickImgList)
+        {
             QListWidgetItem * addedItem = new QListWidgetItem();
             QVariant newData(QVariant::fromValue(img));
             addedItem->setData(Qt::UserRole,newData);

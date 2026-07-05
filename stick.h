@@ -94,6 +94,7 @@ private:
     //-------- variables----------//
 
 
+    QRectF constructBr();
 };
 void sceneRemover(QGraphicsScene *sceneToClear);
 QRectF calcImgRect(QLineF l,QSizeF s);

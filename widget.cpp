@@ -1,5 +1,4 @@
 #include "widget.h"
-#include <sticklib.h>
 #include "ui_widget.h"
 #include "sleeper.h"
 #include <QGraphicsRectItem>
@@ -144,11 +143,9 @@ Widget::Widget(QWidget *parent)
     : QWidget(parent)
     , ui(new Ui::Widget)
 {
-    //stickLib *myStickLib = new stickLib(this);
     ui->setupUi(this);
     myUi = ui;
     //crea la scena virtuale
-    //ui->tabWidget->addTab(myStickLib, "StickFigure Library");
     advancedImgTab = ui->advancedTab;
     advancedLineTab = new advancedLineWidget();
     advancedCircleTab = new advancedCircleWidget();
@@ -203,9 +200,11 @@ Widget::Widget(QWidget *parent)
     V = view;
     view->setBackgroundBrush(QBrush(QColor(Qt::darkGray)));
     scene->setBackgroundBrush(QBrush(QColor(Qt::white)));
+    auto num = scene->items();
     view->setScene(scene);
     view->myAnimation->scene = scene;
     addFrame();
+    num = scene->items();
     CURRENTSTICKFIGURE = CURRENTFRAME->stickFigures[0];
     //inserisci il pannello nella finestra
     ui->viewLayout->addWidget(view);
@@ -226,8 +225,9 @@ Widget::Widget(QWidget *parent)
     if(termsAccepted == 0){
         termsAndConditions();
     }
-    if(termsAccepted == 0)
+    if(termsAccepted == 0){
         exit(EXIT_FAILURE);
+    }
 
 
 
@@ -240,6 +240,7 @@ Widget::Widget(QWidget *parent)
     myRect->setPen(Qt::NoPen);
     scene->addItem(myRect);
     scene->setSceneRect(limitRect->rect());
+    num = scene->items();
     // adjust image editing offset sliders according to max size of scene
     imgVOffsetSlider->setRange(-myRect->rect().height(), myRect->rect().height());
     imgVOffsetSpinbox->setRange(-myRect->rect().height(), myRect->rect().height());
@@ -384,6 +385,18 @@ extern bool undoFlag;
 Widget::~Widget()
 {
     undoFlag = true;
+    delete view;
+    // setParent(nullptr) prima della delete: se il tab è attualmente inserito in myTabWidget,
+    // lo scollega evitando che venga cancellato due volte (una qui, una dalla cascata di Qt);
+    // se non è mai stato selezionato in questa sessione non ha comunque un parent, quindi è un no-op sicuro
+    advancedLineTab->setParent(nullptr);
+    delete advancedLineTab;
+    advancedCircleTab->setParent(nullptr);
+    delete advancedCircleTab;
+    advancedTaperTab->setParent(nullptr);
+    delete advancedTaperTab;
+    advancedRectTab->setParent(nullptr);
+    delete advancedRectTab;
     delete ui;
 }
 
@@ -471,12 +484,17 @@ void Widget::addFrame(void)
     view->storeUndo(CMD_ADDFRAME);
     int pos = 0;
     if(view->myAnimation->frameList.count()>=1)
+    {
         pos = CURRENTFRAME->frameNumber+1;
+    }
     switchFrameFlag = true;
     Frame* addedFrame = setUpFrame(pos);
     switchFrameFlag = false;
     view->moveToFrame(addedFrame);
+
+    auto num = scene->items();
     addStick();
+    num = scene->items();
     //view->myAnimation->storeUndo();
 }
 
@@ -487,6 +505,8 @@ Frame* Widget::setUpFrame(int pos){
 }
 void Widget::on_copyFrame_clicked()
 {
+
+    auto num = scene->items();
     view->storeUndo(CMD_ADDFRAME);
     // byte array stores serialized data
     QByteArray byteArray;
@@ -503,13 +523,18 @@ void Widget::on_copyFrame_clicked()
     QDataStream myStream2(&buffer2);
     // prepare new frame
     int pos = 0;
+     num = scene->items();
     if(view->myAnimation->frameList.count()>=1)
+    {
         pos = CURRENTFRAME->frameNumber+1;
+    }
     Frame* addedFrame = setUpFrame(pos);
+     num = scene->items();
     // hydrate new frame with previous frame data
     switchFrameFlag = true;
     myStream2>>*addedFrame;
     switchFrameFlag = false;
+    num = scene->items();
     // update frame name
     addedFrame->frameNumber++;
     // move to new frame
@@ -1090,6 +1115,8 @@ void Widget::on_copyStickFigureBtn_clicked()
 {
     if(CURRENTSTICKFIGURE != nullptr){
         copyFlag = true;
+        // libera il buffer di copia precedente prima di sovrascriverlo, altrimenti va perso senza essere cancellato
+        delete view->copyStickFigureBuffer;
         view->copyStickFigureBuffer = new StickFigure();
 
         cloneStickFigure(view->copyStickFigureBuffer,CURRENTSTICKFIGURE);
@@ -1135,6 +1162,10 @@ void Widget::on_joinBtn_clicked()
 
 }
 
+/**
+ * @brief Widget::on_splitBtn_clicked callback to action that
+ * divides a single stickfigure item into two by severing the joint selected and its children
+ */
 void Widget::on_splitBtn_clicked()
 {
 
@@ -1156,9 +1187,13 @@ void Widget::on_joinStick_clicked()
 void Widget::on_splitStick_clicked()
 {
     if(CURRENTSTICKFIGURE == nullptr || CS == nullptr)
+    {
         return;
+    }
     view->storeUndo();
+    view->removeHandles(CURRENTSTICKFIGURE);
     stick* added = CURRENTSTICKFIGURE->chop(CS);
+    view->addHandles(CURRENTSTICKFIGURE);
     CURRENTFRAME->totalSticks.append(added);
 }
 

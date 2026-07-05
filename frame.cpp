@@ -33,8 +33,9 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     if(!libFlag){
         ListWidget = myStickFigureWidgetList;
     }
-    else
+    else{
         ListWidget = myCurrentLibraryWidget;
+    }
 
     if(!libFlag && !copyFlag){
 
@@ -56,9 +57,12 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
 
     //StickFigure* addedStickFigure = view->addStickFigure( addedItem);
 
-    if(currentStickFigure!=nullptr){
+    if(currentStickFigure!=nullptr)
+    {
         if(!stickFigures.isEmpty() && !currentStickFigure->stickList.isEmpty())
+        {
             currentStickFigure->highlight(false); //de highlight old selection
+        }
     }
     stickFigureBuffer = new StickFigure(addedItem);
     stickFigures.append(stickFigureBuffer);
@@ -81,11 +85,13 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     }
     if(!undoFlag && !switchFrameFlag && !copyFlag){
         // update current stick
-        if(!libFlag){
+        if(!libFlag)
+        {
             scene->clearSelection(); //clear scene selection
             if(!currentStickFigure->stickList.isEmpty())
+            {
                 selectStick(currentStickFigure); // puo essere ridontante in quanto ci sta la callback di sticklayerView_currentItemChanged//update selected stick
-        //
+            }
         }
         int tempIndex = myListWidget->currentRow();
         myListWidget->clearSelection();
@@ -132,6 +138,7 @@ StickFigure* Frame::addStickFigureToLibrary(StickFigure*S){
         addedItem->setSelected( true);
         myCurrentLibraryWidget->setCurrentRow(newIdx);
         S->updateIcon();
+        delete byteArray;
     }
 }
 StickFigure* Frame::removeStickFigure(StickFigure* toRemove)
@@ -357,14 +364,13 @@ void Frame::updateIcon()
     iconImg->fill(Qt::white);
     icoScene.setBackgroundBrush(QBrush(QColor(Qt::white)));
     icoScene.setSceneRect(scene->sceneRect());
-    // ora clona tutti gli stick nello stickfigure in una tempList, aggiungili alla scena fittizia
-    QList<stick*> tempList;
+    // ora clona tutti gli stick nello stickfigure e aggiungili alla scena fittizia
+    // (addItem rende la scena proprietaria dei cloni: non vanno cancellati a mano,
+    // altrimenti verrebbero distrutti due volte quando icoScene esce di scope)
     for(StickFigure *S:stickFigures)
     {
         for(stick* s: S->stickList){
-            stick* clone = new stick(s);
-            tempList.append(clone);
-            icoScene.addItem(clone);
+            icoScene.addItem(new stick(s));
         }
     }
     // crea un painter che disegni sull'immagine
@@ -372,13 +378,11 @@ void Frame::updateIcon()
     // renderizza dalla scena sull'immagine mediante il painter
     icoScene.render(&painter);
     // imposta l'iconea
-    *frameIcon = QIcon(*iconImg);
+    delete frameIcon;
+    frameIcon = new QIcon(*iconImg);
     linkedItem->setIcon(*frameIcon);
 
-    // cancella gli elementi costruiti
-    for(stick* S: tempList){
-        delete S;
-    }
+    // i cloni vengono cancellati automaticamente dal distruttore di icoScene
     painter.end();
     iconUpdateFlag = false;
 }

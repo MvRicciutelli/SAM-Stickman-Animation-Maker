@@ -9,6 +9,10 @@ extern QGraphicsRectItem* myRect;
 QString exportPath;
 int renderOption = NONE;
 imageExport::imageExport(QObject *parent, QString path, int option)
+    // il costruttore base va chiamato esplicitamente, altrimenti il parent passato dal chiamante
+    // viene ignorato e Qt non ha modo di ripulire questo thread quando il parent viene distrutto
+    // (sicuro solo perché myMainWindow::closeEvent aspetta che il thread finisca prima di chiudere)
+    : QThread(parent)
 {
     exportPath = path;
     renderOption = option;

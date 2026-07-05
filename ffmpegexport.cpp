@@ -16,6 +16,8 @@ ffmpegExport::ffmpegExport(QWidget *parent) :
 {
     ui->setupUi(this);
     ui->fpsSpinbox->setValue(FPS);
+    // senza questo, chiudere la finestra dalla X la nasconde soltanto: non viene mai distrutta
+    setAttribute(Qt::WA_DeleteOnClose);
 }
 
 ffmpegExport::~ffmpegExport()

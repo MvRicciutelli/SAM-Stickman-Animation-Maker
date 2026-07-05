@@ -41,24 +41,21 @@ void StickFigure::updateIcon()
     else
         icoScene.setSceneRect(myRect->rect());
     icoScene.setBackgroundBrush(QBrush(QColor(Qt::white)));
-    // ora clona tutti gli stick nello stickfigure in una tempList, aggiungili alla scena fittizia
-    QList<stick*> tempList;
+    // ora clona tutti gli stick nello stickfigure e aggiungili alla scena fittizia
+    // (addItem rende la scena proprietaria dei cloni: non vanno cancellati a mano,
+    // altrimenti verrebbero distrutti due volte quando icoScene esce di scope)
     for(stick* S: stickList){
-        stick* clone = new stick(S);
-        tempList.append(clone);
-        icoScene.addItem(clone);
+        icoScene.addItem(new stick(S));
     }
     // crea un painter che disegni sull'immagine
     QPainter painter(iconImg);
     // renderizza dalla scena sull'immagine mediante il painter
     icoScene.render(&painter);
     // imposta l'iconea
-    *stickFigureIcon = QIcon(*iconImg);
+    delete stickFigureIcon;
+    stickFigureIcon = new QIcon(*iconImg);
     linkedItem->setIcon(*stickFigureIcon);
-    // cancella gli elementi costruiti
-    for(stick* S: tempList){
-        delete S;
-    }
+    // i cloni vengono cancellati automaticamente dal distruttore di icoScene
     iconUpdateFlag = false;
 }
 StickFigure::StickFigure(QListWidgetItem* item)
@@ -159,8 +156,9 @@ void StickFigure::highlight(bool setting)
     {
         s->highlight = setting;
 
-        if(!stickList.isEmpty() && setting == false)
+        if(!stickList.isEmpty() && setting == false){
             s->selected = false;
+        }
         //s->refresh(0);
     }
 
@@ -554,35 +552,50 @@ void cloneStickFigure(StickFigure* dest, StickFigure*src){
 
 
     if(!copyFlag)
+    {
         dest->updateIcon();
+    }
+    delete byteArray;
 }
 //this function join parent stick with its children
 QList<stick*> StickFigure::weld(stick* master){
     QList<stick*> toWeld;
     if(stickList.count()<= 1)
+    {
         return toWeld;
+    }
     //list of items to be deleted
 
     //populate the list with the immediate children of the selected stick
-    for(stick* s:master->children){
+    for(stick* s:master->children)
+    {
         if(s->parent == master && !(s->stepchild && master->isMaster()) ){ //todo master replacement
             toWeld.append(s);
         }
     }
     if(toWeld.isEmpty())
+    {
         return toWeld;
+    }
     // the master stick will now extend to the old extent of the welded element
     QPointF newP2(toWeld[0]->myLine.p2());
     master->myLine.setP2(newP2);
     if(master->stickType == stick::TAPER || master->stickType == stick::RECT || master->stickType == stick::TRAPEZOID)
+    {
         master->imgAngle= -atan2(master->myLine.dx(),master->myLine.dy())*180/M_PI;
-    for(stick*s: toWeld){
+    }
+    for(stick*s: toWeld)
+    {
         //remove parentage of the welded sticks and put the new master in place
-        for(stick* c:s->children){
-            if(c->parent == s){
+        for(stick* c:s->children)
+        {
+            if(c->parent == s)
+            {
                 c->myLine.setP1(newP2); //also update children p1 position
                 if(c->stickType == stick::TAPER || c->stickType == stick::RECT || c->stickType == stick::TRAPEZOID)
+                {
                     c->imgAngle= -atan2(c->myLine.dx(),c->myLine.dy())*180/M_PI;
+                }
                 c->parent = master;
             }
         }
@@ -593,7 +606,8 @@ QList<stick*> StickFigure::weld(stick* master){
             recursive = recursive->parent;
         }
     }//delete and remove from scenevivi la vitas
-    for(stick*s: toWeld){
+    for(stick*s: toWeld)
+    {
         stickList.removeAll(s);
         scene->removeItem(s);
         delete s;
@@ -1263,14 +1277,15 @@ void splitStickFigures(StickFigure* split, stick* origin,StickFigure* branch){
     stick* toAdd = new stick(origin);
     branch->stickList.append(toAdd);        
 
-        for(stick* s: origin->children){
-
-            if(s->parent != origin->parent){
-                matchingIndex.append(s);
-                toAdd = new stick(s);
-                branch->stickList.append(toAdd);
-            }
+    for(stick* s: origin->children)
+    {
+        if(s->parent != origin->parent)
+        {
+            matchingIndex.append(s);
+            toAdd = new stick(s);
+            branch->stickList.append(toAdd);
         }
+    }
 
     //branch->stickList[matchingIndex.indexOf(origin)]->master = true; //todo master replacement
     branch->masterStick = branch->stickList[matchingIndex.indexOf(origin)];
@@ -1328,5 +1343,6 @@ void cloneStick(stick* dest, stick*src){
     QDataStream myStream2(&buffer2);
     // hydrate new frame with previous frame data
     myStream2>>*dest;
+    delete byteArray;
 }
 QDataStream & operator>> (QDataStream& stream, stick& myStick);

@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1376</width>
+    <width>1412</width>
     <height>1114</height>
    </rect>
   </property>
@@ -724,8 +724,6 @@ QPushButton:pressed{
                      </property>
                      <property name="styleSheet">
                       <string notr="true">QLabel {
-    qproperty-icon: url(&quot; &quot;); /* empty image */
-    qproperty-iconSize: 50px 50px; /* space for the background image */
     background-image: url(:/resources/onion_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
