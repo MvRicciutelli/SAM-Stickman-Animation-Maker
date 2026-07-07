@@ -71,7 +71,6 @@ public:
      */
     void RemoveImagesFromListWidget();
 
-    stick * parent = nullptr;    ///< parent stick inside the figure tree; nullptr for the master
     /**
      * @brief Endpoint of a segment measured trigonometrically.
      * @param line segment to measure.
@@ -143,7 +142,6 @@ public:
     float angleBuffer = 0;           ///< usato per disegnare lo stick nei refresh
     float angleBuffer2 = 0;          ///< usato nella rotazione di tutto lo stickfigure
     QRectF imgRect;                  ///< legacy image placement rect (derived, not serialized)
-    QList<stick*> children;          ///< ALL descendants in the figure tree (flattened, not just direct children)
     QGraphicsEllipseItem* stickHandle[2]; ///< red/green endpoint handles shown on the scene
     StickFigure* myStickFigure = nullptr; ///< owning figure; needed by isMaster()
 

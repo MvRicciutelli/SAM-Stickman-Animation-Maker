@@ -210,7 +210,7 @@ void StickFigure::cancelDrawing()
         currentStick = nullptr;
     }
     else{
-        currentStick = parentBuffer;
+        currentStick = static_cast<stick*>(parentBuffer); // bridge: i dati di una figura viva sono stick
     }
     stickBuffer->RemoveImagesFromListWidget(); // stick vivo (già mostrato durante il disegno)
     delete stickBuffer;
@@ -326,12 +326,12 @@ void StickFigure::deleteStick(int idx)
     if(stickList[idx]->isMaster()) //todo master replacement
         this->masterStick = nullptr;
     //per ogni figlio dell'oggetto, rimuovi gli oggetti dalla scena e cancellali
-    for(stick * s : selectedStick->children){
-        int childIndex          = stickList.indexOf(s);
+    for(StickData * s : selectedStick->children){
+        int childIndex          = stickList.indexOf(static_cast<stick*>(s)); // bridge: dati di figura viva
         stick *childStick       = stickList[childIndex];   //oggetto stick che contiene l'oggetto grafico
         scene->removeItem(stickList[childIndex]); //rimuovi l'oggetto dalla scena
         stickList.removeAt(childIndex);
-        stick * parent          = selectedStick->parent;
+        StickData * parent      = selectedStick->parent;
         // rimuovi a ritroso ciascuno stick figlio di quello selezionato dalle listte figli di tutti gli altri sitck presenti genitori di esso
         while(parent != nullptr )
         {
@@ -345,7 +345,7 @@ void StickFigure::deleteStick(int idx)
     // epura lo stick dalla lista sticklist
     stickList.removeAll(selectedStick);
     // rimuovi lo stick selezionato dalla lista dei suoi genitori
-    stick * parent = selectedStick->parent;
+    StickData * parent = selectedStick->parent;
     while(parent != nullptr)
     {
         int removefromparentIdx = parent->children.indexOf(selectedStick);
@@ -373,7 +373,7 @@ QDataStream & operator<< (QDataStream& stream, const StickFigure& myStickFigure)
         if(!s->isMaster()) //todo master replacement
         {
             qDebug() << "stk non master idx";
-            s->parentIdx = (int)myStickFigure.stickList.indexOf(s->parent);
+            s->parentIdx = (int)myStickFigure.stickList.indexOf(static_cast<stick*>(s->parent)); // bridge: dati di figura viva
             qDebug() << "after streaming stick idx";
         }
         else{
@@ -413,7 +413,7 @@ QDataStream & operator>> (QDataStream& stream,StickFigure& myStickFigure){
         if(s->parentIdx>=0){
             // trova il genitore e aggiungi alla lista dei figli del genitore lo stick corrente
             s->parent = myStickFigure.stickList[s->parentIdx];
-            stick * currentParent = s->parent;
+            StickData * currentParent = s->parent;
             // procedi a ritroso per i genitori del genitore
             while(currentParent != nullptr){
                 currentParent->children.append(s);
@@ -502,10 +502,10 @@ QList<stick*> StickFigure::weld(stick* master){
     //list of items to be deleted
 
     //populate the list with the immediate children of the selected stick
-    for(stick* s:master->children)
+    for(StickData* s:master->children)
     {
         if(s->parent == master && !(s->stepchild && master->isMaster()) ){ //todo master replacement
-            toWeld.append(s);
+            toWeld.append(static_cast<stick*>(s)); // bridge: dati di figura viva
         }
     }
     if(toWeld.isEmpty())
@@ -522,7 +522,7 @@ QList<stick*> StickFigure::weld(stick* master){
     for(stick*s: toWeld)
     {
         //remove parentage of the welded sticks and put the new master in place
-        for(stick* c:s->children)
+        for(StickData* c:s->children)
         {
             if(c->parent == s)
             {
@@ -534,7 +534,7 @@ QList<stick*> StickFigure::weld(stick* master){
                 c->parent = master;
             }
         }
-        stick* recursive = master;
+        StickData* recursive = master;
         while(recursive!=nullptr)
         { //remove the deleted elements from the list of children of the hierarchy
             recursive->children.removeAll(s);
@@ -578,14 +578,14 @@ stick*  StickFigure::chop(stick* origin){
     }
     else{
         toAdd->children = origin->children;
-        for(stick*s:origin->children)
+        for(StickData*s:origin->children)
            {
             if(s->parent==origin)
                 s->parent = toAdd;
         }
     }
     // inserisci lo stick aggiunto come children lungo la catena genitoriale
-    stick* recoursive = origin;
+    StickData* recoursive = origin;
     while(recoursive != nullptr){
         recoursive->children.append(toAdd);
         recoursive = recoursive->parent;
@@ -709,24 +709,24 @@ void mergeStickFigures(StickFigure* mainStickFigure, stick* mainStick,StickFigur
             toAdd->parent = linker;
 
         }
-        else if(s->stepchild && s->parent->isMaster()) //todo master replacement
+        else if(s->stepchild && static_cast<stick*>(s->parent)->isMaster()) //todo master replacement (bridge: dati di figura viva)
         {
 
             toAdd->parent = linker;
         }
         else{
-            toAdd->parent = matchIndexes[toJoin->stickList.indexOf(s->parent)];
+            toAdd->parent = matchIndexes[toJoin->stickList.indexOf(static_cast<stick*>(s->parent))];
         }
-        for(stick* c: s->children){
+        for(StickData* c: s->children){
 
-                toAdd->children.append(matchIndexes[toJoin->stickList.indexOf(c)]);
+                toAdd->children.append(matchIndexes[toJoin->stickList.indexOf(static_cast<stick*>(c))]);
         }
         i++;
     }
     linker->children.append(matchIndexes[toJoin->stickList.indexOf(toJoin->masterStick)]->children);
     linker->children.append(matchIndexes[toJoin->stickList.indexOf(toJoin->masterStick)]);
 
-    stick * recursive;
+    StickData * recursive;
     recursive = mainStick;
     while(1){
         if(recursive == nullptr)
@@ -736,16 +736,16 @@ void mergeStickFigures(StickFigure* mainStickFigure, stick* mainStick,StickFigur
         recursive->children.append(linker);
         recursive = recursive->parent;
     }
-    QList<stick*> stepChildToRemove;
-    for(stick* child:toJoin->masterStick->children){
+    QList<StickData*> stepChildToRemove;
+    for(StickData* child:toJoin->masterStick->children){
         // solo i figli DIRETTI del vecchio master vengono davvero riparentati a linker (vedi sopra
         // "s->stepchild && s->parent->isMaster()"): un nipote stepchild più in profondità mantiene il
         // suo parent originale, quindi resta un discendente legittimo del master clonato e non va tolto
         if(child->stepchild && child->parent == toJoin->masterStick)
-            stepChildToRemove.append(matchIndexes[toJoin->stickList.indexOf(child)]);
+            stepChildToRemove.append(matchIndexes[toJoin->stickList.indexOf(static_cast<stick*>(child))]);
 
     }
-    for(stick* child:stepChildToRemove){
+    for(StickData* child:stepChildToRemove){
          matchIndexes[toJoin->stickList.indexOf(toJoin->masterStick)]->children.removeAll(child);
     }
 
@@ -764,14 +764,15 @@ void mergeStickFigures(StickFigure* mainStickFigure, stick* mainStick,StickFigur
 //      Gerarchia sugli stick dei fratelli, che originano nello stesso punto del prossimo master
 //      Figli del prossimo master che cambieranno il loro status da stepchild a non stepchild
 void StickFigure::setStepChildAsMaster(stick* toMaster){
-    QList<stick*> zii;
-    QList<stick*> catenaGenitori;
-    QList<stick*> fratelli;
-    QList<stick*> oldStepChild;
-    QList<stick*> oldDirectChain;
-    QList<stick*> newDirectChain;
+    // Phase 2a: le catene sono relazioni dell'albero, quindi tipate sui dati (StickData)
+    QList<StickData*> zii;
+    QList<StickData*> catenaGenitori;
+    QList<StickData*> fratelli;
+    QList<StickData*> oldStepChild;
+    QList<StickData*> oldDirectChain;
+    QList<StickData*> newDirectChain;
     stick* oldMaster = masterStick;
-    stick* oldParent = toMaster->parent;
+    StickData* oldParent = toMaster->parent;
     QPointF p1Buf;
     QPointF p2Buf;
 
@@ -803,7 +804,7 @@ void StickFigure::setStepChildAsMaster(stick* toMaster){
         }
     }
     // forma le catene dei fratelli, ovvero la gerarchia rimane la stessa, importala nel nuovo master
-    for(stick* s:fratelli){
+    for(StickData* s:fratelli){
         s->parent = toMaster;
         toMaster->children.append(s);
         toMaster->children.append(s->children);
@@ -811,14 +812,15 @@ void StickFigure::setStepChildAsMaster(stick* toMaster){
     // inverti i genitori, prima mettili in una lista ordinata,
     // dove l'ultimo item sarà il vecchio genitore dello stick da e master
     // e il primo item sarà il vecchio master
-    QList<stick*> chainToInvert;
-    stick* recursive = toMaster->parent;
-    for(stick*s:catenaGenitori){
+    QList<StickData*> chainToInvert;
+    StickData* recursive = toMaster->parent;
+    for(StickData*s:catenaGenitori){
+       Q_UNUSED(s);
        chainToInvert.insert(0,recursive);
        if(recursive!= oldMaster)
         recursive = recursive->parent;
     }// ora dal genitore del prossimo master al primo figlio del vecchio master riassegna il parent
-    for(stick*s:chainToInvert){
+    for(StickData*s:chainToInvert){
        if(chainToInvert.indexOf(s)+1 == chainToInvert.length())
            break; // fermati al master
        s->parent = chainToInvert[chainToInvert.indexOf(s)+1]; // quello che era prima era il figlio diretto diviene il nuovo genitore
@@ -827,11 +829,11 @@ void StickFigure::setStepChildAsMaster(stick* toMaster){
     toMaster->parent->parent = toMaster;
     toMaster->parent = nullptr; // il nuovo master non ha genitori
     // pulisci la gerarchia dellacatena dei genitori da invertire
-    for(stick* s: catenaGenitori){
+    for(StickData* s: catenaGenitori){
         s->children.clear();
     }
     // nella catena da invertire scambia p1 con p2 e ricostruisci la lista dei figli
-    for(stick* s:catenaGenitori){
+    for(StickData* s:catenaGenitori){
         if(s!=oldMaster){ // il vecchio master mantiene la stessa direzione di prima
             p2Buf = s->myLine.p2();
             s->myLine.setP2(s->myLine.p1());
@@ -846,7 +848,7 @@ void StickFigure::setStepChildAsMaster(stick* toMaster){
                 s->imgAngle = s->imgAngle-180;
             }
         }
-        stick* recursive = s->parent; // segna lo stick corrente come figlio di tutti i suoi genitori
+        StickData* recursive = s->parent; // segna lo stick corrente come figlio di tutti i suoi genitori
         int n = 0;
         while(recursive != nullptr && recursive != oldMaster){
             recursive->children.append(s);
@@ -863,10 +865,10 @@ void StickFigure::setStepChildAsMaster(stick* toMaster){
     // togli anche il resto della catena genitoriale stessa: senza questo ogni suo membro finisce per
     // elencare se stesso e i propri (ex) antenati come propri discendenti (voci auto-referenziali/cicliche
     // in children), dato che catenaGenitori è già interamente contenuta in oldDirectChain
-    for(stick* s: catenaGenitori){
+    for(StickData* s: catenaGenitori){
         oldDirectChain.removeAll(s);
     }
-    for(stick* s:catenaGenitori){
+    for(StickData* s:catenaGenitori){
         s->children.append(oldDirectChain);
         //toMaster->children.append(s);
     }
@@ -878,9 +880,9 @@ void StickFigure::setStepChildAsMaster(stick* toMaster){
 
     // aggiungi alla catena degli zii al ramo catena genitori invertita
     // ma ora che la catena è invertita, il genitore dello zio sarà quello che prima era il "nonno"
-    for(stick* s:zii){
+    for(StickData* s:zii){
             s->parent = s->parent->parent;
-            stick* recursive = s->parent;
+            StickData* recursive = s->parent;
             while(recursive){ // trasporta la nuova parentela a ritroso lungo la catena
                 recursive->children.append(s);
                 recursive->children.append(s->children);
@@ -911,10 +913,11 @@ void StickFigure::setStepChildAsMaster(stick* toMaster){
 // stick che nascevano nella catena sopracitata ma che generavano gerarchie parallele
 // stick che prima erano stepchild, la cui gerarchia verrà unita con la catena genitoriale una volta invertita
 void StickFigure::setDirectChainAsMaster(stick* toMaster){
-    QList<stick*> zii;
-    QList<stick*> catenaGenitori;
-    QList<stick*> fratelli;
-    QList<stick*> oldStepChild;
+    // Phase 2a: le catene sono relazioni dell'albero, quindi tipate sui dati (StickData)
+    QList<StickData*> zii;
+    QList<StickData*> catenaGenitori;
+    QList<StickData*> fratelli;
+    QList<StickData*> oldStepChild;
     stick* oldMaster = masterStick;
     QPointF p2Buf;
     for(stick* s: stickList){
@@ -949,14 +952,15 @@ void StickFigure::setDirectChainAsMaster(stick* toMaster){
 
     // la catena genitoriale va invertita, incluso il vecchio master si scambiano p1 con p2
     // e il primo figlio di ciascuno stick diventa il genitore di quello che prima era suo genitore
-    QList<stick*> catenaDaInvertire;
-    stick* iterator = toMaster->parent;
-    for(stick*s: catenaGenitori) {
+    QList<StickData*> catenaDaInvertire;
+    StickData* iterator = toMaster->parent;
+    for(StickData*s: catenaGenitori) {
+        Q_UNUSED(s);
         catenaDaInvertire.insert(0,iterator);
         if(iterator != oldMaster)
             iterator = iterator->parent;
     }
-    for(stick*s: catenaGenitori) {
+    for(StickData*s: catenaGenitori) {
         p2Buf = s->myLine.p2();
         s->myLine.setP2(s->myLine.p1());
         s->myLine.setP1(p2Buf);
@@ -973,7 +977,7 @@ void StickFigure::setDirectChainAsMaster(stick* toMaster){
         s->children.clear(); // attenzione il master così si perde anch gli stepchild che non vengono ricostruiti al for successivo
     }
     toMaster->parent->parent = toMaster;
-    for(stick*s:catenaDaInvertire){
+    for(StickData*s:catenaDaInvertire){
        if(catenaDaInvertire.indexOf(s)+1==catenaDaInvertire.length())
            break; // fermati al master
        s->parent = catenaDaInvertire[catenaDaInvertire.indexOf(s)+1]; // quello che era prima era il figlio diretto diviene il nuovo genitore
@@ -981,8 +985,8 @@ void StickFigure::setDirectChainAsMaster(stick* toMaster){
 
     toMaster->parent = nullptr;
     // ricostruisci le liste dei figli ora che la catena è stata invertita
-    for(stick*s: catenaGenitori) {
-        stick * recursive = s->parent;
+    for(StickData*s: catenaGenitori) {
+        StickData * recursive = s->parent;
         s->stepchild = true;
         if(oldStepChild.contains(s))
                 oldStepChild.removeAll(s);
@@ -998,12 +1002,12 @@ void StickFigure::setDirectChainAsMaster(stick* toMaster){
         }
     }
     // i fratelli diventano stepchild ma la gerarchia non cambia
-    for(stick* s:fratelli){
+    for(StickData* s:fratelli){
         if(oldStepChild.contains(s))
                 oldStepChild.removeAll(s);
         s->stepchild = true;
         if(s != oldMaster){
-            for(stick* c:s->children){
+            for(StickData* c:s->children){
                 if(oldStepChild.contains(c))
                         oldStepChild.removeAll(c);
                 c->stepchild = true;
@@ -1017,11 +1021,11 @@ void StickFigure::setDirectChainAsMaster(stick* toMaster){
     }
     // gli zii ereditano la gerarchia, ma il loro pdre diviene quello che prima era il padre del padre per via dell'inversione
     // della catena genitoriale
-    for(stick* s:zii){
+    for(StickData* s:zii){
         if(oldStepChild.contains(s))
                 oldStepChild.removeAll(s);
         s->stepchild = true;
-        stick* recursive;
+        StickData* recursive;
         s->parent = s->parent->parent; // occhio conseguenza dell'inversione della catena genitoriale
         recursive = s->parent;
         while(recursive){ // trasporta la gerarchia verso il nuovo master lungo la catena
@@ -1029,7 +1033,7 @@ void StickFigure::setDirectChainAsMaster(stick* toMaster){
             recursive->children.append(s);
             recursive = recursive->parent;
         }
-        for(stick* c:s->children){
+        for(StickData* c:s->children){
             if(oldStepChild.contains(c))
                     oldStepChild.removeAll(c);
             c->stepchild = true;
@@ -1038,9 +1042,9 @@ void StickFigure::setDirectChainAsMaster(stick* toMaster){
     // quelli che prima erano stepchild, rimangono tali, ma con l'inversione della catena genitoriale,
     // la catena dei vecchi stepchild è contigua con la catena del vecchio master ora
     // trasporta la gerarchia a ritroso per quella strada verso il nuovo master partendo dal vecchio master
-    for(stick*s:oldStepChild){
+    for(StickData*s:oldStepChild){
         s->stepchild = true;
-        stick* recursive = oldMaster;
+        StickData* recursive = oldMaster;
         while(recursive && !recursive->children.contains(s)){
             recursive->children.append(s);
             recursive = recursive->parent;
@@ -1132,7 +1136,7 @@ void StickFigure::stepDownMaster(stick* toMaster){
         if(s->parent == oldMaster){
             if(s->stepchild && s!=toMaster){
                 s->stepchild = false;
-                for(stick* c:s->children){
+                for(StickData* c:s->children){
                     c->stepchild = false;
                 }
                 s->parent = toMaster;
@@ -1152,7 +1156,8 @@ void StickFigure::stepDownMaster(stick* toMaster){
         }
     // il nuovo master ha come children tutti gli stick tranne se stesso
     toMaster->children.clear();
-    toMaster->children = stickList;
+    for(stick* s: stickList) // copia esplicita: children è tipata sui dati (Phase 2a)
+        toMaster->children.append(s);
     toMaster->children.removeAll(toMaster);
 
     masterStick = toMaster;
@@ -1170,7 +1175,7 @@ void StickFigure::elongate(QPointF newEndPoint, stick* myStick){
     float dx = newEndPoint.x()-myStick->myLine.p2().x();
     float dy = newEndPoint.y()-myStick->myLine.p2().y();
     myStick->myLine.setP2(newEndPoint);
-    for(stick*s: myStick->children){
+    for(StickData*s: myStick->children){
         if(!(myStick->isMaster() && s->stepchild)){ //todo master replacement
             s->myLine.translate(dx,dy);
 
@@ -1222,12 +1227,12 @@ void splitStickFigures(StickFigure* split, stick* origin,StickFigure* branch){
     stick* toAdd = new stick(origin);
     branch->stickList.append(toAdd);        
 
-    for(stick* s: origin->children)
+    for(StickData* s: origin->children)
     {
         if(s->parent != origin->parent)
         {
-            matchingIndex.append(s);
-            toAdd = new stick(s);
+            matchingIndex.append(static_cast<stick*>(s)); // bridge: dati di figura viva
+            toAdd = new stick(static_cast<stick*>(s));
             branch->stickList.append(toAdd);
         }
     }
@@ -1238,11 +1243,11 @@ void splitStickFigures(StickFigure* split, stick* origin,StickFigure* branch){
     int i = 0;
     // in un altro ciclo for, per ogni stick clonato aggiungere gli stessi parent e gli stessi children sfruttando l'indicizzazione
     for(stick* s: branch->stickList){
-        int parentIdx = matchingIndex.indexOf(matchingIndex[i]->parent);
+        int parentIdx = matchingIndex.indexOf(static_cast<stick*>(matchingIndex[i]->parent)); // bridge: dati di figura viva
         if(matchingIndex[i]->parent != origin->parent && parentIdx != -1)
             s->parent = branch->stickList[parentIdx];
-        for(stick*c: matchingIndex[i]->children){
-            int childIdx = matchingIndex.indexOf(c);
+        for(StickData*c: matchingIndex[i]->children){
+            int childIdx = matchingIndex.indexOf(static_cast<stick*>(c));
             if(childIdx != -1) // c non fa parte del branch (es. voce spuria da una gerarchia children non pulita)
                 s->children.append(branch->stickList[childIdx]);
         }

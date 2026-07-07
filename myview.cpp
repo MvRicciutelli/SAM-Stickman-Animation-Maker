@@ -388,7 +388,7 @@ void myView::keyPressEvent(QKeyEvent *event)
                 //altrimenti cancella il singolo stick e aggiorna l'iconea del livello
                 else if(myStickFigureWidgetList->selectedItems().count()==1)
                 {
-                    stick* nextCurrentStick = CS->parent;
+                    stick* nextCurrentStick = static_cast<stick*>(CS->parent); // bridge: dati di figura viva (Phase 2a)
                     // questa lista serve per rimuovere dalla totalStick tutti gli stick cancellati
                     QList<stick*> oldStickList = CURRENTSTICKFIGURE->stickList;
                     CURRENTSTICKFIGURE->deleteStick( idx);
@@ -693,7 +693,8 @@ void myView::mouseMoveEvent(QMouseEvent *event)
                                     }
                                 }
                             }else{
-                                toRotate = CS->children;
+                                for(StickData* s:CS->children) // bridge: dati di figura viva (Phase 2a)
+                                    toRotate.append(static_cast<stick*>(s));
                             }
                             toRotate.append(CS);
                             CURRENTSTICKFIGURE->rotateStickFigure(&coord,toRotate,false);

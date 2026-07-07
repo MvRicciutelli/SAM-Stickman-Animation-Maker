@@ -12,9 +12,13 @@ of this folder, not inside it (qmake shadow build).
 `QList<stick*> totalSticks` (all sticks across all figures in the frame,
 used for Z-ordering).
 `StickFigure` owns `QList<stick*> stickList`.
-`stick` (a `QGraphicsItem`) forms an intra-figure tree via `parent`/
-`children` — `children` is the flattened list of ALL descendants, not just
-direct children.
+`stick` (a `QGraphicsItem` + `StickData`) forms an intra-figure tree via
+`parent`/`children`, which since refactor Phase 2a live on `StickData` and
+are typed `StickData*` — `children` is the flattened list of ALL
+descendants, not just direct children. Bridge invariant until Phase 2c:
+every `StickData` inside a LIVE figure is actually a `stick`, so view-side
+code may `static_cast<stick*>` a tree pointer (such casts carry a
+"bridge: dati di figura viva" comment).
 
 `QGraphicsScene::addItem()` transfers ownership to the scene. A
 `QGraphicsItem`'s destructor auto-detaches from its scene safely on its own,

@@ -67,6 +67,18 @@ public:
      */
     StickData *Clone() const;
 
+    // ------- figure-tree relationships (Phase 2a: moved here from the legacy stick) ------
+
+    StickData *parent = nullptr;    ///< parent stick inside the figure tree; nullptr for the master
+    /**
+     * @brief ALL descendants in the figure tree, flattened — not just direct children.
+     *
+     * Historical invariant kept as-is: every ancestor lists every descendant. Direct
+     * children are the entries whose parent points back at this stick. Not serialized
+     * directly — rebuilt from parentIdx on load.
+     */
+    QList<StickData*> children;
+
     // ------- persistent fields (exactly what operator<</operator>> read and write) ------
 
     int version = 1;                ///< serialization format version of this record

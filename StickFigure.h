@@ -68,7 +68,13 @@ private:
     QPointF p1;
     stick* stickBuffer = nullptr;
     int selectOrigin( QPointF * point);
-    stick* parentBuffer = nullptr;
+    /**
+     * @brief Parent picked for the stick being drawn (tree pointer, so data-typed).
+     *
+     * Bridge note (until Phase 2c): every StickData in a live figure is actually a
+     * stick, so the rare places that need the view side downcast explicitly.
+     */
+    StickData* parentBuffer = nullptr;
     QGraphicsScene * myScene = nullptr;
 
 

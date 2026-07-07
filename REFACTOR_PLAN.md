@@ -381,6 +381,38 @@ structurally, not by remembering to guard it.
    updates happen, called explicitly, not triggered as a side effect deep
    inside a data mutation.
 
+**Split into 2a/2b/2c** (same rationale as Phase 1's split — each lands
+buildable and test-verified):
+
+- **2a — tree pointers become data:** `parent`/`children` move from `stick`
+  to `StickData` (typed `StickData*`); the tree algorithms
+  (`weld`/`chop`/`mergeStickFigures`/`splitStickFigures`/`setMaster`
+  family/`deleteStick`/serialization tree rebuild) have their chain lists
+  and cursors re-typed to `StickData*` — they were already pure data logic.
+  Where view operations on tree members remain (scene detach, `refresh`,
+  `QList<stick*>` interop), an explicit
+  `static_cast<stick*>(...)` bridge cast is used, always marked with a
+  "bridge: dati di figura viva" comment. Bridge invariant: until 2c, every
+  `StickData` inside a LIVE figure is actually a `stick`; scratch objects
+  gain pure-`StickData` sticks only in 2b, and no tree algorithm runs on
+  scratch containers.
+- **2b — scratch objects become pure data:** create `StickFigureData`/
+  `FrameData` (steps 1–2) with their own flag-free stream operators
+  (byte-compatible with today's format); the undo buffers,
+  `frameCopyBuffer`, `copyStickFigureBuffer` and `stickLibraryBuffer`
+  switch from `Frame*`/`StickFigure*` to data objects; live↔data
+  conversion goes through explicit Extract/Populate bridge functions that
+  replace the flag-gated behavior of the shared operators.
+- **2c — the presenter (steps 3 and 5):** `FramePresenter` +
+  `StickGraphicsItem`, `stickList` becomes `QList<StickData*>`, the bridge
+  casts from 2a and the Populate bools from 2b are deleted, and
+  `switchFrameFlag` dies per the exit criteria below.
+
+- [x] Phase 2a complete — tree pointers and tree algorithms are
+  data-typed; app + tests build and pass unchanged.
+- [ ] Phase 2b complete
+- [ ] Phase 2c complete
+
 **Verify:** Phase 0 tests updated to construct `FrameData`/
 `StickFigureData` directly (no `QGraphicsScene` needed for most of them
 now — note in the test file which ones still require one, e.g. presenter

@@ -491,7 +491,7 @@ void stick::rotate(QPointF *point)
             qDebug("X2= %f, Y2= %f", pBuf.x(),pBuf.y());
 
         }
-        children[i]->refresh(1);
+        static_cast<stick*>(children[i])->refresh(1); // bridge: dati di figura viva (Phase 2a)
     }
     if((stickType == IMAGE ||stickType == CIRCLE|| stickType == RECT || stickType == TAPER || stickType == TRAPEZOID) && !traslationOnly){
         imgAngle = angle;
@@ -521,7 +521,7 @@ void stick::rotate(float angle){
             //effettua la traslazione dovuta alla rotazione dell'estremo libero
             children[i]->myLine.translate(-DX,-DY);
         }
-        children[i]->refresh(1);
+        static_cast<stick*>(children[i])->refresh(1); // bridge: dati di figura viva (Phase 2a)
     }
     if(stickType == IMAGE ||stickType == CIRCLE|| stickType == TRAPEZOID || stickType == TAPER || stickType == RECT){
         if(stickType == IMAGE)
@@ -546,7 +546,7 @@ void stick::manipulate(QPointF *point)
                     || children[i]->stickType == TRAPEZOID || children[i]->stickType == TAPER){
                 children[i]->imgAngle = -atan2(children[i]->myLine.dx(),children[i]->myLine.dy())*180/M_PI;
             }
-            children[i]->refresh(0);
+            static_cast<stick*>(children[i])->refresh(0); // bridge: dati di figura viva (Phase 2a)
         }
 
     }
@@ -572,7 +572,7 @@ void stick::endRotation()
     // anche per tutti i children
     for(int i= 0; i<children.length();i++)
     {
-        children[i]->refresh(0);
+        static_cast<stick*>(children[i])->refresh(0); // bridge: dati di figura viva (Phase 2a)
     }
 }
 QPointF stick::getP2(QLineF* line)
@@ -612,7 +612,7 @@ void stick::scale(float scaleFactor){
         {
             //effettua la traslazione dovuta alla rotazione dell'estremo libero
             children[i]->myLine.translate(-DX,-DY);
-            children[i]->refresh(1);
+            static_cast<stick*>(children[i])->refresh(1); // bridge: dati di figura viva (Phase 2a)
         }
     }
     qDebug("scale = %f \r\n",trueScale);
