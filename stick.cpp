@@ -7,11 +7,6 @@ bool onionRender = false;
 extern QGraphicsRectItem* myRect;
 extern QPixmap * imageDrawBuffer ;
 extern QListWidget* imgListWidget;
-extern bool libFlag;
-extern bool undoFlag;
-extern bool copyFlag;
-extern bool clearUndoFlag;
-extern bool iconUpdateFlag;
 extern bool renderFlag;
 extern bool playBack;
 extern int HANDLESIZE;
@@ -74,30 +69,37 @@ stick::stick(stick* S)
 
 }
 /**
- * @details Only the widget-facing cleanup is left here: emptying the image list widget
- * that mirrors the on-screen selected IMAGE stick. The QImage list itself is freed by
- * ~StickData() unconditionally — a pure data object needs no guard. The flag checks
- * below still exist because scratch/undo/copy/library sticks are stick instances until
- * Phase 1b makes them plain StickData.
+ * @details Frees only what this object owns on the view side: the endpoint handles.
+ * The QImage list is freed by ~StickData(); the image-list-widget cleanup that used to
+ * live here (guarded by six global flags to skip scratch/undo/copy/library objects)
+ * moved to RemoveImagesFromListWidget(), which the live-deletion call sites invoke
+ * explicitly — a destructor cannot know whether its stick was on screen, the deleter
+ * always does. This removes every scratch-vs-live flag from stick.cpp (Phase 1b).
  */
 stick::~stick(){
-    if(stickType == IMAGE){
-        // mancavano copyFlag/clearUndoFlag: senza di essi, cancellare uno stick scartato da un
-        // buffer di copia o da clearUndo() (mai davvero mostrato) toccava comunque imgListWidget,
-        // che riflette invece lo stick IMAGE correntemente selezionato sullo schermo
-        if(!onionRender && !undoFlag && !libFlag && !copyFlag && !clearUndoFlag && !iconUpdateFlag){
-            int j = 0;
-            for(QImage*i:stickImgList)
-            {
-                Q_UNUSED(i);
-                QListWidgetItem * item= imgListWidget->takeItem(j);
-                delete  item;
-                j++;
-            }
-        }
-    }
     delete stickHandle[0] ;
     delete stickHandle[1] ;
+}
+/**
+ * @details Called right before a LIVE stick is deleted (deleteStick, weld,
+ * cancelDrawing, ~StickFigure): empties the rows this stick's images occupy in the
+ * image list widget, which mirrors the on-screen selected IMAGE stick. Scratch
+ * deletions (undo/copy/library buffers) and render clones (onion skins, icons,
+ * preview/export) simply never call it — previously the export thread's clone
+ * deletions could hit this widget from a non-GUI thread through ~stick, because no
+ * flag covered that path.
+ */
+void stick::RemoveImagesFromListWidget(){
+    if(stickType != IMAGE)
+        return;
+    int j = 0;
+    for(QImage*i:stickImgList)
+    {
+        Q_UNUSED(i);
+        QListWidgetItem * item= imgListWidget->takeItem(j);
+        delete  item;
+        j++;
+    }
 }
 void stick::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
 {

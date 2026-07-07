@@ -34,6 +34,13 @@ set too broadly). When adding a new code path that creates/destroys
 scratch objects, check every existing guard of this shape nearby and match
 it rather than inventing a new condition.
 
+As of refactor Phase 1b, `stick.cpp` itself is flag-free: `~stick` no
+longer touches `imgListWidget`; the code paths that delete a LIVE stick
+(`deleteStick`, `weld`, `cancelDrawing`, `~StickFigure`'s live branch) call
+`stick::RemoveImagesFromListWidget()` explicitly instead. The flags still
+gate everything at the `StickFigure`/`Frame` level (`operator>>`,
+destructors, `addStickFigure`).
+
 Scratch/buffer objects — `frameCopyBuffer`, `stickLibraryBuffer`,
 `copyStickFigureBuffer`, undo/redo buffer `Frame*` entries, `undoFrame` —
 have an **uninitialized `.scene` member for their entire lifetime** (never

@@ -19,6 +19,7 @@ StickFigure::~StickFigure()
         for(stick* s: stickList)
         {
             //if(!clearUndoFlag)
+            s->RemoveImagesFromListWidget(); // solo dentro questa guardia: qui gli stick sono vivi
             scene->removeItem(s);
             delete s;
         }
@@ -211,6 +212,7 @@ void StickFigure::cancelDrawing()
     else{
         currentStick = parentBuffer;
     }
+    stickBuffer->RemoveImagesFromListWidget(); // stick vivo (già mostrato durante il disegno)
     delete stickBuffer;
     lineBuffer  = QLineF();
     drawCount   = 0;
@@ -337,6 +339,7 @@ void StickFigure::deleteStick(int idx)
             parent->children.removeAt(removefromparentIdx);
             parent = parent->parent; // update parent pointer
         }
+        childStick->RemoveImagesFromListWidget(); // stick vivo: aggiorna la UI prima di distruggerlo
         delete childStick;
     }
     // epura lo stick dalla lista sticklist
@@ -349,6 +352,7 @@ void StickFigure::deleteStick(int idx)
         parent->children.removeAt(removefromparentIdx);
         parent                  = parent->parent;
     }
+    selectedStick->RemoveImagesFromListWidget(); // stick vivo: aggiorna la UI prima di distruggerlo
     delete selectedStick; // distruggi l'oggetto
     lineBuffer = QLineF(); // svuota linebuffer
 
@@ -541,6 +545,7 @@ QList<stick*> StickFigure::weld(stick* master){
     {
         stickList.removeAll(s);
         scene->removeItem(s);
+        s->RemoveImagesFromListWidget(); // stick vivo: aggiorna la UI prima di distruggerlo
         delete s;
     }
     refresh(0);

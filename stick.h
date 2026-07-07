@@ -58,9 +58,18 @@ public:
     stick();
 
     /**
-     * @brief Detaches the images of a live IMAGE stick from the image list widget.
+     * @brief Frees the endpoint handles (image cleanup lives in ~StickData).
      */
     ~stick();
+
+    /**
+     * @brief Empties this stick's rows from the image list widget.
+     *
+     * Must be called by whoever deletes a LIVE (on-screen) IMAGE stick, right before
+     * the delete; scratch/buffer deletions must not call it. Replaces the flag-guarded
+     * cleanup the destructor performed before Phase 1b.
+     */
+    void RemoveImagesFromListWidget();
 
     stick * parent = nullptr;    ///< parent stick inside the figure tree; nullptr for the master
     /**

@@ -307,16 +307,34 @@ for one verifiable sitting):
   a non-owning `StickData*`). Tree pointers (`parent`/`children`) and
   transient interaction state (selection, highlight, drag buffers, `br`,
   `imgRect`, handles) stay on `stick` for now.
-- **1b — the actual view split (steps 2, 4, 6):** create
-  `StickGraphicsItem`, switch `StickFigure::stickList` to
-  `QList<StickData*>` with the parallel view-owned graphics-item list, move
-  `parent`/`children` onto `StickData`, make scratch/buffer/undo paths
-  construct plain `StickData`, and delete the flag checks from
-  `stick.cpp`'s destructor. Exit criteria above apply to 1b.
+- **1b — get the six flags out of stick.cpp (step 6):** the destructor's
+  flag-guarded `imgListWidget` cleanup becomes an explicit
+  `stick::RemoveImagesFromListWidget()` call made by the code paths that
+  delete a LIVE stick (`deleteStick`, `weld`, `cancelDrawing`,
+  `~StickFigure`'s live branch). A destructor cannot know whether its stick
+  was on screen; the deleter always knows — so the flags become
+  unnecessary *there* instead of being guarded better.
+- **Folded into Phase 2 (steps 2 and 4, plus scratch-objects-as-data):**
+  creating `StickGraphicsItem`, switching `StickFigure::stickList` to
+  `QList<StickData*>` with view-owned graphics items, and moving
+  `parent`/`children` onto `StickData`. Rationale: scratch objects are
+  whole `Frame`/`StickFigure` containers (the undo buffer holds `Frame*`),
+  so "scratch sticks are plain `StickData`" is only reachable once
+  `FrameData`/`StickFigureData` exist; and graphics items need an owner
+  that creates/destroys them on frame switches — that is exactly
+  `FramePresenter`. Building the parallel lists before Phase 2 would wire
+  graphics-item ownership ad hoc only to redo it one phase later.
+  Consequently Phase 1's second exit criterion (scratch paths construct
+  only `StickData`) moves into Phase 2's exit criteria.
 
 - [x] Phase 1a complete — `StickData` extracted, serialization and clone
   are pure-data; app + tests build and pass unchanged.
-- [ ] Phase 1b complete
+- [x] Phase 1b complete — `stick.cpp` no longer references any of the six
+  flags (grep-verified); live-deletion sites call
+  `RemoveImagesFromListWidget()` explicitly. Side fix: render/export
+  clone deletions (onion skins, icons, preview thread) can no longer touch
+  `imgListWidget` — the export-thread path previously reached it from a
+  non-GUI thread because no flag covered it.
 
 ---
 
@@ -331,6 +349,11 @@ objects trap lives — removing `Frame`'s `scene` member removes the trap
 structurally, not by remembering to guard it.
 
 **Steps:**
+0. (Folded in from Phase 1b — see there for rationale.) Create
+   `StickGraphicsItem : public QGraphicsItem` holding a non-owning
+   `StickData*`; move `parent`/`children` onto `StickData` (as
+   `StickData*`); the presenter from step 3 owns the graphics items, and
+   scratch/buffer/undo paths construct only data objects from here on.
 1. Create `StickFigureData` (name, `QList<StickData*> stickList`,
    `masterStick`/`currentStick` as `StickData*`, tree-manipulation methods
    — `mergeStickFigures`, `splitStickFigures`, `setStepChildAsMaster`,

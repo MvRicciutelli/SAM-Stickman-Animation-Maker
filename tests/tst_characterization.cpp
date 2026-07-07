@@ -381,6 +381,34 @@ private slots:
         QCOMPARE(pasted->stickList[0]->scene(), scene);
     }
 
+    // the imgListWidget cleanup moved from ~stick to explicit calls at the live-delete
+    // sites (Phase 1b): deleting the on-screen IMAGE stick empties its widget rows,
+    // while scratch snapshots (undo buffer) never touch them
+    void DeleteImageStickClearsImageListWidget()
+    {
+        AddFrame();
+        stick *drawn = DrawStick(QPointF(500, 100), QPointF(500, 200));
+        // upgrade to IMAGE like drawCmd's DRAWIMG branch (myview.cpp:486)
+        drawn->stickType = stick::IMAGE;
+        QImage *image = new QImage(8, 8, QImage::Format_ARGB32);
+        image->fill(Qt::green);
+        drawn->addImage(image, "img");
+        QCOMPARE(imgListWidget->count(), 1);
+
+        // snapshotting the frame into the undo buffer (scratch path) must not touch the widget
+        view->storeUndo(CMD_SIMPLE);
+        QCOMPARE(imgListWidget->count(), 1);
+
+        // live deletion via the delete-key flow (myview.cpp:394)
+        StickFigure *figure = CurrentStickFigure();
+        int idx = figure->stickList.indexOf(drawn);
+        CurrentFrame()->totalSticks.removeAll(drawn);
+        figure->deleteStick(idx);
+        figure->currentStick = nullptr; // the key handler moves selection to the parent (none here)
+        QCOMPARE(figure->stickList.count(), 0);
+        QCOMPARE(imgListWidget->count(), 0);
+    }
+
     // the exact snapshot round-trip storeUndo() performs on every operation (myview.cpp:1193)
     void FrameSnapshotRoundTrip()
     {
