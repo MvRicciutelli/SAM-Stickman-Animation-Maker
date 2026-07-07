@@ -10,10 +10,6 @@
 #include "myview.h"
 #include "uiItems.h"
 
-// defined in StickFigure.cpp but declared in no header
-QDataStream &operator<<(QDataStream &stream, const stick &myStick);
-QDataStream &operator>>(QDataStream &stream, stick &myStick);
-
 extern QGraphicsScene *scene;
 extern QGraphicsRectItem *myRect;
 extern QGraphicsRectItem *limitRect;
@@ -231,6 +227,50 @@ private slots:
         QCOMPARE(loaded.imgOffset, source.imgOffset);
         QCOMPARE(loaded.hardTop, source.hardTop);
         QCOMPARE(loaded.hardBottom, source.hardBottom);
+    }
+
+    // regression (found during Phase 1a): the stickImg index must be written as a 4-byte
+    // int — Qt6's QList::indexOf returns qsizetype, and streaming it uncast wrote 8 bytes
+    // while operator>> reads 4, desyncing every IMAGE-stick save
+    void StickImageRoundTrip()
+    {
+        stick source;
+        source.stickType = stick::IMAGE;
+        source.myLine = QLineF(0, 0, 0, 50);
+        source.Z = 2;
+        QImage *first_image = new QImage(8, 8, QImage::Format_ARGB32);
+        first_image->fill(Qt::red);
+        QImage *second_image = new QImage(8, 8, QImage::Format_ARGB32);
+        second_image->fill(Qt::blue);
+        source.stickImgList << first_image << second_image;
+        source.imgNameList << "red" << "blue";
+        source.stickImg = second_image;
+        source.imgAngleOffset = 15;
+
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << source;
+        }
+        stick loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+        QCOMPARE(loaded.stickImgList.count(), 2);
+        QCOMPARE(loaded.imgNameList, source.imgNameList);
+        QCOMPARE(loaded.stickImg, loaded.stickImgList[1]); // displayed-image index survives
+        QCOMPARE(*loaded.stickImgList[0], *first_image);
+        QCOMPARE(*loaded.stickImgList[1], *second_image);
+        QCOMPARE(loaded.imgAngleOffset, source.imgAngleOffset);
+
+        // ~stick touches imgListWidget for live IMAGE sticks; these are scratch objects
+        undoFlag = true;
+        qDeleteAll(source.stickImgList);
+        source.stickImgList.clear();
+        qDeleteAll(loaded.stickImgList);
+        loaded.stickImgList.clear();
+        undoFlag = false;
     }
 
     // scratch deserialization (undoFlag set): the tree is rebuilt but nothing touches the scene

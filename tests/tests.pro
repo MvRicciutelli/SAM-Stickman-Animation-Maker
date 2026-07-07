@@ -20,7 +20,8 @@ SOURCES += \
     ../animation.cpp \
     ../frame.cpp \
     ../myview.cpp \
-    ../stick.cpp
+    ../stick.cpp \
+    ../stickdata.cpp
 
 HEADERS += \
     ../StickFigure.h \
@@ -32,6 +33,7 @@ HEADERS += \
     ../frame.h \
     ../myview.h \
     ../stick.h \
+    ../stickdata.h \
     ../style.h \
     ../uiItems.h
 

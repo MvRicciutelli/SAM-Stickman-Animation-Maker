@@ -353,89 +353,8 @@ void StickFigure::deleteStick(int idx)
     lineBuffer = QLineF(); // svuota linebuffer
 
 }
-// serializzatori e deserializzatori della classe stick
-QDataStream & operator<< (QDataStream& stream, const stick& myStick){
-    stream<<myStick.Z;
-    stream<<myStick.version;
-    stream<<myStick.stickType;
-    stream<<myStick.stepchild;
-    stream<<myStick.myLine;
-    stream<<myStick.parentIdx;
-    stream<<myStick.Pen;
-    stream<<myStick.Brush;
-    //stream<<myStick.isMaster(); //todo master replacement
-    stream<<myStick.order;
-    if((myStick.stickType == stick::CIRCLE)||(myStick.stickType == stick::IMAGE)||(myStick.stickType == stick::RECT)||(myStick.stickType == stick::TRAPEZOID)||(myStick.stickType == stick::TAPER)){
-        if(myStick.stickType == stick::IMAGE){
-            QSize imgSize = myStick.stickImg->size();
-            stream<<imgSize;
-        }
-        stream<<myStick.imgAngle;
-        stream<<myStick.imgAngleOffset; // mancava: si azzerava a ogni save/load/clone (vedi paint(): imgAngle+imgAngleOffset)
-        stream<<myStick.imgHScale;
-        stream<<myStick.imgWScale;
-        stream<<myStick.imgOffset;
-        stream<<myStick.hardTop;
-        stream<<myStick.hardBottom;
-
-        if(myStick.stickType == stick::IMAGE){
-            stream<< (int)myStick.stickImgList.length();
-            stream<< myStick.stickImgList.indexOf(myStick.stickImg);
-            int j = 0;
-            for(QImage*i:myStick.stickImgList){
-
-                stream<<*i;
-                stream<<myStick.imgNameList[j];
-                j++;
-            }
-        }
-    }
-
-    return stream;
-}
-QDataStream & operator>> (QDataStream& stream, stick& myStick){
-    stream>>myStick.Z;
-    stream>>myStick.version;
-    stream>>myStick.stickType;
-    stream>>myStick.stepchild;
-    stream>>myStick.myLine;
-    stream>>myStick.parentIdx;
-    stream>>myStick.Pen;
-    stream>>myStick.Brush;
-    //stream>>myStick.master; //todo master replacement
-    stream>>myStick.order;
-    if((myStick.stickType == stick::IMAGE)||(myStick.stickType == stick::CIRCLE)||(myStick.stickType == stick::RECT)||(myStick.stickType == stick::TRAPEZOID)||(myStick.stickType == stick::TAPER)){
-        QSize mysize;
-        if(myStick.stickType == stick::IMAGE){
-
-            stream>>mysize;
-        }
-        stream>>myStick.imgAngle;
-        stream>>myStick.imgAngleOffset;
-        stream>>myStick.imgHScale;
-        stream>>myStick.imgWScale;
-        stream>>myStick.imgOffset;
-        stream>>myStick.hardTop;
-        stream>>myStick.hardBottom;
-        //stream>>bytesize;
-        if(myStick.stickType == stick::IMAGE){
-            int numOfImgs;
-            int stickImgIdx;
-            stream>>numOfImgs;
-            stream>>stickImgIdx;
-            for(int i = 0; i<numOfImgs;i++){
-                QImage *img = new QImage(mysize,QImage::Format_ARGB32);
-                stream>>*img;
-                QString name;
-                myStick.stickImgList.append(img);
-                stream>>name;
-                myStick.imgNameList.append(name);
-            }
-            myStick.stickImg = myStick.stickImgList[stickImgIdx];
-        }
-    }
-    return stream;
-}
+// i serializzatori della classe stick sono stati spostati in stickdata.cpp (Phase 1a):
+// operano solo su StickData, senza dipendenze da scena o widget
 // serializzatore per stickfigure
 QDataStream & operator<< (QDataStream& stream, const StickFigure& myStickFigure){
     // per prima cosa registra il numero di stick che lo compongono
@@ -1351,22 +1270,12 @@ float StickFigure::maxZ(){
     }
     return maxVal;
 }
+/**
+ * @details Used by chop() to duplicate a stick being split in two. Historically this
+ * serialized to a QBuffer and deserialized back; since Phase 1a it is a plain deep
+ * field copy via StickData::CopyFrom(), which duplicates exactly the same field set
+ * (stepchild included, unlike the stick(stick*) clone constructor).
+ */
 void cloneStick(stick* dest, stick*src){
-    // byte array stores serialized data
-    QByteArray* byteArray = new QByteArray();
-    // buffer temporarily holds serialized data
-    QBuffer buffer1(byteArray);
-    // use this buffer to store data from the object
-    buffer1.open(QIODevice::WriteOnly);
-    QDataStream myStream(&buffer1);
-    myStream<<*(src);
-    // now create a seconds buffer from which to read data of the bytearray
-    QBuffer buffer2(byteArray);
-    buffer2.open(QIODevice::ReadOnly);
-    // a new data stream to deserialize
-    QDataStream myStream2(&buffer2);
-    // hydrate new frame with previous frame data
-    myStream2>>*dest;
-    delete byteArray;
+    dest->CopyFrom(*src);
 }
-QDataStream & operator>> (QDataStream& stream, stick& myStick);

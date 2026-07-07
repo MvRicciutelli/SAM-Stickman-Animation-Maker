@@ -99,6 +99,23 @@ guard and phase 5 deletes them outright.
   job, kept as one reviewable diff instead of scattered across unrelated
   structural changes.
 
+## Code style requirements (user-mandated, apply to all refactored code from Phase 1 onward)
+
+- **Plain, navigable C++.** No clever template metaprogramming, no dense
+  one-liner tricks, no exotic language features where a simple class,
+  explicit loop, or plain function does the job. The code must be easy to
+  grep, read top-to-bottom, and step through in a debugger.
+- **Doxygen comments in English on every symbol a phase creates or
+  refactors** (functions, variables, defines, enums, classes):
+  - In **headers**: `@brief` on each declaration, plus `@param`/`@return`
+    where applicable.
+  - In **source files**: the definition carries `@details` explaining the
+    *relevance* of the symbol — why it exists and what role it plays in the
+    architecture, not a restatement of the code.
+  - Old, untouched code keeps its existing comments (Italian or English) —
+    this rule applies to what a phase touches, same scoping as the naming
+    convention above.
+
 ### Qt-imposed exceptions — do not rename these, in any phase
 
 Qt's own ecosystem dictates several names outside this project's control.
@@ -277,7 +294,29 @@ each, copy/paste a stickfigure, save/load a `.stck` file.
 subclass for a scratch/buffer/undo object — only `StickData` — and the six
 flags are no longer referenced anywhere inside `stick.cpp`.
 
-- [ ] Phase 1 complete
+**Split into 1a/1b** (per the risk note below — the full split is too large
+for one verifiable sitting):
+
+- **1a — extract `StickData` (steps 1, 3, 5):** `stickdata.h/cpp` hold every
+  persistent field (everything the stream operators touch) plus `Clone()`/
+  `CopyFrom()`; the stick-level `operator<<`/`operator>>` move there,
+  operating purely on `StickData`. `stick` temporarily derives from both
+  `QGraphicsItem` and `StickData` so every call site keeps compiling
+  unchanged — this multiple inheritance is a deliberate bridge that 1b
+  dissolves into the plan's composition design (`StickGraphicsItem` holding
+  a non-owning `StickData*`). Tree pointers (`parent`/`children`) and
+  transient interaction state (selection, highlight, drag buffers, `br`,
+  `imgRect`, handles) stay on `stick` for now.
+- **1b — the actual view split (steps 2, 4, 6):** create
+  `StickGraphicsItem`, switch `StickFigure::stickList` to
+  `QList<StickData*>` with the parallel view-owned graphics-item list, move
+  `parent`/`children` onto `StickData`, make scratch/buffer/undo paths
+  construct plain `StickData`, and delete the flag checks from
+  `stick.cpp`'s destructor. Exit criteria above apply to 1b.
+
+- [x] Phase 1a complete — `StickData` extracted, serialization and clone
+  are pure-data; app + tests build and pass unchanged.
+- [ ] Phase 1b complete
 
 ---
 

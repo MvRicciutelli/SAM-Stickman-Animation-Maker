@@ -15,7 +15,12 @@ extern bool iconUpdateFlag;
 extern bool renderFlag;
 extern bool playBack;
 extern int HANDLESIZE;
-//lo stick si basa fondamentalmente su un QGraphicsLineObject, uno stick alloca una lineobject
+/**
+ * @details Interactive-drawing constructor: StickFigure::startDrawing() builds the stick
+ * on the zero-length segment under the mouse. Solid brush is the historical default for
+ * the shape types; the endpoint handles are created here but attached to the scene by
+ * the drawing code.
+ */
 stick::stick(QLineF *line)
 {
     this->setFlag(QGraphicsItem::ItemIsSelectable,true);
@@ -32,6 +37,10 @@ stick::stick(QLineF *line)
     stickHandle[1]->setBrush(QBrush(Qt::red));
 
 }
+/**
+ * @details Empty-container constructor: deserialization ("idrata il contenitore") and
+ * chop() fill the StickData part afterwards.
+ */
 stick::stick()
 {
     this->setFlag(QGraphicsItem::ItemIsSelectable,true);
@@ -42,40 +51,21 @@ stick::stick()
     stickHandle[1]->setBrush(QBrush(Qt::red));
     //Pen = QPen();
 }
+/**
+ * @details Visual-clone constructor, used by onion skins, icon rendering, preview export
+ * and mergeStickFigures(). The persistent fields now come from StickData::CopyFrom();
+ * kept on top of it, as before Phase 1a: stepchild is reset (clones start unattached —
+ * merge recomputes it), highlight starts true, and the source's bounding rect and Z are
+ * applied to the QGraphicsItem side. Tree pointers are never copied.
+ */
 stick::stick(stick* S)
 {
     this->setFlag(QGraphicsItem::ItemIsSelectable,true);
-    Pen = S->Pen;
-    Brush = S->Brush;
-    highlight = true;
-    setLine(&S->myLine);
+    CopyFrom(*S);
     stepchild = false;
-    this->Z = S->Z;
+    highlight = true;
     this->setZValue(S->Z);
     this->br = S->boundingRect();
-    this->stickType = S->stickType;
-    //this->master = S->master;//todo master replacement
-    this->order = S->order;
-    hardTop = S->hardTop;
-    hardBottom = S->hardBottom;
-    if(S->stickType == IMAGE|| S->stickType == RECT || S->stickType == TRAPEZOID|| S->stickType== CIRCLE || S->stickType== TAPER){
-        if(S->stickType == IMAGE){
-            for(QImage*i:S->stickImgList){
-                stickImgList.append(new QImage(*i));
-                if(i == S->stickImg)
-                {
-                    stickImg = stickImgList.last();
-                }
-            }
-            imgNameList = S->imgNameList;
-        }
-        imgAngle = S->imgAngle;
-        imgWScale = S->imgWScale;
-        imgHScale = S->imgHScale;
-        imgAngleOffset = S->imgAngleOffset;
-        imgOffset = S->imgOffset;
-
-    }
     stickHandle[0] = new QGraphicsEllipseItem();
     stickHandle[1] = new QGraphicsEllipseItem();
     stickHandle[0]->setZValue(100);stickHandle[1]->setZValue(100);
@@ -83,27 +73,28 @@ stick::stick(stick* S)
     stickHandle[1]->setBrush(QBrush(Qt::red));
 
 }
+/**
+ * @details Only the widget-facing cleanup is left here: emptying the image list widget
+ * that mirrors the on-screen selected IMAGE stick. The QImage list itself is freed by
+ * ~StickData() unconditionally — a pure data object needs no guard. The flag checks
+ * below still exist because scratch/undo/copy/library sticks are stick instances until
+ * Phase 1b makes them plain StickData.
+ */
 stick::~stick(){
     if(stickType == IMAGE){
-        int j = 0;
-        for(QImage*i:stickImgList)
-        {
-            delete i;
-            // mancavano copyFlag/clearUndoFlag: senza di essi, cancellare uno stick scartato da un
-            // buffer di copia o da clearUndo() (mai davvero mostrato) toccava comunque imgListWidget,
-            // che riflette invece lo stick IMAGE correntemente selezionato sullo schermo
-            if(!onionRender && !undoFlag && !libFlag && !copyFlag && !clearUndoFlag && !iconUpdateFlag){
+        // mancavano copyFlag/clearUndoFlag: senza di essi, cancellare uno stick scartato da un
+        // buffer di copia o da clearUndo() (mai davvero mostrato) toccava comunque imgListWidget,
+        // che riflette invece lo stick IMAGE correntemente selezionato sullo schermo
+        if(!onionRender && !undoFlag && !libFlag && !copyFlag && !clearUndoFlag && !iconUpdateFlag){
+            int j = 0;
+            for(QImage*i:stickImgList)
+            {
+                Q_UNUSED(i);
                 QListWidgetItem * item= imgListWidget->takeItem(j);
                 delete  item;
+                j++;
             }
-            j++;
         }
-        if(!onionRender && !undoFlag && !libFlag && !copyFlag && !clearUndoFlag && !iconUpdateFlag)
-        {
-            stickImgList.clear();
-        }
-        stickImg = nullptr;
-
     }
     delete stickHandle[0] ;
     delete stickHandle[1] ;

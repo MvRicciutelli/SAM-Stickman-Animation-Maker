@@ -32,6 +32,7 @@ SOURCES += \
     myview.cpp \
     sleeper.cpp \
     stick.cpp \
+    stickdata.cpp \
     widget.cpp
 
 HEADERS += \
@@ -50,6 +51,7 @@ HEADERS += \
     myview.h \
     sleeper.h \
     stick.h \
+    stickdata.h \
     style.h \
     uiItems.h \
     widget.h

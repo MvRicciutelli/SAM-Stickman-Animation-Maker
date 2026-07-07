@@ -110,10 +110,19 @@ which slot in `frameList` the restored snapshot belongs in.
 
 ## Serialization
 
-`QDataStream operator<<`/`operator>>` on `stick`, `StickFigure`, `Frame`,
-`Animation` are the SAME functions used for: undo/redo snapshots, frame
-copy/paste, stickfigure copy/paste, library save/load, and whole-animation
-file save/load. A bug in one of these operators affects all of those
+Since refactor Phase 1a, `stick`'s persistent state lives in `StickData`
+(`stickdata.h/cpp`): `stick` derives from both `QGraphicsItem` and
+`StickData` (a deliberate bridge until Phase 1b splits view from data), the
+stick-level stream operators live in `stickdata.cpp` and are pure-data (no
+flag guards), and `cloneStick()` is a plain `StickData::CopyFrom()` field
+copy instead of a stream round-trip. `~StickData` frees the image list
+unconditionally; only the `imgListWidget` cleanup remains flag-guarded in
+`~stick`.
+
+`QDataStream operator<<`/`operator>>` on `StickData`, `StickFigure`,
+`Frame`, `Animation` are the SAME functions used for: undo/redo snapshots,
+frame copy/paste, stickfigure copy/paste, library save/load, and
+whole-animation file save/load. A bug in one of these operators affects all of those
 features simultaneously — when fixing or extending one, check it against
 all five use sites, not just the one you're working on. Every caller today
 passes a freshly-constructed, empty target; `operator>>` implementations
@@ -125,6 +134,10 @@ changes.
 - Comments are a mix of Italian and English; match whichever the
   surrounding function uses. Comments explain *why* (a guard's reason, a
   workaround), never *what*.
+- Refactored/new code (from refactor Phase 1 on): plain, navigable C++ (no
+  clever tricks), English Doxygen on every touched symbol — `@brief`/
+  `@param`/`@return` in headers, `@details` (the symbol's relevance) in
+  source files. See REFACTOR_PLAN.md "Code style requirements".
 - Terse, minimal-diff style (ponytail-lite even without the plugin active):
   no speculative abstractions, no unrequested refactors alongside a bug fix.
 - Before adding a null/bounds check "just in case," trace actual callers

@@ -80,5 +80,10 @@ QDataStream &operator>>(QDataStream& stream,StickFigure& myStickFigure);
 void cloneStickFigure(StickFigure *dest, StickFigure *src);
 void mergeStickFigures(StickFigure* mainStickFigure, stick* mainStick,StickFigure* toJoin);
 void splitStickFigures(StickFigure* split, stick* origin,StickFigure* branch);
+/**
+ * @brief Deep-copies a stick's persistent data (plain field copy since Phase 1a).
+ * @param dest freshly-constructed stick to fill.
+ * @param src stick to copy from; tree pointers are not copied.
+ */
 void cloneStick(stick* dest, stick*src);
 #endif // StickFigure_H
