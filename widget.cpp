@@ -134,7 +134,6 @@ struct{
     bool sliderRot      = false;
 }sliderFlags;
 bool playBack               = false;
-bool switchFrameFlag        = false;
 float zoomLvl               = 1;
 bool  firstTimeOpened       = false;
 QImage * imageDrawBuffer;
@@ -491,9 +490,7 @@ void Widget::addFrame(void)
     {
         pos = CURRENTFRAME->frameNumber+1;
     }
-    switchFrameFlag = true;
     Frame* addedFrame = setUpFrame(pos);
-    switchFrameFlag = false;
     view->moveToFrame(addedFrame);
 
     auto num = scene->items();

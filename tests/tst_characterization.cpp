@@ -17,7 +17,6 @@ extern QPointF onionOffset;
 extern myView *V;
 extern int W;
 extern int H;
-extern bool switchFrameFlag;
 extern FrameData *stickLibraryBuffer;
 
 class TestCharacterization : public QObject
@@ -42,9 +41,7 @@ class TestCharacterization : public QObject
         int pos = 0;
         if (view->myAnimation->frameList.count() >= 1)
             pos = CurrentFrame()->frameNumber + 1;
-        switchFrameFlag = true;
         Frame *added_frame = view->setUpFrame(pos);
-        switchFrameFlag = false;
         view->moveToFrame(added_frame);
         AddStick();
         return added_frame;

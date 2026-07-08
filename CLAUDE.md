@@ -39,25 +39,22 @@ or UI widgets): `undoFlag`, `copyFlag`, `libFlag`, `loadingAnimationFlag`,
 `clearUndoFlag`, `switchFrameFlag`. This was the single most bug-dense
 subsystem in the codebase.
 
-As of refactor Phase 2b, **four of the six flags are gone**: `copyFlag`,
-`libFlag`, `clearUndoFlag`, `loadingAnimationFlag` have zero remaining
-declarations or assignments. They existed only to disambiguate which of
-several behaviors a shared serialize/clone function should run; now that
-scratch objects (undo snapshots, the copy-paste buffer, the library) are
-pure `StickFigureData`/`FrameData` instead of live `StickFigure`/`Frame`,
-there is nothing left for those flags to disambiguate — a `StickFigureData`
-has no scene, no list widget, no icon to guard. See "Serialization" below
-for the data classes and their bridge functions.
+As of refactor Phase 2c (which turned out to be a dead-code deletion, not
+the originally-planned `StickGraphicsItem` split — see REFACTOR_PLAN.md),
+**five of the six flags are gone**: `copyFlag`, `libFlag`, `clearUndoFlag`,
+`loadingAnimationFlag` had zero remaining declarations or assignments once
+Phase 2b turned every scratch object into pure data — a `StickFigureData`
+has no scene, no list widget, no icon to guard, so there was nothing left
+for those flags to disambiguate. `switchFrameFlag` turned out to already
+be unreachable dead state after Phase 2b (its only set-site no longer
+wrapped any call that reads it) and was deleted outright. See
+"Serialization" below for the data classes and their bridge functions.
 
-Two flags remain, both purely at the live-object level:
-- **`undoFlag`** — true while `myView::undoRedo()` is restoring a frame.
-  `StickFigure::~StickFigure()` checks it to skip removing sticks from the
-  scene when `Frame::clearFrame()` (called just before repopulating) has
-  already freed them explicitly.
-- **`switchFrameFlag`** — true while a frame is being populated
-  programmatically (paste, undo restore) rather than through direct user
-  clicks; `Frame::addStickFigure()` checks it to skip list-widget selection
-  side effects that `moveToFrame()` will redo anyway a moment later.
+Only **`undoFlag`** remains, purely at the live-object level: true while
+`myView::undoRedo()` is restoring a frame. `StickFigure::~StickFigure()`
+checks it to skip removing sticks from the scene when
+`Frame::clearFrame()` (called just before repopulating) has already freed
+them explicitly.
 
 `stick.cpp` itself has been flag-free since Phase 1b: `~stick` never
 touches `imgListWidget`; the code paths that delete a LIVE stick

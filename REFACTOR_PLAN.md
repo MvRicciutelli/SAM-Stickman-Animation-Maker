@@ -419,22 +419,77 @@ buildable and test-verified):
   remaining declarations or assignments (grep-verified); their names only
   survive in comments explaining what was removed and why. App + tests
   build and pass unchanged (20 characterization tests).
-- [ ] Phase 2c complete
+- [~] Phase 2c **descoped, deferred to an optional future phase** — decided
+  with the user 2026-07-08 after sizing the blast radius: retyping
+  `stickList` to `QList<StickData*>` plus building `StickGraphicsItem`/
+  `FramePresenter` touches 195+ call sites across `myview.cpp`/
+  `widget.cpp`/`frame.cpp`/`StickFigure.cpp`, including mouse-event
+  handling and `paint()` — code the QtTest suite cannot exercise (headless,
+  no `QApplication` event loop), so this diff would be the first in the
+  whole refactor not caught by an automated regression net. Crucially, by
+  this point 2c is no longer fixing a live bug source: the three root
+  causes in this plan's "Root diagnosis" are already resolved for every
+  *scratch* object (cause 1's uninitialized-`.scene` trap cannot occur —
+  `FrameData`/`StickFigureData` have no `.scene` member, ever; cause 2 is
+  gone — each data class has exactly one serialize behavior; cause 3 is
+  gone — undo/redo already clones in memory via `Extract`/`Populate`, no
+  stream). What 2c would still buy is architectural: `stick` stays a fused
+  data+view object for *live* figures only, which is a maintainability/
+  testability goal, not a correctness one. Given the size and the missing
+  test coverage for its riskiest surface, see "Phase 2c (deferred)" below
+  instead of executing it now.
+- **Dead-code finding while closing out Phase 2:** analysis of
+  `switchFrameFlag`'s only two set-sites (`Widget::addFrame`, both removed
+  by Phase 2b's paste/copy rewrites) showed it could never be `true` at
+  either of its two read-sites (`Frame::addStickFigure`, only ever called
+  from `Widget::addStick()`/`myView::splitStickFigure()`) anymore — Phase
+  2b's `PopulateLiveFrame()` bypasses `addStickFigure()` entirely by
+  constructing `StickFigure` objects directly. Deleted outright (not
+  converted to a local guard — there was nothing left to guard). This
+  finding is exactly the kind Phase 6 ("re-run tokensave's dead-code scans
+  now that flags are gone") anticipated, just found a few phases early.
 
-**Verify:** Phase 0 tests updated to construct `FrameData`/
-`StickFigureData` directly (no `QGraphicsScene` needed for most of them
-now — note in the test file which ones still require one, e.g. presenter
-tests). Manually smoke-test: add/delete/reorder frames, copy/paste a
-frame, onion skin rendering, the stickfigure library (add/remove/load from
-library), depth/z-order controls, layer up/down.
+**Verify:** all 20 characterization tests pass; full app builds and links.
+Manually smoke-test add/delete/reorder frames, copy/paste a frame, onion
+skin rendering, the stickfigure library (add/remove/load), depth/z-order
+controls, layer up/down — none of Phase 2's changes should be visible to
+the user.
 
-**Exit criteria:** `frame.cpp`'s data methods contain no `scene->`,
-`ListWidget->`, or `myCurrentLibraryWidget->` calls; all such calls live in
-`FramePresenter`. `switchFrameFlag` has no remaining reads outside
-`FramePresenter::Sync()`, if it's still needed there at all as a
-non-global local guard.
+**Exit criteria (as descoped):** `copyFlag`, `libFlag`, `clearUndoFlag`,
+`loadingAnimationFlag`, `switchFrameFlag` have zero remaining reads
+anywhere in the codebase (grep-verified) — met. `undoFlag` remains,
+narrowly scoped to "inside `undoRedo()`" (documented in `CLAUDE.md`). The
+original exit criteria's `FramePresenter`/`stick.cpp`-scene-call
+conditions are **not** met and are carried forward to the deferred
+Phase 2c below, should the project revisit it.
 
-- [ ] Phase 2 complete
+- [x] Phase 2 complete (as descoped — see Phase 2c note above)
+
+---
+
+## Phase 2c (deferred) — `StickGraphicsItem` + `FramePresenter`
+
+**Status:** not scheduled. Revisit only if a concrete need arises (e.g. a
+future feature that wants to unit-test view-adjacent logic headlessly, or
+a maintainer decides the fused `stick` class is actively getting in the
+way). Do not start this without re-confirming the blast radius hasn't
+grown further and without a plan for exercising the mouse/paint paths
+(manual test matrix at minimum, ideally a `QTest::mouseClick`-based GUI
+test added first).
+
+**Steps, if resumed:** create `StickGraphicsItem : public QGraphicsItem`
+holding a non-owning `StickData*`, reading `paint()`/`boundingRect()`/
+mouse handling from it. Switch `StickFigure::stickList` to
+`QList<StickData*>` with a parallel, view-owned `QList<StickGraphicsItem*>`
+kept 1:1 by index. Create `FramePresenter` (owned by `myView`) that,
+given a `FrameData*`, attaches/detaches `StickGraphicsItem`s, wires
+handles, and updates the frame-list preview icon — the one place
+scene/list-widget updates happen for a frame switch, called explicitly
+instead of triggered as a side effect of a data mutation. Delete the
+`static_cast<stick*>` bridge casts introduced in Phase 2a once nothing
+needs them.
+
+- [ ] Phase 2c (deferred) — not started
 
 ---
 

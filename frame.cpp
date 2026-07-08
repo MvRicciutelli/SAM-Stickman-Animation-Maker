@@ -9,7 +9,6 @@
 #define CS currentStickFigure->currentStick
 extern QListWidget * myStickFigureWidgetList;
 extern bool undoFlag;
-extern bool switchFrameFlag;
 Frame::Frame()
 {
     frameIcon       = new QIcon();
@@ -60,10 +59,11 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     //aggiorna lo stickfigure corrente
     currentStickFigure = stickFigureBuffer;
     currentStickFigure->name = myName;
-    // switchFrameFlag mancava: senza di esso, duplicare un frame (on_copyFrame_clicked) inseriva
-    // ogni suo stickfigure in myStickFigureWidgetList durante il deserializzo, per poi vederselo
-    // subito buttare via dal clear()+rebuild che moveToFrame() fa comunque un attimo dopo
-    if(!undoFlag && !switchFrameFlag){
+    // switchFrameFlag è stato eliminato (Phase 2c): da Phase 2b questa funzione è raggiunta
+    // solo dai percorsi UI vivi (Widget::addStick, myView::splitStickFigure) — i percorsi che
+    // un tempo passavano di qui durante la deserializzazione (copia/incolla frame) ora
+    // costruiscono le StickFigure direttamente in PopulateLiveFrame(), bypassando addStickFigure
+    if(!undoFlag){
         QVariant newData(QVariant::fromValue(currentStickFigure));
         addedItem->setData(Qt::UserRole,newData);
         addedItem->setData(Qt::DisplayRole,myName);
@@ -73,7 +73,7 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     // update current stickfigure
     currentStickFigure->highlight(false); //de highlight old selection
     currentStickFigure->highlight(true); //highlight new one
-    if(!undoFlag && !switchFrameFlag){
+    if(!undoFlag){
         // update current stick
         scene->clearSelection(); //clear scene selection
         if(!currentStickFigure->stickList.isEmpty())

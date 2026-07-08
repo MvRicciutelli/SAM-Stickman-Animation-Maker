@@ -19,7 +19,6 @@ int H = 480;
 int HANDLESIZE = 10;
 int autoSaveInterval = 50;
 bool playBack = false;
-bool switchFrameFlag = false;
 float zoomLvl = 1;
 QImage *imageDrawBuffer = nullptr;
 QString imageNameBuffer;
