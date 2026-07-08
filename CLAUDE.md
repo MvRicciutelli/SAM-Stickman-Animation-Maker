@@ -20,6 +20,11 @@ every `StickData` inside a LIVE figure is actually a `stick`, so view-side
 code may `static_cast<stick*>` a tree pointer (such casts carry a
 "bridge: dati di figura viva" comment).
 
+Since refactor Phase 2b, every scratch/buffer object (undo/redo snapshots,
+frame copy/paste, stickfigure copy/paste, the stickfigure library) is a
+pure-data `FrameData`/`StickFigureData`/`StickData` instead of a live
+`Frame`/`StickFigure`/`stick` — see "Serialization" below.
+
 `QGraphicsScene::addItem()` transfers ownership to the scene. A
 `QGraphicsItem`'s destructor auto-detaches from its scene safely on its own,
 regardless of whether `removeItem()` was called first — never assume you
@@ -27,33 +32,37 @@ must call `removeItem()` before `delete`.
 
 ## The flag-guard system (read this before touching lifetime/serialization code)
 
-Six global booleans gate whether a `StickFigure`/`Frame`/`stick` under
-construction or destruction is "live" (attached to the real scene/UI) or
-"scratch" (an invisible buffer that must not touch the scene or UI widgets):
-`undoFlag`, `copyFlag`, `libFlag`, `loadingAnimationFlag`, `clearUndoFlag`,
-`switchFrameFlag`. This is the single most bug-dense subsystem in the
-codebase — most crashes found in this project traced back to one of these
-guards being incomplete at some call site (missing a flag, or a flag left
-set too broadly). When adding a new code path that creates/destroys
-scratch objects, check every existing guard of this shape nearby and match
-it rather than inventing a new condition.
+Historically, six global booleans gated whether a `StickFigure`/`Frame`/
+`stick` under construction or destruction was "live" (attached to the real
+scene/UI) or "scratch" (an invisible buffer that must not touch the scene
+or UI widgets): `undoFlag`, `copyFlag`, `libFlag`, `loadingAnimationFlag`,
+`clearUndoFlag`, `switchFrameFlag`. This was the single most bug-dense
+subsystem in the codebase.
 
-As of refactor Phase 1b, `stick.cpp` itself is flag-free: `~stick` no
-longer touches `imgListWidget`; the code paths that delete a LIVE stick
+As of refactor Phase 2b, **four of the six flags are gone**: `copyFlag`,
+`libFlag`, `clearUndoFlag`, `loadingAnimationFlag` have zero remaining
+declarations or assignments. They existed only to disambiguate which of
+several behaviors a shared serialize/clone function should run; now that
+scratch objects (undo snapshots, the copy-paste buffer, the library) are
+pure `StickFigureData`/`FrameData` instead of live `StickFigure`/`Frame`,
+there is nothing left for those flags to disambiguate — a `StickFigureData`
+has no scene, no list widget, no icon to guard. See "Serialization" below
+for the data classes and their bridge functions.
+
+Two flags remain, both purely at the live-object level:
+- **`undoFlag`** — true while `myView::undoRedo()` is restoring a frame.
+  `StickFigure::~StickFigure()` checks it to skip removing sticks from the
+  scene when `Frame::clearFrame()` (called just before repopulating) has
+  already freed them explicitly.
+- **`switchFrameFlag`** — true while a frame is being populated
+  programmatically (paste, undo restore) rather than through direct user
+  clicks; `Frame::addStickFigure()` checks it to skip list-widget selection
+  side effects that `moveToFrame()` will redo anyway a moment later.
+
+`stick.cpp` itself has been flag-free since Phase 1b: `~stick` never
+touches `imgListWidget`; the code paths that delete a LIVE stick
 (`deleteStick`, `weld`, `cancelDrawing`, `~StickFigure`'s live branch) call
-`stick::RemoveImagesFromListWidget()` explicitly instead. The flags still
-gate everything at the `StickFigure`/`Frame` level (`operator>>`,
-destructors, `addStickFigure`).
-
-Scratch/buffer objects — `frameCopyBuffer`, `stickLibraryBuffer`,
-`copyStickFigureBuffer`, undo/redo buffer `Frame*` entries, `undoFrame` —
-have an **uninitialized `.scene` member for their entire lifetime** (never
-wired via `Animation::addFrame`, unlike real frames). Never call
-`Frame::clearFrame()` or `scene->removeItem()` on one of these — it
-dereferences the null/garbage `.scene`. Free their contents with
-`qDeleteAll(...)` directly and let `QGraphicsItem`'s auto-detach handle the
-rest. See `discardScratchFrame()` / `freeLibraryFrame()` in `myview.cpp` for
-the established pattern.
+`stick::RemoveImagesFromListWidget()` explicitly instead.
 
 ## Command flow: how a UI edit reaches the data model and becomes undoable
 
@@ -66,30 +75,31 @@ void Widget::on_someBtn_clicked(){
 }
 ```
 
-`storeUndo()` always runs *before* the mutation — it clones `currentFrame`
-(via the same serialize/deserialize round-trip described below) into a
-scratch `Frame` and pushes it, wrapped in an `undoInfoStruct{command, frame}`,
-onto `myView::undoBuffer`. The `command` tag (`CMD_SIMPLE` — default,
-`CMD_ADDFRAME`, `CMD_DELETEFRAME`, `CMD_MOVETOFRAME`, see `myview.h`) records
-*what kind* of structural change is about to happen, not the change itself —
-`undoRedo()` uses it later to decide how to re-integrate the snapshot rather
-than replaying an action. On a genuine new user edit (`undoFlag` false —
-i.e. not called recursively from inside `undoRedo()`) `storeUndo()` also
-discards and clears `redoBuffer`, since any pending redo history is now
-stale. `storeUndo()` doubles as the autosave trigger point: it increments
-`opCount` and emits `autoSaveTrigger()` every `autoSaveInterval` ops if
-`animationPath` points at a real file. Both buffers are capped at
-`MAXUNDO` entries, evicting the oldest via `discardScratchFrame()`.
+`storeUndo()` always runs *before* the mutation — since Phase 2b it takes
+an in-memory snapshot via `ExtractFrameData(*currentFrame)` (a plain
+`FrameData*`, no stream, no scratch `Frame`) and pushes it, wrapped in an
+`undoInfoStruct{command, frame}`, onto `myView::undoBuffer`. The `command`
+tag (`CMD_SIMPLE` — default, `CMD_ADDFRAME`, `CMD_DELETEFRAME`,
+`CMD_MOVETOFRAME`, see `myview.h`) records *what kind* of structural change
+is about to happen, not the change itself — `undoRedo()` uses it later to
+decide how to re-integrate the snapshot rather than replaying an action. On
+a genuine new user edit (`undoFlag` false — i.e. not called recursively
+from inside `undoRedo()`) `storeUndo()` also discards (`delete`) and clears
+`redoBuffer`, since any pending redo history is now stale. `storeUndo()`
+doubles as the autosave trigger point: it increments `opCount` and emits
+`autoSaveTrigger()` every `autoSaveInterval` ops if `animationPath` points
+at a real file. Both buffers are capped at `MAXUNDO` entries, evicting the
+oldest via a plain `delete`.
 
 `myView::undoRedo(mode)` (`mode` = `MODE_UNDO`/`MODE_REDO`) is the reverse
 path, called from the Undo/Redo buttons:
-1. Pop one `undoInfoStruct` off the relevant buffer.
+1. Pop one `undoInfoStruct` off the relevant buffer — `myUndo.frame` is
+   already a ready-to-use `FrameData*`, no deserialization step.
 2. Immediately call `storeUndo(poppedCommand, oppositeMode)` — this snapshots
    the *current* (about-to-be-overwritten) live frame into the *other*
    buffer, which is what makes undo/redo symmetric (undoing pushes a redo
    entry and vice versa).
-3. Deserialize the popped snapshot into a scratch `Frame* undoFrame`.
-4. Dispatch on `command` to decide *where* in `frameList` the snapshot
+3. Dispatch on `command` to decide *where* in `frameList` the snapshot
    belongs and whether a frame needs to be created/removed first:
    - `CMD_ADDFRAME`+undo or `CMD_DELETEFRAME`+redo → the frame at
      `undoFrame->frameNumber` must disappear: `deleteFrame(currentFrame)`,
@@ -102,43 +112,63 @@ path, called from the Undo/Redo buttons:
    - `CMD_SIMPLE` (else) → clear + repopulate `currentFrame` directly; used
      for in-place edits (stick moves, scale/rotate, add/remove stick or
      stickfigure) that don't change which frame is current.
-   Every branch clears `undoFlag` around the specific `cloneFrame()` call
-   that populates the *live* target frame, then sets it back to `true`
-   immediately after — `operator>>` checks `undoFlag` to decide whether to
-   actually `scene->addItem()` a deserialized stick, so leaving it `true`
-   here would silently produce sticks that exist in the model but never
-   attach to the scene (this was the root cause of a `QGraphicsScene::
-   removeItem: item's scene (0x0)...` crash chain earlier in the project's
-   history).
-5. `discardScratchFrame(undoFrame)` frees the scratch frame — never
-   `clearFrame()`/`delete` directly, per the uninitialized-`.scene` rule
-   above.
+   Every branch repopulates the *live* target frame via
+   `PopulateLiveFrame(target, *undoFrame, /*attach_to_scene=*/true,
+   /*update_icons=*/true)` — attaching to the scene is now an explicit
+   parameter instead of something `operator>>` inferred from a global flag
+   (this used to be exactly the kind of place a left-set flag caused a
+   `QGraphicsScene::removeItem: item's scene (0x0)...` crash).
+4. `delete undoFrame` frees the snapshot — it is pure data, so a plain
+   delete is correct; there is no scratch-`.scene` trap to avoid anymore.
 
 Net effect: the undo system doesn't store or replay *commands* in the usual
-sense — it stores whole-`Frame` snapshots and a tag describing the
+sense — it stores whole-`FrameData` snapshots and a tag describing the
 structural shape of the change, then uses that tag purely to figure out
 which slot in `frameList` the restored snapshot belongs in.
 
 ## Serialization
 
-Since refactor Phase 1a, `stick`'s persistent state lives in `StickData`
-(`stickdata.h/cpp`): `stick` derives from both `QGraphicsItem` and
-`StickData` (a deliberate bridge until Phase 1b splits view from data), the
-stick-level stream operators live in `stickdata.cpp` and are pure-data (no
-flag guards), and `cloneStick()` is a plain `StickData::CopyFrom()` field
-copy instead of a stream round-trip. `~StickData` frees the image list
-unconditionally; only the `imgListWidget` cleanup remains flag-guarded in
-`~stick`.
+Since refactor Phase 1a/2a/2b, every layer's persistent state lives in a
+`*Data` class with no scene/widget dependency, mirroring the live class it
+was extracted from:
+- `StickData` (`stickdata.h/cpp`) — position, type, image list, and (since
+  Phase 2a) the figure-tree `parent`/`children` pointers (typed
+  `StickData*`). `stick` derives from both `QGraphicsItem` and `StickData`
+  — a deliberate bridge kept until Phase 2c's `StickGraphicsItem` split.
+  Bridge invariant: every `StickData` inside a LIVE figure is actually a
+  `stick`, so view-side code may `static_cast<stick*>` a tree pointer
+  (marked with a "bridge: dati di figura viva" comment).
+- `StickFigureData` (`stickfiguredata.h/cpp`) — name, `stickList`,
+  `masterStick`/`currentStick`.
+- `FrameData` (`framedata.h/cpp`) — `stickFigures`, the flattened
+  `totalSticks` z-order list, `frameNumber`/`numOfItems`.
 
-`QDataStream operator<<`/`operator>>` on `StickData`, `StickFigure`,
-`Frame`, `Animation` are the SAME functions used for: undo/redo snapshots,
-frame copy/paste, stickfigure copy/paste, library save/load, and
-whole-animation file save/load. A bug in one of these operators affects all of those
-features simultaneously — when fixing or extending one, check it against
-all five use sites, not just the one you're working on. Every caller today
-passes a freshly-constructed, empty target; `operator>>` implementations
-defensively `qDeleteAll` the target's existing list first in case that ever
-changes.
+Each `*Data` class has its own `QDataStream operator<<`/`operator>>`,
+**byte-compatible with the pre-refactor format** (existing `.mAnim`/`.stck`
+files still load), and a `Clone()` that deep-copies in memory with no
+stream involved. These operators have no flag guards — they read/write
+data and nothing else.
+
+The live classes (`stick`, `StickFigure`, `Frame`) keep thin
+`operator<<`/`operator>>` wrappers (used only by the single-`.stck`-file
+and whole-`.mAnim`-file paths) that delegate to the data operators, plus
+explicit **bridge functions** that replace what the old flag-guarded shared
+operators used to do implicitly:
+- `ExtractStickFigureData(figure)` / `PopulateLiveStickFigure(target, data,
+  attach_to_scene, update_icon)`
+- `ExtractFrameData(frame)` / `PopulateLiveFrame(target, data,
+  attach_to_scene, update_icons)`
+
+`attach_to_scene`/`update_icon(s)` are plain bool parameters now — undo
+restore and paste pass `true` (the target is genuinely on screen), whole-
+file load passes `false` (only the frame `moveToFrame()` actually displays
+needs attaching/rendering, which it does itself right after). This is the
+same behavior the old `undoFlag`/`loadingAnimationFlag` checks produced,
+just selected explicitly by the caller instead of inferred from global
+state. Every scratch/buffer object in the codebase — `frameCopyBuffer`,
+`stickLibraryBuffer`, `copyStickFigureBuffer`, both undo/redo buffers — is
+one of the `*Data` classes now, so none of them need the historical
+uninitialized-`.scene` care; freeing one is a plain `delete`.
 
 ## Conventions
 

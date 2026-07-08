@@ -6,42 +6,36 @@
 #include <QFile>
 #include <QVector2D>
 // StickFigure work in the one active scene
-extern bool loadingAnimationFlag;
 extern bool undoFlag;
-extern bool libFlag;
-extern bool clearUndoFlag;
-extern bool copyFlag;
-extern bool iconUpdateFlag;
 extern QGraphicsRectItem* myRect;
+/**
+ * @details Since Phase 2b the only scratch-vs-live flag left here is undoFlag: the
+ * copy/library buffers are pure data objects now, so libFlag/copyFlag/clearUndoFlag
+ * had no remaining setter and their guard terms were dropped. undoFlag still marks
+ * "inside undoRedo()", where clearFrame() has already freed the sticks explicitly.
+ */
 StickFigure::~StickFigure()
 {
-    if(!undoFlag && !libFlag && !clearUndoFlag && !copyFlag){
+    if(!undoFlag){
         for(stick* s: stickList)
         {
-            //if(!clearUndoFlag)
             s->RemoveImagesFromListWidget(); // solo dentro questa guardia: qui gli stick sono vivi
             scene->removeItem(s);
             delete s;
         }
     }
-    // già vengono distrutti dal clear della libreria
-    if(!libFlag){
-        delete iconImg;
-        delete stickFigureIcon;
-    }
+    delete iconImg;
+    delete stickFigureIcon;
 }
-// questa funzione aggiorna l'iconea del livello
+// questa funzione aggiorna l'iconea del livello: da Phase 2b è chiamata solo su figure
+// vive (le figure di libreria sono StickFigureData e hanno il loro render in myview.cpp)
 void StickFigure::updateIcon()
 {
-    iconUpdateFlag = true;
     //crea una scena fittizia, falla bianca e delle stesse dimensioni di quella principale
     QGraphicsScene icoScene;
     iconImg->fill(Qt::white);
 
-    if(!libFlag && !copyFlag)
-        icoScene.setSceneRect(scene->sceneRect());
-    else
-        icoScene.setSceneRect(myRect->rect());
+    icoScene.setSceneRect(scene->sceneRect());
     icoScene.setBackgroundBrush(QBrush(QColor(Qt::white)));
     // ora clona tutti gli stick nello stickfigure e aggiungili alla scena fittizia
     // (addItem rende la scena proprietaria dei cloni: non vanno cancellati a mano,
@@ -58,7 +52,6 @@ void StickFigure::updateIcon()
     stickFigureIcon = new QIcon(*iconImg);
     linkedItem->setIcon(*stickFigureIcon);
     // i cloni vengono cancellati automaticamente dal distruttore di icoScene
-    iconUpdateFlag = false;
 }
 StickFigure::StickFigure(QListWidgetItem* item)
 {
@@ -357,98 +350,121 @@ void StickFigure::deleteStick(int idx)
     lineBuffer = QLineF(); // svuota linebuffer
 
 }
-// i serializzatori della classe stick sono stati spostati in stickdata.cpp (Phase 1a):
-// operano solo su StickData, senza dipendenze da scena o widget
-// serializzatore per stickfigure
-QDataStream & operator<< (QDataStream& stream, const StickFigure& myStickFigure){
-    // per prima cosa registra il numero di stick che lo compongono
+// i serializzatori della classe stick sono stati spostati in stickdata.cpp (Phase 1a),
+// quelli a livello figura in stickfiguredata.cpp (Phase 2b): operano solo su dati puri.
+// Qui restano i wrapper per i percorsi file .stck e le funzioni ponte vivo<->dati.
 
-    stream<<myStickFigure.version;
-    qDebug() << "before stream version";
-    stream<<(int)myStickFigure.stickList.count();// beware, stream types must correspond! qsizetype != int
-    stream<<myStickFigure.name;
-    qDebug() << "before stream stick idx";
-    // per ogni stick nella lista scrivi l'indice del genitore e poi serializza il tutto
-    for(stick* s:myStickFigure.stickList){
-        if(!s->isMaster()) //todo master replacement
-        {
-            qDebug() << "stk non master idx";
-            s->parentIdx = (int)myStickFigure.stickList.indexOf(static_cast<stick*>(s->parent)); // bridge: dati di figura viva
-            qDebug() << "after streaming stick idx";
+/**
+ * @details Snapshot copy of a live figure into pure data: sticks are cloned
+ * field-by-field and the tree pointers, master and current selection are remapped by
+ * index. This replaces the serialize-to-QBuffer idiom for every in-memory copy (undo,
+ * copy/paste, library) — no stream, no flags.
+ */
+StickFigureData *ExtractStickFigureData(const StickFigure &source_figure)
+{
+    StickFigureData *data = new StickFigureData();
+    data->version = source_figure.version;
+    data->name = source_figure.name;
+    for (stick *live_stick : source_figure.stickList)
+        data->stickList.append(live_stick->Clone());
+    for (int i = 0; i < source_figure.stickList.count(); i++) {
+        stick *live_stick = source_figure.stickList[i];
+        StickData *copied_stick = data->stickList[i];
+        int parent_index = source_figure.stickList.indexOf(static_cast<stick*>(live_stick->parent)); // bridge: dati di figura viva
+        if (parent_index >= 0)
+            copied_stick->parent = data->stickList[parent_index];
+        for (StickData *child : live_stick->children) {
+            int child_index = source_figure.stickList.indexOf(static_cast<stick*>(child)); // bridge: dati di figura viva
+            if (child_index >= 0)
+                copied_stick->children.append(data->stickList[child_index]);
         }
-        else{
-            qDebug() << "stk  master idx";
-            s->parentIdx = -1;
-        }
-        qDebug() << "before streaming stick";
-        stream<<*s;
-        qDebug() << "after streaming stick";
     }
+    int master_index = source_figure.stickList.indexOf(source_figure.masterStick);
+    if (master_index >= 0)
+        data->masterStick = data->stickList[master_index];
+    int current_index = source_figure.stickList.indexOf(source_figure.currentStick);
+    if (current_index >= 0)
+        data->currentStick = data->stickList[current_index];
+    return data;
+}
+
+/**
+ * @details Rebuilds a live figure from data, replicating what the legacy operator>>
+ * did in its flags-clear (live) configuration: fresh stick objects hydrated via
+ * CopyFrom, the tree rebuilt canonically by walking each stick's ancestor chain
+ * (children end up in the flattened all-descendants form, exactly like a stream load),
+ * the master's origin handle painted green, currentStick defaulting to the first
+ * stick. Scene attach and icon rendering are explicit parameters instead of global
+ * flags — the two bools disappear into FramePresenter in Phase 2c.
+ */
+void PopulateLiveStickFigure(StickFigure *target_figure, const StickFigureData &source_data,
+                             bool attach_to_scene, bool update_icon)
+{
+    // difesa in profondità come nel vecchio operator>>: il target è di regola appena
+    // costruito, ma un riuso non deve far trapelare gli stick precedenti
+    qDeleteAll(target_figure->stickList);
+    target_figure->stickList.clear();
+    target_figure->masterStick = nullptr;
+    target_figure->currentStick = nullptr;
+    target_figure->version = source_data.version;
+    target_figure->name = source_data.name;
+    for (StickData *source_stick : source_data.stickList) {
+        stick *live_stick = new stick();
+        live_stick->CopyFrom(*source_stick);
+        live_stick->myStickFigure = target_figure;
+        target_figure->stickList.append(live_stick);
+    }
+    for (int i = 0; i < source_data.stickList.count(); i++) {
+        StickData *source_stick = source_data.stickList[i];
+        stick *live_stick = target_figure->stickList[i];
+        if (source_stick->parent != nullptr) {
+            // ricostruzione canonica: appendi lo stick a TUTTI i suoi antenati
+            int parent_index = source_data.stickList.indexOf(source_stick->parent);
+            live_stick->parent = target_figure->stickList[parent_index];
+            StickData *ancestor = source_stick->parent;
+            int ancestor_index = parent_index;
+            while (true) {
+                target_figure->stickList[ancestor_index]->children.append(live_stick);
+                if (ancestor->parent == nullptr)
+                    break;
+                ancestor_index = source_data.stickList.indexOf(ancestor->parent);
+                ancestor = ancestor->parent;
+            }
+        } else { // se stiamo considerando lo stickmaster
+            live_stick->parent = nullptr;
+            target_figure->masterStick = live_stick;
+            live_stick->stickHandle[0]->setBrush(QBrush(Qt::green));
+            live_stick->stickHandle[0]->setZValue(101);
+        }
+        if (attach_to_scene)
+            target_figure->scene->addItem(live_stick);
+    }
+    if (target_figure->stickList.count() > 0)
+        target_figure->currentStick = target_figure->stickList[0];
+    if (update_icon)
+        target_figure->updateIcon();
+}
+
+/**
+ * @details Wrapper kept for the .stck single-figure save path (saveStickFigure):
+ * extract to data, stream the data. Byte layout unchanged.
+ */
+QDataStream & operator<< (QDataStream& stream, const StickFigure& myStickFigure){
+    StickFigureData *data = ExtractStickFigureData(myStickFigure);
+    stream << *data;
+    delete data;
     return stream;
 }
-// deserializza lo stickfigure
+
+/**
+ * @details Wrapper kept for the .stck single-figure load path (loadStickFigure): the
+ * target is a live, on-scene figure, so the rebuilt sticks are attached and the icon
+ * rendered — the behavior the legacy operator had with all flags clear.
+ */
 QDataStream & operator>> (QDataStream& stream,StickFigure& myStickFigure){
-
-    int max = 0;
-    stream>>myStickFigure.version;
-    stream>>max; // quanti stick possiede?
-    stream>>myStickFigure.name;
-    // difesa in profondità: ogni chiamante attuale passa sempre un target appena costruito con
-    // stickList già vuota, quindi qDeleteAll qui è oggi un no-op, ma senza di esso un futuro
-    // chiamante che riusi un oggetto vivo perderebbe (senza liberarli) i suoi stick precedenti
-    qDeleteAll(myStickFigure.stickList);
-    myStickFigure.stickList.clear();
-    myStickFigure.masterStick = nullptr;
-    myStickFigure.currentStick = nullptr;
-    // per ogni stick popola la lista sticklist
-    for(int i = 0; i<max; i++){
-        myStickFigure.currentStick = new stick(); // prepara il contenitore
-        myStickFigure.stickList.append(myStickFigure.currentStick);
-        stream>>*myStickFigure.currentStick; // "idrata il contenitore" con i dati nel file
-        //myStickFigure.currentStick->Z = myStickFigure.baseZ+i*0.01;
-        myStickFigure.currentStick->myStickFigure = &myStickFigure;
-    }
-    // ricostruisci le gerarchie di parentela tramite gli indici
-    for(stick * s:myStickFigure.stickList){
-        if(s->parentIdx>=0){
-            // trova il genitore e aggiungi alla lista dei figli del genitore lo stick corrente
-            s->parent = myStickFigure.stickList[s->parentIdx];
-            StickData * currentParent = s->parent;
-            // procedi a ritroso per i genitori del genitore
-            while(currentParent != nullptr){
-                currentParent->children.append(s);
-                if(currentParent->parentIdx>= 0 ){
-                    currentParent = myStickFigure.stickList[currentParent->parentIdx];
-                }
-                else{ // arrivati allo stickmaster vai al prossimo
-                    break;
-                }
-            }
-        }
-        else{ // se stiamo considerando lo stickmaster
-            s->parent = nullptr;
-            myStickFigure.masterStick = s;
-            s->stickHandle[0]->setBrush(QBrush(Qt::green));
-            s->stickHandle[0]->setZValue(101);
-        }
-        //if(s->isMaster()){ //todo master replacement
-
-        //}
-        if(!undoFlag && !loadingAnimationFlag && !libFlag && !copyFlag){
-            myStickFigure.scene->addItem(s);
-        }
-        //s->refresh(0); // commentato per bug che non ho capito era necessario?
-    }
-    if(myStickFigure.stickList.count()>0){
-        myStickFigure.currentStick = myStickFigure.stickList[0];
-    }
-    // libFlag e loadingAnimationFlag mancavano: senza libFlag, aggiungere uno stickfigure alla
-    // libreria calcolava l'icona due volte (qui e nella chiamata esplicita in
-    // Frame::addStickFigureToLibrary); senza loadingAnimationFlag, caricare un file renderizzava
-    // l'icona di OGNI stickfigure di OGNI frame invece che solo di quello mostrato
-    if(!undoFlag && !copyFlag && !libFlag && !loadingAnimationFlag){
-        myStickFigure.updateIcon();
-    }
+    StickFigureData data;
+    stream >> data;
+    PopulateLiveStickFigure(&myStickFigure, data, true, true);
     return stream;
 }
 // salva sul percorso impostato i dati serializzati dello stickfigure usando il datastream
@@ -467,31 +483,8 @@ void StickFigure::updateBoundingRects(){
         s->updateBr(0);
     }
 }
-void cloneStickFigure(StickFigure* dest, StickFigure*src){
-
-    // byte array stores serialized data (su stack, come le altre funzioni di clone: evita che
-    // buffer1/buffer2 restino aperti su una QByteArray già cancellata)
-    QByteArray byteArray;
-    // buffer temporarily holds serialized data
-    QBuffer buffer1(&byteArray);
-    // use this buffer to store data from the object
-    buffer1.open(QIODevice::WriteOnly);
-    QDataStream myStream(&buffer1);
-    myStream<<*(src);
-    // now create a seconds buffer from which to read data of the bytearray
-    QBuffer buffer2(&byteArray);
-    buffer2.open(QIODevice::ReadOnly);
-    // a new data stream to deserialize
-    QDataStream myStream2(&buffer2);
-    // hydrate new frame with previous frame data
-    myStream2>>*dest;
-
-
-    if(!copyFlag)
-    {
-        dest->updateIcon();
-    }
-}
+// cloneStickFigure è stato eliminato (Phase 2b): i chiamanti passano da
+// ExtractStickFigureData()/PopulateLiveStickFigure()
 //this function join parent stick with its children
 QList<stick*> StickFigure::weld(stick* master){
     QList<stick*> toWeld;

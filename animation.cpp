@@ -17,7 +17,6 @@ extern QGraphicsRectItem *myRect;
 extern QGraphicsRectItem *limitRect;
 extern QGraphicsScene* scene;
 
-bool loadingAnimationFlag = false;
 bool clearingAnimation = false;
 bool changeTypeFlag = false;
 namespace Ui { class Widget; }
@@ -285,29 +284,8 @@ Frame* Animation::setupFrame(int pos){
     // update other frames
     return addedFrame;
 }
-void Animation::cloneFrame(Frame* target, Frame* source)
-{
-    // byte array stores serialized data
-    QByteArray byteArray;
-    // buffer temporarily holds serialized data
-    QBuffer buffer1(&byteArray);
-    // use this buffer to store data from the object
-    buffer1.open(QIODevice::WriteOnly);
-    QDataStream myStream(&buffer1);
-    myStream<<*(source);
-    // now create a seconds buffer from which to read data of the bytearray
-    QBuffer buffer2(&byteArray);
-    buffer2.open(QIODevice::ReadOnly);
-    // a new data stream to deserialize
-    QDataStream myStream2(&buffer2);
-    // hydrate new frame with previous frame data
-    myStream2>>*target;
-    buffer1.close();
-    buffer2.close();
-
-    //target->linkedItem = source->linkedItem;
-    //target->scene = source->scene;
-}
+// Animation::cloneFrame è stato eliminato (Phase 2b): il ripristino di undo/redo passa
+// da PopulateLiveFrame() e le copie in-memory da ExtractFrameData()
 QDataStream &operator<<(QDataStream& stream, const Animation& myAnimation){
     int frameNum = myAnimation.frameList.count();
     stream<<myAnimation.version;
@@ -374,9 +352,9 @@ void Animation::loadAnimation(QString name)
     }
     QDataStream out(&file);
     clearAnimation();
-    loadingAnimationFlag = true;
+    // niente più loadingAnimationFlag: l'operator>> di Frame non attacca alla scena né
+    // renderizza icone per costruzione (vedi PopulateLiveFrame), non serve una guardia
     out >> *this;
-    loadingAnimationFlag = false;
     file.close();
     qDebug("load finished");
 

@@ -17,7 +17,6 @@ public:
     void updateSelection(QPointF point);
     QGraphicsScene * scene;
     Frame *deleteFrame(Frame* frame);
-    void cloneFrame(Frame *target, Frame *source);
     Frame *setupFrame(int pos);
     void saveAnimation(QString fileName);
     void loadAnimation(QString name);

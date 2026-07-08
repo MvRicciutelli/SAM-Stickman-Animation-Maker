@@ -410,7 +410,15 @@ buildable and test-verified):
 
 - [x] Phase 2a complete — tree pointers and tree algorithms are
   data-typed; app + tests build and pass unchanged.
-- [ ] Phase 2b complete
+- [x] Phase 2b complete — `StickFigureData`/`FrameData` (with byte-compatible
+  flag-free stream operators) exist; the undo buffers, `frameCopyBuffer`,
+  `copyStickFigureBuffer` and `stickLibraryBuffer` all hold data objects;
+  `ExtractStickFigureData`/`PopulateLiveStickFigure` and
+  `ExtractFrameData`/`PopulateLiveFrame` are the sole live↔data bridge.
+  `copyFlag`, `libFlag`, `clearUndoFlag`, `loadingAnimationFlag` have zero
+  remaining declarations or assignments (grep-verified); their names only
+  survive in comments explaining what was removed and why. App + tests
+  build and pass unchanged (20 characterization tests).
 - [ ] Phase 2c complete
 
 **Verify:** Phase 0 tests updated to construct `FrameData`/

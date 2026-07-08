@@ -25,10 +25,8 @@ QPointF coord; //current mouse pos
 float   rotationBuffer; //selected item Rotation buffer
 float   lengthBuffer;
 float zoomLvlBuf;
-bool clearUndoFlag = false;
-Frame* stickLibraryBuffer;
+FrameData* stickLibraryBuffer; ///< libreria corrente: solo dati da Phase 2b
 bool undoFlag = false;
-bool libFlag = false;
 extern QSpinBox * onionSkinSB;
 bool startStickFigureRotation = false;
 bool startStickFigureScale = false;
@@ -60,7 +58,7 @@ myView::myView(QWidget *parent) : QGraphicsView(parent)
     myBrush.setStyle(Qt::SolidPattern);
     myBrush.setColor(Qt::gray);
     myPen.setCapStyle(Qt::RoundCap);
-    stickLibraryBuffer = new Frame();
+    stickLibraryBuffer = new FrameData();
 }
 
 myView::~myView()
@@ -1073,40 +1071,21 @@ void myView::updateOnionSkins(){
     onionRender = false;
 }
 #define MAXUNDO 50
-// scarta completamente un frame "usa e getta" (voce di undo/redo, ecc.): i suoi stick non sono mai
-// stati aggiunti alla scena reale (operator>> lo salta quando undoFlag/clearUndoFlag è attivo,
-// esattamente il contesto in cui questi frame vengono creati), quindi NON si tocca frame->scene,
-// che per questi frame "di passaggio" non viene mai inizializzato ed è un puntatore indeterminato.
-// qDeleteAll libera comunque gli stick correttamente; il resto (icone incluse) lo fa ~Frame()/~StickFigure().
-static void discardScratchFrame(Frame* f){
-    // forza undoFlag qui: questa funzione viene chiamata anche da un contesto (invalidazione del
-    // redo buffer su una modifica nuova) in cui NESSUno dei flag di "oggetto di passaggio" è attivo,
-    // e senza undoFlag la pulizia di uno stick IMAGE toccherebbe imgListWidget (vedi stick::~stick())
-    bool prevUndoFlag = undoFlag;
-    undoFlag = true;
-    for(StickFigure* S: f->stickFigures){
-        qDeleteAll(S->stickList);
-        S->stickList.clear();
-    }
-    undoFlag = prevUndoFlag;
-    delete f;
-}
 // Questa funzione fa sia undo che redo, a seconda prende come sorgente un buffer diverso undoBuffe ro redoBuffer
-// copia dal Buffer,
+/**
+ * @details Since Phase 2b a snapshot is a FrameData used directly: no
+ * serialize-and-back round-trip per operation (this also fixes the old leak where the
+ * popped snapshot was cloned but never freed). undoFlag stays raised for the whole
+ * restore — scene attachment is now an explicit PopulateLiveFrame() parameter, so the
+ * old lower-the-flag-around-cloneFrame dance is gone; the flag only tells the code
+ * reachable from clearFrame()/moveToFrame() that undoRedo() is driving.
+ */
 void myView::undoRedo(int mode){
     undoFlag = true;
     if(mode == MODE_UNDO && undoBuffer.isEmpty())
         return;
     else if(mode == MODE_REDO && redoBuffer.isEmpty())
         return;
-    //CLONE FRAME
-    // byte array stores serialized data
-    QByteArray byteArray;
-    // buffer temporarily holds serialized data
-    QBuffer buffer1(&byteArray);
-    // use this buffer to store data from the object
-    buffer1.open(QIODevice::WriteOnly);
-    QDataStream myStream(&buffer1);
     undoInfoStruct myUndo;
     if(mode == MODE_REDO){
         myUndo = redoBuffer.takeLast();
@@ -1114,49 +1093,30 @@ void myView::undoRedo(int mode){
     else {
         myUndo = undoBuffer.takeLast();
     }
-    myStream<<*(myUndo.frame);
-    // now create a seconds buffer from which to read data of the bytearray
-    QBuffer buffer2(&byteArray);
-    buffer2.open(QIODevice::ReadOnly);
-    // a new data stream to deserialize
-    QDataStream myStream2(&buffer2);
-
-    Frame* undoFrame = new Frame();
     if(mode == MODE_UNDO){// memorizza l'undo nel buffer dei redo
         storeUndo(myUndo.command,MODE_REDO);
     }
     else if(mode == MODE_REDO){ // se siamo in redo immetti lo stato negli undo
         storeUndo(myUndo.command,MODE_UNDO);
     }
-    // hydrate new frame with previous frame data
-    undoFlag = true;
-    myStream2>>*undoFrame;
-    //scene()->clear();
+    FrameData* undoFrame = myUndo.frame;
     // se è un undo su un addframe, o un redo su un deleteframe ci sta da rimuovere un frame
     if((myUndo.command == CMD_ADDFRAME && mode == MODE_UNDO)||
             (myUndo.command == CMD_DELETEFRAME && mode == MODE_REDO)){
         // routine di cancellazione del frame
         deleteFrame(myAnimation->currentFrame);
-        // svuota il frame da popolare con il buffer
+        // svuota il frame da popolare con il buffer e ripopolalo dallo snapshot,
+        // attaccando davvero gli stick alla scena (il target è il frame VERO)
         myAnimation->frameList[undoFrame->frameNumber]->clearFrame();
-        //popola il frame di destinazione con il buffer
-        // undoFlag va abbassato qui: il target è il frame VERO, non uno scartafaccio, quindi i suoi
-        // stick vanno davvero aggiunti alla scena (operator>> lo salta quando undoFlag è attivo,
-        // causando "item's scene (0x0)" e un crash appena qualcosa presume che siano in scena)
-        undoFlag = false;
-        myAnimation->cloneFrame(myAnimation->frameList[undoFrame->frameNumber],undoFrame);
-        undoFlag = true;
+        PopulateLiveFrame(myAnimation->frameList[undoFrame->frameNumber],*undoFrame,true,true);
         // spostati verso tale frame
         moveToFrame(myAnimation->frameList[undoFrame->frameNumber]);
     }
     // se è un undo su uno spostamento
     else if(myUndo.command == CMD_MOVETOFRAME){
-        //svuota il frame di destinazione
+        //svuota il frame di destinazione e popolalo con lo snapshot
         myAnimation->frameList[undoFrame->frameNumber]->clearFrame();
-        // popolalo col buffer
-        undoFlag = false;
-        myAnimation->cloneFrame(myAnimation->frameList[undoFrame->frameNumber],undoFrame);
-        undoFlag = true;
+        PopulateLiveFrame(myAnimation->frameList[undoFrame->frameNumber],*undoFrame,true,true);
         // spostati sul frame di destinazione
         moveToFrame(myAnimation->frameList[undoFrame->frameNumber]);
     }
@@ -1165,10 +1125,7 @@ void myView::undoRedo(int mode){
             (myUndo.command == CMD_ADDFRAME && mode == MODE_REDO)){
         // routine di aggiunta del frame
         Frame* addedFrame = setUpFrame(undoFrame->frameNumber);
-        // popola il frame aggiuntio col buffer
-        undoFlag = false;
-        myAnimation->cloneFrame(addedFrame,undoFrame);
-        undoFlag = true;
+        PopulateLiveFrame(addedFrame,*undoFrame,true,true);
         // spostati sulla destinazione
         moveToFrame(addedFrame);
 
@@ -1176,14 +1133,10 @@ void myView::undoRedo(int mode){
     else{
         myAnimation->currentFrame->clearFrame();
         sceneRemover(scene());
-        //scene()->clear();
-        //myRect = new QGraphicsRectItem(0,0,W,H); // RENEW IT
-        undoFlag = false;
-        myAnimation->cloneFrame(myAnimation->currentFrame,undoFrame);
-        undoFlag = true;
+        PopulateLiveFrame(myAnimation->currentFrame,*undoFrame,true,true);
         moveToFrame(myAnimation->currentFrame);
     }
-    discardScratchFrame(undoFrame);
+    delete undoFrame; // lo snapshot è puro dato: nessuna danza di flag per liberarlo
     undoFlag = false;
     //
 }
@@ -1191,6 +1144,13 @@ extern int autoSaveInterval;
 extern int opCount;
 // routine per immagazzinare undo e redo popolando il buffer a seconda della mode selezionata
 // inoltre incrementiamo il contatore delle operazioni e verifichiamo se possiamo innescare l'autosave
+/**
+ * @details Since Phase 2b the snapshot is a direct in-memory ExtractFrameData() copy:
+ * no QDataStream round-trip per operation (the main performance sink of the old undo)
+ * and no scratch Frame with an uninitialized scene. undoFlag is only READ here (to
+ * tell a fresh user edit from the internal call undoRedo() makes on the other buffer);
+ * it is not raised anymore because no deserialization needs guarding.
+ */
 void myView::storeUndo(int command, int mode){
     if(myAnimation->frameList.isEmpty())
     {
@@ -1202,66 +1162,34 @@ void myView::storeUndo(int command, int mode){
     // interna che undoRedo() fa sull'ALTRO buffer durante un vero undo/redo: non toccarlo.
     if(!undoFlag){
         for(undoInfoStruct u: redoBuffer){
-            discardScratchFrame(u.frame);
+            delete u.frame;
         }
         redoBuffer.clear();
     }
     updateFrameOrder(CURRENTFRAME);
     opCount++;
-    qDebug() << "beforetrigger autosav";
     // se il file è stato salvato, ed esiste, e sono passati un numero sufficiente di istruzioni, procedi con láutosave
     if(QFile::exists(animationPath) && opCount%autoSaveInterval == 0)
     {
         emit autoSaveTrigger();
     }
-    qDebug() << "after trigger autosav";
-    undoFlag = true;
-    // inizializza la struttura di undo/redo
+    // inizializza la struttura di undo/redo con lo snapshot dati del frame corrente
     undoInfoStruct myUndo;
-    myUndo.frame = new Frame();
+    myUndo.frame = ExtractFrameData(*myAnimation->currentFrame);
     myUndo.command = command;
-    qDebug() << "after new frame";
-    //CLONE FRAME
-    // byte array stores serialized data
-    QByteArray byteArray;
-    // buffer temporarily holds serialized data
-    QBuffer buffer1(&byteArray);
-    // use this buffer to store data from the object
-    buffer1.open(QIODevice::WriteOnly);
-    qDebug() << "open buffer";
-    QDataStream myStream(&buffer1);
-
-    qDebug() << "after stream obj";
-    myStream<<*(myAnimation->currentFrame);
-    buffer1.close();
-    qDebug() << "stream frame";
-    // now create a seconds buffer from which to read data of the bytearray
-    QBuffer buffer2(&byteArray);
-    buffer2.open(QIODevice::ReadOnly);
-    // a new data stream to deserialize
-    qDebug() << "buffer 2";
-    QDataStream myStream2(&buffer2);
-
-    // hydrate new frame with previous frame data
-    myStream2>>*myUndo.frame;
-    buffer2.close();
-    qDebug() << "after clone frame";
     //popola il buffer appropriato
     if(mode == MODE_UNDO){
         if(undoBuffer.count()>=MAXUNDO){
-            discardScratchFrame(undoBuffer.takeFirst().frame);
+            delete undoBuffer.takeFirst().frame;
         }
         undoBuffer.append(myUndo);
     }
     else if(mode ==MODE_REDO){
         if(redoBuffer.count()>=MAXUNDO){
-            discardScratchFrame(redoBuffer.takeFirst().frame);
+            delete redoBuffer.takeFirst().frame;
         }
         redoBuffer.append(myUndo);
     }
-    qDebug() << "after uno/redo store";
-    undoFlag = false;
-
 }
 void myView::updateFrameOrder(Frame* f){
     int j = 0;
@@ -1311,86 +1239,112 @@ void myView::removeHandles(StickFigure *S)
     }
 }
 // cancella i buffer di undo e redo, da chiamare quando si carica un nuovo file
+/**
+ * @details Snapshots are pure data since Phase 2b: freeing them is a plain delete,
+ * so the old clearUndoFlag choreography is gone (and the flag with it).
+ */
 void myView::clearUndo(){
-    clearUndoFlag = true;
     for(undoInfoStruct u:undoBuffer){
-        discardScratchFrame(u.frame);
+        delete u.frame;
     }
     undoBuffer.clear();
     for(undoInfoStruct u:redoBuffer){
-        discardScratchFrame(u.frame);
+        delete u.frame;
     }
     redoBuffer.clear();
-    clearUndoFlag = false;
 }
+/**
+ * @details Renders the 50x50 preview icon of a library entry from its data record:
+ * temporary stick view objects are built from the StickData, rendered on a throwaway
+ * scene, then freed by that scene's destructor. This mirrors StickFigure::updateIcon()
+ * for figures that no longer have a live view (the library holds pure data now).
+ */
+static QIcon RenderLibraryIcon(const StickFigureData &figure_data){
+    QGraphicsScene icon_scene;
+    QPixmap icon_pixmap(50,50);
+    icon_pixmap.fill(Qt::white);
+    icon_scene.setSceneRect(myRect->rect());
+    icon_scene.setBackgroundBrush(QBrush(QColor(Qt::white)));
+    for(StickData *stick_data : figure_data.stickList){
+        stick *render_clone = new stick();
+        render_clone->CopyFrom(*stick_data);
+        render_clone->setZValue(render_clone->Z);
+        render_clone->br = render_clone->updateBr(0);
+        icon_scene.addItem(render_clone); // la scena diventa proprietaria del clone
+    }
+    QPainter painter(&icon_pixmap);
+    icon_scene.render(&painter);
+    return QIcon(icon_pixmap);
+}
+/**
+ * @details Straight file write of the library data — the libFlag that used to select
+ * the "library" behavior inside the shared operators is gone; FrameData's operator<<
+ * has exactly one behavior.
+ */
 void myView::saveLibrary(QString fileName){
-    libFlag = true;
     QFile file(fileName);
     if(!file.open(QIODevice::WriteOnly)){
-        libFlag = false;
         return;
     }
     QDataStream out(&file);
     out << *stickLibraryBuffer;
     file.close();
-    libFlag = false;
 }
-// libera davvero il precedente buffer di libreria: con libFlag attivo, ~StickFigure() salta sia la
-// pulizia degli stick sia quella di iconImg/stickFigureIcon (pensate per gli oggetti "di passaggio"
-// della (de)serializzazione, non per uno scarto definitivo come questo), quindi senza liberarli
-// esplicitamente ogni cambio di libreria perdeva la memoria di stick e icone di quella precedente
-static void freeLibraryFrame(Frame* f){
-    for(StickFigure* S: f->stickFigures){
-        qDeleteAll(S->stickList);
-        S->stickList.clear();
-        delete S->iconImg;
-        delete S->stickFigureIcon;
-    }
-    delete f;
-}
+/**
+ * @details The library buffer owns plain data: replacing it is delete + new, no
+ * per-figure cleanup choreography (freeLibraryFrame is gone).
+ */
 void myView::clearCurrentLib(){
-    libFlag = true;
     myCurrentLibraryWidget->clear();
-    freeLibraryFrame(stickLibraryBuffer);
-    stickLibraryBuffer = new Frame();
-    libFlag = false;
+    delete stickLibraryBuffer;
+    stickLibraryBuffer = new FrameData();
 }
+/**
+ * @details Reads the library file into the data buffer, then builds the list-widget
+ * entries: each item stores its StickFigureData pointer and an icon rendered from the
+ * data. mode!=0 keeps the widget untouched (legacy semantics, currently unused).
+ */
 void myView::loadLibrary(QString fileName, int mode){
-    libFlag = true;
     QFile file(fileName);
     if(!file.open(QIODevice::ReadOnly)){
-        libFlag = false;
         return;
     }
-    QDataStream out(&file);
+    QDataStream in(&file);
     myCurrentLibraryWidget->clear();
-    freeLibraryFrame(stickLibraryBuffer);
-    stickLibraryBuffer = new Frame();
-    out >> *stickLibraryBuffer;
-    // aggiungi tutta gli stickfigure del nuovo frame alla lista del widget
-
-    for(StickFigure *S:stickLibraryBuffer->stickFigures){
-        QListWidgetItem * addedItem = new QListWidgetItem();
-        QVariant newData(QVariant::fromValue(S));
-        addedItem->setData(Qt::UserRole,newData);
-        addedItem->setData(Qt::DisplayRole,S->name);
-        addedItem->setIcon(*S->stickFigureIcon);
-        S->linkedItem = addedItem;
-        if(!mode)
-            myCurrentLibraryWidget->addItem(S->linkedItem); // questa operazione avviene con lóp >> il widget viene assegnato a seconda della libflag;
-    }
-
-
+    delete stickLibraryBuffer;
+    stickLibraryBuffer = new FrameData();
+    in >> *stickLibraryBuffer;
     file.close();
-    libFlag = false;
+    if(mode)
+        return;
+    // aggiungi tutti gli stickfigure della libreria alla lista del widget
+    for(StickFigureData *figure_data:stickLibraryBuffer->stickFigures){
+        QListWidgetItem * addedItem = new QListWidgetItem();
+        addedItem->setData(Qt::UserRole,QVariant::fromValue(figure_data));
+        addedItem->setData(Qt::DisplayRole,figure_data->name);
+        addedItem->setIcon(RenderLibraryIcon(*figure_data));
+        myCurrentLibraryWidget->addItem(addedItem);
+    }
 }
+/**
+ * @details Extracts the current figure into a data record, appends it to the library
+ * buffer and creates its widget entry (insert-after-current + select, as before).
+ * @return the live source figure, or nullptr if it has no sticks.
+ */
 StickFigure* myView::addStickFigureToLibrary(){
     if(CURRENTSTICKFIGURE->stickList.count()>0)
     {
-        libFlag = true;
-        stickLibraryBuffer->addStickFigureToLibrary(CURRENTSTICKFIGURE);
-
-        libFlag = false;
+        StickFigureData *figure_data = ExtractStickFigureData(*CURRENTSTICKFIGURE);
+        stickLibraryBuffer->stickFigures.append(figure_data);
+        QListWidgetItem * addedItem = new QListWidgetItem();
+        addedItem->setData(Qt::UserRole,QVariant::fromValue(figure_data));
+        addedItem->setData(Qt::DisplayRole,figure_data->name);
+        addedItem->setIcon(RenderLibraryIcon(*figure_data));
+        int newIdx = myCurrentLibraryWidget->currentRow()+1;
+        myCurrentLibraryWidget->insertItem(newIdx,addedItem);
+        myCurrentLibraryWidget->clearSelection();
+        addedItem->setSelected(true);
+        myCurrentLibraryWidget->setCurrentRow(newIdx);
         return CURRENTSTICKFIGURE;
     }else
     {
@@ -1398,27 +1352,20 @@ StickFigure* myView::addStickFigureToLibrary(){
     }
 
 }
+/**
+ * @details Removes the selected entry from both the widget and the data buffer; the
+ * record is freed with a plain delete (it owns its sticks, nothing else to detach).
+ */
 void myView::removeFromLibrary(){
     // get selected item
     int idx = myCurrentLibraryWidget->currentRow();
     if(idx<0 || idx>=myCurrentLibraryWidget->count()) // niente selezionato: senza questo, takeItem(-1) torna nullptr e va in crash sotto
         return;
-    libFlag = true;
     QListWidgetItem *itemToRemove = myCurrentLibraryWidget->takeItem(idx);
-    // estrai il dato utente salvato in esso, puntatore ad uno stickfigure
-    QVariant  retrievedData = (itemToRemove->data(Qt::UserRole));
-    //riconverti il dato
-    StickFigure* toRemove = qvariant_cast<StickFigure*>(retrievedData);
-
-    // delete items
-    //since we have libFlag on we have to remove these manually
+    StickFigureData* toRemove = qvariant_cast<StickFigureData*>(itemToRemove->data(Qt::UserRole));
     delete itemToRemove;
-    delete toRemove->iconImg;
-    delete toRemove->stickFigureIcon;
-    //this also deletes stickfigure
-    stickLibraryBuffer->removeStickFigure(toRemove);
-
-    libFlag = false;
+    stickLibraryBuffer->stickFigures.removeAll(toRemove);
+    delete toRemove;
 }
 void myView::setGraphics(bool all, int attribute){
     storeUndo(CMD_SIMPLE);

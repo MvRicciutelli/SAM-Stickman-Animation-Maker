@@ -44,10 +44,17 @@
 #define ATTRIBUTE_BRUSHSIZE 3
 
 
+/**
+ * @brief One undo/redo entry: a whole-frame data snapshot plus the command tag that
+ *        tells undoRedo() which frameList slot the snapshot belongs in.
+ *
+ * Since Phase 2b the snapshot is a FrameData (pure data, plain delete) instead of a
+ * scratch Frame with an uninitialized scene member.
+ */
 typedef struct undoInfoStruct
 {
-    int command;
-    Frame* frame;
+    int command;      ///< CMD_SIMPLE / CMD_ADDFRAME / CMD_DELETEFRAME / CMD_MOVETOFRAME
+    FrameData* frame; ///< owned pre-change snapshot of the frame
 }undoInfoStruct;
 
 class myView : public QGraphicsView
@@ -63,7 +70,7 @@ public:
     void deleteStickFigure();
     QPen    myPen;
     QBrush  myBrush;
-    StickFigure* copyStickFigureBuffer = nullptr;
+    StickFigureData* copyStickFigureBuffer = nullptr; ///< owned copy-paste buffer (pure data since Phase 2b)
     void moveToFrame(Frame *frame);
     void updateOnionSkins();
     QList<QGraphicsPixmapItem*> onionSkins;

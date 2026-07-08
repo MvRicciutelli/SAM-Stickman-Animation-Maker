@@ -1,6 +1,7 @@
 #ifndef FRAME_H
 #define FRAME_H
 #include <StickFigure.h>
+#include <framedata.h>
 #include <QGraphicsScene>
 class Frame
 {
@@ -23,13 +24,10 @@ public:
     QListWidgetItem * linkedItem;
     void updateIcon();
     QList <stick*> totalSticks;
-    void copyFrame(QDataStream &stream, Frame *destination);
     StickFigure *addStickFigure( QListWidget *myListWidget, QString name = "");
     void updateRender();
     void clearFrame();
     void normalizeDepth();
-    void cloneFrame(Frame *target, Frame *source);
-    StickFigure *addStickFigureToLibrary(StickFigure *S = nullptr);
     void refresh(int mode = 0);
     void stickfigureToBottom(StickFigure *S);
     void stickfigureToTop(StickFigure *S);
@@ -38,6 +36,39 @@ public:
     void cleanTotalSticks();
 };
 Q_DECLARE_METATYPE(Frame*);
+
+/**
+ * @brief Streams a live frame by extracting its data first (file save path).
+ * @param stream destination stream.
+ * @param myFrame live frame to write.
+ * @return the stream, for chaining.
+ */
 QDataStream & operator<< (QDataStream& stream, const Frame& myFrame);
+
+/**
+ * @brief Streams data into a live frame WITHOUT attaching sticks to the scene
+ *        (file load path — moveToFrame() attaches the displayed frame afterwards).
+ * @param stream source stream.
+ * @param myFrame live frame to fill; must start empty.
+ * @return the stream, for chaining.
+ */
 QDataStream & operator>> (QDataStream& stream, Frame& myFrame);
+
+/**
+ * @brief Snapshots a live frame into a pure-data record (undo/copy source).
+ * @param source_frame live frame to copy from.
+ * @return new FrameData; caller takes ownership.
+ */
+FrameData *ExtractFrameData(const Frame &source_frame);
+
+/**
+ * @brief Rebuilds a live frame's content from a data record (restore/paste/load target).
+ * @param target_frame live frame to fill; must start with no stickfigures
+ *        (fresh from setUpFrame() or just cleared by clearFrame()).
+ * @param source_data record to copy from (left untouched).
+ * @param attach_to_scene forwarded to PopulateLiveStickFigure() for every figure.
+ * @param update_icons forwarded to PopulateLiveStickFigure() for every figure.
+ */
+void PopulateLiveFrame(Frame *target_frame, const FrameData &source_data,
+                       bool attach_to_scene, bool update_icons);
 #endif // FRAME_H

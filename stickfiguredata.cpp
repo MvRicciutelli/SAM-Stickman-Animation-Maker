@@ -1,0 +1,119 @@
+#include "stickfiguredata.h"
+
+/**
+ * @details Defaults live as in-class initializers in the header.
+ */
+StickFigureData::StickFigureData()
+{
+}
+
+/**
+ * @details A figure record owns its sticks outright — there is no scene or widget to
+ * detach from, which is precisely why scratch objects can be freed with a plain delete
+ * instead of the flag-guarded dances the live classes needed.
+ */
+StickFigureData::~StickFigureData()
+{
+    qDeleteAll(stickList);
+    stickList.clear();
+}
+
+/**
+ * @details In-memory deep copy: sticks are cloned field-by-field and the tree pointers
+ * (parent/children/master/current) are remapped onto the copies by index. Replaces the
+ * historical serialize-and-back clone idiom for figure buffers.
+ */
+StickFigureData *StickFigureData::Clone() const
+{
+    StickFigureData *copy = new StickFigureData();
+    copy->version = version;
+    copy->name = name;
+    for (StickData *source_stick : stickList)
+        copy->stickList.append(source_stick->Clone());
+    for (int i = 0; i < stickList.count(); i++) {
+        StickData *source_stick = stickList[i];
+        StickData *copied_stick = copy->stickList[i];
+        int parent_index = stickList.indexOf(source_stick->parent);
+        if (parent_index >= 0)
+            copied_stick->parent = copy->stickList[parent_index];
+        for (StickData *child : source_stick->children) {
+            int child_index = stickList.indexOf(child);
+            if (child_index >= 0)
+                copied_stick->children.append(copy->stickList[child_index]);
+        }
+    }
+    int master_index = stickList.indexOf(masterStick);
+    if (master_index >= 0)
+        copy->masterStick = copy->stickList[master_index];
+    int current_index = stickList.indexOf(currentStick);
+    if (current_index >= 0)
+        copy->currentStick = copy->stickList[current_index];
+    return copy;
+}
+
+/**
+ * @details Byte-for-byte the layout the legacy StickFigure operator wrote, so existing
+ * .stck/.mAnim/.marlib files stay compatible: version, stick count, name, then each
+ * stick prefixed by nothing (parentIdx travels inside the stick record; -1 marks the
+ * master). No flag guards — this operator writes data and nothing else.
+ */
+QDataStream &operator<<(QDataStream &stream, const StickFigureData &figure_data)
+{
+    stream << figure_data.version;
+    stream << (int)figure_data.stickList.count(); // beware, stream types must correspond! qsizetype != int
+    stream << figure_data.name;
+    for (StickData *stick_data : figure_data.stickList) {
+        if (stick_data != figure_data.masterStick)
+            stick_data->parentIdx = (int)figure_data.stickList.indexOf(stick_data->parent);
+        else
+            stick_data->parentIdx = -1;
+        stream << *stick_data;
+    }
+    return stream;
+}
+
+/**
+ * @details Mirror of operator<<: reads the sticks and rebuilds the parent/children
+ * tree from parentIdx with the same ancestor walk the legacy operator used (children
+ * lists are the flattened all-descendants form). Scene attach, handle colors and icon
+ * updates — which the legacy operator did behind flag guards — belong to
+ * PopulateLiveStickFigure() now.
+ */
+QDataStream &operator>>(QDataStream &stream, StickFigureData &figure_data)
+{
+    int max = 0;
+    stream >> figure_data.version;
+    stream >> max;
+    stream >> figure_data.name;
+    // difesa in profondità come nel vecchio operator>>: il target è sempre appena
+    // costruito, ma un riuso futuro non deve far trapelare gli stick precedenti
+    qDeleteAll(figure_data.stickList);
+    figure_data.stickList.clear();
+    figure_data.masterStick = nullptr;
+    figure_data.currentStick = nullptr;
+    for (int i = 0; i < max; i++) {
+        StickData *loaded_stick = new StickData();
+        figure_data.stickList.append(loaded_stick);
+        stream >> *loaded_stick;
+    }
+    // ricostruisci le gerarchie di parentela tramite gli indici
+    for (StickData *stick_data : figure_data.stickList) {
+        if (stick_data->parentIdx >= 0) {
+            stick_data->parent = figure_data.stickList[stick_data->parentIdx];
+            StickData *current_parent = stick_data->parent;
+            while (current_parent != nullptr) {
+                current_parent->children.append(stick_data);
+                if (current_parent->parentIdx >= 0)
+                    current_parent = figure_data.stickList[current_parent->parentIdx];
+                else // arrivati allo stickmaster vai al prossimo
+                    break;
+            }
+        } else {
+            stick_data->parent = nullptr;
+            figure_data.masterStick = stick_data;
+        }
+    }
+    if (figure_data.stickList.count() > 0)
+        figure_data.currentStick = figure_data.stickList[0];
+    return stream;
+}

@@ -19,9 +19,11 @@ SOURCES += \
     ../advancedtaperwidget.cpp \
     ../animation.cpp \
     ../frame.cpp \
+    ../framedata.cpp \
     ../myview.cpp \
     ../stick.cpp \
-    ../stickdata.cpp
+    ../stickdata.cpp \
+    ../stickfiguredata.cpp
 
 HEADERS += \
     ../StickFigure.h \
@@ -31,9 +33,11 @@ HEADERS += \
     ../advancedtaperwidget.h \
     ../animation.h \
     ../frame.h \
+    ../framedata.h \
     ../myview.h \
     ../stick.h \
     ../stickdata.h \
+    ../stickfiguredata.h \
     ../style.h \
     ../uiItems.h
 

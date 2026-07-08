@@ -17,11 +17,8 @@ extern QPointF onionOffset;
 extern myView *V;
 extern int W;
 extern int H;
-extern bool undoFlag;
-extern bool libFlag;
-extern bool copyFlag;
 extern bool switchFrameFlag;
-extern Frame *stickLibraryBuffer;
+extern FrameData *stickLibraryBuffer;
 
 class TestCharacterization : public QObject
 {
@@ -74,19 +71,6 @@ class TestCharacterization : public QObject
         CurrentFrame()->totalSticks.append(drawn);
         view->myAnimation->updateSelection(drawn);
         return drawn;
-    }
-
-    // replicates the file-static discardScratchFrame() (myview.cpp:1080)
-    void DiscardScratchFrame(Frame *scratch_frame)
-    {
-        bool previous_undo_flag = undoFlag;
-        undoFlag = true;
-        for (StickFigure *figure : scratch_frame->stickFigures) {
-            qDeleteAll(figure->stickList);
-            figure->stickList.clear();
-        }
-        undoFlag = previous_undo_flag;
-        delete scratch_frame;
     }
 
 private slots:
@@ -263,38 +247,27 @@ private slots:
         QCOMPARE(*loaded.stickImgList[0], *first_image);
         QCOMPARE(*loaded.stickImgList[1], *second_image);
         QCOMPARE(loaded.imgAngleOffset, source.imgAngleOffset);
-
-        // ~stick touches imgListWidget for live IMAGE sticks; these are scratch objects
-        undoFlag = true;
-        qDeleteAll(source.stickImgList);
-        source.stickImgList.clear();
-        qDeleteAll(loaded.stickImgList);
-        loaded.stickImgList.clear();
-        undoFlag = false;
+        // no manual cleanup: ~StickData frees the images, ~stick only the handles
     }
 
-    // scratch deserialization (undoFlag set): the tree is rebuilt but nothing touches the scene
-    void StickFigureScratchRoundTrip()
+    // figure-level round trip on pure data: scratch objects need no scene and no flags
+    void StickFigureDataRoundTrip()
     {
-        StickFigure source;
+        StickFigureData source;
         source.name = "figura";
-        stick *master = new stick();
+        StickData *master = new StickData();
         master->myLine = QLineF(0, 0, 0, 100);
-        master->parent = nullptr;
-        master->myStickFigure = &source;
         source.stickList << master;
         source.masterStick = master;
-        stick *child = new stick();
+        StickData *child = new StickData();
         child->myLine = QLineF(0, 100, 50, 100);
         child->parent = master;
-        child->myStickFigure = &source;
         master->children << child;
         source.stickList << child;
-        stick *step_child = new stick();
+        StickData *step_child = new StickData();
         step_child->myLine = QLineF(0, 0, -50, 0);
         step_child->parent = master;
         step_child->stepchild = true;
-        step_child->myStickFigure = &source;
         master->children << step_child;
         source.stickList << step_child;
 
@@ -303,13 +276,11 @@ private slots:
             QDataStream out(&bytes, QIODevice::WriteOnly);
             out << source;
         }
-        StickFigure loaded;
-        undoFlag = true; // scratch mode, exactly like storeUndo()'s snapshot
+        StickFigureData loaded;
         {
             QDataStream in(&bytes, QIODevice::ReadOnly);
             in >> loaded;
         }
-        undoFlag = false;
 
         QCOMPARE(loaded.stickList.count(), 3);
         QCOMPARE(loaded.name, source.name);
@@ -323,13 +294,33 @@ private slots:
         QVERIFY(loaded.stickList[0]->children.contains(loaded.stickList[2]));
         for (int i = 0; i < 3; i++)
             QCOMPARE(loaded.stickList[i]->myLine, source.stickList[i]->myLine);
-        // scratch sticks must never be attached to the scene
-        QVERIFY(loaded.stickList[0]->scene() == nullptr);
+        // the destructors free the sticks — no scratch-cleanup choreography left
+    }
 
-        qDeleteAll(source.stickList);
-        source.stickList.clear();
-        qDeleteAll(loaded.stickList);
-        loaded.stickList.clear();
+    void DataCloneIsIndependent()
+    {
+        StickFigureData source;
+        StickData *master = new StickData();
+        master->myLine = QLineF(0, 0, 0, 100);
+        source.stickList << master;
+        source.masterStick = master;
+        StickData *child = new StickData();
+        child->myLine = QLineF(0, 100, 50, 100);
+        child->parent = master;
+        master->children << child;
+        source.stickList << child;
+
+        StickFigureData *copy = source.Clone();
+        QCOMPARE(copy->stickList.count(), 2);
+        QVERIFY(copy->stickList[0] != source.stickList[0]);
+        QCOMPARE(copy->masterStick, copy->stickList[0]);
+        QCOMPARE(copy->stickList[1]->parent, copy->stickList[0]);
+        QVERIFY(copy->stickList[0]->children.contains(copy->stickList[1]));
+
+        QLineF original_line = source.stickList[0]->myLine;
+        copy->stickList[0]->myLine.translate(5, 5);
+        QCOMPARE(source.stickList[0]->myLine, original_line);
+        delete copy;
     }
 
     void CopyPasteStickFigure()
@@ -340,26 +331,16 @@ private slots:
         StickFigure *source = CurrentStickFigure();
         QCOMPARE(source->stickList.count(), 2);
 
-        // replicates Widget::on_copyStickFigureBtn_clicked() (widget.cpp:1120)
-        copyFlag = true;
-        if (view->copyStickFigureBuffer) {
-            qDeleteAll(view->copyStickFigureBuffer->stickList);
-            view->copyStickFigureBuffer->stickList.clear();
-        }
+        // replicates Widget::on_copyStickFigureBtn_clicked() (widget.cpp)
         delete view->copyStickFigureBuffer;
-        view->copyStickFigureBuffer = new StickFigure();
-        cloneStickFigure(view->copyStickFigureBuffer, source);
-        copyFlag = false;
+        view->copyStickFigureBuffer = ExtractStickFigureData(*source);
 
-        StickFigure *buffered = view->copyStickFigureBuffer;
+        StickFigureData *buffered = view->copyStickFigureBuffer;
         QCOMPARE(buffered->stickList.count(), 2);
-        QVERIFY(buffered->stickList[0] != source->stickList[0]);
         QCOMPARE(buffered->stickList[0]->myLine, source->stickList[0]->myLine);
         QCOMPARE(buffered->stickList[1]->myLine, source->stickList[1]->myLine);
         QCOMPARE(buffered->stickList[1]->parent, buffered->stickList[0]);
         QCOMPARE(buffered->masterStick, buffered->stickList[0]);
-        // the copy buffer is scratch: never attached to the scene
-        QVERIFY(buffered->stickList[0]->scene() == nullptr);
 
         // deep copy: mutating the buffer leaves the source untouched
         QLineF source_line = source->stickList[0]->myLine;
@@ -367,17 +348,18 @@ private slots:
         QCOMPARE(source->stickList[0]->myLine, source_line);
         buffered->stickList[0]->myLine.translate(-5, -5);
 
-        // replicates Widget::on_pasteStickFigureBtn_clicked() (widget.cpp:1138)
+        // replicates Widget::on_pasteStickFigureBtn_clicked() (widget.cpp)
         view->storeUndo(CMD_SIMPLE);
         StickFigure *pasted = AddStick();
-        cloneStickFigure(pasted, buffered);
+        PopulateLiveStickFigure(pasted, *buffered, true, true);
         pasted->refresh(0);
         for (stick *s : pasted->stickList)
             CurrentFrame()->totalSticks.append(s);
         view->addHandles(pasted);
 
         QCOMPARE(pasted->stickList.count(), 2);
-        // pasted sticks really live on the scene (copyFlag is off during this clone)
+        QCOMPARE(pasted->stickList[1]->parent, pasted->stickList[0]);
+        // pasted sticks really live on the scene (attach_to_scene = true)
         QCOMPARE(pasted->stickList[0]->scene(), scene);
     }
 
@@ -409,7 +391,8 @@ private slots:
         QCOMPARE(imgListWidget->count(), 0);
     }
 
-    // the exact snapshot round-trip storeUndo() performs on every operation (myview.cpp:1193)
+    // the exact snapshot storeUndo() takes since Phase 2b (plain data extraction),
+    // plus the FrameData byte round-trip the file paths use
     void FrameSnapshotRoundTrip()
     {
         AddFrame();
@@ -418,37 +401,39 @@ private slots:
         Frame *live_frame = CurrentFrame();
         view->updateFrameOrder(live_frame); // storeUndo() does this before snapshotting
 
-        undoFlag = true;
-        Frame *snapshot = new Frame();
-        QByteArray bytes;
-        {
-            QDataStream out(&bytes, QIODevice::WriteOnly);
-            out << *live_frame;
-        }
-        {
-            QDataStream in(&bytes, QIODevice::ReadOnly);
-            in >> *snapshot;
-        }
-        undoFlag = false;
-
+        FrameData *snapshot = ExtractFrameData(*live_frame);
         QCOMPARE(snapshot->stickFigures.count(), live_frame->stickFigures.count());
         QCOMPARE(snapshot->frameNumber, live_frame->frameNumber);
         QCOMPARE(snapshot->numOfItems, live_frame->numOfItems);
         QCOMPARE(snapshot->totalSticks.count(), live_frame->totalSticks.count());
         for (int i = 0; i < live_frame->stickFigures.count(); i++) {
             StickFigure *live_figure = live_frame->stickFigures[i];
-            StickFigure *snapshot_figure = snapshot->stickFigures[i];
+            StickFigureData *snapshot_figure = snapshot->stickFigures[i];
             QCOMPARE(snapshot_figure->stickList.count(), live_figure->stickList.count());
             for (int j = 0; j < live_figure->stickList.count(); j++)
                 QCOMPARE(snapshot_figure->stickList[j]->myLine, live_figure->stickList[j]->myLine);
         }
-        // snapshot sticks are scratch: not on the scene (this is what undoFlag guards)
-        QVERIFY(snapshot->stickFigures.last()->stickList[0]->scene() == nullptr);
-        // z-order is rebuilt from stick::order
-        for (int j = 0; j < snapshot->totalSticks.count(); j++)
-            QCOMPARE(snapshot->totalSticks[j]->order, live_frame->totalSticks[j]->order);
 
-        DiscardScratchFrame(snapshot);
+        // byte round-trip: same layout as the pre-refactor shared operators
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << *snapshot;
+        }
+        FrameData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+        QCOMPARE(loaded.stickFigures.count(), snapshot->stickFigures.count());
+        QCOMPARE(loaded.frameNumber, snapshot->frameNumber);
+        QCOMPARE(loaded.numOfItems, snapshot->numOfItems);
+        QCOMPARE(loaded.totalSticks.count(), snapshot->totalSticks.count());
+        for (int j = 0; j < snapshot->totalSticks.count(); j++)
+            QCOMPARE(loaded.totalSticks[j]->order, snapshot->totalSticks[j]->order);
+        QVERIFY(loaded.currentStickFigure != nullptr);
+
+        delete snapshot; // pure data: plain delete, no scratch choreography
     }
 
     void UndoSimpleEdit()
@@ -698,11 +683,16 @@ private slots:
         view->loadLibrary(path);
 
         QCOMPARE(stickLibraryBuffer->stickFigures.count(), 1);
-        StickFigure *reloaded = stickLibraryBuffer->stickFigures[0];
+        StickFigureData *reloaded = stickLibraryBuffer->stickFigures[0];
         QCOMPARE(reloaded->name, QString("libfig"));
         QCOMPARE(reloaded->stickList.count(), 1);
         QCOMPARE(reloaded->stickList[0]->myLine, source->stickList[0]->myLine);
         QCOMPARE(myCurrentLibraryWidget->count(), 1);
+
+        // the widget entry carries the data record (what the add-to-scene handler casts)
+        StickFigureData *from_item = qvariant_cast<StickFigureData*>(
+            myCurrentLibraryWidget->item(0)->data(Qt::UserRole));
+        QCOMPARE(from_item, reloaded);
 
         QFile::remove(path);
     }

@@ -1,4 +1,5 @@
 #include "frame.h"
+#include <QHash>
 #include <QListWidget>
 #include <QDebug>
 #include <QBuffer>
@@ -6,14 +7,9 @@
 #include <QFont>
 #include "uiItems.h"
 #define CS currentStickFigure->currentStick
-QListWidget * ListWidget;
 extern QListWidget * myStickFigureWidgetList;
 extern bool undoFlag;
-extern bool libFlag;
 extern bool switchFrameFlag;
-extern bool loadingAnimationFlag;
-
-bool iconUpdateFlag = false;
 Frame::Frame()
 {
     frameIcon       = new QIcon();
@@ -29,36 +25,26 @@ Frame::~Frame(){
     delete frameIcon;
     //delete renderImg;
 }
-extern bool copyFlag;
+// da Phase 2b questa funzione viene chiamata solo dai percorsi UI vivi (Widget::addStick
+// e i paste): la deserializzazione non passa più di qui (vedi PopulateLiveFrame), quindi
+// le guardie su libFlag/copyFlag/loadingAnimationFlag sono cadute con i rispettivi flag
 StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
 {
     QString myName;
-    if(!libFlag){
-        ListWidget = myStickFigureWidgetList;
+    if(name.count()== 0){
+        int intName = 0;
+        if(!stickFigures.isEmpty()){
+            intName = myStickFigureWidgetList->currentRow()+1;
+        }
+
+        myName.asprintf("%d",intName);
     }
     else{
-        ListWidget = myCurrentLibraryWidget;
-    }
-
-    if(!libFlag && !copyFlag){
-
-        if(name.count()== 0){
-            int intName = 0;
-            if(!stickFigures.isEmpty()){
-                intName = myStickFigureWidgetList->currentRow()+1;
-            }
-
-            myName.asprintf("%d",intName);
-        }
-        else{
-            myName = name;
-        }
+        myName = name;
     }
     //deseleziona graficamente nel viewport
 
     QListWidgetItem * addedItem = new QListWidgetItem();
-
-    //StickFigure* addedStickFigure = view->addStickFigure( addedItem);
 
     if(currentStickFigure!=nullptr)
     {
@@ -77,7 +63,7 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     // switchFrameFlag mancava: senza di esso, duplicare un frame (on_copyFrame_clicked) inseriva
     // ogni suo stickfigure in myStickFigureWidgetList durante il deserializzo, per poi vederselo
     // subito buttare via dal clear()+rebuild che moveToFrame() fa comunque un attimo dopo
-    if(!undoFlag && !libFlag &&!copyFlag && !loadingAnimationFlag && !switchFrameFlag){
+    if(!undoFlag && !switchFrameFlag){
         QVariant newData(QVariant::fromValue(currentStickFigure));
         addedItem->setData(Qt::UserRole,newData);
         addedItem->setData(Qt::DisplayRole,myName);
@@ -85,19 +71,14 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
         myListWidget->insertItem(myListWidget->currentRow()+1,addedItem);
     }
     // update current stickfigure
-    if(!libFlag && !copyFlag){
-        currentStickFigure->highlight(false); //de highlight old selection
-        currentStickFigure->highlight(true); //highlight new one
-    }
-    if(!undoFlag && !switchFrameFlag && !copyFlag && !loadingAnimationFlag){
+    currentStickFigure->highlight(false); //de highlight old selection
+    currentStickFigure->highlight(true); //highlight new one
+    if(!undoFlag && !switchFrameFlag){
         // update current stick
-        if(!libFlag)
+        scene->clearSelection(); //clear scene selection
+        if(!currentStickFigure->stickList.isEmpty())
         {
-            scene->clearSelection(); //clear scene selection
-            if(!currentStickFigure->stickList.isEmpty())
-            {
-                selectStick(currentStickFigure); // puo essere ridontante in quanto ci sta la callback di sticklayerView_currentItemChanged//update selected stick
-            }
+            selectStick(currentStickFigure); // puo essere ridontante in quanto ci sta la callback di sticklayerView_currentItemChanged//update selected stick
         }
         int tempIndex = myListWidget->currentRow();
         myListWidget->clearSelection();
@@ -108,49 +89,8 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
 
     return stickFigureBuffer;
 }
-StickFigure* Frame::addStickFigureToLibrary(StickFigure*S){
-    if(S != nullptr){
-        QListWidgetItem * addedItem = new QListWidgetItem();
-        //stickFigureBuffer = addStickFigure(myCurrentLibraryWidget, S->name);
-        StickFigure *newStickFigure =new StickFigure();
-        newStickFigure->linkedItem = addedItem;
-        stickFigures.append(newStickFigure);
-        // byte array stores serialized data
-        QByteArray* byteArray = new QByteArray();
-        // buffer temporarily holds serialized data
-        QBuffer buffer1(byteArray);
-        // use this buffer to store data from the object
-        buffer1.open(QIODevice::WriteOnly);
-        QDataStream myStream(&buffer1);
-        myStream<<*(S);
-        // now create a seconds buffer from which to read data of the bytearray
-        QBuffer buffer2(byteArray);
-        buffer2.open(QIODevice::ReadOnly);
-        // a new data stream to deserialize
-        QDataStream myStream2(&buffer2);
-        // hydrate new frame with previous frame data
-        myStream2>>*newStickFigure;
-
-
-        QVariant newData(QVariant::fromValue(newStickFigure));
-
-        addedItem->setData(Qt::UserRole,newData);
-        addedItem->setData(Qt::DisplayRole,newStickFigure->name);
-        int newIdx = myCurrentLibraryWidget->currentRow()+1;
-        myCurrentLibraryWidget->insertItem(newIdx,addedItem);
-
-        myCurrentLibraryWidget->clearSelection();
-        addedItem->setSelected( true);
-        myCurrentLibraryWidget->setCurrentRow(newIdx);
-        // era S->updateIcon(): aggiornava l'icona dello stickfigure sorgente invece di quella del
-        // clone appena aggiunto alla libreria, che restava senza icona finché la libreria non
-        // veniva salvata e ricaricata da file (updateIcon() imposta anche addedItem->setIcon(...))
-        newStickFigure->updateIcon();
-        delete byteArray;
-        return newStickFigure;
-    }
-    return nullptr;
-}
+// Frame::addStickFigureToLibrary è stato eliminato (Phase 2b): la libreria contiene
+// StickFigureData e viene gestita interamente da myView::addStickFigureToLibrary
 StickFigure* Frame::removeStickFigure(StickFigure* toRemove)
 {
     if(stickFigures.count() > 0)
@@ -218,83 +158,102 @@ stick *Frame::selectStick(QPointF point)
     selectedStickFigure->currentStick->selected = true; //for rendering purpose
     return selectedStickFigure->stickList[selectedIdx];
 }
-QDataStream & operator<< (QDataStream& stream, const Frame& myFrame){
-    int num = (int)myFrame.stickFigures.count();
-    stream<< num ;
-    stream<<myFrame.numOfItems;
-    stream<< myFrame.frameNumber;
-    stream<< (int)myFrame.stickFigures.indexOf(myFrame.currentStickFigure);
-    qDebug() << "before streaming sf";
-    if(!libFlag){
-        if(myFrame.currentStickFigure)
-        {
-            stream<< (int)myFrame.currentStickFigure->stickList.indexOf(myFrame.currentStickFigure->currentStick);
-        }else{
-            stream<<0;
-        }
-    }else{
-        // operator>> legge SEMPRE un int qui (anche con libFlag), quindi va sempre scritto anche qui:
-        // altrimenti lo stream si desincronizza di un int ad ogni salvataggio/caricamento di libreria,
-        // corrompendo tutti i campi letti dopo (a partire dal primo StickFigure)
-        stream<<0;
+/**
+ * @details Snapshot copy of a live frame into pure data: every figure is extracted,
+ * then the frame-wide z-order list and the current-figure pointer are remapped onto
+ * the data copies. Replaces the serialize-to-QBuffer idiom for undo snapshots and
+ * frame copy/paste — no stream, no flags.
+ */
+FrameData *ExtractFrameData(const Frame &source_frame)
+{
+    FrameData *data = new FrameData();
+    data->frameNumber = source_frame.frameNumber;
+    data->numOfItems = source_frame.numOfItems;
+    QHash<const stick*, StickData*> live_to_data;
+    for (StickFigure *figure : source_frame.stickFigures) {
+        StickFigureData *figure_data = ExtractStickFigureData(*figure);
+        data->stickFigures.append(figure_data);
+        for (int i = 0; i < figure->stickList.count(); i++)
+            live_to_data.insert(figure->stickList[i], figure_data->stickList[i]);
+        if (figure == source_frame.currentStickFigure)
+            data->currentStickFigure = figure_data;
     }
-    for(StickFigure* S: myFrame.stickFigures){
-        stream<< *S;
+    for (stick *ordered_stick : source_frame.totalSticks) {
+        StickData *mapped = live_to_data.value(ordered_stick, nullptr);
+        if (mapped) // una voce stantia in totalSticks non deve propagarsi allo snapshot
+            data->totalSticks.append(mapped);
     }
-    qDebug() << "after stream sf";
-    return stream;
+    return data;
 }
-QDataStream & operator>> (QDataStream& stream, Frame& myFrame){
-    int max = 0;
-    int currentStickIdx = 0;
-    int currentStickFigureIdx = 0;
-    stream>> max;
 
-    stream>>myFrame.numOfItems;
-    stream>> myFrame.frameNumber;
-    stream>>currentStickFigureIdx;
-    if(!libFlag){
-        stream>>currentStickIdx;
-    }else{
-        int buff;
-        stream>>buff;
+/**
+ * @details Rebuilds a live frame's content from data, replicating what the legacy
+ * operator>> did per configuration: one live figure per data figure (created directly,
+ * NOT via addStickFigure — no list-widget or selection side effects, moveToFrame()
+ * rebuilds those for the displayed frame), totalSticks rebuilt from each stick's order
+ * with the legacy out-of-range guard, current selection restored from the data record
+ * with the legacy bounds checks.
+ */
+void PopulateLiveFrame(Frame *target_frame, const FrameData &source_data,
+                       bool attach_to_scene, bool update_icons)
+{
+    target_frame->numOfItems = source_data.numOfItems;
+    target_frame->frameNumber = source_data.frameNumber;
+    target_frame->totalSticks.clear();
+    for (StickFigureData *figure_data : source_data.stickFigures) {
+        QListWidgetItem *added_item = new QListWidgetItem();
+        StickFigure *figure = new StickFigure(added_item);
+        target_frame->stickFigures.append(figure);
+        figure->baseZ = target_frame->stickFigures.count();
+        figure->scene = target_frame->scene;
+        target_frame->currentStickFigure = figure;
+        PopulateLiveStickFigure(figure, *figure_data, attach_to_scene, update_icons);
+        added_item->setData(Qt::DisplayRole, figure->name);
+        for (stick *s : figure->stickList)
+            target_frame->totalSticks.append(s);
     }
-
-
-    myFrame.totalSticks.clear();
-    QListWidget * Widget;
-    if(libFlag) {
-        Widget = myCurrentLibraryWidget;
-    }
-    else{
-        Widget = myStickFigureWidgetList;
-    }
-
-    for(int i = 0;i<max;i++){
-
-        StickFigure* S = myFrame.addStickFigure(Widget);
-        stream>>*S;
-        S->linkedItem->setData(Qt::DisplayRole,S->name);
-        myFrame.totalSticks.append(S->stickList);
-        //myFrame.stickFigures.append(S);
-    }
-
-    for(StickFigure*S:myFrame.stickFigures){
-        for(stick*s:S->stickList){
+    for (StickFigure *figure : target_frame->stickFigures) {
+        for (stick *s : figure->stickList) {
             // s->order presuppone di formare una permutazione perfetta 0..count-1: se per qualche
             // motivo non lo è (es. mai passato da updateFrameOrder()), senza questo controllo si
             // scrive fuori dai limiti di totalSticks (corruzione dell'heap, crash non immediato)
-            if(s->order>=0 && s->order<myFrame.totalSticks.count())
-                myFrame.totalSticks[s->order] = s;
+            if (s->order >= 0 && s->order < target_frame->totalSticks.count())
+                target_frame->totalSticks[s->order] = s;
         }
     }
-    myFrame.currentStickFigure = nullptr;
-    if(currentStickIdx>=0 && currentStickFigureIdx>=0 && currentStickFigureIdx<myFrame.stickFigures.length()){
-        if(currentStickIdx < myFrame.stickFigures[currentStickFigureIdx]->stickList.length()){
-            myFrame.currentStickFigure = myFrame.stickFigures[currentStickFigureIdx];
-            myFrame.currentStickFigure->currentStick = myFrame.currentStickFigure->stickList[currentStickIdx];
+    // ripristina la selezione corrente mappando i puntatori del record dati sugli indici
+    // delle figure vive appena create (il target parte senza figure, quindi 1:1)
+    target_frame->currentStickFigure = nullptr;
+    int figure_index = source_data.stickFigures.indexOf(source_data.currentStickFigure);
+    if (source_data.currentStickFigure && figure_index >= 0 && figure_index < target_frame->stickFigures.length()) {
+        int stick_index = source_data.currentStickFigure->stickList.indexOf(source_data.currentStickFigure->currentStick);
+        if (stick_index >= 0 && stick_index < target_frame->stickFigures[figure_index]->stickList.length()) {
+            target_frame->currentStickFigure = target_frame->stickFigures[figure_index];
+            target_frame->currentStickFigure->currentStick = target_frame->currentStickFigure->stickList[stick_index];
         }
     }
+}
+
+/**
+ * @details Wrapper kept for the whole-animation file save path (Animation's
+ * operator<< streams every frame through here). Byte layout unchanged.
+ */
+QDataStream & operator<< (QDataStream& stream, const Frame& myFrame){
+    FrameData *data = ExtractFrameData(myFrame);
+    stream << *data;
+    delete data;
+    return stream;
+}
+
+/**
+ * @details Wrapper kept for the whole-animation file load path: sticks stay detached
+ * and icons unrendered (the historical loadingAnimationFlag behavior) because
+ * moveToFrame() attaches and refreshes the frame that actually gets displayed.
+ */
+QDataStream & operator>> (QDataStream& stream, Frame& myFrame){
+    FrameData data;
+    stream >> data;
+    PopulateLiveFrame(&myFrame, data, false, false);
     return stream;
 }
 float Frame::minMaxZ(int option){
@@ -379,7 +338,6 @@ void Frame::stickfigureAboveBelow(StickFigure* toMove, StickFigure *previous, in
 // questa funzione aggiorna l'iconea del livello
 void Frame::updateIcon()
 {
-    iconUpdateFlag = true;
     //crea una scena fittizia, falla bianca e delle stesse dimensioni di quella principale
     QGraphicsScene icoScene;
     iconImg->fill(Qt::white);
@@ -416,7 +374,6 @@ void Frame::updateIcon()
 
     // i cloni vengono cancellati automaticamente dal distruttore di icoScene
     painter.end();
-    iconUpdateFlag = false;
 }
 
 void Frame::updateRender(){

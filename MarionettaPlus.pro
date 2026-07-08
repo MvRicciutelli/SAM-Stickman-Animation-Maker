@@ -26,6 +26,7 @@ SOURCES += \
     checkupdate.cpp \
     ffmpegexport.cpp \
     frame.cpp \
+    framedata.cpp \
     imageexport.cpp \
     main.cpp \
     mymainwindow.cpp \
@@ -33,6 +34,7 @@ SOURCES += \
     sleeper.cpp \
     stick.cpp \
     stickdata.cpp \
+    stickfiguredata.cpp \
     widget.cpp
 
 HEADERS += \
@@ -46,12 +48,14 @@ HEADERS += \
     checkupdate.h \
     ffmpegexport.h \
     frame.h \
+    framedata.h \
     imageexport.h \
     mymainwindow.h \
     myview.h \
     sleeper.h \
     stick.h \
     stickdata.h \
+    stickfiguredata.h \
     style.h \
     uiItems.h \
     widget.h

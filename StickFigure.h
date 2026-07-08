@@ -4,6 +4,7 @@
 #include <QLineF>
 #include <QtMath>
 #include <stick.h>
+#include <stickfiguredata.h>
 #include <QGraphicsScene>
 #include <QListWidgetItem>
 
@@ -44,7 +45,6 @@ public:
     bool selectingOrigin = false;
     void loadStickFigure(QString name);
     void refresh(int mode = 0);
-    void cloneStickFigure(StickFigure *target, StickFigure *source);
 
     void rotateStickFigure(QPointF *coord, QList<stick*>sticks, bool completeRotation);
     void scale(QPointF *coord);
@@ -81,9 +81,43 @@ private:
 };
 // to use QVariant in order to insert a stickfigure pointer into the widget list
 Q_DECLARE_METATYPE(StickFigure*)
+
+/**
+ * @brief Streams a live figure by extracting its data first (.stck save path).
+ * @param stream destination stream.
+ * @param myStickFigure live figure to write.
+ * @return the stream, for chaining.
+ */
 QDataStream &operator<<(QDataStream& stream, const StickFigure& myStickFigure);
+
+/**
+ * @brief Streams data into a live figure, attaching it to the scene (.stck load path).
+ * @param stream source stream.
+ * @param myStickFigure live figure to fill; must have a valid scene member.
+ * @return the stream, for chaining.
+ */
 QDataStream &operator>>(QDataStream& stream,StickFigure& myStickFigure);
-void cloneStickFigure(StickFigure *dest, StickFigure *src);
+
+/**
+ * @brief Snapshots a live figure into a pure-data record (undo/copy/library source).
+ * @param source_figure live figure to copy from.
+ * @return new StickFigureData; caller takes ownership.
+ */
+StickFigureData *ExtractStickFigureData(const StickFigure &source_figure);
+
+/**
+ * @brief Rebuilds a live figure from a data record (paste/restore/load target).
+ * @param target_figure live figure to fill; existing sticks are freed first.
+ * @param source_data record to copy from (left untouched).
+ * @param attach_to_scene true adds each rebuilt stick to the figure's scene member
+ *        (paste and .stck load); false leaves them detached (file load, where
+ *        moveToFrame() attaches the displayed frame afterwards).
+ * @param update_icon true renders the layer icon at the end (skipped on file load,
+ *        where only the displayed frame's icons matter — historical perf fix).
+ */
+void PopulateLiveStickFigure(StickFigure *target_figure, const StickFigureData &source_data,
+                             bool attach_to_scene, bool update_icon);
+
 void mergeStickFigures(StickFigure* mainStickFigure, stick* mainStick,StickFigure* toJoin);
 void splitStickFigures(StickFigure* split, stick* origin,StickFigure* branch);
 /**

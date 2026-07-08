@@ -118,7 +118,7 @@ advancedCircleWidget *advancedCircleTab;
 advancedTaperWidget * advancedTaperTab;
 QSlider*  circleSquashSlider;
 QSpinBox * circleSquashSpinbox;
-Frame * frameCopyBuffer = nullptr;
+FrameData * frameCopyBuffer = nullptr; ///< buffer copia-frame: solo dati da Phase 2b
 
 //----------------------
 int W                   = DEFAULTWIDTH;
@@ -134,7 +134,6 @@ struct{
     bool sliderRot      = false;
 }sliderFlags;
 bool playBack               = false;
-bool copyFlag               = false;
 bool switchFrameFlag        = false;
 float zoomLvl               = 1;
 bool  firstTimeOpened       = false;
@@ -255,7 +254,7 @@ Widget::Widget(QWidget *parent)
     myLibraryListWidget->clear();
     detectLibraries();
     myLibraryListWidget->setCurrentRow(0);
-    frameCopyBuffer = new Frame();
+    frameCopyBuffer = new FrameData();
 }
 
 //leggi il file json, se tutti i campi sono validi,leggilo, senno creane uno nuovo
@@ -510,42 +509,22 @@ Frame* Widget::setUpFrame(int pos){
 }
 void Widget::on_copyFrame_clicked()
 {
-
-    auto num = scene->items();
     view->storeUndo(CMD_ADDFRAME);
-    // byte array stores serialized data
-    QByteArray byteArray;
-    // buffer temporarily holds serialized data
-    QBuffer buffer1(&byteArray);
-    // use this buffer to store data from the object
-    buffer1.open(QIODevice::WriteOnly);
-    QDataStream myStream(&buffer1);
-    myStream<<*(CURRENTFRAME);
-    // now create a seconds buffer from which to read data of the bytearray
-    QBuffer buffer2(&byteArray);
-    buffer2.open(QIODevice::ReadOnly);
-    // a new data stream to deserialize
-    QDataStream myStream2(&buffer2);
+    // snapshot dati del frame corrente (Phase 2b): niente stream né switchFrameFlag
+    FrameData *snapshot = ExtractFrameData(*CURRENTFRAME);
     // prepare new frame
     int pos = 0;
-     num = scene->items();
     if(view->myAnimation->frameList.count()>=1)
     {
         pos = CURRENTFRAME->frameNumber+1;
     }
     Frame* addedFrame = setUpFrame(pos);
-     num = scene->items();
-    // hydrate new frame with previous frame data
-    switchFrameFlag = true;
-    myStream2>>*addedFrame;
-    switchFrameFlag = false;
-    num = scene->items();
+    PopulateLiveFrame(addedFrame,*snapshot,true,true);
+    delete snapshot;
     // update frame name
     addedFrame->frameNumber++;
     // move to new frame
     view->moveToFrame(addedFrame);
-    buffer1.close();
-    buffer2.close();
     // update list icons
     view->updateFrameOrder(CURRENTFRAME);
 
@@ -782,11 +761,10 @@ void Widget::on_addItemFromLibraryToSceneBtn_clicked()
     }
     StickFigure * added = addStick();
     QListWidgetItem *itemToAdd = myCurrentLibraryWidget->item(idx);
-    // estrai il dato utente salvato in esso, puntatore ad uno stickfigure
+    // estrai il dato utente salvato in esso: da Phase 2b la libreria contiene record dati
     QVariant  retrievedData = (itemToAdd->data(Qt::UserRole));
-    //riconverti il dato
-    StickFigure* toAdd = qvariant_cast<StickFigure*>(retrievedData);
-    cloneStickFigure(added,toAdd);
+    StickFigureData* toAdd = qvariant_cast<StickFigureData*>(retrievedData);
+    PopulateLiveStickFigure(added,*toAdd,true,true);
     for(stick*s:added->stickList){
         CURRENTFRAME->totalSticks.append(s);
     }
@@ -1120,18 +1098,10 @@ void Widget::on_HorizontalFlipBtn_clicked()
 void Widget::on_copyStickFigureBtn_clicked()
 {
     if(CURRENTSTICKFIGURE != nullptr){
-        copyFlag = true;
-        // libera il buffer di copia precedente prima di sovrascriverlo: copyFlag è già attivo qui,
-        // quindi ~StickFigure() salta la pulizia dei suoi stick (vedi ~StickFigure()) e va fatta a mano
-        if(view->copyStickFigureBuffer){
-            qDeleteAll(view->copyStickFigureBuffer->stickList);
-            view->copyStickFigureBuffer->stickList.clear();
-        }
+        // il buffer è puro dato (Phase 2b): liberarlo e riestrarlo è tutto qui,
+        // niente copyFlag e niente pulizia manuale degli stick
         delete view->copyStickFigureBuffer;
-        view->copyStickFigureBuffer = new StickFigure();
-
-        cloneStickFigure(view->copyStickFigureBuffer,CURRENTSTICKFIGURE);
-        copyFlag = false;
+        view->copyStickFigureBuffer = ExtractStickFigureData(*CURRENTSTICKFIGURE);
     }
 }
 
@@ -1140,7 +1110,7 @@ void Widget::on_pasteStickFigureBtn_clicked()
    if(view->copyStickFigureBuffer != nullptr){
        view->storeUndo(CMD_SIMPLE);
        StickFigure* added =addStick();
-       cloneStickFigure(added,view->copyStickFigureBuffer);
+       PopulateLiveStickFigure(added,*view->copyStickFigureBuffer,true,true);
        added->refresh(0);
        for(stick*s:added->stickList){
            CURRENTFRAME->totalSticks.append(s);
@@ -1556,43 +1526,11 @@ void Widget::on_deleteLibrary_clicked()
         }
     }
 }
-extern bool libFlag;
 void Widget::on_cpyFrame_clicked()
 {
-
-    switchFrameFlag = true;
-    copyFlag = true;
-    // byte array stores serialized data
-    QByteArray byteArray;
-    // buffer temporarily holds serialized data
-    QBuffer buffer1(&byteArray);
-    // use this buffer to store data from the object
-    buffer1.open(QIODevice::WriteOnly);
-    QDataStream myStream(&buffer1);
-    myStream<<*(CURRENTFRAME);
-    // now create a seconds buffer from which to read data of the bytearray
-    QBuffer buffer2(&byteArray);
-    buffer2.open(QIODevice::ReadOnly);
-    // a new data stream to deserialize
-    QDataStream myStream2(&buffer2);
-
-    if(frameCopyBuffer!=nullptr){
-        // il buffer di copia precedente va davvero liberato qui: con copyFlag attivo, ~StickFigure()
-        // salta la pulizia dei suoi stick (pensata per gli oggetti "di passaggio" della
-        // (de)serializzazione, non per uno scarto definitivo come questo), quindi senza liberarli
-        // esplicitamente ogni ri-copia perdeva la memoria della copia precedente
-        for(StickFigure* S: frameCopyBuffer->stickFigures){
-            qDeleteAll(S->stickList);
-            S->stickList.clear();
-        }
-        delete frameCopyBuffer;
-        frameCopyBuffer = new Frame;
-    }
-    myStream2>>*frameCopyBuffer;
-    buffer1.close();
-    buffer2.close();
-    switchFrameFlag = false;
-    copyFlag = false;
+    // il buffer è puro dato (Phase 2b): estrazione diretta, niente stream né flag
+    delete frameCopyBuffer;
+    frameCopyBuffer = ExtractFrameData(*CURRENTFRAME);
 }
 
 void Widget::on_pasteFrame_clicked()
@@ -1600,9 +1538,9 @@ void Widget::on_pasteFrame_clicked()
 
     view->storeUndo();
     // add a new stickfigure per every stickfigure in the copy buffer
-    for(StickFigure*S:frameCopyBuffer->stickFigures){
+    for(StickFigureData*S:frameCopyBuffer->stickFigures){
         StickFigure *added = addStick();
-        cloneStickFigure(added,S);
+        PopulateLiveStickFigure(added,*S,true,true);
         for(stick*s:added->stickList){
             CURRENTFRAME->totalSticks.append(s);
         }
