@@ -11,7 +11,6 @@
 #include <QVariant>
 #include <QDebug>
 #include <QColorDialog>
-#include <QBuffer>
 #include <QInputDialog>
 #include <QThread>
 #include <QTimer>
@@ -695,8 +694,6 @@ void Widget::on_saveLibraryBtn_clicked()
     QString fileName = QFileDialog::getSaveFileName(this,tr("save marionetta library"),
                        libFolder.path(),"Marionetta Library(*.marlib)");
     if(fileName.length()>0){
-        QDataStream myStream;
-
         view->saveLibrary(fileName);
         myLibraryListWidget->clear();
         detectLibraries();
@@ -715,8 +712,6 @@ void Widget::on_loadLibraryBtn_clicked()
     QString fileName = QFileDialog::getOpenFileName(this,tr("load marionetta library"),
                        libFolder.path(),"Marionetta Library(*.marlib)");
     if(QFile::exists(fileName)){
-        QDataStream myStream;
-
         view->loadLibrary(fileName);
     }
 }
@@ -786,7 +781,6 @@ void Widget::on_saveCurrentLibraryBtn_clicked()
         buffer = item->data(Qt::UserRole);
         fileName = qvariant_cast<QString>(buffer);
         if(QFile::exists(fileName)){
-            QDataStream myStream;
             view->saveLibrary(fileName);
             myLibraryListWidget->clear();
             detectLibraries();
@@ -1193,15 +1187,12 @@ void Widget::on_createNewLibraryBtn_clicked()
     QString fileName = QFileDialog::getSaveFileName(this,tr("create a new marionetta library"),
                        libFolder.path(),"Marionetta Library(*.marlib)");
     if(fileName.length()>0){
-        QDataStream myStream;
         view->clearCurrentLib();
         view->saveLibrary(fileName);
         myLibraryListWidget->clear();
         detectLibraries();
     }
     if(QFile::exists(fileName)){
-        QDataStream myStream;
-
         view->loadLibrary(fileName);
 
         QListWidgetItem *added = myLibraryListWidget->findItems(QFileInfo(fileName).fileName(),Qt::MatchExactly)[0];

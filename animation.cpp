@@ -1,6 +1,5 @@
 #include "animation.h"
 
-#include <QBuffer>
 #include <QFile>
 #include <QSpinBox>
 #include "advancedtab.h"

@@ -540,7 +540,35 @@ run — there's now only one behavior per operator). `grep -rn
 "QDataStream\|QBuffer" widget.cpp myview.cpp` should only turn up the
 `FileSerializer` call sites, nothing in the UI action handlers.
 
-- [ ] Phase 3 complete
+**Status: descoped — steps 2–4's exit criteria were already met by Phase
+2b, step 1 (`AnimationData`) is skipped as unneeded.** Re-checked on
+2026-07-09:
+- `libFlag`/`loadingAnimationFlag`/`copyFlag` — zero reads (Phase 2b/2c).
+- `grep -rn "QBuffer" *.cpp` — zero constructions anywhere in the
+  codebase; the `#include <QBuffer>` lines were dead and removed from
+  `widget.cpp`/`myview.cpp`/`frame.cpp`/`StickFigure.cpp`/`animation.cpp`.
+  Also found and removed 5 vestigial `QDataStream myStream;` locals in
+  `widget.cpp`'s library handlers (default-constructed, never attached to
+  a device, never read or written — dead before this refactor touched
+  them, just never noticed).
+- `grep -rn "QDataStream" widget.cpp myview.cpp` — zero in `widget.cpp`;
+  in `myview.cpp` only `saveLibrary`/`loadLibrary`'s genuine file I/O.
+  Step 2 ("replace clone/copy call sites with `Clone()`") is done, just
+  not literally via `Clone()` — Phase 2b's `Extract*`/`Populate*` bridge
+  functions serve the same role (in-memory, no stream) and additionally
+  handle the live↔data conversion `Clone()` alone can't.
+
+Step 1 (`AnimationData`) is **not built**: unlike `StickData`/
+`StickFigureData`/`FrameData`, nothing in the codebase ever needs a
+scratch/buffer `Animation` — undo/redo and copy/paste both operate at
+`Frame` granularity, never on the whole animation, and `Animation`'s
+`operator<<`/`operator>>` already has exactly one call site (whole-file
+save/load), so there's no "five-purpose shared serializer" problem at this
+layer to fix. Building `AnimationData` now would be a speculative
+abstraction with no consumer — skip per YAGNI; revisit only if a future
+feature needs to clone/undo a whole animation in memory.
+
+- [x] Phase 3 complete (as descoped — see status note above)
 
 ---
 
@@ -596,7 +624,44 @@ operations, rescale.
 references in the codebase. Undo/redo is driven entirely by
 `QUndoStack`.
 
-- [ ] Phase 4 complete
+**Status: assessed 2026-07-09, recommend deferring — flagging for your
+override rather than silently skipping, since (unlike Phase 3's
+`AnimationData`) this is a real design tradeoff, not a clear-cut YAGNI
+call.** `clearUndoFlag` is already gone (Phase 2b/2c); only `undoFlag`
+remains, doing one narrow job. What's left of this phase's *stated*
+motivation — "a single stick drag clones an entire frame" — is already
+gone too: Phase 2b replaced the `QDataStream` round-trip with a direct
+in-memory `ExtractFrameData()` copy, so the remaining cost is one
+in-memory clone per edit, not one clone-plus-serialize. What's left to gain
+from `QUndoStack` itself is deleting the hand-rolled `CMD_*`/`MODE_*`
+dispatch in favor of a well-tested Qt primitive — real, but maintainability
+only, not a fix for a live bug.
+
+Sizing the actual work: 59 non-test call sites (`storeUndo`/`undoRedo`
+combined) across `widget.cpp` (31) and `myview.cpp` (21), plus scattered
+sites in `advancedtaperwidget.cpp`/`advancedtab.cpp`/`mymainwindow.cpp`/
+`StickFigure.cpp`. Step 2's per-action `QUndoCommand` design requires each
+command's `redo()` to *perform* the mutation (`QUndoStack::push` calls
+`redo()` once) — today's handlers run their mutation inline, so a faithful
+port means restructuring each handler's control flow, not just swapping a
+function call. The step 2 escape hatch ("it's fine if some actions still
+clone a whole `FrameData`") avoids writing dozens of bespoke command
+classes, but even the single generic "snapshot command" shape still
+touches all 59 call sites and changes the redo()-must-mutate contract at
+each one — a diff comparable in size and risk to Phase 2c's descoped
+`StickGraphicsItem` split, including the same gap: none of it is exercised
+by the headless QtTest suite (mouse-driven edits, `mymainwindow.cpp`'s
+menu actions).
+
+Given the stated motivation is already resolved and the remaining payoff
+is architectural rather than corrective, this phase is deferred by the
+same reasoning as Phase 2c — **not executed this session.** If you want it
+done anyway (e.g. the `CMD_*` dispatch is actively in your way, or you want
+`QUndoStack`'s free features like `undoText()`/merge), say so and it's a
+reasonable scope for its own dedicated session with a manual smoke-test
+plan agreed up front.
+
+- [ ] Phase 4 — deferred, not started (see status note above)
 
 ---
 

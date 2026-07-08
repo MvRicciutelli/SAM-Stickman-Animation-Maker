@@ -6,7 +6,6 @@
 #include <frame.h>
 #include <QMessageBox>
 #include <QSpinBox>
-#include <QBuffer>
 #include <QCheckBox>
 #include <animationoptions.h>
 #include <QMessageBox>

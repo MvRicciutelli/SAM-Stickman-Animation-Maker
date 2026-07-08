@@ -1,7 +1,6 @@
 #include "StickFigure.h"
 
 #include <QtAlgorithms>
-#include <QBuffer>
 #include <QDebug>
 #include <QFile>
 #include <QVector2D>

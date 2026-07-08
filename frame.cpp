@@ -2,7 +2,6 @@
 #include <QHash>
 #include <QListWidget>
 #include <QDebug>
-#include <QBuffer>
 #include <QPainter>
 #include <QFont>
 #include "uiItems.h"
