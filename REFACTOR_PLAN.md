@@ -661,42 +661,68 @@ too, not just fresh edits, arguably more correct than before.
 `QUndoStack::push()` auto-discarding stale redo history on a fresh edit
 replaced the old manual `!undoFlag` + `redoBuffer.clear()` dance.
 
-**Why `undoFlag` survives, despite the exit criteria:** it is not a
-leftover of the undo *mechanism* — it guards a real double-free.
-`Frame::clearFrame()` explicitly frees each stick before deleting its
-owning `StickFigure`, and `StickFigure::~StickFigure()` would try to free
-those same (already-deleted) sticks again unless `undoFlag` tells it not
-to. `clearFrame()` is called from exactly one place in the entire
-codebase: `RestoreFrameSnapshot()`, which is exactly where `undoFlag` is
-raised. This is unrelated to `CMD_*`/`QUndoStack` — it is a `StickFigure`
-lifetime concern, out of Phase 4's scope (`StickFigure`'s split into a
-pure-data class, where this ownership question would restructure away
-entirely, is the deferred Phase 2c). `clearUndoFlag` **is** fully gone
-(zero references, grep-verified) — it existed only to guard the
-now-deleted manual buffer-eviction code.
+**`undoFlag` initially survived Phase 4** for a reason unrelated to
+`CMD_*`/`QUndoStack`: it guarded a real double-free between two functions
+that both thought they owned stick cleanup. `Frame::clearFrame()`
+explicitly freed each stick before deleting its owning `StickFigure`, and
+`StickFigure::~StickFigure()` would try to free those same
+(already-deleted) sticks again unless told not to — `undoFlag` was that
+signal, raised for the exact duration of `RestoreFrameSnapshot()` (the
+only caller of `clearFrame()` in the codebase).
 
-**Dead-code finding, same pattern as `switchFrameFlag` in Phase 2c:**
-tracing `undoFlag`'s only remaining read sites turned up two more dead
-`!undoFlag` checks in `Frame::addStickFigure()` — that function is only
-ever called from `Widget::addStick()`/`myView::splitStickFigure()`
-(confirmed by grep), never while `undoFlag` is true, since
-`RestoreFrameSnapshot()`'s `PopulateLiveFrame()` constructs `StickFigure`
-objects directly rather than calling `addStickFigure()`. Removed (always
-true → unconditional).
+**Follow-up (2026-07-09): eliminated `undoFlag` entirely** by fixing the
+double-ownership at its root instead of guarding it, once Phase 2b's
+precondition was recognized: every remaining `StickFigure` is guaranteed
+live (scratch objects are `StickFigureData` since Phase 2b, never a
+`StickFigure`), so there is no more "maybe scratch, maybe live" ambiguity
+for the destructor to resolve. Fix:
+- `StickFigure::~StickFigure()` now unconditionally owns cleanup (removes
+  each stick from the scene, calls `RemoveImagesFromListWidget()`, deletes
+  it) — no flag, no guard.
+- `Frame::clearFrame()` no longer duplicates that cleanup; it's
+  `qDeleteAll(stickFigures); stickFigures.clear();`, matching what
+  `~Frame()` already did.
+- `undoFlag`'s declaration and both write sites (`RestoreFrameSnapshot()`,
+  `Widget::~Widget()`) are deleted. Two dead `!undoFlag` checks in
+  `Frame::addStickFigure()` (same pattern as `switchFrameFlag` in Phase
+  2c — that function is never reached while the flag was true) went with
+  it.
 
-Verify performed: all 20 characterization tests pass, including
-`UndoSimpleEdit`/`UndoAddFrame`/`UndoDeleteFrame`/`UndoMoveToFrame`, which
-exercise every `CMD_*`/`MODE_*` branch of the new `RestoreFrameSnapshot()`
-against the same assertions as before the rewrite. Full app builds and
-links. **Not yet done: your manual smoke-test** of a long undo/redo chain
+This also fixed a **real, pre-existing memory leak**: `RestoreFrameSnapshot()`'s
+`CMD_ADDFRAME`+undo/`CMD_DELETEFRAME`+redo branches call
+`Animation::deleteFrame()` → `~Frame()` → `delete` each `StickFigure` →
+(old) `~StickFigure()`, which skipped its cleanup loop entirely because
+`undoFlag` was raised — so every undo of an add-frame or redo of a
+delete-frame leaked that frame's sticks (never freed, and for `IMAGE`
+sticks, left stale entries in `imgListWidget`). This predated Phase 4;
+the old `undoRedo()` had the identical shape. A new test,
+`UndoAddFrameFreesImageStickListWidgetEntries`, was written and confirmed
+to **fail against the pre-fix code** (proving it genuinely detects the
+bug) before the fix, then confirmed to pass after.
+
+The one item flagged as unverifiable by static reading — whether
+`Widget::~Widget()`'s `delete view` is safe now that `~StickFigure()`
+always touches `scene`/`imgListWidget` — was checked two ways: (1) a new
+test, `ViewDestructorHandlesImageStickWithoutCrash`, builds a standalone
+`myView` with a live `IMAGE` stick and deletes it directly, exercising the
+exact `myView → Animation → Frame → StickFigure → stick` cascade
+`Widget::~Widget()` triggers; (2) the built `MarionettaPlus.exe` was
+launched and cleanly closed via a real `WM_CLOSE` (`Process.CloseMainWindow()`),
+exiting with code 0. Neither surfaced a crash.
+
+Verify performed: all 22 characterization tests pass (20 original + the
+2 above). Full app builds, links, and cleanly starts/closes. **Still not
+covered by any of this:** a manual smoke-test of a long undo/redo chain
 across drag-based tools (rotate/scale/move/rotate-scene/scale-scene/
 elongate/manipulate) and slider-driven edits (image offset/scale/rotation,
-rect/taper width/height) — these are exactly the gesture-spanning call
-sites the redesign depends on, and they are the one thing this session's
-headless test suite cannot exercise.
+rect/taper width/height) — these gesture-spanning call sites are what
+Phase 4's redesign depends on most, and they're real mouse/slider
+interaction the headless suite cannot drive.
 
-- [x] Phase 4 complete — see status note above for the one justified
-  deviation (`undoFlag` retained) and the pending manual smoke-test.
+- [x] Phase 4 complete, including the `undoFlag` follow-up — zero
+  references to any of the original six flags remain anywhere in the
+  codebase. Pending: your manual smoke-test of the drag/slider gestures
+  noted above.
 
 ---
 

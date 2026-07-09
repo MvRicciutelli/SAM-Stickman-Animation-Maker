@@ -39,24 +39,25 @@ or UI widgets): `undoFlag`, `copyFlag`, `libFlag`, `loadingAnimationFlag`,
 `clearUndoFlag`, `switchFrameFlag`. This was the single most bug-dense
 subsystem in the codebase.
 
-As of refactor Phase 2c (which turned out to be a dead-code deletion, not
-the originally-planned `StickGraphicsItem` split — see REFACTOR_PLAN.md),
-**five of the six flags are gone**: `copyFlag`, `libFlag`, `clearUndoFlag`,
+**All six flags are gone.** `copyFlag`, `libFlag`, `clearUndoFlag`,
 `loadingAnimationFlag` had zero remaining declarations or assignments once
 Phase 2b turned every scratch object into pure data — a `StickFigureData`
 has no scene, no list widget, no icon to guard, so there was nothing left
-for those flags to disambiguate. `switchFrameFlag` turned out to already
-be unreachable dead state after Phase 2b (its only set-site no longer
-wrapped any call that reads it) and was deleted outright. See
-"Serialization" below for the data classes and their bridge functions.
-
-Only **`undoFlag`** remains, purely at the live-object level: true while
-`myView::RestoreFrameSnapshot()` (Phase 4) is restoring a frame.
-`StickFigure::~StickFigure()` checks it to skip removing sticks from the
-scene when `Frame::clearFrame()` (called just before repopulating) has
-already freed them explicitly. `Frame::addStickFigure()`'s own `!undoFlag`
-checks were removed in Phase 4 as dead code — that function is never
-reached while `undoFlag` is true.
+for those flags to disambiguate. `switchFrameFlag` (Phase 2c) turned out
+to already be unreachable dead state after Phase 2b (its only set-site no
+longer wrapped any call that reads it). `undoFlag` (Phase 4 follow-up) was
+the last: it guarded a double-free between `Frame::clearFrame()` and
+`StickFigure::~StickFigure()`, both of which thought they owned stick
+cleanup. Fixed at the root instead of guarded: `~StickFigure()` now
+unconditionally owns cleanup (removes each stick from the scene, calls
+`RemoveImagesFromListWidget()`, deletes it — no flag needed since every
+remaining `StickFigure` is guaranteed live post-Phase-2b), and
+`clearFrame()` no longer duplicates that work — it's a plain
+`qDeleteAll(stickFigures)`. Fixing this also closed a real, pre-existing
+leak: undoing an add-frame (or redoing a delete-frame) used to leak that
+frame's sticks, since the old flag-guarded destructor skipped freeing them
+during `Animation::deleteFrame()`'s teardown. See "Serialization" below
+for the data classes and their bridge functions.
 
 `stick.cpp` itself has been flag-free since Phase 1b: `~stick` never
 touches `imgListWidget`; the code paths that delete a LIVE stick
@@ -129,14 +130,10 @@ connected to `QUndoStack::indexChanged`, which fires on push *and* on
 undo/redo — so autosave now also triggers after an undo/redo, not just
 fresh edits.
 
-`undoFlag` survives Phase 4 (unlike `clearUndoFlag`, which is fully gone)
-for a reason unrelated to the undo mechanism itself: it guards a real
-double-free. `Frame::clearFrame()` explicitly frees each stick before
-deleting its owning `StickFigure`, and `~StickFigure()` would try to free
-those same sticks again unless `undoFlag` tells it not to.
-`RestoreFrameSnapshot()` is the only caller of `clearFrame()` anywhere in
-the codebase, so `undoFlag` is raised for exactly that call's duration —
-narrowly scoped and still load-bearing, not leftover debt.
+`RestoreFrameSnapshot()` calls `Frame::clearFrame()` with no flag needed
+around it — see "The flag-guard system" above for how `undoFlag` (the
+last of the original six) was eliminated by fixing the double-ownership
+it guarded, rather than guarding it more carefully.
 
 ## Serialization
 

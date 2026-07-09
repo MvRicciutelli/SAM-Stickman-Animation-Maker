@@ -25,7 +25,6 @@ float   rotationBuffer; //selected item Rotation buffer
 float   lengthBuffer;
 float zoomLvlBuf;
 FrameData* stickLibraryBuffer; ///< libreria corrente: solo dati da Phase 2b
-bool undoFlag = false;
 extern QSpinBox * onionSkinSB;
 bool startStickFigureRotation = false;
 bool startStickFigureScale = false;
@@ -1141,12 +1140,11 @@ private:
 /**
  * @details Replaces the pre-Phase-4 `undoRedo()`'s dispatch body verbatim, just
  * driven by a QUndoCommand's before/after snapshot instead of a popped buffer entry.
- * `undoFlag` stays raised for the whole restore so `StickFigure::~StickFigure()`
- * skips removing sticks from the scene when `clearFrame()` has already freed them.
+ * No flag needed here anymore: `Frame::clearFrame()` and `~StickFigure()` each own
+ * exactly the cleanup they perform, so nothing needs to skip work for the other.
  */
 void myView::RestoreFrameSnapshot(int command_tag, int mode, FrameData *snapshot)
 {
-    undoFlag = true;
     // se è un undo su un addframe, o un redo su un deleteframe ci sta da rimuovere un frame
     if((command_tag == CMD_ADDFRAME && mode == MODE_UNDO)||
             (command_tag == CMD_DELETEFRAME && mode == MODE_REDO)){
@@ -1182,7 +1180,6 @@ void myView::RestoreFrameSnapshot(int command_tag, int mode, FrameData *snapshot
         PopulateLiveFrame(myAnimation->currentFrame,*snapshot,true,true);
         moveToFrame(myAnimation->currentFrame);
     }
-    undoFlag = false;
 }
 
 /**
@@ -1190,8 +1187,7 @@ void myView::RestoreFrameSnapshot(int command_tag, int mode, FrameData *snapshot
  * calls `redo()` once (a deliberate no-op here, see FrameUndoCommand) and — if the
  * stack's current index wasn't at the top (the user had undone something and then
  * made a fresh edit instead of redoing) — automatically discards the now-stale redo
- * history. That discard was the old code's manual `!undoFlag` + `redoBuffer.clear()`
- * dance; `QUndoStack` does it as part of `push()`, so no flag is needed here anymore.
+ * history. `QUndoStack` does that as part of `push()`.
  */
 void myView::storeUndo(int command){
     if(myAnimation->frameList.isEmpty())

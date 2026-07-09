@@ -379,10 +379,15 @@ void Widget::detectLibraries(){
         }
     }
 }
-extern bool undoFlag;
+/**
+ * @details undoFlag (removed in Phase 4) used to be raised here before `delete view`.
+ * It's no longer needed: `~StickFigure()`'s cleanup (scene removal, imgListWidget
+ * entries, the sticks themselves) is safe to run unconditionally now, and every
+ * object it touches — `scene`, `imgListWidget` (owned by `ui`) — is still alive at
+ * this point, since `delete ui` runs after `delete view` below.
+ */
 Widget::~Widget()
 {
-    undoFlag = true;
     delete view;
     // setParent(nullptr) prima della delete: se il tab è attualmente inserito in myTabWidget,
     // lo scollega evitando che venga cancellato due volte (una qui, una dalla cascata di Qt);

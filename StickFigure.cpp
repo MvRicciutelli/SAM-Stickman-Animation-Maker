@@ -5,24 +5,24 @@
 #include <QFile>
 #include <QVector2D>
 // StickFigure work in the one active scene
-extern bool undoFlag;
 extern QGraphicsRectItem* myRect;
 /**
- * @details Since Phase 2b the only scratch-vs-live flag left here is undoFlag: the
- * copy/library buffers are pure data objects now, so libFlag/copyFlag/clearUndoFlag
- * had no remaining setter and their guard terms were dropped. undoFlag still marks
- * "inside myView::RestoreFrameSnapshot()" (Phase 4), where clearFrame() has already
- * freed the sticks explicitly.
+ * @details Unconditional since Phase 4's undoFlag removal: every StickFigure that
+ * exists is guaranteed live (scratch/buffer figures are StickFigureData since Phase
+ * 2b, never a StickFigure), so this destructor is the single, sole owner of its
+ * sticks' cleanup — no caller pre-frees them, so nothing needs guarding against a
+ * double-free. See Frame::clearFrame(), which used to duplicate this cleanup
+ * specifically to route around a now-removed guard, and Frame::~Frame()/
+ * Frame::removeStickFigure(), which already relied on this destructor doing the
+ * real work.
  */
 StickFigure::~StickFigure()
 {
-    if(!undoFlag){
-        for(stick* s: stickList)
-        {
-            s->RemoveImagesFromListWidget(); // solo dentro questa guardia: qui gli stick sono vivi
-            scene->removeItem(s);
-            delete s;
-        }
+    for(stick* s: stickList)
+    {
+        s->RemoveImagesFromListWidget();
+        scene->removeItem(s);
+        delete s;
     }
     delete iconImg;
     delete stickFigureIcon;

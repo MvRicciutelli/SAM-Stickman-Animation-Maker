@@ -1,5 +1,6 @@
 #include "frame.h"
 #include <QHash>
+#include <QtAlgorithms>
 #include <QListWidget>
 #include <QDebug>
 #include <QPainter>
@@ -57,10 +58,10 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     //aggiorna lo stickfigure corrente
     currentStickFigure = stickFigureBuffer;
     currentStickFigure->name = myName;
-    // switchFrameFlag è stato eliminato (Phase 2c) e undoFlag non guarda più nulla qui
-    // (Phase 4): questa funzione è raggiunta solo dai percorsi UI vivi (Widget::addStick,
-    // myView::splitStickFigure), mai da undoFlag=true (RestoreFrameSnapshot() non la
-    // chiama — costruisce le StickFigure direttamente in PopulateLiveFrame())
+    // switchFrameFlag (Phase 2c) e undoFlag (Phase 4) sono stati entrambi eliminati:
+    // questa funzione è raggiunta solo dai percorsi UI vivi (Widget::addStick,
+    // myView::splitStickFigure) — RestoreFrameSnapshot() non la chiama mai, costruisce
+    // le StickFigure direttamente in PopulateLiveFrame()
     QVariant newData(QVariant::fromValue(currentStickFigure));
     addedItem->setData(Qt::UserRole,newData);
     addedItem->setData(Qt::DisplayRole,myName);
@@ -389,19 +390,17 @@ void Frame::updateRender(){
     renderScene.render(&painter);
     renderScene.clear();*/
 }
+/**
+ * @details Since Phase 4 removed undoFlag, this is a plain qDeleteAll: ~StickFigure()
+ * is now the single, unconditional owner of stick cleanup (scene removal,
+ * imgListWidget entries, the sticks themselves), so there is nothing left for this
+ * function to duplicate. It used to free every stick itself, explicitly, specifically
+ * to route around ~StickFigure() skipping that work when undoFlag was raised (which
+ * it always was, every time this ran, since clearFrame()'s one caller is
+ * RestoreFrameSnapshot()) — that workaround is what undoFlag existed to enable.
+ */
 void Frame::clearFrame(){
-    for(StickFigure *S:stickFigures){
-        // il frame viene svuotato per sempre qui: libera gli stick esplicitamente invece di
-        // affidarsi al distruttore di StickFigure, che salta la pulizia quando undoFlag è
-        // attivo (il caso in cui clearFrame() viene chiamata oggi, da RestoreFrameSnapshot -
-        // senza questo, ogni undo/redo che passa da qui perdeva la memoria del frame sovrascritto)
-        for(stick* s: S->stickList){
-            scene->removeItem(s);
-            delete s;
-        }
-        delete S;
-
-    }
+    qDeleteAll(stickFigures);
     stickFigures.clear();
 
 }

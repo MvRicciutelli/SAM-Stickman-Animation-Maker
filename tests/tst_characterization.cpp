@@ -469,6 +469,34 @@ private slots:
         QCOMPARE(view->myAnimation->frameList.count(), frames_before + 1);
     }
 
+    // isolates the CMD_ADDFRAME+undo path specifically: RestoreFrameSnapshot() calls
+    // Animation::deleteFrame() on the added frame (~Frame -> delete each StickFigure ->
+    // ~StickFigure()), which is a DIFFERENT code path from clearFrame() (used on the frame
+    // being restored INTO, not the one being removed). Built the image stick directly,
+    // bypassing DrawStick()/storeUndo(), so only ONE undo command (CMD_ADDFRAME) exists —
+    // undoing it must delete the whole added frame, sticks included, in a single step.
+    void UndoAddFrameFreesImageStickListWidgetEntries()
+    {
+        AddFrame();
+        StickFigure *figure = CurrentStickFigure();
+        stick *img_stick = new stick();
+        img_stick->myLine = QLineF(700, 100, 700, 200);
+        img_stick->myStickFigure = figure;
+        img_stick->stickType = stick::IMAGE;
+        QImage *image = new QImage(8, 8, QImage::Format_ARGB32);
+        image->fill(Qt::blue);
+        img_stick->addImage(image, "leak-check"); // also registers an entry in imgListWidget
+        figure->stickList.append(img_stick);
+        figure->masterStick = img_stick;
+        figure->currentStick = img_stick;
+        scene->addItem(img_stick);
+        CurrentFrame()->totalSticks.append(img_stick);
+        QCOMPARE(imgListWidget->count(), 1);
+
+        view->undo_stack.undo(); // CMD_ADDFRAME+undo: deletes the frame img_stick lives in
+        QCOMPARE(imgListWidget->count(), 0);
+    }
+
     void UndoDeleteFrame()
     {
         AddFrame();
@@ -692,6 +720,38 @@ private slots:
         QCOMPARE(from_item, reloaded);
 
         QFile::remove(path);
+    }
+
+    // exercises the exact destructor cascade Widget::~Widget()'s `delete view` triggers
+    // (myView -> Animation -> Frame -> StickFigure -> stick) with an IMAGE stick present,
+    // on a throwaway myView instance — proves removing undoFlag's guard from
+    // ~StickFigure() didn't turn app shutdown into a crash: scene->removeItem() and
+    // RemoveImagesFromListWidget() now run unconditionally, and this is where they'd
+    // fault if `scene`/`imgListWidget` weren't still valid at that point.
+    void ViewDestructorHandlesImageStickWithoutCrash()
+    {
+        myView *throwaway_view = new myView();
+        throwaway_view->setScene(scene);
+        throwaway_view->myAnimation->scene = scene;
+        Frame *throwaway_frame = throwaway_view->setUpFrame(0);
+        throwaway_view->moveToFrame(throwaway_frame);
+        StickFigure *figure = throwaway_frame->addStickFigure(myStickFigureWidgetList);
+
+        stick *img_stick = new stick();
+        img_stick->myLine = QLineF(50, 50, 50, 150);
+        img_stick->myStickFigure = figure;
+        img_stick->stickType = stick::IMAGE;
+        QImage *image = new QImage(8, 8, QImage::Format_ARGB32);
+        image->fill(Qt::green);
+        img_stick->addImage(image, "shutdown-check");
+        figure->stickList.append(img_stick);
+        figure->masterStick = img_stick;
+        figure->currentStick = img_stick;
+        scene->addItem(img_stick);
+        QCOMPARE(imgListWidget->count(), 1);
+
+        delete throwaway_view; // same cascade as Widget::~Widget()'s `delete view`
+        QCOMPARE(imgListWidget->count(), 0);
     }
 };
 
