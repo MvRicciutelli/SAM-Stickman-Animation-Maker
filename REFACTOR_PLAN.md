@@ -624,44 +624,79 @@ operations, rescale.
 references in the codebase. Undo/redo is driven entirely by
 `QUndoStack`.
 
-**Status: assessed 2026-07-09, recommend deferring — flagging for your
-override rather than silently skipping, since (unlike Phase 3's
-`AnimationData`) this is a real design tradeoff, not a clear-cut YAGNI
-call.** `clearUndoFlag` is already gone (Phase 2b/2c); only `undoFlag`
-remains, doing one narrow job. What's left of this phase's *stated*
-motivation — "a single stick drag clones an entire frame" — is already
-gone too: Phase 2b replaced the `QDataStream` round-trip with a direct
-in-memory `ExtractFrameData()` copy, so the remaining cost is one
-in-memory clone per edit, not one clone-plus-serialize. What's left to gain
-from `QUndoStack` itself is deleting the hand-rolled `CMD_*`/`MODE_*`
-dispatch in favor of a well-tested Qt primitive — real, but maintainability
-only, not a fix for a live bug.
+**Status: complete (2026-07-09), with one deliberate, functionally-justified
+deviation from the literal exit criteria — `undoFlag` remains.**
 
-Sizing the actual work: 59 non-test call sites (`storeUndo`/`undoRedo`
-combined) across `widget.cpp` (31) and `myview.cpp` (21), plus scattered
-sites in `advancedtaperwidget.cpp`/`advancedtab.cpp`/`mymainwindow.cpp`/
-`StickFigure.cpp`. Step 2's per-action `QUndoCommand` design requires each
-command's `redo()` to *perform* the mutation (`QUndoStack::push` calls
-`redo()` once) — today's handlers run their mutation inline, so a faithful
-port means restructuring each handler's control flow, not just swapping a
-function call. The step 2 escape hatch ("it's fine if some actions still
-clone a whole `FrameData`") avoids writing dozens of bespoke command
-classes, but even the single generic "snapshot command" shape still
-touches all 59 call sites and changes the redo()-must-mutate contract at
-each one — a diff comparable in size and risk to Phase 2c's descoped
-`StickGraphicsItem` split, including the same gap: none of it is exercised
-by the headless QtTest suite (mouse-driven edits, `mymainwindow.cpp`'s
-menu actions).
+Initial sizing (59 non-test `storeUndo`/`undoRedo` call sites) flagged this
+as comparable in risk to the descoped Phase 2c, on the assumption that
+Step 2's per-action `QUndoCommand` design — `redo()` must *perform* the
+mutation, since `QUndoStack::push()` calls it once — would require
+restructuring each handler's control flow. Tracing every call site's
+actual "undo unit" boundary before writing code found the load-bearing
+detail that resolves this: **several tools are drag/multi-click gestures
+spanning several event-handler calls** (`ROTATE`/`SCALE`/`MOVESCENE`/
+`ROTATESCENE`/`SCALESCENE`/`ELONGATE`/`MANIPULATE`'s mutation happens across
+repeated `mouseMoveEvent` calls after a single `mousePressEvent`; slider
+tools the same way across repeated `valueChanged` calls after the first;
+2-click drawing spans two `mousePressEvent` calls) — and critically, **the
+pre-Phase-4 code never captured an explicit "after" snapshot for these
+either.** It captured "before" once (at gesture start) and left the buffer
+entry there; "after" was only ever computed lazily, at the moment the user
+actually clicked Undo. This is directly compatible with `QUndoCommand`
+without restructuring anything: `FrameUndoCommand` (`myview.cpp`) captures
+`before_` at construction (exactly where `storeUndo()` already ran), lets
+`push()`'s automatic first `redo()` be a no-op (the caller's inline
+mutation code — completely unchanged — runs immediately after, exactly as
+before), and captures `after_` lazily on the first `undo()` call. Every
+`storeUndo(command)` call site in the codebase is therefore **unchanged**
+— same signature, same call position, same inline mutation code after it.
+Only `myView`'s undo *mechanism* changed: `undoBuffer`/`redoBuffer`/
+`undoInfoStruct`/`MAXUNDO`-eviction/`undoRedo()` are gone, replaced by
+`undo_stack` (`QUndoStack`, `setUndoLimit(MAXUNDO)`) + `FrameUndoCommand` +
+`RestoreFrameSnapshot()` (the old `undoRedo()` dispatch body, verbatim,
+now taking an explicit snapshot instead of a popped buffer entry).
+Autosave triggering moved to `QUndoStack::indexChanged` per step 4 (a
+lambda in the constructor) — this also makes autosave fire after undo/redo
+too, not just fresh edits, arguably more correct than before.
+`QUndoStack::push()` auto-discarding stale redo history on a fresh edit
+replaced the old manual `!undoFlag` + `redoBuffer.clear()` dance.
 
-Given the stated motivation is already resolved and the remaining payoff
-is architectural rather than corrective, this phase is deferred by the
-same reasoning as Phase 2c — **not executed this session.** If you want it
-done anyway (e.g. the `CMD_*` dispatch is actively in your way, or you want
-`QUndoStack`'s free features like `undoText()`/merge), say so and it's a
-reasonable scope for its own dedicated session with a manual smoke-test
-plan agreed up front.
+**Why `undoFlag` survives, despite the exit criteria:** it is not a
+leftover of the undo *mechanism* — it guards a real double-free.
+`Frame::clearFrame()` explicitly frees each stick before deleting its
+owning `StickFigure`, and `StickFigure::~StickFigure()` would try to free
+those same (already-deleted) sticks again unless `undoFlag` tells it not
+to. `clearFrame()` is called from exactly one place in the entire
+codebase: `RestoreFrameSnapshot()`, which is exactly where `undoFlag` is
+raised. This is unrelated to `CMD_*`/`QUndoStack` — it is a `StickFigure`
+lifetime concern, out of Phase 4's scope (`StickFigure`'s split into a
+pure-data class, where this ownership question would restructure away
+entirely, is the deferred Phase 2c). `clearUndoFlag` **is** fully gone
+(zero references, grep-verified) — it existed only to guard the
+now-deleted manual buffer-eviction code.
 
-- [ ] Phase 4 — deferred, not started (see status note above)
+**Dead-code finding, same pattern as `switchFrameFlag` in Phase 2c:**
+tracing `undoFlag`'s only remaining read sites turned up two more dead
+`!undoFlag` checks in `Frame::addStickFigure()` — that function is only
+ever called from `Widget::addStick()`/`myView::splitStickFigure()`
+(confirmed by grep), never while `undoFlag` is true, since
+`RestoreFrameSnapshot()`'s `PopulateLiveFrame()` constructs `StickFigure`
+objects directly rather than calling `addStickFigure()`. Removed (always
+true → unconditional).
+
+Verify performed: all 20 characterization tests pass, including
+`UndoSimpleEdit`/`UndoAddFrame`/`UndoDeleteFrame`/`UndoMoveToFrame`, which
+exercise every `CMD_*`/`MODE_*` branch of the new `RestoreFrameSnapshot()`
+against the same assertions as before the rewrite. Full app builds and
+links. **Not yet done: your manual smoke-test** of a long undo/redo chain
+across drag-based tools (rotate/scale/move/rotate-scene/scale-scene/
+elongate/manipulate) and slider-driven edits (image offset/scale/rotation,
+rect/taper width/height) — these are exactly the gesture-spanning call
+sites the redesign depends on, and they are the one thing this session's
+headless test suite cannot exercise.
+
+- [x] Phase 4 complete — see status note above for the one justified
+  deviation (`undoFlag` retained) and the pending manual smoke-test.
 
 ---
 

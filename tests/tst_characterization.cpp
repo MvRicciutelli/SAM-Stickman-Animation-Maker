@@ -446,10 +446,10 @@ private slots:
         QLineF moved_line = CurrentStickFigure()->stickList[0]->myLine;
         QVERIFY(moved_line != original_line);
 
-        view->undoRedo(MODE_UNDO);
+        view->undo_stack.undo();
         QCOMPARE(CurrentFrame()->stickFigures[figure_index]->stickList[0]->myLine, original_line);
 
-        view->undoRedo(MODE_REDO);
+        view->undo_stack.redo();
         QCOMPARE(CurrentFrame()->stickFigures[figure_index]->stickList[0]->myLine, moved_line);
     }
 
@@ -461,11 +461,11 @@ private slots:
         AddFrame();
         QCOMPARE(view->myAnimation->frameList.count(), frames_before + 1);
 
-        view->undoRedo(MODE_UNDO);
+        view->undo_stack.undo();
         QCOMPARE(view->myAnimation->frameList.count(), frames_before);
         QCOMPARE(CurrentFrame()->frameNumber, current_number_before);
 
-        view->undoRedo(MODE_REDO);
+        view->undo_stack.redo();
         QCOMPARE(view->myAnimation->frameList.count(), frames_before + 1);
     }
 
@@ -483,12 +483,12 @@ private slots:
         view->moveToFrame(CurrentFrame());
         QCOMPARE(view->myAnimation->frameList.count(), frames_before - 1);
 
-        view->undoRedo(MODE_UNDO);
+        view->undo_stack.undo();
         QCOMPARE(view->myAnimation->frameList.count(), frames_before);
         QCOMPARE(CurrentFrame()->frameNumber, deleted_number);
         QCOMPARE(CurrentFrame()->totalSticks.count(), sticks_before);
 
-        view->undoRedo(MODE_REDO);
+        view->undo_stack.redo();
         QCOMPARE(view->myAnimation->frameList.count(), frames_before - 1);
     }
 
@@ -504,7 +504,7 @@ private slots:
         view->moveToFrame(other_frame);
         QCOMPARE(CurrentFrame()->frameNumber, 0);
 
-        view->undoRedo(MODE_UNDO);
+        view->undo_stack.undo();
         QCOMPARE(CurrentFrame()->frameNumber, origin_number);
     }
 

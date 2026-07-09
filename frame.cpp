@@ -7,7 +7,6 @@
 #include "uiItems.h"
 #define CS currentStickFigure->currentStick
 extern QListWidget * myStickFigureWidgetList;
-extern bool undoFlag;
 Frame::Frame()
 {
     frameIcon       = new QIcon();
@@ -58,32 +57,28 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     //aggiorna lo stickfigure corrente
     currentStickFigure = stickFigureBuffer;
     currentStickFigure->name = myName;
-    // switchFrameFlag è stato eliminato (Phase 2c): da Phase 2b questa funzione è raggiunta
-    // solo dai percorsi UI vivi (Widget::addStick, myView::splitStickFigure) — i percorsi che
-    // un tempo passavano di qui durante la deserializzazione (copia/incolla frame) ora
-    // costruiscono le StickFigure direttamente in PopulateLiveFrame(), bypassando addStickFigure
-    if(!undoFlag){
-        QVariant newData(QVariant::fromValue(currentStickFigure));
-        addedItem->setData(Qt::UserRole,newData);
-        addedItem->setData(Qt::DisplayRole,myName);
-        addedItem->setIcon(*currentStickFigure->stickFigureIcon);
-        myListWidget->insertItem(myListWidget->currentRow()+1,addedItem);
-    }
+    // switchFrameFlag è stato eliminato (Phase 2c) e undoFlag non guarda più nulla qui
+    // (Phase 4): questa funzione è raggiunta solo dai percorsi UI vivi (Widget::addStick,
+    // myView::splitStickFigure), mai da undoFlag=true (RestoreFrameSnapshot() non la
+    // chiama — costruisce le StickFigure direttamente in PopulateLiveFrame())
+    QVariant newData(QVariant::fromValue(currentStickFigure));
+    addedItem->setData(Qt::UserRole,newData);
+    addedItem->setData(Qt::DisplayRole,myName);
+    addedItem->setIcon(*currentStickFigure->stickFigureIcon);
+    myListWidget->insertItem(myListWidget->currentRow()+1,addedItem);
     // update current stickfigure
     currentStickFigure->highlight(false); //de highlight old selection
     currentStickFigure->highlight(true); //highlight new one
-    if(!undoFlag){
-        // update current stick
-        scene->clearSelection(); //clear scene selection
-        if(!currentStickFigure->stickList.isEmpty())
-        {
-            selectStick(currentStickFigure); // puo essere ridontante in quanto ci sta la callback di sticklayerView_currentItemChanged//update selected stick
-        }
-        int tempIndex = myListWidget->currentRow();
-        myListWidget->clearSelection();
-        addedItem->setSelected( true);
-        myListWidget->setCurrentRow(tempIndex+1);
+    // update current stick
+    scene->clearSelection(); //clear scene selection
+    if(!currentStickFigure->stickList.isEmpty())
+    {
+        selectStick(currentStickFigure); // puo essere ridontante in quanto ci sta la callback di sticklayerView_currentItemChanged//update selected stick
     }
+    int tempIndex = myListWidget->currentRow();
+    myListWidget->clearSelection();
+    addedItem->setSelected( true);
+    myListWidget->setCurrentRow(tempIndex+1);
     currentStickFigure->scene = scene;
 
     return stickFigureBuffer;
@@ -397,10 +392,9 @@ void Frame::updateRender(){
 void Frame::clearFrame(){
     for(StickFigure *S:stickFigures){
         // il frame viene svuotato per sempre qui: libera gli stick esplicitamente invece di
-        // affidarsi al distruttore di StickFigure, che salta la pulizia quando undoFlag/copyFlag/
-        // libFlag/clearUndoFlag sono attivi (pensati per gli oggetti "di passaggio" della
-        // (de)serializzazione, non per una cancellazione definitiva come questa - senza questo,
-        // ogni undo/redo che passa da qui perdeva la memoria del frame sovrascritto)
+        // affidarsi al distruttore di StickFigure, che salta la pulizia quando undoFlag è
+        // attivo (il caso in cui clearFrame() viene chiamata oggi, da RestoreFrameSnapshot -
+        // senza questo, ogni undo/redo che passa da qui perdeva la memoria del frame sovrascritto)
         for(stick* s: S->stickList){
             scene->removeItem(s);
             delete s;

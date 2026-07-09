@@ -470,12 +470,12 @@ void Widget::on_elongateBtn_clicked()
 
 void Widget::on_undoBtn_clicked()
 {
-    view->undoRedo(MODE_UNDO);
+    view->undo_stack.undo();
 }
 
 void Widget::on_redoBtn_clicked()
 {
-    view->undoRedo(MODE_REDO);
+    view->undo_stack.redo();
 }
 void Widget::on_addFrameBtn_clicked()
 {

@@ -46,6 +46,10 @@ extern bool loadFile;
 extern QPointF onionOffset;
 extern QImage * imageDrawBuffer ;
 extern QString animationPath;
+extern int autoSaveInterval;
+extern int opCount;
+
+#define MAXUNDO 50 ///< cap on undo_stack depth, enforced via QUndoStack::setUndoLimit()
 
 myView::myView(QWidget *parent) : QGraphicsView(parent)
 {
@@ -58,6 +62,16 @@ myView::myView(QWidget *parent) : QGraphicsView(parent)
     myBrush.setColor(Qt::gray);
     myPen.setCapStyle(Qt::RoundCap);
     stickLibraryBuffer = new FrameData();
+    undo_stack.setUndoLimit(MAXUNDO);
+    // autosave triggering moved here from storeUndo() (Phase 4): indexChanged fires
+    // on every push/undo/redo, which is a more correct autosave trigger than the old
+    // "only on a fresh edit" behavior (undo/redo are edits too, worth autosaving)
+    connect(&undo_stack, &QUndoStack::indexChanged, this, [this](int){
+        opCount++;
+        if(QFile::exists(animationPath) && opCount % autoSaveInterval == 0){
+            emit autoSaveTrigger();
+        }
+    });
 }
 
 myView::~myView()
@@ -1069,126 +1083,123 @@ void myView::updateOnionSkins(){
 
     onionRender = false;
 }
-#define MAXUNDO 50
-// Questa funzione fa sia undo che redo, a seconda prende come sorgente un buffer diverso undoBuffe ro redoBuffer
 /**
- * @details Since Phase 2b a snapshot is a FrameData used directly: no
- * serialize-and-back round-trip per operation (this also fixes the old leak where the
- * popped snapshot was cloned but never freed). undoFlag stays raised for the whole
- * restore — scene attachment is now an explicit PopulateLiveFrame() parameter, so the
- * old lower-the-flag-around-cloneFrame dance is gone; the flag only tells the code
- * reachable from clearFrame()/moveToFrame() that undoRedo() is driving.
+ * @brief Single QUndoCommand shape covering every undoable edit (REFACTOR_PLAN.md
+ *        Phase 4's permitted simplification: one generic snapshot command instead of
+ *        one subclass per user action).
+ *
+ * @details The mutation itself is never re-run through this class — it already
+ * happened inline in the caller, exactly as before Phase 4 (a mouse drag, a button
+ * handler, a slider callback). This command only *records* that edit so it can be
+ * reverted/reapplied later:
+ * - The constructor captures `before_` (the live frame, right before the caller's
+ *   mutation runs) — this is what `storeUndo()` used to push directly.
+ * - `redo()`'s FIRST call (made automatically by `QUndoStack::push()`, before the
+ *   caller's mutation has even run yet) is a deliberate no-op — there is nothing to
+ *   reapply on first push, the caller's own code performs the edit right after.
+ * - `undo()`'s FIRST call captures `after_` lazily (the live frame now holds
+ *   whatever the edit produced, since it ran normally) before restoring `before_`.
+ *   This mirrors the pre-Phase-4 design exactly: the old code only ever captured a
+ *   "redo" snapshot at the moment `undoRedo()` actually needed one, never eagerly.
+ * - Every subsequent `redo()`/`undo()` call is a pure, symmetric snapshot restore.
  */
-void myView::undoRedo(int mode){
+class FrameUndoCommand : public QUndoCommand
+{
+public:
+    FrameUndoCommand(myView *view, int command_tag)
+        : view_(view), command_tag_(command_tag)
+    {
+        before_ = ExtractFrameData(*view_->myAnimation->currentFrame);
+    }
+    ~FrameUndoCommand() override
+    {
+        delete before_;
+        delete after_;
+    }
+    void redo() override
+    {
+        if(is_first_redo_){
+            is_first_redo_ = false;
+            return;
+        }
+        view_->RestoreFrameSnapshot(command_tag_, MODE_REDO, after_);
+    }
+    void undo() override
+    {
+        if(after_ == nullptr)
+            after_ = ExtractFrameData(*view_->myAnimation->currentFrame);
+        view_->RestoreFrameSnapshot(command_tag_, MODE_UNDO, before_);
+    }
+private:
+    myView *view_;
+    int command_tag_;
+    FrameData *before_ = nullptr;
+    FrameData *after_ = nullptr;
+    bool is_first_redo_ = true;
+};
+
+/**
+ * @details Replaces the pre-Phase-4 `undoRedo()`'s dispatch body verbatim, just
+ * driven by a QUndoCommand's before/after snapshot instead of a popped buffer entry.
+ * `undoFlag` stays raised for the whole restore so `StickFigure::~StickFigure()`
+ * skips removing sticks from the scene when `clearFrame()` has already freed them.
+ */
+void myView::RestoreFrameSnapshot(int command_tag, int mode, FrameData *snapshot)
+{
     undoFlag = true;
-    if(mode == MODE_UNDO && undoBuffer.isEmpty())
-        return;
-    else if(mode == MODE_REDO && redoBuffer.isEmpty())
-        return;
-    undoInfoStruct myUndo;
-    if(mode == MODE_REDO){
-        myUndo = redoBuffer.takeLast();
-    }
-    else {
-        myUndo = undoBuffer.takeLast();
-    }
-    if(mode == MODE_UNDO){// memorizza l'undo nel buffer dei redo
-        storeUndo(myUndo.command,MODE_REDO);
-    }
-    else if(mode == MODE_REDO){ // se siamo in redo immetti lo stato negli undo
-        storeUndo(myUndo.command,MODE_UNDO);
-    }
-    FrameData* undoFrame = myUndo.frame;
     // se è un undo su un addframe, o un redo su un deleteframe ci sta da rimuovere un frame
-    if((myUndo.command == CMD_ADDFRAME && mode == MODE_UNDO)||
-            (myUndo.command == CMD_DELETEFRAME && mode == MODE_REDO)){
+    if((command_tag == CMD_ADDFRAME && mode == MODE_UNDO)||
+            (command_tag == CMD_DELETEFRAME && mode == MODE_REDO)){
         // routine di cancellazione del frame
         deleteFrame(myAnimation->currentFrame);
         // svuota il frame da popolare con il buffer e ripopolalo dallo snapshot,
         // attaccando davvero gli stick alla scena (il target è il frame VERO)
-        myAnimation->frameList[undoFrame->frameNumber]->clearFrame();
-        PopulateLiveFrame(myAnimation->frameList[undoFrame->frameNumber],*undoFrame,true,true);
+        myAnimation->frameList[snapshot->frameNumber]->clearFrame();
+        PopulateLiveFrame(myAnimation->frameList[snapshot->frameNumber],*snapshot,true,true);
         // spostati verso tale frame
-        moveToFrame(myAnimation->frameList[undoFrame->frameNumber]);
+        moveToFrame(myAnimation->frameList[snapshot->frameNumber]);
     }
     // se è un undo su uno spostamento
-    else if(myUndo.command == CMD_MOVETOFRAME){
+    else if(command_tag == CMD_MOVETOFRAME){
         //svuota il frame di destinazione e popolalo con lo snapshot
-        myAnimation->frameList[undoFrame->frameNumber]->clearFrame();
-        PopulateLiveFrame(myAnimation->frameList[undoFrame->frameNumber],*undoFrame,true,true);
+        myAnimation->frameList[snapshot->frameNumber]->clearFrame();
+        PopulateLiveFrame(myAnimation->frameList[snapshot->frameNumber],*snapshot,true,true);
         // spostati sul frame di destinazione
-        moveToFrame(myAnimation->frameList[undoFrame->frameNumber]);
+        moveToFrame(myAnimation->frameList[snapshot->frameNumber]);
     }
     // se è un undo su un deleteframe o un redo su un adddframe bisogna aggiungere un frame
-    else if((myUndo.command == CMD_DELETEFRAME && mode == MODE_UNDO)||
-            (myUndo.command == CMD_ADDFRAME && mode == MODE_REDO)){
+    else if((command_tag == CMD_DELETEFRAME && mode == MODE_UNDO)||
+            (command_tag == CMD_ADDFRAME && mode == MODE_REDO)){
         // routine di aggiunta del frame
-        Frame* addedFrame = setUpFrame(undoFrame->frameNumber);
-        PopulateLiveFrame(addedFrame,*undoFrame,true,true);
+        Frame* addedFrame = setUpFrame(snapshot->frameNumber);
+        PopulateLiveFrame(addedFrame,*snapshot,true,true);
         // spostati sulla destinazione
         moveToFrame(addedFrame);
-
     }
     else{
         myAnimation->currentFrame->clearFrame();
         sceneRemover(scene());
-        PopulateLiveFrame(myAnimation->currentFrame,*undoFrame,true,true);
+        PopulateLiveFrame(myAnimation->currentFrame,*snapshot,true,true);
         moveToFrame(myAnimation->currentFrame);
     }
-    delete undoFrame; // lo snapshot è puro dato: nessuna danza di flag per liberarlo
     undoFlag = false;
-    //
 }
-extern int autoSaveInterval;
-extern int opCount;
-// routine per immagazzinare undo e redo popolando il buffer a seconda della mode selezionata
-// inoltre incrementiamo il contatore delle operazioni e verifichiamo se possiamo innescare l'autosave
+
 /**
- * @details Since Phase 2b the snapshot is a direct in-memory ExtractFrameData() copy:
- * no QDataStream round-trip per operation (the main performance sink of the old undo)
- * and no scratch Frame with an uninitialized scene. undoFlag is only READ here (to
- * tell a fresh user edit from the internal call undoRedo() makes on the other buffer);
- * it is not raised anymore because no deserialization needs guarding.
+ * @details Captures the pre-edit snapshot and pushes it: `QUndoStack::push()` also
+ * calls `redo()` once (a deliberate no-op here, see FrameUndoCommand) and — if the
+ * stack's current index wasn't at the top (the user had undone something and then
+ * made a fresh edit instead of redoing) — automatically discards the now-stale redo
+ * history. That discard was the old code's manual `!undoFlag` + `redoBuffer.clear()`
+ * dance; `QUndoStack` does it as part of `push()`, so no flag is needed here anymore.
  */
-void myView::storeUndo(int command, int mode){
+void myView::storeUndo(int command){
     if(myAnimation->frameList.isEmpty())
     {
         return;
     }
-    // se undoFlag è ancora false qui, non siamo dentro undoRedo(): questa è una modifica nuova
-    // dell'utente, quindi il buffer di redo (che punterebbe a uno stato "futuro" ormai non più
-    // coerente) va invalidato. Se invece undoFlag è già true, questa chiamata è la registrazione
-    // interna che undoRedo() fa sull'ALTRO buffer durante un vero undo/redo: non toccarlo.
-    if(!undoFlag){
-        for(undoInfoStruct u: redoBuffer){
-            delete u.frame;
-        }
-        redoBuffer.clear();
-    }
     updateFrameOrder(CURRENTFRAME);
-    opCount++;
-    // se il file è stato salvato, ed esiste, e sono passati un numero sufficiente di istruzioni, procedi con láutosave
-    if(QFile::exists(animationPath) && opCount%autoSaveInterval == 0)
-    {
-        emit autoSaveTrigger();
-    }
-    // inizializza la struttura di undo/redo con lo snapshot dati del frame corrente
-    undoInfoStruct myUndo;
-    myUndo.frame = ExtractFrameData(*myAnimation->currentFrame);
-    myUndo.command = command;
-    //popola il buffer appropriato
-    if(mode == MODE_UNDO){
-        if(undoBuffer.count()>=MAXUNDO){
-            delete undoBuffer.takeFirst().frame;
-        }
-        undoBuffer.append(myUndo);
-    }
-    else if(mode ==MODE_REDO){
-        if(redoBuffer.count()>=MAXUNDO){
-            delete redoBuffer.takeFirst().frame;
-        }
-        redoBuffer.append(myUndo);
-    }
+    undo_stack.push(new FrameUndoCommand(this, command));
 }
 void myView::updateFrameOrder(Frame* f){
     int j = 0;
@@ -1237,20 +1248,14 @@ void myView::removeHandles(StickFigure *S)
         scene()->removeItem(s->stickHandle[1]);
     }
 }
-// cancella i buffer di undo e redo, da chiamare quando si carica un nuovo file
+// cancella la storia di undo/redo, da chiamare quando si carica un nuovo file
 /**
- * @details Snapshots are pure data since Phase 2b: freeing them is a plain delete,
- * so the old clearUndoFlag choreography is gone (and the flag with it).
+ * @details QUndoStack::clear() deletes every remaining FrameUndoCommand (each
+ * frees its own before_/after_ FrameData in its destructor) — the old manual
+ * per-entry delete loop and the clearUndoFlag choreography around it are both gone.
  */
 void myView::clearUndo(){
-    for(undoInfoStruct u:undoBuffer){
-        delete u.frame;
-    }
-    undoBuffer.clear();
-    for(undoInfoStruct u:redoBuffer){
-        delete u.frame;
-    }
-    redoBuffer.clear();
+    undo_stack.clear();
 }
 /**
  * @details Renders the 50x50 preview icon of a library entry from its data record:

@@ -51,10 +51,12 @@ wrapped any call that reads it) and was deleted outright. See
 "Serialization" below for the data classes and their bridge functions.
 
 Only **`undoFlag`** remains, purely at the live-object level: true while
-`myView::undoRedo()` is restoring a frame. `StickFigure::~StickFigure()`
-checks it to skip removing sticks from the scene when
-`Frame::clearFrame()` (called just before repopulating) has already freed
-them explicitly.
+`myView::RestoreFrameSnapshot()` (Phase 4) is restoring a frame.
+`StickFigure::~StickFigure()` checks it to skip removing sticks from the
+scene when `Frame::clearFrame()` (called just before repopulating) has
+already freed them explicitly. `Frame::addStickFigure()`'s own `!undoFlag`
+checks were removed in Phase 4 as dead code — that function is never
+reached while `undoFlag` is true.
 
 `stick.cpp` itself has been flag-free since Phase 1b: `~stick` never
 touches `imgListWidget`; the code paths that delete a LIVE stick
@@ -63,7 +65,9 @@ touches `imgListWidget`; the code paths that delete a LIVE stick
 
 ## Command flow: how a UI edit reaches the data model and becomes undoable
 
-Every mutating UI handler in `widget.cpp` follows the same shape:
+Since refactor Phase 4, undo/redo is driven by a `QUndoStack` member on
+`myView` (`undo_stack`), not hand-rolled buffers. Every mutating UI handler
+still follows the exact same shape it always has — **this did not change**:
 
 ```cpp
 void Widget::on_someBtn_clicked(){
@@ -72,56 +76,67 @@ void Widget::on_someBtn_clicked(){
 }
 ```
 
-`storeUndo()` always runs *before* the mutation — since Phase 2b it takes
-an in-memory snapshot via `ExtractFrameData(*currentFrame)` (a plain
-`FrameData*`, no stream, no scratch `Frame`) and pushes it, wrapped in an
-`undoInfoStruct{command, frame}`, onto `myView::undoBuffer`. The `command`
-tag (`CMD_SIMPLE` — default, `CMD_ADDFRAME`, `CMD_DELETEFRAME`,
-`CMD_MOVETOFRAME`, see `myview.h`) records *what kind* of structural change
-is about to happen, not the change itself — `undoRedo()` uses it later to
-decide how to re-integrate the snapshot rather than replaying an action. On
-a genuine new user edit (`undoFlag` false — i.e. not called recursively
-from inside `undoRedo()`) `storeUndo()` also discards (`delete`) and clears
-`redoBuffer`, since any pending redo history is now stale. `storeUndo()`
-doubles as the autosave trigger point: it increments `opCount` and emits
-`autoSaveTrigger()` every `autoSaveInterval` ops if `animationPath` points
-at a real file. Both buffers are capped at `MAXUNDO` entries, evicting the
-oldest via a plain `delete`.
+`storeUndo(command)` still runs *before* the mutation, with the exact same
+signature and call sites as before Phase 4. Internally it now constructs a
+`FrameUndoCommand` (`myview.cpp`, not exposed in any header — only
+`storeUndo()`/`RestoreFrameSnapshot()` need it) and pushes it onto
+`undo_stack`. `command` (`CMD_SIMPLE` — default, `CMD_ADDFRAME`,
+`CMD_DELETEFRAME`, `CMD_MOVETOFRAME`, see `myview.h`) still records *what
+kind* of structural change is about to happen, not the change itself.
 
-`myView::undoRedo(mode)` (`mode` = `MODE_UNDO`/`MODE_REDO`) is the reverse
-path, called from the Undo/Redo buttons:
-1. Pop one `undoInfoStruct` off the relevant buffer — `myUndo.frame` is
-   already a ready-to-use `FrameData*`, no deserialization step.
-2. Immediately call `storeUndo(poppedCommand, oppositeMode)` — this snapshots
-   the *current* (about-to-be-overwritten) live frame into the *other*
-   buffer, which is what makes undo/redo symmetric (undoing pushes a redo
-   entry and vice versa).
-3. Dispatch on `command` to decide *where* in `frameList` the snapshot
-   belongs and whether a frame needs to be created/removed first:
-   - `CMD_ADDFRAME`+undo or `CMD_DELETEFRAME`+redo → the frame at
-     `undoFrame->frameNumber` must disappear: `deleteFrame(currentFrame)`,
-     then clear and re-populate the (now-shifted) frame at that index.
-   - `CMD_DELETEFRAME`+undo or `CMD_ADDFRAME`+redo → the opposite: a frame
-     must be (re)created at `undoFrame->frameNumber` via `setUpFrame()`
-     before populating it.
-   - `CMD_MOVETOFRAME` → just clear + repopulate the frame at
-     `undoFrame->frameNumber` (no add/remove, only content changed).
-   - `CMD_SIMPLE` (else) → clear + repopulate `currentFrame` directly; used
-     for in-place edits (stick moves, scale/rotate, add/remove stick or
-     stickfigure) that don't change which frame is current.
-   Every branch repopulates the *live* target frame via
-   `PopulateLiveFrame(target, *undoFrame, /*attach_to_scene=*/true,
-   /*update_icons=*/true)` — attaching to the scene is now an explicit
-   parameter instead of something `operator>>` inferred from a global flag
-   (this used to be exactly the kind of place a left-set flag caused a
-   `QGraphicsScene::removeItem: item's scene (0x0)...` crash).
-4. `delete undoFrame` frees the snapshot — it is pure data, so a plain
-   delete is correct; there is no scratch-`.scene` trap to avoid anymore.
+**Why the call sites didn't need to change**, even though `QUndoCommand`'s
+contract is normally "`redo()` performs the mutation": several tools in
+this app are drag/multi-click gestures whose mutation spans multiple event
+handler calls (`mouseMoveEvent` during a drag, `valueChanged` during a
+slider drag, the second click of a 2-click draw) — for these, `storeUndo()`
+was always called once at gesture *start*, and the pre-Phase-4 code never
+captured an explicit "after" state either; it only computed one lazily, at
+the moment the user actually clicked Undo. `FrameUndoCommand` preserves
+this exactly:
+- **Constructor** captures `before_` (`ExtractFrameData` of the current
+  frame) — this is what `storeUndo()` always did.
+- **`redo()`'s first call** (made automatically by `QUndoStack::push()`,
+  before the caller's mutation has even run) is a deliberate no-op — the
+  caller's own inline code, unchanged, performs the edit immediately after
+  `storeUndo()` returns, exactly as before Phase 4.
+- **`undo()`'s first call** captures `after_` lazily (the live frame,
+  whatever the edit produced) before restoring `before_`.
+- Every subsequent `redo()`/`undo()` is a pure, symmetric snapshot restore.
 
-Net effect: the undo system doesn't store or replay *commands* in the usual
-sense — it stores whole-`FrameData` snapshots and a tag describing the
-structural shape of the change, then uses that tag purely to figure out
-which slot in `frameList` the restored snapshot belongs in.
+`myView::RestoreFrameSnapshot(command_tag, mode, snapshot)` is what
+`FrameUndoCommand::undo()`/`redo()` call to actually restore a snapshot —
+it is the pre-Phase-4 `undoRedo()`'s dispatch body, verbatim, just taking
+an explicit snapshot argument instead of popping one off a buffer:
+- `CMD_ADDFRAME`+undo or `CMD_DELETEFRAME`+redo → the frame at
+  `snapshot->frameNumber` must disappear: `deleteFrame(currentFrame)`,
+  then clear and re-populate the (now-shifted) frame at that index.
+- `CMD_DELETEFRAME`+undo or `CMD_ADDFRAME`+redo → the opposite: a frame
+  must be (re)created at `snapshot->frameNumber` via `setUpFrame()` before
+  populating it.
+- `CMD_MOVETOFRAME` → just clear + repopulate the frame at
+  `snapshot->frameNumber` (no add/remove, only content changed).
+- `CMD_SIMPLE` (else) → clear + repopulate `currentFrame` directly; used
+  for in-place edits (stick moves, scale/rotate, add/remove stick or
+  stickfigure) that don't change which frame is current.
+
+`QUndoStack` handles what the old code did by hand: pushing a new command
+after an undo (without redoing first) automatically discards the stale
+redo history (replacing the old manual `!undoFlag` + `redoBuffer.clear()`
+check), and `undo_stack.setUndoLimit(MAXUNDO)` (set once, in the
+constructor) replaces the hand-rolled per-push eviction. Autosave
+(`opCount`/`autoSaveInterval`/`autoSaveTrigger()`) moved to a lambda
+connected to `QUndoStack::indexChanged`, which fires on push *and* on
+undo/redo — so autosave now also triggers after an undo/redo, not just
+fresh edits.
+
+`undoFlag` survives Phase 4 (unlike `clearUndoFlag`, which is fully gone)
+for a reason unrelated to the undo mechanism itself: it guards a real
+double-free. `Frame::clearFrame()` explicitly frees each stick before
+deleting its owning `StickFigure`, and `~StickFigure()` would try to free
+those same sticks again unless `undoFlag` tells it not to.
+`RestoreFrameSnapshot()` is the only caller of `clearFrame()` anywhere in
+the codebase, so `undoFlag` is raised for exactly that call's duration —
+narrowly scoped and still load-bearing, not leftover debt.
 
 ## Serialization
 

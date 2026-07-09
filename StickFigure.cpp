@@ -11,7 +11,8 @@ extern QGraphicsRectItem* myRect;
  * @details Since Phase 2b the only scratch-vs-live flag left here is undoFlag: the
  * copy/library buffers are pure data objects now, so libFlag/copyFlag/clearUndoFlag
  * had no remaining setter and their guard terms were dropped. undoFlag still marks
- * "inside undoRedo()", where clearFrame() has already freed the sticks explicitly.
+ * "inside myView::RestoreFrameSnapshot()" (Phase 4), where clearFrame() has already
+ * freed the sticks explicitly.
  */
 StickFigure::~StickFigure()
 {

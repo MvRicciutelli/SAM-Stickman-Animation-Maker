@@ -7,6 +7,7 @@
 #include <QMouseEvent>
 #include <QGraphicsItem>
 #include <QLineF>
+#include <QUndoStack>
 #include <StickFigure.h>
 #include <animation.h>
 #define DRAW 5
@@ -44,19 +45,6 @@
 #define ATTRIBUTE_BRUSHSIZE 3
 
 
-/**
- * @brief One undo/redo entry: a whole-frame data snapshot plus the command tag that
- *        tells undoRedo() which frameList slot the snapshot belongs in.
- *
- * Since Phase 2b the snapshot is a FrameData (pure data, plain delete) instead of a
- * scratch Frame with an uninitialized scene member.
- */
-typedef struct undoInfoStruct
-{
-    int command;      ///< CMD_SIMPLE / CMD_ADDFRAME / CMD_DELETEFRAME / CMD_MOVETOFRAME
-    FrameData* frame; ///< owned pre-change snapshot of the frame
-}undoInfoStruct;
-
 class myView : public QGraphicsView
 {
     Q_OBJECT
@@ -74,13 +62,44 @@ public:
     void moveToFrame(Frame *frame);
     void updateOnionSkins();
     QList<QGraphicsPixmapItem*> onionSkins;
-    QList <undoInfoStruct> undoBuffer;
-    QList <undoInfoStruct> redoBuffer;
-    void undoRedo(int mode);
-    void storeUndo(int command = CMD_SIMPLE, int mode = MODE_UNDO);
+
+    /**
+     * @brief Undo/redo history, replacing the hand-rolled undoBuffer/redoBuffer
+     *        (REFACTOR_PLAN.md Phase 4). Every entry is a FrameUndoCommand
+     *        (myview.cpp) holding before/after `FrameData` snapshots of a single
+     *        frame; `MAXUNDO` is enforced via `setUndoLimit()` in the constructor.
+     */
+    QUndoStack undo_stack;
+
+    /**
+     * @brief Restores a frame from a snapshot, dispatching on the command tag.
+     * @param command_tag CMD_SIMPLE / CMD_ADDFRAME / CMD_DELETEFRAME / CMD_MOVETOFRAME —
+     *        which structural change (if any) accompanied the edit being reverted/
+     *        reapplied, and therefore whether a frame needs to be created/removed
+     *        first (mirrors the pre-Phase-4 `undoRedo()` dispatch).
+     * @param mode MODE_UNDO or MODE_REDO — which direction the CMD_ADDFRAME/
+     *        CMD_DELETEFRAME pair goes (add un-does a delete and vice versa).
+     * @param snapshot the frame content to restore; not modified or taken over.
+     *
+     * Called only by FrameUndoCommand::undo()/redo() (myview.cpp) — public because
+     * that class lives outside myView, not because other callers are expected.
+     */
+    void RestoreFrameSnapshot(int command_tag, int mode, FrameData *snapshot);
+
+    /**
+     * @brief Snapshots the current frame as the "before" state of a new edit and
+     *        pushes it onto `undo_stack`.
+     * @param command CMD_SIMPLE (default) / CMD_ADDFRAME / CMD_DELETEFRAME /
+     *        CMD_MOVETOFRAME — see RestoreFrameSnapshot().
+     *
+     * Call BEFORE mutating, exactly like the pre-Phase-4 version — callers are
+     * unchanged by this refactor. The "after" state is captured lazily, the first
+     * time this edit is undone (see FrameUndoCommand in myview.cpp), since until
+     * then the live frame already *is* the after-state and needs no separate copy.
+     */
+    void storeUndo(int command = CMD_SIMPLE);
     void deleteFrame(Frame *frame);
     Frame *setUpFrame(int pos);
-    void storeRedo(int command = CMD_SIMPLE);
     void mapMyCoords(QPointF &myCoord, QPointF startingPoint);
     void clearUndo();
     void loadLibrary(QString fileName, int mode = 0);
