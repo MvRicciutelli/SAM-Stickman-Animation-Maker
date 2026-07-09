@@ -21,10 +21,6 @@ bool changeTypeFlag = false;
 namespace Ui { class Widget; }
 extern Ui::Widget *myUi;
 
-#define CS currentFrame->currentStickFigure->currentStick
-#define CURRENTSTICKFIGURE currentFrame->currentStickFigure
-
-
 Animation::Animation()
 {
 
@@ -90,9 +86,9 @@ void Animation::updateSelection(QPointF point)
         return;
     scene->clearSelection();
     StickFigure *selectedStickFigure = nullptr;
-    if(CURRENTSTICKFIGURE != nullptr){
-        CURRENTSTICKFIGURE->highlight(false);
-        CURRENTSTICKFIGURE->refresh(0);
+    if(currentFrame->CurrentStickFigure() != nullptr){
+        currentFrame->CurrentStickFigure()->highlight(false);
+        currentFrame->CurrentStickFigure()->refresh(0);
     }
 
     for(StickFigure * S: currentFrame->stickFigures)
@@ -115,20 +111,20 @@ void Animation::updateSelection(QPointF point)
     }
     if(selectedStickFigure == nullptr) // nessuno stickfigure nel frame ha almeno uno stick
         return;
-    // CURRENTSTICKFIGURE va controllato PRIMA: espandere CS da solo deferenzia già
+    // CurrentStickFigure() va controllato PRIMA: CurrentStick() da solo deferenzia già
     // currentStickFigure, che può essere nullptr dopo un ripristino di undo/redo il cui
     // "stickfigure corrente" salvato era un layer vuoto (operator>> lo lascia nullptr in quel caso)
-    if(CURRENTSTICKFIGURE && CS){
-        if(selectedStickFigure->stickList[selectedIdx]->stickType != CS->stickType){
+    if(currentFrame->CurrentStickFigure() && currentFrame->CurrentStick()){
+        if(selectedStickFigure->stickList[selectedIdx]->stickType != currentFrame->CurrentStick()->stickType){
             updateTab(selectedStickFigure->stickList[selectedIdx]->stickType );
         }
     }
 
-    CURRENTSTICKFIGURE = selectedStickFigure;
-    CS = CURRENTSTICKFIGURE->stickList[selectedIdx];
-    CURRENTSTICKFIGURE->highlight(true);
-    CS->setSelected(true);
-    CS->selected = true;
+    currentFrame->CurrentStickFigure() = selectedStickFigure;
+    currentFrame->CurrentStick() = currentFrame->CurrentStickFigure()->stickList[selectedIdx];
+    currentFrame->CurrentStickFigure()->highlight(true);
+    currentFrame->CurrentStick()->setSelected(true);
+    currentFrame->CurrentStick()->selected = true;
 
 
     updateSliders();
@@ -169,20 +165,20 @@ void Animation::updateSelection(stick* s)
 
     // update current stickfigure
     scene->clearSelection();
-    CURRENTSTICKFIGURE->highlight(false);
+    currentFrame->CurrentStickFigure()->highlight(false);
 
     for(StickFigure *S : currentFrame->stickFigures)
     {
         if(S->stickList.contains(s))
         {
-            CURRENTSTICKFIGURE = S;
+            currentFrame->CurrentStickFigure() = S;
             S->highlight(true);
         }
     }
     // update current stick
-    if(!CURRENTSTICKFIGURE->stickList.isEmpty())
+    if(!currentFrame->CurrentStickFigure()->stickList.isEmpty())
     {
-     CS = s;
+     currentFrame->CurrentStick() = s;
      s->setSelected(true);
      s->selected = true;
     }
@@ -193,15 +189,15 @@ void Animation::updateSelection(stick* s)
 void Animation::updateSelection(StickFigure* S)
 {
     //update current frame
-    if(S==CURRENTSTICKFIGURE)
+    if(S==currentFrame->CurrentStickFigure())
         return;
     // update current stickfigure
-    if(CURRENTSTICKFIGURE !=nullptr)
+    if(currentFrame->CurrentStickFigure() !=nullptr)
     {
-        CURRENTSTICKFIGURE->highlight(false); //de highlight old selection
+        currentFrame->CurrentStickFigure()->highlight(false); //de highlight old selection
     }
 
-    CURRENTSTICKFIGURE = S; //update currentStickFigure buffer
+    currentFrame->CurrentStickFigure() = S; //update currentStickFigure buffer
 
     S->highlight(true); //highlight new one
 
@@ -215,8 +211,8 @@ void Animation::updateSelection(StickFigure* S)
 }
 
 void Animation::updateSliders(){
-    stick *cs = CS;
-    if(CS == nullptr)
+    stick *cs = currentFrame->CurrentStick();
+    if(currentFrame->CurrentStick() == nullptr)
         return;
     if(cs->stickType == stick::IMAGE){
         //aggiorna gli slider di modifica alla scala e all'offset
@@ -256,7 +252,7 @@ void Animation::updateSliders(){
 
     }
     editLineThicknessSlider->setValue(cs->Pen.width());
-    elongateSpinbox->setValue(  CS->myLine.length());
+    elongateSpinbox->setValue(  currentFrame->CurrentStick()->myLine.length());
 }
 Frame* Animation::setupFrame(int pos){
     QString name;

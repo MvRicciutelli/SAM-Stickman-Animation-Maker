@@ -760,7 +760,55 @@ loadingAnimationFlag\|clearUndoFlag\|switchFrameFlag"` returns nothing.
 `grep -rn "define CURRENTSTICKFIGURE\|define CURRENTFRAME"` returns
 nothing.
 
-- [ ] Phase 5 complete
+**Status: complete (2026-07-09).** Step 1: all five flags were already
+gone by the time this phase started (Phase 2b/2c/4's own follow-up work);
+this phase's grep just confirmed it — zero live reads/writes/declarations
+of any of the six original flags remain (`grep -n
+"\b(undoFlag|copyFlag|libFlag|loadingAnimationFlag|clearUndoFlag|switchFrameFlag)\s*[=;]"`
+returns nothing; their names survive only in comments explaining what was
+removed and why). Step 2 (`switchFrameFlag` → local RAII guard) is moot —
+`switchFrameFlag` isn't a lingering global needing localization, it's
+fully deleted (Phase 2c), and there's no `FramePresenter` to hold a local
+guard in anyway (Phase 2c deferred).
+
+Step 3: added `Animation::CurrentFrame()` (returns `Frame*&`) and
+`Frame::CurrentStickFigure()`/`Frame::CurrentStick()` (return
+`StickFigure*&`/`stick*&`) — trivial inline one-liner accessors in
+`animation.h`/`frame.h`, named in `UpperPascalCase` per this plan's naming
+convention (the plan's own step 3 text suggested lowercase names,
+written before that convention was formalized — `CurrentFrame`/
+`CurrentStickFigure` is what's actually consistent with every other
+method added since Phase 1). Returning a **reference to the pointer**
+(not the pointer by value) was the key design choice: it preserves every
+existing use of the macros verbatim, including the several sites that
+*assign* through them (e.g. `CURRENTSTICKFIGURE = selectedStickFigure;`
+in `Animation::updateSelection()`), without needing to hunt down and
+special-case each lvalue usage separately.
+
+All ~400 combined occurrences of `CS`/`CURRENTSTICKFIGURE`/`CURRENTFRAME`
+across 9 files (`widget.cpp`, `myview.cpp`, `mymainwindow.cpp`,
+`animation.cpp`, `frame.cpp`, and the four `advanced*widget.cpp` files)
+were replaced with the real method-call chain appropriate to that file's
+path to the `Animation` singleton (`myAnimation->...` inside `myView`'s
+own methods, `view->myAnimation->...` in `widget.cpp`/`mymainwindow.cpp`,
+`V->myAnimation->...` in the `advanced*widget.cpp` files,
+`currentFrame->...` inside `Animation`'s own methods). This was safe as a
+bulk mechanical substitution — verified beforehand that none of the three
+macro names ever appear as a substring of another identifier, string
+literal, or anywhere the replacement text itself would collide — and the
+compiler would have caught any missed/wrong substitution immediately
+(undeclared identifier), which none did: the full app and test suite
+built clean on the first attempt after the sweep.
+
+**Verify performed:** full rebuild (app + tests), zero errors. All 22
+characterization tests pass. `MarionettaPlus.exe` launched and cleanly
+closed via a real `WM_CLOSE`, exit code 0. Manual smoke-test of the full
+UI (drag tools, sliders, menus) is still outstanding from Phase 4 — this
+phase's changes are 1:1 text substitutions with no behavior change, so
+they don't add new smoke-test surface, but they don't reduce the Phase 4
+one either.
+
+- [x] Phase 5 complete
 
 ---
 

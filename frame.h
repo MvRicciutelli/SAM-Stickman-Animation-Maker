@@ -12,6 +12,23 @@ public:
     QList<StickFigure*> stickFigures;
     StickFigure* stickFigureBuffer;
     StickFigure* currentStickFigure;
+    /**
+     * @brief Accessor for the currently selected stickfigure in this frame.
+     * @return reference to `currentStickFigure`, so reads and assignments
+     *         (`CurrentStickFigure() = someFigure`) both work like the raw member did.
+     *
+     * Replaces the `CURRENTSTICKFIGURE` macro (Phase 5).
+     */
+    StickFigure*& CurrentStickFigure() { return currentStickFigure; }
+    /**
+     * @brief Accessor for the currently selected stick within `CurrentStickFigure()`.
+     * @return reference to that stickfigure's `currentStick`.
+     *
+     * Replaces the `CS` macro (Phase 5). Same as the macro, this dereferences
+     * `currentStickFigure` without a null check — callers are responsible for that,
+     * exactly as before.
+     */
+    stick*& CurrentStick() { return currentStickFigure->currentStick; }
     stick *selectStick(QPointF point);
     stick *selectStick(StickFigure* S, stick* s= nullptr);
     StickFigure* removeStickFigure(StickFigure* toRemove);

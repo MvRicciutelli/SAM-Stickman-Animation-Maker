@@ -3,9 +3,6 @@
 #include "myview.h"
 #include "uiItems.h"
 #include <QCheckBox>
-#define CS V->myAnimation->currentFrame->currentStickFigure->currentStick
-#define CURRENTSTICKFIGURE V->myAnimation->currentFrame->currentStickFigure
-#define CURRENTFRAME V->myAnimation->currentFrame
 extern int W;
 extern int H;
 extern myView *V;
@@ -35,15 +32,15 @@ advancedTaperWidget::~advancedTaperWidget()
 void advancedTaperWidget::on_taperWidthSlider_valueChanged(int value)
 {
     ui->taperWidthSpinbox->setValue(value);
-    if(CS==nullptr)
+    if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
         return;
     if(taperWSliderFlag == false){
         taperWSliderFlag = true;
 
         V->storeUndo();
     }
-    CS->imgWScale = value;
-    CURRENTSTICKFIGURE->refresh();
+    V->myAnimation->CurrentFrame()->CurrentStick()->imgWScale = value;
+    V->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
 
 }
 
@@ -56,25 +53,25 @@ void advancedTaperWidget::on_taperWidthSlider_sliderReleased()
 void advancedTaperWidget::on_taperHeightSpinbox_valueChanged(int arg1)
 {
     ui->taperHeightSlider->setValue(arg1);
-    if(CS==nullptr)
+    if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
         return;
-    CS->imgHScale = arg1;
-    CURRENTSTICKFIGURE->refresh();
+    V->myAnimation->CurrentFrame()->CurrentStick()->imgHScale = arg1;
+    V->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
     ui->taperHeightSlider->setValue(arg1);
 }
 
 void advancedTaperWidget::on_taperHeightSlider_valueChanged(int value)
 {
     ui->taperHeightSpinbox->setValue(value);
-    if(CS==nullptr)
+    if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
         return;
     if(taperHSliderFlag == false){
         taperHSliderFlag = true;
 
         V->storeUndo();
     }
-    CS->imgHScale = value;
-    CURRENTSTICKFIGURE->refresh();
+    V->myAnimation->CurrentFrame()->CurrentStick()->imgHScale = value;
+    V->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
 }
 
 void advancedTaperWidget::on_taperHeightSlider_sliderReleased()
@@ -86,29 +83,29 @@ void advancedTaperWidget::on_taperHeightSlider_sliderReleased()
 void advancedTaperWidget::on_taperWidthSpinbox_valueChanged(int arg1)
 {
     ui->taperWidthSlider->setValue(arg1);
-    if(CS==nullptr)
+    if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
         return;
-    CS->imgWScale = arg1;
-    CURRENTSTICKFIGURE->refresh();
+    V->myAnimation->CurrentFrame()->CurrentStick()->imgWScale = arg1;
+    V->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
     ui->taperWidthSlider->setValue(arg1);
 }
 
 void advancedTaperWidget::on_hardTopTaperCheck_stateChanged(int arg1)
 {
-    if(CS==nullptr)
+    if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
         return;
     V->storeUndo();
-    CS->hardTop=((bool) arg1);
-    CURRENTSTICKFIGURE->refresh();
+    V->myAnimation->CurrentFrame()->CurrentStick()->hardTop=((bool) arg1);
+    V->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
     V->myAnimation->currentFrame->updateIcon();
 }
 
 void advancedTaperWidget::on_hardBottomTaperCheck_stateChanged(int arg1)
 {
-   if(CS==nullptr)
+   if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
        return;
    V->storeUndo();
-   CS->hardBottom=((bool) arg1);
-   CURRENTSTICKFIGURE->refresh();
+   V->myAnimation->CurrentFrame()->CurrentStick()->hardBottom=((bool) arg1);
+   V->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
    V->myAnimation->currentFrame->updateIcon();
 }

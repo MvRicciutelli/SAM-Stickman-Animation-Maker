@@ -9,9 +9,6 @@
 #include <animationoptions.h>
 #include <ffmpegexport.h>
 #include <QMessageBox>
-#define CS view->myAnimation->currentFrame->currentStickFigure->currentStick
-#define CURRENTSTICKFIGURE view->myAnimation->currentFrame->currentStickFigure
-#define CURRENTFRAME view->myAnimation->currentFrame
 extern QDir programFolder;
 extern int W;
 extern int H;
@@ -55,8 +52,8 @@ void myMainWindow::on_actionsave_triggered()
 {
     QString fileName = QFileDialog::getSaveFileName(this,tr("Save StickFigure"),
                        myStickFiguresFolder.path(), "Stickfigure (*.stck)");
-    if(fileName.length()>1 && CURRENTSTICKFIGURE){
-        CURRENTSTICKFIGURE->saveStickFigure(fileName);
+    if(fileName.length()>1 && view->myAnimation->CurrentFrame()->CurrentStickFigure()){
+        view->myAnimation->CurrentFrame()->CurrentStickFigure()->saveStickFigure(fileName);
     }
 }
 
@@ -68,11 +65,11 @@ void myMainWindow::on_actionload_triggered()
     if(QFile::exists(fileName)){
         view->storeUndo();
         centralW->addStick();
-        CURRENTSTICKFIGURE->loadStickFigure(fileName);
-        for(stick*s:CURRENTSTICKFIGURE->stickList){
-            CURRENTFRAME->totalSticks.append(s);
+        view->myAnimation->CurrentFrame()->CurrentStickFigure()->loadStickFigure(fileName);
+        for(stick*s:view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
+            view->myAnimation->CurrentFrame()->totalSticks.append(s);
         }
-        view->addHandles(CURRENTSTICKFIGURE);
+        view->addHandles(view->myAnimation->CurrentFrame()->CurrentStickFigure());
     }
 }
 

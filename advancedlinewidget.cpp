@@ -7,9 +7,6 @@
 extern int W;
 extern int H;
 
-#define CS V->myAnimation->currentFrame->currentStickFigure->currentStick
-#define CURRENTSTICKFIGURE V->myAnimation->currentFrame->currentStickFigure
-#define CURRENTFRAME V->myAnimation->currentFrame
 extern myView *V;
 advancedLineWidget::advancedLineWidget(QWidget *parent) :
     QWidget(parent),
@@ -27,14 +24,14 @@ advancedLineWidget::~advancedLineWidget()
 
 void advancedLineWidget::on_editLineThicknessSlider_valueChanged(int value)
 {
-    if(CURRENTSTICKFIGURE != nullptr){
-        if(CS != nullptr){
+    if(V->myAnimation->CurrentFrame()->CurrentStickFigure() != nullptr){
+        if(V->myAnimation->CurrentFrame()->CurrentStick() != nullptr){
             editLineThicknessSlider->setRange(0,0.5*sqrt(pow(W,2)+pow(H,2)));
             lineEditThicknessWidthSpinbox->setRange(0,0.5*sqrt(pow(W,2)+pow(H,2)));
             lineEditThicknessWidthSpinbox->setValue(value);
-            CS->Pen.setWidth(value);
+            V->myAnimation->CurrentFrame()->CurrentStick()->Pen.setWidth(value);
             V->myPen.setWidth(value);
-            CS->refresh(1);
+            V->myAnimation->CurrentFrame()->CurrentStick()->refresh(1);
         }
     }
 }

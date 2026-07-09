@@ -6,7 +6,6 @@
 #include <QPainter>
 #include <QFont>
 #include "uiItems.h"
-#define CS currentStickFigure->currentStick
 extern QListWidget * myStickFigureWidgetList;
 Frame::Frame()
 {

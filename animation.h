@@ -12,6 +12,15 @@ public:
     Frame *frameBuffer;
     Frame * addFrame(QListWidgetItem* item, int pos);
     Frame* currentFrame;
+    /**
+     * @brief Accessor for the currently displayed frame.
+     * @return reference to `currentFrame`, so both reads and assignments
+     *         (`CurrentFrame() = someFrame`) work exactly like the raw member did.
+     *
+     * Replaces the `CURRENTFRAME` macro (Phase 5) — same expression, but as a real,
+     * symbol-searchable, compiler-checked method instead of blind text substitution.
+     */
+    Frame*& CurrentFrame() { return currentFrame; }
     void updateSelection(stick* item);
     void updateSelection(StickFigure* item);
     void updateSelection(QPointF point);

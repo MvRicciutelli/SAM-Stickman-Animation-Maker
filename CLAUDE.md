@@ -30,6 +30,19 @@ pure-data `FrameData`/`StickFigureData`/`StickData` instead of a live
 regardless of whether `removeItem()` was called first — never assume you
 must call `removeItem()` before `delete`.
 
+Reach "the current frame/stickfigure/stick" via
+`Animation::CurrentFrame()` / `Frame::CurrentStickFigure()` /
+`Frame::CurrentStick()` (all trivial inline accessors, each returning a
+**reference to the pointer** — e.g. `CurrentStickFigure() = someFigure;`
+is a valid assignment, exactly like the raw member it wraps). These
+replaced the `CS`/`CURRENTSTICKFIGURE`/`CURRENTFRAME` preprocessor macros
+(Phase 5) that used to expand to a different hand-written expression per
+file (`myAnimation->...` inside `myView`'s own methods, `view->myAnimation->...`
+in `widget.cpp`/`mymainwindow.cpp`, `V->myAnimation->...` in the
+`advanced*widget.cpp` files) — same reachability, but as real,
+symbol-searchable, compiler-checked calls instead of blind text
+substitution.
+
 ## The flag-guard system (read this before touching lifetime/serialization code)
 
 Historically, six global booleans gated whether a `StickFigure`/`Frame`/
