@@ -20,6 +20,7 @@ SOURCES += \
     ../animation.cpp \
     ../frame.cpp \
     ../framedata.cpp \
+    ../framepresenter.cpp \
     ../myview.cpp \
     ../stick.cpp \
     ../stickdata.cpp \
@@ -34,6 +35,7 @@ HEADERS += \
     ../animation.h \
     ../frame.h \
     ../framedata.h \
+    ../framepresenter.h \
     ../myview.h \
     ../stick.h \
     ../stickdata.h \

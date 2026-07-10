@@ -21,7 +21,7 @@ public:
      * symbol-searchable, compiler-checked method instead of blind text substitution.
      */
     Frame*& CurrentFrame() { return currentFrame; }
-    void updateSelection(stick* item);
+    void updateSelection(StickData* item);
     void updateSelection(StickFigure* item);
     void updateSelection(QPointF point);
     QGraphicsScene * scene;

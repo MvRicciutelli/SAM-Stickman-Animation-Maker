@@ -28,9 +28,9 @@ public:
      * `currentStickFigure` without a null check — callers are responsible for that,
      * exactly as before.
      */
-    stick*& CurrentStick() { return currentStickFigure->currentStick; }
-    stick *selectStick(QPointF point);
-    stick *selectStick(StickFigure* S, stick* s= nullptr);
+    StickData*& CurrentStick() { return currentStickFigure->currentStick; }
+    StickData *selectStick(QPointF point);
+    StickData *selectStick(StickFigure* S, StickData* s= nullptr);
     StickFigure* removeStickFigure(StickFigure* toRemove);
     QIcon* frameIcon;
     int numOfItems = 0;
@@ -40,7 +40,7 @@ public:
     int frameNumber = 0;
     QListWidgetItem * linkedItem;
     void updateIcon();
-    QList <stick*> totalSticks;
+    QList <StickData*> totalSticks;
     StickFigure *addStickFigure( QListWidget *myListWidget, QString name = "");
     void updateRender();
     void clearFrame();

@@ -10,6 +10,7 @@
 #include <animationoptions.h>
 #include <QMessageBox>
 #include "uiItems.h"
+#include "framepresenter.h"
 
 
 bool    isRightPressed = false;
@@ -30,8 +31,8 @@ bool rotateScene = false;
 bool scaleScene = false;
 StickFigure* joinToStickFigure;
 StickFigure* splitToStickFigure;;
-stick* joinToStick;
-stick* splitToStick;
+StickData* joinToStick;
+StickData* splitToStick;
 extern QString imageNameBuffer;
 extern int W;
 extern int H;
@@ -108,7 +109,7 @@ void myView::deleteStickFigure()
         myStickFigureWidgetList->takeItem(myStickFigureWidgetList->row(current));
         delete current;
         // delete from the total list
-        for(stick*s:cs->stickList){
+        for(StickData*s:cs->stickList){
             myAnimation->CurrentFrame()->totalSticks.removeAll(s);
         }
         //rimuovilo dal frame e distruggilo
@@ -245,8 +246,8 @@ void myView::mousePressEvent(QMouseEvent *event)
                 storeUndo();
                 arrowSelection();
                 startStickFigureRotation = true;
-                for(stick*s:myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
-                    s->angleBuffer2 = s->myLine.angle();
+                for(StickData*s:myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
+                    if(s->view) s->view->angleBuffer2 = s->myLine.angle();
                 }
                 break;
             }
@@ -268,8 +269,8 @@ void myView::mousePressEvent(QMouseEvent *event)
             {
                 storeUndo();
                 startStickFigureRotation = true;
-                for(stick*s:myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
-                    s->angleBuffer2 = s->myLine.angle();
+                for(StickData*s:myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
+                    if(s->view) s->view->angleBuffer2 = s->myLine.angle();
                 }
                 break;
             }
@@ -277,9 +278,11 @@ void myView::mousePressEvent(QMouseEvent *event)
             {
                 storeUndo();
                 startStickFigureScale = true;
-                for(stick*s:myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
-                    s->scaleBuffer = s->myLine.length();
-                    s->widthBuffer = s->Pen.width();
+                for(StickData*s:myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
+                    if(s->view){
+                        s->view->scaleBuffer = s->myLine.length();
+                        s->view->widthBuffer = s->Pen.width();
+                    }
                 }
                 break;
             }
@@ -296,8 +299,8 @@ void myView::mousePressEvent(QMouseEvent *event)
                     if(S->masterStick && S->stickList.count()>0){
                         S->originPosBuffer = S->masterStick->myLine.p1();
                         S->sceneRotationBuffer = 0;
-                        for(stick*s:S->stickList){
-                            s->angleBuffer2 = s->myLine.angle();
+                        for(StickData*s:S->stickList){
+                            if(s->view) s->view->angleBuffer2 = s->myLine.angle();
                         }
                     }
                 }
@@ -309,9 +312,11 @@ void myView::mousePressEvent(QMouseEvent *event)
                     //check it is not an empty layer
                     if(S->masterStick && S->stickList.count()>0){
                         S->originPosBuffer = S->masterStick->myLine.p1();
-                        for(stick*s:S->stickList){
-                            s->scaleBuffer = s->myLine.length();
-                            s->widthBuffer = s->Pen.width();
+                        for(StickData*s:S->stickList){
+                            if(s->view){
+                                s->view->scaleBuffer = s->myLine.length();
+                                s->view->widthBuffer = s->Pen.width();
+                            }
                         }
                     }
                 }
@@ -332,7 +337,7 @@ void myView::mousePressEvent(QMouseEvent *event)
                             mergeStickFigures(joinToStickFigure,joinToStick,myAnimation->CurrentFrame()->CurrentStickFigure());
                             addHandles(joinToStickFigure);
                             deleteStickFigure();
-                            for(stick*s:myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
+                            for(StickData*s:myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
                                 if(!myAnimation->CurrentFrame()->totalSticks.contains(s))
                                     myAnimation->CurrentFrame()->totalSticks.append(s);
                             }
@@ -379,10 +384,11 @@ void myView::keyPressEvent(QKeyEvent *event)
             {
                 storeUndo();
 
-                stick *item = (stick*)scene()->selectedItems()[0];//oggetto selezionato nella scnea
-                int idx = myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.indexOf(item);        // indice corrispondente nella lista ordinata degli oggetti
+                StickGraphicsItem *item = (StickGraphicsItem*)scene()->selectedItems()[0];//oggetto selezionato nella scnea
+                StickData *item_data = item->data;
+                int idx = myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.indexOf(item_data);        // indice corrispondente nella lista ordinata degli oggetti
                 // se si tratta dello stick master e ci sono altri stickfigure, cancella l'intero stickfigure
-                if(myAnimation->CurrentFrame()->CurrentStickFigure()->stickList[idx]->isMaster() && // todo master replacement
+                if(myAnimation->CurrentFrame()->CurrentStickFigure()->stickList[idx] == myAnimation->CurrentFrame()->CurrentStickFigure()->masterStick &&
                         myAnimation->currentFrame->stickFigures.count()>1)
                 {
                     //estrai dalla lista grafica l'elemento selezionato collegato allo stickfigure
@@ -395,12 +401,12 @@ void myView::keyPressEvent(QKeyEvent *event)
                 //altrimenti cancella il singolo stick e aggiorna l'iconea del livello
                 else if(myStickFigureWidgetList->selectedItems().count()==1)
                 {
-                    stick* nextCurrentStick = static_cast<stick*>(myAnimation->CurrentFrame()->CurrentStick()->parent); // bridge: dati di figura viva (Phase 2a)
+                    StickData* nextCurrentStick = myAnimation->CurrentFrame()->CurrentStick()->parent;
                     // questa lista serve per rimuovere dalla totalStick tutti gli stick cancellati
-                    QList<stick*> oldStickList = myAnimation->CurrentFrame()->CurrentStickFigure()->stickList;
+                    QList<StickData*> oldStickList = myAnimation->CurrentFrame()->CurrentStickFigure()->stickList;
                     myAnimation->CurrentFrame()->CurrentStickFigure()->deleteStick( idx);
-                    QList<stick*> survivors = myAnimation->CurrentFrame()->CurrentStickFigure()->stickList;
-                    for(stick*s:oldStickList){
+                    QList<StickData*> survivors = myAnimation->CurrentFrame()->CurrentStickFigure()->stickList;
+                    for(StickData*s:oldStickList){
                         if(!survivors.contains(s)){
                             myAnimation->CurrentFrame()->totalSticks.removeAll(s);
                         }
@@ -425,7 +431,6 @@ void myView::keyPressEvent(QKeyEvent *event)
                 {
                     if(myAnimation->CurrentFrame()->CurrentStickFigure()->drawCount==1)
                     {
-                        scene()->removeItem((QGraphicsItem*)myAnimation->CurrentFrame()->CurrentStick());
                         myAnimation->CurrentFrame()->CurrentStickFigure()->cancelDrawing();
                     }
                     break;
@@ -446,8 +451,9 @@ void myView::arrowSelection(){
     myStickFigureWidgetList->clearSelection();
     myAnimation->CurrentFrame()->CurrentStickFigure()->linkedItem->setSelected(true);
     myStickFigureWidgetList->setCurrentRow(myStickFigureWidgetList->row(myAnimation->CurrentFrame()->CurrentStickFigure()->linkedItem));
-    if(myAnimation->CurrentFrame()->CurrentStick()!=nullptr && myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.count()>0)
-        myAnimation->CurrentFrame()->CurrentStick()->populateImageListWidget();
+    if(myAnimation->CurrentFrame()->CurrentStick()!=nullptr && myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.count()>0
+            && myAnimation->CurrentFrame()->CurrentStick()->view)
+        myAnimation->CurrentFrame()->CurrentStick()->view->populateImageListWidget();
     //dbgLbl->setText(QString::number(myAnimation->CurrentFrame()->CurrentStick()->order));
 }
 // il disegno di una linea conta 2 click
@@ -462,51 +468,53 @@ void myView::drawCmd(QPointF* point, int mode)
             storeUndo();
 
             myAnimation->CurrentFrame()->CurrentStickFigure()->startDrawing(point, myPen, myBrush);
+            StickData *new_stick = myAnimation->CurrentFrame()->CurrentStick();
+            // il costruttore di stick imposta già new_stick->view: la scena vera e propria
+            // riceve l'elemento dentro AttachView(), senza una addItem() separata
+            FramePresenter::AttachView(new_stick, scene());
             if(!myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.isEmpty()){
-               myAnimation->CurrentFrame()->CurrentStick()->selected = false;
-               myAnimation->CurrentFrame()->CurrentStick()->refresh(0);
+               new_stick->view->selected = false;
+               new_stick->view->refresh(0);
             }
-            myAnimation->CurrentFrame()->CurrentStick()->selected = true;
-            myAnimation->CurrentFrame()->CurrentStick()->hardTop = hardTopCheck->isChecked();
-            myAnimation->CurrentFrame()->CurrentStick()->hardBottom = hardBottomCheck->isChecked();
-            myAnimation->CurrentFrame()->CurrentStick()->Pen = myPen;
+            new_stick->view->selected = true;
+            new_stick->hardTop = hardTopCheck->isChecked();
+            new_stick->hardBottom = hardBottomCheck->isChecked();
+            new_stick->Pen = myPen;
             // se stiamo usando il tool per generare cerchi cambiamo il tipo dello stick
             if(mode == DRAWCIRCLE){
-                myAnimation->CurrentFrame()->CurrentStick()->stickType = stick::StickType::CIRCLE;
+                new_stick->stickType = StickData::CIRCLE;
             }
             else if(mode == DRAWRECT){
-                myAnimation->CurrentFrame()->CurrentStick()->stickType = stick::StickType::RECT;
-                myAnimation->CurrentFrame()->CurrentStick()->imgWScale = advancedRectSlider->value();
-                myAnimation->CurrentFrame()->CurrentStick()->Pen.setJoinStyle(Qt::MiterJoin);
+                new_stick->stickType = StickData::RECT;
+                new_stick->imgWScale = advancedRectSlider->value();
+                new_stick->Pen.setJoinStyle(Qt::MiterJoin);
             }
             else if(mode == DRAWTAPER){
-                myAnimation->CurrentFrame()->CurrentStick()->stickType = stick::StickType::TAPER;
-                myAnimation->CurrentFrame()->CurrentStick()->imgHScale = taperHSlider->value();
-                myAnimation->CurrentFrame()->CurrentStick()->imgWScale = taperWSlider->value();
+                new_stick->stickType = StickData::TAPER;
+                new_stick->imgHScale = taperHSlider->value();
+                new_stick->imgWScale = taperWSlider->value();
             }
             else if(mode == DRAWTRAPEZOID){
-                myAnimation->CurrentFrame()->CurrentStick()->stickType = stick::StickType::TRAPEZOID;
-                myAnimation->CurrentFrame()->CurrentStick()->imgHScale = taperHSlider->value();
-                myAnimation->CurrentFrame()->CurrentStick()->imgWScale = taperWSlider->value();
-                myAnimation->CurrentFrame()->CurrentStick()->Pen.setJoinStyle(Qt::MiterJoin);
+                new_stick->stickType = StickData::TRAPEZOID;
+                new_stick->imgHScale = taperHSlider->value();
+                new_stick->imgWScale = taperWSlider->value();
+                new_stick->Pen.setJoinStyle(Qt::MiterJoin);
             }
             else if(mode == DRAWIMG){
-                myAnimation->CurrentFrame()->CurrentStick()->stickType = stick::StickType::IMAGE;
+                new_stick->stickType = StickData::IMAGE;
                 QImage* img = new QImage(*imageDrawBuffer);
 
-                myAnimation->CurrentFrame()->CurrentStick()->addImage(img, imageNameBuffer);
+                new_stick->view->addImage(img, imageNameBuffer);
 
             }
 
-            //aggiungi il nuovo elemento alla scena mediante puntatore dell'elemento linea dell'oggetto stick
-           scene()->addItem(myAnimation->CurrentFrame()->CurrentStick());
            qDebug("Draw 1 = %f, %f",point->x(),point->y());
         }
         else if(myAnimation->CurrentFrame()->CurrentStickFigure()->drawCount >0)
         {
             myAnimation->CurrentFrame()->CurrentStickFigure()->endDrawing(point);
-            scene()->addItem(myAnimation->CurrentFrame()->CurrentStick()->stickHandle[0]);
-            scene()->addItem(myAnimation->CurrentFrame()->CurrentStick()->stickHandle[1]);
+            scene()->addItem(myAnimation->CurrentFrame()->CurrentStick()->view->stickHandle[0]);
+            scene()->addItem(myAnimation->CurrentFrame()->CurrentStick()->view->stickHandle[1]);
             qDebug("Draw 2 = %f, %f",point->x(),point->y());
             myAnimation->currentFrame->updateIcon();
             myAnimation->updateTab(myAnimation->CurrentFrame()->CurrentStick()->stickType);
@@ -639,7 +647,8 @@ void myView::mouseReleaseEvent(QMouseEvent *event)
                      && myStickFigureWidgetList->selectedItems().count() == 1)
             {
                 //termina una rotazione di stick al rilascio
-                myAnimation->CurrentFrame()->CurrentStick()->endRotation();
+                if(myAnimation->CurrentFrame()->CurrentStick()->view)
+                    myAnimation->CurrentFrame()->CurrentStick()->view->endRotation();
                 myAnimation->CurrentFrame()->CurrentStickFigure()->updateIcon();
                 myStickFigureWidgetList->selectedItems()[0]->setIcon(*myAnimation->CurrentFrame()->CurrentStickFigure()->stickFigureIcon);
                 myAnimation->currentFrame->updateIcon();
@@ -682,28 +691,30 @@ void myView::mouseMoveEvent(QMouseEvent *event)
                 if(scene()->selectedItems().count() == 1)
                 {
                     //trova l'indice dello stick selezionato dentro la lista nella scena cercando il puntatore nelle liste
-                    stick* item = (stick*)scene()->selectedItems()[0];
-                    myAnimation->updateSelection(item);
+                    StickGraphicsItem* item = (StickGraphicsItem*)scene()->selectedItems()[0];
+                    myAnimation->updateSelection(item->data);
 
                     //qDebug("selected item %d", idx);
                     // Ora ruota lo stick
                     if(myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.count()>0){
                         if(tool == CLAMP){
-                            myAnimation->CurrentFrame()->CurrentStick()->rotate(&coord);
+                            if(myAnimation->CurrentFrame()->CurrentStick()->view)
+                                myAnimation->CurrentFrame()->CurrentStick()->view->rotate(&coord);
                         }
                         else{
-                            QList<stick*> toRotate;
-                            if(myAnimation->CurrentFrame()->CurrentStick()->isMaster()){ // // todo master replacement
-                                for(stick*s:myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
-                                    if(!s->stepchild){
-                                        toRotate.append(s);
+                            QList<StickGraphicsItem*> toRotate;
+                            if(myAnimation->CurrentFrame()->CurrentStick() == myAnimation->CurrentFrame()->CurrentStickFigure()->masterStick){
+                                for(StickData*s:myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
+                                    if(!s->stepchild && s->view){
+                                        toRotate.append(s->view);
                                     }
                                 }
                             }else{
-                                for(StickData* s:myAnimation->CurrentFrame()->CurrentStick()->children) // bridge: dati di figura viva (Phase 2a)
-                                    toRotate.append(static_cast<stick*>(s));
+                                for(StickData* s:myAnimation->CurrentFrame()->CurrentStick()->children)
+                                    if(s->view) toRotate.append(s->view);
                             }
-                            toRotate.append(myAnimation->CurrentFrame()->CurrentStick());
+                            if(myAnimation->CurrentFrame()->CurrentStick()->view)
+                                toRotate.append(myAnimation->CurrentFrame()->CurrentStick()->view);
                             myAnimation->CurrentFrame()->CurrentStickFigure()->rotateStickFigure(&coord,toRotate,false);
                         }
                             //
@@ -738,7 +749,8 @@ void myView::mouseMoveEvent(QMouseEvent *event)
             if(myAnimation->CurrentFrame()->CurrentStickFigure() != nullptr && myAnimation->CurrentFrame()->CurrentStick()!=nullptr)
             {
                 if(isPressed){
-                    myAnimation->CurrentFrame()->CurrentStick()->manipulate(&coord);
+                    if(myAnimation->CurrentFrame()->CurrentStick()->view)
+                        myAnimation->CurrentFrame()->CurrentStick()->view->manipulate(&coord);
                     elongateSpinbox->setValue(myAnimation->CurrentFrame()->CurrentStick()->myLine.length());
                 }
             }
@@ -749,7 +761,11 @@ void myView::mouseMoveEvent(QMouseEvent *event)
             if(myAnimation->CurrentFrame()->CurrentStickFigure() != nullptr)
             {
                 if(isPressed){
-                    myAnimation->CurrentFrame()->CurrentStickFigure()->rotateStickFigure(&coord,myAnimation->CurrentFrame()->CurrentStickFigure()->stickList,true);
+                    QList<StickGraphicsItem*> views;
+                    for(StickData* s: myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
+                        if(s->view) views.append(s->view);
+                    }
+                    myAnimation->CurrentFrame()->CurrentStickFigure()->rotateStickFigure(&coord,views,true);
                 }
             }
             break;
@@ -798,10 +814,12 @@ void myView::mouseMoveEvent(QMouseEvent *event)
 
                         connectCenter.setAngle(connectCenter.angle()+angle); // ruotiamola dell'angolo di incremento
                         // ruota ogni singolo stick
-                        for(stick *s:S->stickList){
+                        for(StickData *s:S->stickList){
 
-                            s->rotate(angle);
-                            s->angleBuffer2+=angle; // aggiorna il buffer interno dell'angolo dello stick
+                            if(s->view){
+                                s->view->rotate(angle);
+                                s->view->angleBuffer2+=angle; // aggiorna il buffer interno dell'angolo dello stick
+                            }
                         }
 
                         QLineF Delta(S->originPosBuffer,connectCenter.p2()); // traslazione della punta della lineacentro-master ruotata
@@ -842,8 +860,8 @@ void myView::mouseMoveEvent(QMouseEvent *event)
                         dx = -originalDistFromCenter.dx()*scaleAmount+actualDistFromCenter.dx();
                         dy = -originalDistFromCenter.dy()*scaleAmount+actualDistFromCenter.dy();
                         S->traslate(dx,dy);
-                        for(stick* s:S->stickList){
-                            s->scale(scaleAmount);
+                        for(StickData* s:S->stickList){
+                            if(s->view) s->view->scale(scaleAmount);
 
                         }
                     }
@@ -896,10 +914,12 @@ void myView::scaleFrame(Frame* F, float scaleAmount, QRectF R){
             float dx =-(scaleAmount-1)*actualDistFromCenter.dx();
             float dy =-(scaleAmount-1)*actualDistFromCenter.dy();
             S->traslate(dx,dy);
-            for(stick* s:S->stickList){
-                s->scaleBuffer = s->myLine.length();
-                s->widthBuffer = s->Pen.widthF();
-                s->scale(scaleAmount);
+            for(StickData* s:S->stickList){
+                if(s->view){
+                    s->view->scaleBuffer = s->myLine.length();
+                    s->view->widthBuffer = s->Pen.widthF();
+                    s->view->scale(scaleAmount);
+                }
             }
         }
 
@@ -935,9 +955,9 @@ void myView::moveToFrame(Frame* frame){
     if(myAnimation->frameList.count()>=1){
         for(StickFigure *S:myAnimation->currentFrame->stickFigures){
             removeHandles(S);
-            for(stick * s: S->stickList){
-               if(scene()->items().contains(s)){
-                    currentScene->removeItem(s);
+            for(StickData * s: S->stickList){
+               if(s->view && scene()->items().contains(s->view)){
+                    currentScene->removeItem(s->view);
 
                }
             }
@@ -949,6 +969,17 @@ void myView::moveToFrame(Frame* frame){
     // rimuovigli elementi dalla lista widget
     myStickFigureWidgetList->clear();
 
+    // assicura che ogni stick del nuovo frame abbia una view PRIMA di addHandles() qui sotto:
+    // un frame appena caricato da file (attach_to_scene=false) non ne ha ancora una, un frame
+    // già visitato in precedenza sì, basta ri-attaccarla alla scena
+    for(int j = 0;j<frame->numOfItems;j++)
+    {
+        StickData *s = frame->totalSticks[j];
+        if(s->view)
+            currentScene->addItem(s->view);
+        else
+            FramePresenter::AttachView(s, currentScene);
+    }
 
     // aggiungi tutta gli stickfigure del nuovo frame alla lista del widget
     for(StickFigure *S:frame->stickFigures)
@@ -969,12 +1000,6 @@ void myView::moveToFrame(Frame* frame){
     }
     currentScene->clearSelection();
     myAnimation->currentFrame = frame;
-    for(int j = 0;j<frame->numOfItems;j++)
-    {
-        currentScene->addItem(frame->totalSticks[j]);
-
-        //orderedStickList[frame->numOfItems-1-j]->refresh(0);
-    }
 
     // aggiorna il current frame, se si parte d auna situazione di inizio forza il primo stickfigure
     if(frame->currentStickFigure !=nullptr){
@@ -1041,8 +1066,6 @@ void myView::updateOnionSkins(){
     QImage renderImg =  QImage(scene()->sceneRect().width(),scene()->sceneRect().height(),QImage::Format_ARGB32);
 
     renderScene.setSceneRect(scene()->sceneRect());
-    // ora clona tutti gli stick nello stickfigure in una tempList, aggiungili alla scena fittizia
-    QList<stick*> tempList;
     // dallo spinbox trai il valore del numero di onionskins servono
     int skinNum = onionSkinSB->value();
     float opacityVal = 0;
@@ -1053,11 +1076,15 @@ void myView::updateOnionSkins(){
     // disegna sulla scena fittizia gli stickfigures dei frame da onionskinnare che partono dal frame corrente- numero di skin calcolabili
     for(int i = myAnimation->currentFrame->frameNumber-skinNum; i<myAnimation->currentFrame->frameNumber; i++){
         // todo anzichè copiare stickfigure per stickfigure, copiare l'intera scena
-        for(stick *s:myAnimation->frameList[i]->totalSticks)
+        // questi stick sono VIVI (hanno già una view sul frame i): clonarne i dati prima di
+        // wrapparli evita che il costruttore di stick rubi il back-pointer data->view alla
+        // view reale (vedi StickFigure::updateIcon per lo stesso pattern)
+        QList<StickData*> renderClones;
+        for(StickData *s:myAnimation->frameList[i]->totalSticks)
         {
-            stick* clone = new stick(s);
-            tempList.append(clone);
-            renderScene.addItem(clone);
+            StickData* clone = s->Clone();
+            renderClones.append(clone);
+            renderScene.addItem(new StickGraphicsItem(clone));
         }
         QPainter painter(&renderImg);
         renderImg.fill(Qt::transparent);
@@ -1072,7 +1099,8 @@ void myView::updateOnionSkins(){
         item->setZValue(0);
         onionSkins.append(item);
         scene()->addItem(item);
-        renderScene.clear();
+        renderScene.clear(); // distruggi le view di rendering PRIMA di liberare i dati clonati
+        qDeleteAll(renderClones);
         painter.end();
 
     }
@@ -1196,7 +1224,7 @@ void myView::storeUndo(int command){
 }
 void myView::updateFrameOrder(Frame* f){
     int j = 0;
-    for(stick*s:myAnimation->CurrentFrame()->totalSticks)
+    for(StickData*s:myAnimation->CurrentFrame()->totalSticks)
     {
         s->order = j;
         j++;
@@ -1212,7 +1240,7 @@ void myView::updateFrameOrder(Frame* f){
     }
     for(QGraphicsItem* item:orderedList){
         if(item->type() == STKTYPE){
-            static_cast<stick*>(item)->order = orderedList.indexOf(item);
+            static_cast<StickGraphicsItem*>(item)->order = orderedList.indexOf(item);
             j++;
         }
     }
@@ -1222,12 +1250,13 @@ void myView::updateFrameOrder(Frame* f){
 
 void myView::addHandles(StickFigure *S)
 {
-    for(stick*s:S->stickList){
-        scene()->addItem(s->stickHandle[0]);
-        scene()->addItem(s->stickHandle[1]);
-        if(s->isMaster()){ // todo master replacement
-            s->stickHandle[0]->setBrush(QBrush(Qt::green));
-            s->stickHandle[0]->setZValue(101);
+    for(StickData*s:S->stickList){
+        if(!s->view) continue;
+        scene()->addItem(s->view->stickHandle[0]);
+        scene()->addItem(s->view->stickHandle[1]);
+        if(s == S->masterStick){
+            s->view->stickHandle[0]->setBrush(QBrush(Qt::green));
+            s->view->stickHandle[0]->setZValue(101);
         }
     }
 }
@@ -1235,10 +1264,11 @@ void myView::addHandles(StickFigure *S)
 void myView::removeHandles(StickFigure *S)
 {
 
-    for(stick*s:S->stickList)
+    for(StickData*s:S->stickList)
     {
-        scene()->removeItem(s->stickHandle[0]);
-        scene()->removeItem(s->stickHandle[1]);
+        if(!s->view) continue;
+        scene()->removeItem(s->view->stickHandle[0]);
+        scene()->removeItem(s->view->stickHandle[1]);
     }
 }
 // cancella la storia di undo/redo, da chiamare quando si carica un nuovo file
@@ -1263,11 +1293,12 @@ static QIcon RenderLibraryIcon(const StickFigureData &figure_data){
     icon_scene.setSceneRect(myRect->rect());
     icon_scene.setBackgroundBrush(QBrush(QColor(Qt::white)));
     for(StickData *stick_data : figure_data.stickList){
-        stick *render_clone = new stick();
-        render_clone->CopyFrom(*stick_data);
-        render_clone->setZValue(render_clone->Z);
-        render_clone->br = render_clone->updateBr(0);
-        icon_scene.addItem(render_clone); // la scena diventa proprietaria del clone
+        // la libreria non è mai "viva": stick_data non ha e non avrà mai un'altra view,
+        // quindi wrapparlo direttamente (senza clonarlo) non ruba il back-pointer a nessuno
+        StickGraphicsItem *render_view = new StickGraphicsItem(stick_data);
+        render_view->setZValue(stick_data->Z);
+        render_view->br = render_view->updateBr(0);
+        icon_scene.addItem(render_view); // la scena diventa proprietaria della view
     }
     QPainter painter(&icon_pixmap);
     icon_scene.render(&painter);
@@ -1379,17 +1410,19 @@ void myView::setGraphics(bool all, int attribute){
         {
             myAnimation->CurrentFrame()->CurrentStick()->Brush.setColor(myBrush.color());
         }
-        myAnimation->CurrentFrame()->CurrentStick()->refresh(0);
+        if(myAnimation->CurrentFrame()->CurrentStick()->view)
+            myAnimation->CurrentFrame()->CurrentStick()->view->refresh(0);
     }
     else{
-        for(stick * s:myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
+        for(StickData * s:myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
             if(attribute == ATTRIBUTE_PENCOLOR)
                 s->Pen.setColor(myPen.color());
             else if(attribute== ATTRIBUTE_PENWIDTH)
                 s->Pen.setWidth(myPen.width());
             else if(attribute== ATTRIBUTE_BRUSHCOLOR)
                 s->Brush.setColor(myBrush.color());
-            s->refresh(0);
+            if(s->view)
+                s->view->refresh(0);
         }
     }
 
@@ -1404,8 +1437,8 @@ void myView::splitStickFigure(){
         QMessageBox::about(this,"error","No stick item selected");
         return;
     }
-    if(myAnimation->CurrentFrame()->CurrentStick()->isMaster())
-    { // todo master replacement
+    if(myAnimation->CurrentFrame()->CurrentStick() == myAnimation->CurrentFrame()->CurrentStickFigure()->masterStick)
+    {
         QMessageBox::about(this,"error","cannot split a stickfigure from his master node");
         return;
     }
@@ -1413,14 +1446,14 @@ void myView::splitStickFigure(){
     splitToStickFigure = myAnimation->CurrentFrame()->CurrentStickFigure();
     removeHandles(splitToStickFigure);
     splitToStick = splitToStickFigure->currentStick;
-    QList<stick*> oldStickList = myAnimation->CurrentFrame()->CurrentStickFigure()->stickList;
+    QList<StickData*> oldStickList = myAnimation->CurrentFrame()->CurrentStickFigure()->stickList;
 
     StickFigure * branch = myAnimation->currentFrame->addStickFigure(myStickFigureWidgetList, splitToStickFigure->name+"_split");
     splitStickFigures(splitToStickFigure,splitToStick,branch);
     splitToStickFigure->refresh(0);
     // update the total list
-    QList<stick*> survivorList = splitToStickFigure->stickList;
-    for(stick*s:oldStickList){
+    QList<StickData*> survivorList = splitToStickFigure->stickList;
+    for(StickData*s:oldStickList){
         if(!survivorList.contains(s)){
             myAnimation->CurrentFrame()->totalSticks.removeAll(s);
         }
@@ -1490,14 +1523,15 @@ void myView::preparePreview(){
 
         QPainter painter(renderImg); // painter che esegue il drawing sull immagine
         renderScene.setSceneRect(myRect->rect());
-        // ora clona tutti gli stick nello stickfigure in una tempList, aggiungili alla scena fittizia
-        QList<stick*> tempList;
+        // questi stick sono VIVI: clona i dati prima di wrapparli, altrimenti il costruttore
+        // di stick ruberebbe il back-pointer data->view alla view reale sullo schermo
+        QList<StickData*> renderClones;
         for(StickFigure *S:f->stickFigures)
         {
-            for(stick* s: S->stickList){
-                stick* clone = new stick(s);
-                tempList.append(clone);
-                renderScene.addItem(clone);
+            for(StickData* s: S->stickList){
+                StickData* clone = s->Clone();
+                renderClones.append(clone);
+                renderScene.addItem(new StickGraphicsItem(clone));
             }
         }
         //disegna sull' immagine e salvala
@@ -1508,7 +1542,8 @@ void myView::preparePreview(){
         QGraphicsPixmapItem* item = new QGraphicsPixmapItem(QPixmap::fromImage(*(renderImg)));
         previewList.append(item);
         delete renderImg;
-        renderScene.clear();
+        renderScene.clear(); // distruggi le view di rendering PRIMA di liberare i dati clonati
+        qDeleteAll(renderClones);
         //...add all other video frames here
     }
     playBack = false;

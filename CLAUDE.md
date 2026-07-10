@@ -9,16 +9,37 @@ of this folder, not inside it (qmake shadow build).
 
 `Animation` owns `QList<Frame*> frameList`.
 `Frame` owns `QList<StickFigure*> stickFigures` plus a flattened
-`QList<stick*> totalSticks` (all sticks across all figures in the frame,
-used for Z-ordering).
-`StickFigure` owns `QList<stick*> stickList`.
-`stick` (a `QGraphicsItem` + `StickData`) forms an intra-figure tree via
-`parent`/`children`, which since refactor Phase 2a live on `StickData` and
-are typed `StickData*` — `children` is the flattened list of ALL
-descendants, not just direct children. Bridge invariant until Phase 2c:
-every `StickData` inside a LIVE figure is actually a `stick`, so view-side
-code may `static_cast<stick*>` a tree pointer (such casts carry a
-"bridge: dati di figura viva" comment).
+`QList<StickData*> totalSticks` (all sticks across all figures in the
+frame, used for Z-ordering).
+`StickFigure` owns `QList<StickData*> stickList`.
+
+Since refactor Phase 2c, a "stick" is two separate objects instead of one
+fused class: `StickData` (`stickdata.h/cpp`) is the persistent record —
+no `QGraphicsScene`/widget dependency, exists for scratch/buffer objects
+too — and `StickGraphicsItem` (`stick.h/stick.cpp` — class renamed, files
+deliberately left named `stick.*`) is the `QGraphicsItem`-derived view: it
+holds a non-owning `StickData *data` and adds only what genuinely needs a
+scene or reflects live UI/drag state (endpoint handles, selection/
+highlight, angle/scale caches). The intra-figure tree (`parent`/
+`children`, flattened — `children` lists ALL descendants, not just direct
+children) lives entirely on `StickData`, typed `StickData*`.
+
+Not every `StickData` has a view: `StickData::view` is a non-owning
+`StickGraphicsItem*` back-pointer, `nullptr` for every scratch/buffer/undo
+object (always) and briefly `nullptr` for an in-progress draw until
+`myView::drawCmd()` calls `FramePresenter::AttachView()`. Any code walking
+`stickList`/`totalSticks`/the tree that needs to reach the view (repaint,
+select, rotate/scale interactively) must go through `->view->` guarded by
+a null check — `FramePresenter::AttachView(stick_data, scene)` /
+`DetachView(stick_data, scene)` (`framepresenter.h/cpp`) are the only code
+that constructs or destroys a `StickGraphicsItem` for a stick actually on
+screen; wrapping a LIVE `StickData` in a second `new StickGraphicsItem(...)`
+(e.g. for a throwaway render/icon) steals its real view's back-pointer —
+clone the `StickData` first (`Clone()`) and wrap the clone, never the
+original (see `StickFigure::updateIcon()`/`Frame::updateIcon()` for the
+pattern: destroy the render scene's views *before* `qDeleteAll()`-ing the
+clones, since `~StickGraphicsItem()` reads `data->view` during its own
+destruction).
 
 Since refactor Phase 2b, every scratch/buffer object (undo/redo snapshots,
 frame copy/paste, stickfigure copy/paste, the stickfigure library) is a
@@ -72,10 +93,15 @@ frame's sticks, since the old flag-guarded destructor skipped freeing them
 during `Animation::deleteFrame()`'s teardown. See "Serialization" below
 for the data classes and their bridge functions.
 
-`stick.cpp` itself has been flag-free since Phase 1b: `~stick` never
-touches `imgListWidget`; the code paths that delete a LIVE stick
+`stick.cpp` itself has been flag-free since Phase 1b: `~StickGraphicsItem`
+never touches `imgListWidget`; the code paths that delete a LIVE stick
 (`deleteStick`, `weld`, `cancelDrawing`, `~StickFigure`'s live branch) call
-`stick::RemoveImagesFromListWidget()` explicitly instead.
+`StickGraphicsItem::RemoveImagesFromListWidget()` explicitly instead — on
+the stick's own view, not just its children's (a real bug this refactor's
+retype surfaced and fixed: `deleteStick()` called it for every child being
+swept away but not for the selected stick itself, leaking rows in
+`imgListWidget`; caught by the pre-existing
+`DeleteImageStickClearsImageListWidget` characterization test).
 
 ## Command flow: how a UI edit reaches the data model and becomes undoable
 
@@ -150,16 +176,13 @@ it guarded, rather than guarding it more carefully.
 
 ## Serialization
 
-Since refactor Phase 1a/2a/2b, every layer's persistent state lives in a
+Since refactor Phase 1a/2a/2b/2c, every layer's persistent state lives in a
 `*Data` class with no scene/widget dependency, mirroring the live class it
 was extracted from:
-- `StickData` (`stickdata.h/cpp`) — position, type, image list, and (since
-  Phase 2a) the figure-tree `parent`/`children` pointers (typed
-  `StickData*`). `stick` derives from both `QGraphicsItem` and `StickData`
-  — a deliberate bridge kept until Phase 2c's `StickGraphicsItem` split.
-  Bridge invariant: every `StickData` inside a LIVE figure is actually a
-  `stick`, so view-side code may `static_cast<stick*>` a tree pointer
-  (marked with a "bridge: dati di figura viva" comment).
+- `StickData` (`stickdata.h/cpp`) — position, type, image list, the
+  figure-tree `parent`/`children` pointers (typed `StickData*`), and (since
+  Phase 2c) the non-owning `StickGraphicsItem *view` back-pointer. No
+  `QGraphicsItem` base — see "Data model" above for the full split.
 - `StickFigureData` (`stickfiguredata.h/cpp`) — name, `stickList`,
   `masterStick`/`currentStick`.
 - `FrameData` (`framedata.h/cpp`) — `stickFigures`, the flattened
@@ -171,10 +194,10 @@ files still load), and a `Clone()` that deep-copies in memory with no
 stream involved. These operators have no flag guards — they read/write
 data and nothing else.
 
-The live classes (`stick`, `StickFigure`, `Frame`) keep thin
-`operator<<`/`operator>>` wrappers (used only by the single-`.stck`-file
-and whole-`.mAnim`-file paths) that delegate to the data operators, plus
-explicit **bridge functions** that replace what the old flag-guarded shared
+The live classes (`StickFigure`, `Frame`) keep thin `operator<<`/
+`operator>>` wrappers (used only by the single-`.stck`-file and whole-
+`.mAnim`-file paths) that delegate to the data operators, plus explicit
+**bridge functions** that replace what the old flag-guarded shared
 operators used to do implicitly:
 - `ExtractStickFigureData(figure)` / `PopulateLiveStickFigure(target, data,
   attach_to_scene, update_icon)`
@@ -182,15 +205,18 @@ operators used to do implicitly:
   attach_to_scene, update_icons)`
 
 `attach_to_scene`/`update_icon(s)` are plain bool parameters now — undo
-restore and paste pass `true` (the target is genuinely on screen), whole-
-file load passes `false` (only the frame `moveToFrame()` actually displays
-needs attaching/rendering, which it does itself right after). This is the
-same behavior the old `undoFlag`/`loadingAnimationFlag` checks produced,
-just selected explicitly by the caller instead of inferred from global
-state. Every scratch/buffer object in the codebase — `frameCopyBuffer`,
-`stickLibraryBuffer`, `copyStickFigureBuffer`, both undo/redo buffers — is
-one of the `*Data` classes now, so none of them need the historical
-uninitialized-`.scene` care; freeing one is a plain `delete`.
+restore and paste pass `true` (`PopulateLiveStickFigure` calls
+`FramePresenter::AttachView()` per stick, so the target is genuinely on
+screen with a live view), whole-file load passes `false` (every rebuilt
+`StickData` starts view-less; only the frame `moveToFrame()` actually
+displays attaches views, for the whole frame at once, right after). This
+is the same behavior the old `undoFlag`/`loadingAnimationFlag` checks
+produced, just selected explicitly by the caller instead of inferred from
+global state. Every scratch/buffer object in the codebase —
+`frameCopyBuffer`, `stickLibraryBuffer`, `copyStickFigureBuffer`, both
+undo/redo buffers — is one of the `*Data` classes now, so none of them
+need the historical uninitialized-`.scene` care; freeing one is a plain
+`delete`.
 
 ## Conventions
 
@@ -212,13 +238,22 @@ uninitialized-`.scene` care; freeing one is a plain `delete`.
 ## Tests
 
 `tests/tests.pro` is a standalone qmake QtTest project (characterization
-suite, REFACTOR_PLAN.md Phase 0). It links the model/undo/serialization
-sources directly and does NOT link `widget.cpp`/`mymainwindow.cpp` — the
-globals those files own are re-defined in `tests/test_globals.cpp`, and the
-fixture in `tst_characterization.cpp` replicates the parts of `Widget`'s
-constructor the model layer needs. Test helpers replicate UI handlers
-verbatim and cite the call site they copy — if a handler changes, update the
-matching helper. Build/run (kit: Qt 6.6.1 MinGW 64-bit, shadow build dir):
+suite, REFACTOR_PLAN.md Phase 0, 24 tests as of Phase 2c). It links the
+model/undo/serialization sources directly and does NOT link
+`widget.cpp`/`mymainwindow.cpp` — the globals those files own are
+re-defined in `tests/test_globals.cpp`, and the fixture in
+`tst_characterization.cpp` replicates the parts of `Widget`'s constructor
+the model layer needs. Test helpers replicate UI handlers verbatim and
+cite the call site they copy — if a handler changes, update the matching
+helper. `DrawViaRealMouseEvents`/`DragRotateViaRealMouseEventsIsUndoable`
+are the exception: they drive real `QTest::mouseClick`/`mousePress`/
+`mouseMove`/`mouseRelease` events through `myView`'s actual
+`mousePressEvent`/`mouseMoveEvent`/`mouseReleaseEvent` overrides instead of
+calling model methods directly — added ahead of Phase 2c specifically to
+cover the interactive mouse/paint path headlessly (`view->mapFromScene()`
+converts scene coordinates to viewport pixels, so the tests don't hardcode
+a coordinate transform). Build/run (kit: Qt 6.6.1 MinGW 64-bit, shadow
+build dir):
 
 ```
 qmake <repo>/tests/tests.pro && mingw32-make

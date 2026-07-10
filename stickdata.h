@@ -9,15 +9,17 @@
 #include <QPointF>
 #include <QString>
 
+class StickGraphicsItem; // defined in stick.h; forward-declared to avoid a header cycle
+
 /**
  * @brief Pure-data half of a stick: every field that is saved to disk or duplicated by
  *        undo snapshots, copy/paste and the library, with no scene or widget dependency.
  *
- * This is the model side of the stick/StickGraphicsItem split (REFACTOR_PLAN.md Phase 1).
- * A StickData can exist without a QGraphicsScene, so scratch/buffer/undo objects built
- * from it never need the global flag guards that plague the legacy `stick` class.
- * Field names keep their historical spelling (`myLine`, `Pen`, ...) until the Phase 7
- * naming sweep, so existing call sites compile unchanged.
+ * This is the model side of the stick/StickGraphicsItem split (REFACTOR_PLAN.md Phase 1,
+ * completed by Phase 2c). A StickData can exist without a QGraphicsScene, so scratch/
+ * buffer/undo objects built from it never need any global flag guard. Field names keep
+ * their historical spelling (`myLine`, `Pen`, ...) until the Phase 7 naming sweep, so
+ * existing call sites compile unchanged.
  */
 class StickData
 {
@@ -78,6 +80,20 @@ public:
      * directly — rebuilt from parentIdx on load.
      */
     QList<StickData*> children;
+
+    /**
+     * @brief The on-screen graphics item currently presenting this record, if any.
+     *
+     * Non-owning; nullptr when this record isn't attached to a scene (every scratch/
+     * buffer/undo object, always) or between DetachView() and the next AttachView()
+     * for a live one. Wired by FramePresenter::AttachView()/DetachView() (Phase 2c) —
+     * nothing else should assign it. This is a deliberate, minimal exception to "the
+     * model knows nothing about the view": one non-owning pointer buys O(1) lookup from
+     * data to its presenter for interactive code (rotate/scale/drag) that already has a
+     * StickData* in hand and needs to reach the view, without FramePresenter having to
+     * keep a separate hash synchronized by hand.
+     */
+    StickGraphicsItem *view = nullptr;
 
     // ------- persistent fields (exactly what operator<</operator>> read and write) ------
 

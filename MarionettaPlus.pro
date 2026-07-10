@@ -27,6 +27,7 @@ SOURCES += \
     ffmpegexport.cpp \
     frame.cpp \
     framedata.cpp \
+    framepresenter.cpp \
     imageexport.cpp \
     main.cpp \
     mymainwindow.cpp \
@@ -49,6 +50,7 @@ HEADERS += \
     ffmpegexport.h \
     frame.h \
     framedata.h \
+    framepresenter.h \
     imageexport.h \
     mymainwindow.h \
     myview.h \

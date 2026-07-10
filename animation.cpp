@@ -123,8 +123,10 @@ void Animation::updateSelection(QPointF point)
     currentFrame->CurrentStickFigure() = selectedStickFigure;
     currentFrame->CurrentStick() = currentFrame->CurrentStickFigure()->stickList[selectedIdx];
     currentFrame->CurrentStickFigure()->highlight(true);
-    currentFrame->CurrentStick()->setSelected(true);
-    currentFrame->CurrentStick()->selected = true;
+    if(currentFrame->CurrentStick()->view){
+        currentFrame->CurrentStick()->view->setSelected(true);
+        currentFrame->CurrentStick()->view->selected = true;
+    }
 
 
     updateSliders();
@@ -135,31 +137,31 @@ void Animation::updateSelection(QPointF point)
 void Animation::updateTab(int t){
     int idx = myTabWidget->currentIndex();
     myTabWidget->removeTab(1);
-    if(t == stick::IMAGE){
+    if(t == StickData::IMAGE){
         myTabWidget->insertTab(1,advancedImgTab,"Image Editing");
     }
-    else if(t == stick::RECT){
+    else if(t == StickData::RECT){
         myTabWidget->insertTab(1,advancedRectTab,"Rect Editing");
     }
-    else if(t == stick::LINE){
+    else if(t == StickData::LINE){
         myTabWidget->insertTab(1,advancedLineTab,"Line Editing");
     }
-    else if(t == stick::CIRCLE){
+    else if(t == StickData::CIRCLE){
         myTabWidget->insertTab(1,advancedCircleTab,"Circle Editing");
     }
-    else if(t == stick::TAPER){
+    else if(t == StickData::TAPER){
         myTabWidget->insertTab(1,advancedTaperTab,"Taper Editing");
         hardTopCheck->show();
         hardBottomCheck->show();
     }
-    else if(t == stick::TRAPEZOID){
+    else if(t == StickData::TRAPEZOID){
         myTabWidget->insertTab(1,advancedTaperTab,"Trapezoid Editing");
         hardTopCheck->hide();
         hardBottomCheck->hide();
     }
     myTabWidget->setCurrentIndex(idx);
 }
-void Animation::updateSelection(stick* s)
+void Animation::updateSelection(StickData* s)
 {
     //update current frame
 
@@ -179,8 +181,10 @@ void Animation::updateSelection(stick* s)
     if(!currentFrame->CurrentStickFigure()->stickList.isEmpty())
     {
      currentFrame->CurrentStick() = s;
-     s->setSelected(true);
-     s->selected = true;
+     if(s->view){
+         s->view->setSelected(true);
+         s->view->selected = true;
+     }
     }
     updateSliders();
     //int idx = frameBuffer->currentStickFigure->itemList.indexOf(item);
@@ -211,10 +215,10 @@ void Animation::updateSelection(StickFigure* S)
 }
 
 void Animation::updateSliders(){
-    stick *cs = currentFrame->CurrentStick();
+    StickData *cs = currentFrame->CurrentStick();
     if(currentFrame->CurrentStick() == nullptr)
         return;
-    if(cs->stickType == stick::IMAGE){
+    if(cs->stickType == StickData::IMAGE){
         //aggiorna gli slider di modifica alla scala e all'offset
         if(cs->imgWScale>=1){
             imgWidthSlider->setValue(10*(cs->imgWScale-1));
@@ -233,10 +237,10 @@ void Animation::updateSliders(){
         imgHOffsetSlider->setValue(cs->imgOffset.x());
         imgRotationSlider->setValue(cs->imgAngleOffset);
     }
-    else if(cs->stickType == stick::RECT){
+    else if(cs->stickType == StickData::RECT){
         advancedRectSlider->setValue(cs->imgWScale);
     }
-    else if(cs->stickType == stick::CIRCLE){
+    else if(cs->stickType == StickData::CIRCLE){
         if(cs->imgWScale<1){
             circleSquashSlider->setValue(-(1-cs->imgWScale)*100);
         }
@@ -244,7 +248,7 @@ void Animation::updateSliders(){
             circleSquashSlider->setValue((cs->imgWScale-1)*20);
         }
     }
-    else if(cs->stickType == stick::TAPER||cs->stickType == stick::TRAPEZOID){
+    else if(cs->stickType == StickData::TAPER||cs->stickType == StickData::TRAPEZOID){
         taperWSlider->setValue(cs->imgWScale);
         taperHSlider->setValue(cs->imgHScale);
         hardTopCheck->setChecked(cs->hardTop);

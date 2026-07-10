@@ -1,4 +1,5 @@
 #include "frame.h"
+#include "framepresenter.h"
 #include <QHash>
 #include <QtAlgorithms>
 #include <QListWidget>
@@ -57,10 +58,6 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     //aggiorna lo stickfigure corrente
     currentStickFigure = stickFigureBuffer;
     currentStickFigure->name = myName;
-    // switchFrameFlag (Phase 2c) e undoFlag (Phase 4) sono stati entrambi eliminati:
-    // questa funzione è raggiunta solo dai percorsi UI vivi (Widget::addStick,
-    // myView::splitStickFigure) — RestoreFrameSnapshot() non la chiama mai, costruisce
-    // le StickFigure direttamente in PopulateLiveFrame()
     QVariant newData(QVariant::fromValue(currentStickFigure));
     addedItem->setData(Qt::UserRole,newData);
     addedItem->setData(Qt::DisplayRole,myName);
@@ -103,7 +100,7 @@ StickFigure* Frame::removeStickFigure(StickFigure* toRemove)
     }
     return currentStickFigure;
 }
-stick *Frame::selectStick(StickFigure* S, stick* s)
+StickData *Frame::selectStick(StickFigure* S, StickData* s)
 {
     int stickIdx = 0;
     if(s!=nullptr){
@@ -111,24 +108,28 @@ stick *Frame::selectStick(StickFigure* S, stick* s)
             stickIdx = S->stickList.indexOf(s);
     }
     S->highlight(true);
-    S->stickList[stickIdx]->setSelected(true);
+    if(S->stickList[stickIdx]->view)
+        S->stickList[stickIdx]->view->setSelected(true);
     S->currentStick = S->stickList[stickIdx];
-    S->currentStick->selected = true;
+    if(S->currentStick->view)
+        S->currentStick->view->selected = true;
 
     return S->stickList[stickIdx];
 }
 void Frame::refresh(int mode){
-    for(stick*s:totalSticks){
-        scene->removeItem(s);
+    for(StickData*s:totalSticks){
+        if(s->view)
+            scene->removeItem(s->view);
     }
-    for(stick*s:totalSticks){
-        scene->addItem(s);
+    for(StickData*s:totalSticks){
+        if(s->view)
+            scene->addItem(s->view);
     }
     for(StickFigure*S:stickFigures){
         S->refresh(mode);
     }
 }
-stick *Frame::selectStick(QPointF point)
+StickData *Frame::selectStick(QPointF point)
 {
     float distBuffer;
     float minDist;
@@ -148,8 +149,10 @@ stick *Frame::selectStick(QPointF point)
                 selectedStickFigure = S;
             }
     }
-    selectedStickFigure->stickList[selectedIdx]->setSelected(true); //for scene
-    selectedStickFigure->currentStick->selected = true; //for rendering purpose
+    if(selectedStickFigure->stickList[selectedIdx]->view)
+        selectedStickFigure->stickList[selectedIdx]->view->setSelected(true); //for scene
+    if(selectedStickFigure->currentStick->view)
+        selectedStickFigure->currentStick->view->selected = true; //for rendering purpose
     return selectedStickFigure->stickList[selectedIdx];
 }
 /**
@@ -163,7 +166,7 @@ FrameData *ExtractFrameData(const Frame &source_frame)
     FrameData *data = new FrameData();
     data->frameNumber = source_frame.frameNumber;
     data->numOfItems = source_frame.numOfItems;
-    QHash<const stick*, StickData*> live_to_data;
+    QHash<const StickData*, StickData*> live_to_data;
     for (StickFigure *figure : source_frame.stickFigures) {
         StickFigureData *figure_data = ExtractStickFigureData(*figure);
         data->stickFigures.append(figure_data);
@@ -172,7 +175,7 @@ FrameData *ExtractFrameData(const Frame &source_frame)
         if (figure == source_frame.currentStickFigure)
             data->currentStickFigure = figure_data;
     }
-    for (stick *ordered_stick : source_frame.totalSticks) {
+    for (StickData *ordered_stick : source_frame.totalSticks) {
         StickData *mapped = live_to_data.value(ordered_stick, nullptr);
         if (mapped) // una voce stantia in totalSticks non deve propagarsi allo snapshot
             data->totalSticks.append(mapped);
@@ -203,11 +206,11 @@ void PopulateLiveFrame(Frame *target_frame, const FrameData &source_data,
         target_frame->currentStickFigure = figure;
         PopulateLiveStickFigure(figure, *figure_data, attach_to_scene, update_icons);
         added_item->setData(Qt::DisplayRole, figure->name);
-        for (stick *s : figure->stickList)
+        for (StickData *s : figure->stickList)
             target_frame->totalSticks.append(s);
     }
     for (StickFigure *figure : target_frame->stickFigures) {
-        for (stick *s : figure->stickList) {
+        for (StickData *s : figure->stickList) {
             // s->order presuppone di formare una permutazione perfetta 0..count-1: se per qualche
             // motivo non lo è (es. mai passato da updateFrameOrder()), senza questo controllo si
             // scrive fuori dai limiti di totalSticks (corruzione dell'heap, crash non immediato)
@@ -254,7 +257,7 @@ float Frame::minMaxZ(int option){
     if(totalSticks.isEmpty())
         return 0;
     float peak = totalSticks[0]->Z;
-    for(stick*s:totalSticks){
+    for(StickData*s:totalSticks){
         if(option){
             if(s->Z>peak)
                 peak = s->Z;
@@ -295,7 +298,7 @@ void Frame::stickfigureAboveBelow(StickFigure* toMove, StickFigure *previous, in
 
     mode == 1?toMove->updateZ(previous->maxZ()): toMove->updateZ(previous->minZ());
     int peakIdx = 0;
-    QList<stick*> sticksToMove;
+    QList<StickData*> sticksToMove;
     if(mode == 1){
         for(int j = totalSticks.length()-1; j >-1 ;j--){
             if(previous->stickList.contains(totalSticks[j])){
@@ -303,11 +306,11 @@ void Frame::stickfigureAboveBelow(StickFigure* toMove, StickFigure *previous, in
                 break;
             }
         }
-        for(stick*s:toMove->stickList){
+        for(StickData*s:toMove->stickList){
             if(totalSticks.indexOf(s)<peakIdx)
                 sticksToMove.append(s);
         }
-        for(stick*s:sticksToMove){
+        for(StickData*s:sticksToMove){
             totalSticks.move(totalSticks.indexOf(s),peakIdx);
         }
     }
@@ -318,18 +321,22 @@ void Frame::stickfigureAboveBelow(StickFigure* toMove, StickFigure *previous, in
                 break;
             }
         }
-        for(stick*s:toMove->stickList){
+        for(StickData*s:toMove->stickList){
             if(totalSticks.indexOf(s)>peakIdx)
                 sticksToMove.prepend(s);
         }
-        for(stick*s:sticksToMove){
+        for(StickData*s:sticksToMove){
             totalSticks.move(totalSticks.indexOf(s),peakIdx);
         }
     }
 
 
 }
-// questa funzione aggiorna l'iconea del livello
+/**
+ * @details Since Phase 2c the render clones need their own StickData (see
+ * StickFigure::updateIcon() for why) — cloned, wrapped, rendered, then the views are
+ * freed via icoScene.clear() BEFORE the cloned data (~stick reads data->view).
+ */
 void Frame::updateIcon()
 {
     //crea una scena fittizia, falla bianca e delle stesse dimensioni di quella principale
@@ -337,13 +344,13 @@ void Frame::updateIcon()
     iconImg->fill(Qt::white);
     icoScene.setBackgroundBrush(QBrush(QColor(Qt::white)));
     icoScene.setSceneRect(scene->sceneRect());
-    // ora clona tutti gli stick nello stickfigure e aggiungili alla scena fittizia
-    // (addItem rende la scena proprietaria dei cloni: non vanno cancellati a mano,
-    // altrimenti verrebbero distrutti due volte quando icoScene esce di scope)
+    QList<StickData*> renderClones;
     for(StickFigure *S:stickFigures)
     {
-        for(stick* s: S->stickList){
-            icoScene.addItem(new stick(s));
+        for(StickData* s: S->stickList){
+            StickData* clone = s->Clone();
+            renderClones.append(clone);
+            icoScene.addItem(new StickGraphicsItem(clone));
         }
     }
     // crea un painter che disegni sull'immagine
@@ -366,37 +373,19 @@ void Frame::updateIcon()
     linkedItem->setIcon(*frameIcon);
     linkedItem->setData(Qt::DisplayRole, QString()); // il numero è già nell'iconea: evita di mostrarlo due volte
 
-    // i cloni vengono cancellati automaticamente dal distruttore di icoScene
     painter.end();
+    icoScene.clear();
+    qDeleteAll(renderClones);
 }
 
 void Frame::updateRender(){
-    /*QGraphicsScene renderScene;
-    renderScene.setSceneRect(scene->sceneRect());
-    // ora clona tutti gli stick nello stickfigure in una tempList, aggiungili alla scena fittizia
-    QList<stick*> tempList;
-    for(StickFigure *S:stickFigures)
-    {
-        for(stick* s: S->stickList){
-            stick* clone = new stick(s);
-            tempList.append(clone);
-            renderScene.addItem(clone);
-        }
-    }
-    QPainter painter(renderImg);
-    renderImg->fill(Qt::transparent);
-    painter.setBackground(QBrush(QColor(Qt::transparent)));
-    renderScene.render(&painter);
-    renderScene.clear();*/
+    /* obsoleto, vedi storico pre-Phase-2c */
 }
 /**
  * @details Since Phase 4 removed undoFlag, this is a plain qDeleteAll: ~StickFigure()
  * is now the single, unconditional owner of stick cleanup (scene removal,
  * imgListWidget entries, the sticks themselves), so there is nothing left for this
- * function to duplicate. It used to free every stick itself, explicitly, specifically
- * to route around ~StickFigure() skipping that work when undoFlag was raised (which
- * it always was, every time this ran, since clearFrame()'s one caller is
- * RestoreFrameSnapshot()) — that workaround is what undoFlag existed to enable.
+ * function to duplicate.
  */
 void Frame::clearFrame(){
     qDeleteAll(stickFigures);
@@ -410,9 +399,9 @@ void Frame::normalizeDepth()
 
 }
 void Frame::cleanTotalSticks(void){
-    QList<stick*> temp;
+    QList<StickData*> temp;
     for(StickFigure* S:stickFigures){
-        for(stick *s:S->stickList){
+        for(StickData *s:S->stickList){
             if(!totalSticks.contains(s)){
                 totalSticks.insert(s->order,s);
                 temp.append(s);
@@ -420,7 +409,7 @@ void Frame::cleanTotalSticks(void){
             }
         }
     }
-    for(stick*s:totalSticks){
+    for(StickData*s:totalSticks){
         if(!temp.contains(s)){
             totalSticks.removeAll(s);
         }

@@ -11,89 +11,50 @@ extern bool renderFlag;
 extern bool playBack;
 extern int HANDLESIZE;
 /**
- * @details Interactive-drawing constructor: StickFigure::startDrawing() builds the stick
- * on the zero-length segment under the mouse. Solid brush is the historical default for
- * the shape types; the endpoint handles are created here but attached to the scene by
- * the drawing code.
+ * @details Since Phase 2c: wraps an existing StickData (non-owning) and wires the
+ * back-pointer (`stick_data->view = this`) so tree-walk code holding a `StickData*`
+ * can reach this view without a separate lookup table. Endpoint handles are created
+ * here but attached to the scene by the caller (FramePresenter::AttachView() or the
+ * drawing/paste/library code it's called from).
  */
-stick::stick(QLineF *line)
+StickGraphicsItem::StickGraphicsItem(StickData *stick_data)
 {
     this->setFlag(QGraphicsItem::ItemIsSelectable,true);
-    Pen = QPen();
-    Brush = QBrush();
-    Brush.setStyle(Qt::SolidPattern);
+    data = stick_data;
+    data->view = this;
     highlight = true;
-    setLine(line);
-    stepchild = false;
     stickHandle[0] = new QGraphicsEllipseItem();
     stickHandle[1] = new QGraphicsEllipseItem();
     stickHandle[0]->setZValue(100);stickHandle[1]->setZValue(100);
     stickHandle[0]->setBrush(QBrush(Qt::red));
     stickHandle[1]->setBrush(QBrush(Qt::red));
-
+    br = updateBr(0);
 }
 /**
- * @details Empty-container constructor: deserialization ("idrata il contenitore") and
- * chop() fill the StickData part afterwards.
+ * @details Frees only what this object owns: the endpoint handles. `data` is
+ * non-owning (never deleted here) — whoever owns the StickData's container frees it
+ * separately. Clears the back-pointer so a stray `data->view` can't outlive this
+ * object; a destroy-before-detach bug becomes a null dereference instead of a
+ * use-after-free, easier to notice.
  */
-stick::stick()
-{
-    this->setFlag(QGraphicsItem::ItemIsSelectable,true);
-    stickHandle[0] = new QGraphicsEllipseItem();
-    stickHandle[1] = new QGraphicsEllipseItem();
-    stickHandle[0]->setZValue(100);stickHandle[1]->setZValue(100);
-    stickHandle[0]->setBrush(QBrush(Qt::red));
-    stickHandle[1]->setBrush(QBrush(Qt::red));
-    //Pen = QPen();
-}
-/**
- * @details Visual-clone constructor, used by onion skins, icon rendering, preview export
- * and mergeStickFigures(). The persistent fields now come from StickData::CopyFrom();
- * kept on top of it, as before Phase 1a: stepchild is reset (clones start unattached —
- * merge recomputes it), highlight starts true, and the source's bounding rect and Z are
- * applied to the QGraphicsItem side. Tree pointers are never copied.
- */
-stick::stick(stick* S)
-{
-    this->setFlag(QGraphicsItem::ItemIsSelectable,true);
-    CopyFrom(*S);
-    stepchild = false;
-    highlight = true;
-    this->setZValue(S->Z);
-    this->br = S->boundingRect();
-    stickHandle[0] = new QGraphicsEllipseItem();
-    stickHandle[1] = new QGraphicsEllipseItem();
-    stickHandle[0]->setZValue(100);stickHandle[1]->setZValue(100);
-    stickHandle[0]->setBrush(QBrush(Qt::red));
-    stickHandle[1]->setBrush(QBrush(Qt::red));
-
-}
-/**
- * @details Frees only what this object owns on the view side: the endpoint handles.
- * The QImage list is freed by ~StickData(); the image-list-widget cleanup that used to
- * live here (guarded by six global flags to skip scratch/undo/copy/library objects)
- * moved to RemoveImagesFromListWidget(), which the live-deletion call sites invoke
- * explicitly — a destructor cannot know whether its stick was on screen, the deleter
- * always does. This removes every scratch-vs-live flag from stick.cpp (Phase 1b).
- */
-stick::~stick(){
+StickGraphicsItem::~StickGraphicsItem(){
+    if(data && data->view == this)
+        data->view = nullptr;
     delete stickHandle[0] ;
     delete stickHandle[1] ;
 }
 /**
- * @details Called right before a LIVE stick is deleted (deleteStick, weld,
- * cancelDrawing, ~StickFigure): empties the rows this stick's images occupy in the
- * image list widget, which mirrors the on-screen selected IMAGE stick. Scratch
- * deletions (undo/copy/library buffers) and render clones (onion skins, icons,
- * preview/export) simply never call it — previously the export thread's clone
- * deletions could hit this widget from a non-GUI thread through ~stick, because no
- * flag covered that path.
+ * @details Called right before a LIVE stick's view is detached (deleteStick, weld,
+ * cancelDrawing, FramePresenter::DetachView()): empties the rows this stick's images
+ * occupy in the image list widget, which mirrors the on-screen selected IMAGE stick.
+ * Scratch deletions (undo/copy/library buffers never have a view at all) and render
+ * clones (onion skins, icons, preview/export — see below) simply never call it.
  */
-void stick::RemoveImagesFromListWidget(){
-    if(stickType != IMAGE)
+void StickGraphicsItem::RemoveImagesFromListWidget(){
+    if(data->stickType != StickData::IMAGE)
         return;
     int j = 0;
-    for(QImage*i:stickImgList)
+    for(QImage*i:data->stickImgList)
     {
         Q_UNUSED(i);
         QListWidgetItem * item= imgListWidget->takeItem(j);
@@ -101,182 +62,120 @@ void stick::RemoveImagesFromListWidget(){
         j++;
     }
 }
-void stick::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
+void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
 {
-    //Pen.setColor(Qt::black);
-    QPointF p(myLine.p1().x(),myLine.p1().y());
-    this->setZValue(Z);
+    Q_UNUSED(option);
+    Q_UNUSED(widget);
+    QPointF p(data->myLine.p1().x(),data->myLine.p1().y());
+    this->setZValue(data->Z);
     if(!onionRender)
-        painter->setPen(Pen);
+        painter->setPen(data->Pen);
     else{
-        QPen onionSkinPen(Pen);
+        QPen onionSkinPen(data->Pen);
         onionSkinPen.setColor(Qt::gray);
         painter->setPen(onionSkinPen);
     }
-    /*
-    if(stickType == StickType::CIRCLE){
-        painter->translate(p);
-        painter->rotate(imgAngle);
-        painter->setBrush(Brush);
-        painter->drawEllipse()
-        painter->drawEllipse(QPointF
-                             (0.5*(myLine.dx()),
-                              0.5*(myLine.dy())), // Ellipse center = line center
-                             myLine.length()*0.5, myLine.length()*0.5*imgHScale); //RX e RY
-
-
-        painter->rotate(-imgAngle);
-        painter->translate(-p.x(),-p.y());
-    }
-    */
-    if(stickType == StickType::IMAGE){
-        //QRectF imgRect = calcImgRect(myLine, stickImg->size());
+    if(data->stickType == StickData::IMAGE){
         // ogni immagine la facciamo partire dal punto 0,0
         // la ruotiamo
         // la trasliamo al punto di p1
         // il punto p1 deve essere sempre il topleft corner
-        QTransform t;
-        QSizeF off;
-        QPointF p;
-        //vedi quale fra lunghezza o larghezza dell'immaggine èd la più alta per calcolare lóffset per centrare l'immagine su p1
         QImage scaled = calcImg();
         // in caso di onion rendering converti l'immagine in grayscale
         if(onionRender){
             scaled.convertToFormat(QImage::Format_Grayscale8);
         }
-        p = QPointF(myLine.p1().x(),myLine.p1().y());
+        p = QPointF(data->myLine.p1().x(),data->myLine.p1().y());
         QPointF p2 = QPointF(-scaled.width()/2,-scaled.height()/2);
         painter->translate(p);
-        painter->rotate(imgAngle+imgAngleOffset);
-        QPointF p3 = QPointF(imgOffset);
+        painter->rotate(data->imgAngle+data->imgAngleOffset);
+        QPointF p3 = QPointF(data->imgOffset);
         painter->translate(p3);
         QPixmap pixmap;
         pixmap.convertFromImage(scaled);
-        // se siamo in onionskin
 
         painter->drawPixmap(p2,
                             pixmap);
         painter->translate(-p3.x(),-p3.y());
-        painter->rotate(-imgAngle-imgAngleOffset);
+        painter->rotate(-data->imgAngle-data->imgAngleOffset);
         painter->translate(-p.x(),-p.y());
 
     }
-    else if(stickType == StickType::RECT || stickType == StickType::CIRCLE){
+    else if(data->stickType == StickData::RECT || data->stickType == StickData::CIRCLE){
 
-
-
-        painter->setBrush(Brush);
+        painter->setBrush(data->Brush);
         painter->translate(p);
-        painter->rotate(imgAngle);
-         if(stickType == StickType::RECT){
-             QPointF c(-imgWScale/2,0);
-            painter->drawRect(c.x(),c.y(),imgWScale,myLine.length());
+        painter->rotate(data->imgAngle);
+         if(data->stickType == StickData::RECT){
+             QPointF c(-data->imgWScale/2,0);
+            painter->drawRect(c.x(),c.y(),data->imgWScale,data->myLine.length());
          }
          else{
-             QPointF c(-imgWScale*myLine.length()/2,0);
-             painter->drawEllipse(c.x(),c.y(),myLine.length()*imgWScale,myLine.length());
+             QPointF c(-data->imgWScale*data->myLine.length()/2,0);
+             painter->drawEllipse(c.x(),c.y(),data->myLine.length()*data->imgWScale,data->myLine.length());
          }
-        painter->rotate(-imgAngle);
+        painter->rotate(-data->imgAngle);
         painter->translate(-p.x(),-p.y());
 
     }
-    else if(stickType == StickType::TRAPEZOID || stickType == StickType::TAPER){
-        QPointF points[] = { QPointF(-imgWScale/2,0),QPointF(imgWScale/2,0),QPointF(imgHScale/2,myLine.length()), QPointF(-imgHScale/2,myLine.length())};
-
+    else if(data->stickType == StickData::TRAPEZOID || data->stickType == StickData::TAPER){
+        QPointF points[] = { QPointF(-data->imgWScale/2,0),QPointF(data->imgWScale/2,0),QPointF(data->imgHScale/2,data->myLine.length()), QPointF(-data->imgHScale/2,data->myLine.length())};
 
         QVector <QPointF>pVect = {points[0],points[1],points[2],points[3]};
         QPolygonF poly(pVect);
-        painter->setBrush(Brush);
+        painter->setBrush(data->Brush);
         painter->translate(p);
-        painter->rotate(imgAngle);
+        painter->rotate(data->imgAngle);
 
-        if(stickType == TAPER){
+        if(data->stickType == StickData::TAPER){
 
             QPainterPath totalPath;
             totalPath.setFillRule(Qt::WindingFill);
-            QRectF pie1(QPointF(-imgWScale/2,-imgWScale/2),QSize(imgWScale,imgWScale));
-            if(!hardBottom){
+            QRectF pie1(QPointF(-data->imgWScale/2,-data->imgWScale/2),QSize(data->imgWScale,data->imgWScale));
+            if(!data->hardBottom){
                 QPainterPath piePath;
                 piePath.moveTo(points[0]);
                 piePath.arcTo(pie1,0,180);
                 piePath.closeSubpath();
                 totalPath.addPath(piePath);
-                //totalPath.addEllipse(pie1);
             }
             totalPath.addPolygon(poly);
-            QRectF pie2(QPointF(-imgHScale/2,myLine.length()-imgHScale/2),QSize(imgHScale,imgHScale));
-            if(!hardTop){
+            QRectF pie2(QPointF(-data->imgHScale/2,data->myLine.length()-data->imgHScale/2),QSize(data->imgHScale,data->imgHScale));
+            if(!data->hardTop){
                 QPainterPath piePath;
                 piePath.moveTo(points[2]);
                 piePath.arcTo(pie2,0,-180);
                 piePath.closeSubpath();
                 totalPath.addPath(piePath);
-                //totalPath.addEllipse(pie2);
-
             }
             painter->drawPath(totalPath.simplified());
-            //painter->drawPolygon(pVect);
-            //painter->drawPie(pie2,0,-180*16);
-            //painter->drawEllipse(pie2);
         }
         else{
             painter->drawPolygon(points,4);
         }
-        painter->rotate(-imgAngle);
+        painter->rotate(-data->imgAngle);
         painter->translate(-p.x(),-p.y());
 
     }
-    else if(stickType == StickType::LINE){
-        painter->drawLine(myLine.x1(),myLine.y1(),myLine.x2(),myLine.y2());
+    else if(data->stickType == StickData::LINE){
+        painter->drawLine(data->myLine.x1(),data->myLine.y1(),data->myLine.x2(),data->myLine.y2());
     }
 
-    stickHandle[0]->setRect(myLine.p1().x()-HANDLESIZE/2,myLine.p1().y()-HANDLESIZE/2,HANDLESIZE,HANDLESIZE);
-    stickHandle[1]->setRect(myLine.p2().x()-HANDLESIZE/2,myLine.p2().y()-HANDLESIZE/2,HANDLESIZE,HANDLESIZE);
+    stickHandle[0]->setRect(data->myLine.p1().x()-HANDLESIZE/2,data->myLine.p1().y()-HANDLESIZE/2,HANDLESIZE,HANDLESIZE);
+    stickHandle[1]->setRect(data->myLine.p2().x()-HANDLESIZE/2,data->myLine.p2().y()-HANDLESIZE/2,HANDLESIZE,HANDLESIZE);
     if(this->selected){
         QColor c(Qt::yellow);
         c.setAlphaF(0.75);
         painter->setPen(QPen(c,8));
 
-        painter->drawEllipse(myLine.p2().x()-HANDLESIZE*0.4,myLine.p2().y()-HANDLESIZE*0.4,HANDLESIZE*0.8,HANDLESIZE*0.8);
-        painter->drawEllipse(myLine.p1().x()-HANDLESIZE*0.4,myLine.p1().y()-HANDLESIZE*0.4,HANDLESIZE*0.8,HANDLESIZE*0.8);
-        painter->drawLine(myLine.x1(),myLine.y1(),myLine.x2(),myLine.y2());
+        painter->drawEllipse(data->myLine.p2().x()-HANDLESIZE*0.4,data->myLine.p2().y()-HANDLESIZE*0.4,HANDLESIZE*0.8,HANDLESIZE*0.8);
+        painter->drawEllipse(data->myLine.p1().x()-HANDLESIZE*0.4,data->myLine.p1().y()-HANDLESIZE*0.4,HANDLESIZE*0.8,HANDLESIZE*0.8);
+        painter->drawLine(data->myLine.x1(),data->myLine.y1(),data->myLine.x2(),data->myLine.y2());
 
     }
-    //Pen.setColor(Qt::red); //draw bounding box
-    /*
-    if(!onionRender && !renderFlag &&!playBack){
-        if(this->master){ // il master ha entrambe le estremità disegnate
-            if(this->highlight)
-                painter->setPen(QPen(Qt::green,HANDLESIZE));
-            else
-                painter->setPen(QPen(Qt::darkGreen,HANDLESIZE));
-            painter->drawEllipse(myLine.p1().x()-HANDLESIZE/2,myLine.p1().y()-HANDLESIZE/2,HANDLESIZE,HANDLESIZE);
-        }
-        if(this->parent != nullptr){
-            if(this->highlight){
-                painter->setPen(QPen(Qt::red,HANDLESIZE));
-                if(this->stepchild && this->parent->master)
-                    painter->setPen(QPen(Qt::green,HANDLESIZE));
-            }
-            else{
-                painter->setPen(QPen(Qt::blue,HANDLESIZE));
-                if(this->stepchild && this->parent->master)
-                    painter->setPen(QPen(Qt::darkGreen,HANDLESIZE));
-            }
-            //if(this->parent->master == false)
-                painter->drawEllipse(myLine.p1().x()-HANDLESIZE/2,myLine.p1().y()-HANDLESIZE/2,HANDLESIZE,HANDLESIZE);
-        }
-        if(this->highlight)
-            painter->setPen(QPen(Qt::red,HANDLESIZE));
-        else
-            painter->setPen(QPen(Qt::blue,HANDLESIZE));
-        painter->drawEllipse(myLine.p2().x()-HANDLESIZE/2,myLine.p2().y()-HANDLESIZE/2,HANDLESIZE,HANDLESIZE);
-
-        //painter->drawRect(br);
-    }*/
 }
 // bounding rectangle deve essere sempre "positivo"
-QRectF stick::boundingRect() const
+QRectF StickGraphicsItem::boundingRect() const
 {
     return this->br;
 }
@@ -288,75 +187,63 @@ QRectF calcImgRect(QLineF l,QSizeF s){
                     l.p1().y()-abs(s.height()*f)*0.5), //        line center Y shifted by minus half line length (pushing top left)
                    QPointF(l.p1().x()+abs(l.length())*0.5, //    bottom right corner =
                         l.p1().y()+abs(s.height()*f)*0.5));//    line center shifted by adding half line length (pushing bottom right)
-
-    /*
-    //questa cerca adattivamente quale sia il punto più in alto a sx
-    QRectF out =QRectF(QPointF                                                      // Upper left corner of rect =
-                       (0.5*(l.p1().x()+l.p2().x())-abs(l.length())*0.5, //           line center X shifted by minus half line length
-                        0.5*(l.p1().y()+l.p2().y())-abs(s.height()*f)*0.5), //
-                       QPointF(0.5*(l.p1().x()+l.p2().x())+abs(l.length())*0.5, // bottom right corner =
-                                           0.5*(l.p1().y()+l.p2().y())+abs(s.height()*f)*0.5));*/
-
-    /*QRectF out =QRectF(0.5*(l.p1()+l.p2())-QPointF(),
-                       QPointF(l.p1().x()+abs(l.dx()), // bottom right corner =
-                                           l.p1().y()+(s.height()*f)));*/
     return out;
 
 }
 
-QImage stick::calcImg(){
+QImage StickGraphicsItem::calcImg(){
     QSizeF offsetted;
-    if(stickImg->width()>stickImg->height())
+    if(data->stickImg->width()>data->stickImg->height())
     {
-        offsetted = QSizeF(myLine.length()*imgWScale, stickImg->height()*myLine.length()/stickImg->width()*imgHScale);
+        offsetted = QSizeF(data->myLine.length()*data->imgWScale, data->stickImg->height()*data->myLine.length()/data->stickImg->width()*data->imgHScale);
     }
     else
     {
-        offsetted = QSizeF(myLine.length()*stickImg->width()*imgWScale/stickImg->height(), myLine.length()*imgHScale);
+        offsetted = QSizeF(data->myLine.length()*data->stickImg->width()*data->imgWScale/data->stickImg->height(), data->myLine.length()*data->imgHScale);
     }
 
-    return  stickImg->scaled(offsetted.width(),offsetted.height());
+    return  data->stickImg->scaled(offsetted.width(),offsetted.height());
 }
 
 /**
- * @brief stick::constructBr builds the boudning rect (without taking into account scaling factors)
+ * @brief StickGraphicsItem::constructBr builds the boudning rect (without taking into account scaling factors)
  * @return
  */
-QRectF stick::constructBr()
+QRectF StickGraphicsItem::constructBr()
 {
 
-    if((stickType == IMAGE || stickType == CIRCLE||stickType ==RECT || stickType == TRAPEZOID || stickType == TAPER ) && myLine.length()>0)
+    if((data->stickType == StickData::IMAGE || data->stickType == StickData::CIRCLE||data->stickType ==StickData::RECT || data->stickType == StickData::TRAPEZOID || data->stickType == StickData::TAPER ) && data->myLine.length()>0)
     {
         float d = 0;
 
-        if(stickType == IMAGE ){
+        if(data->stickType == StickData::IMAGE ){
             QImage scaled = calcImg();
             d = sqrt(pow(scaled.width(),2)+pow(scaled.height(),2));
         }
-        else if(stickType !=CIRCLE){
-            d = sqrt(pow(imgWScale,2)+pow(myLine.length()+2*imgHScale,2));
+        else if(data->stickType !=StickData::CIRCLE){
+            d = sqrt(pow(data->imgWScale,2)+pow(data->myLine.length()+2*data->imgHScale,2));
         }
         else{
-            d = sqrt(pow(2*myLine.length()*imgWScale,2)+pow(myLine.length()*imgHScale,2));
+            d = sqrt(pow(2*data->myLine.length()*data->imgWScale,2)+pow(data->myLine.length()*data->imgHScale,2));
         }
         return  QRectF(QPointF                                                      // Upper left corner of rect =
-                       (myLine.p1().x()-d, //           line center X shifted by minus half line length
-                        myLine.p1().y()-d), //          line center Y shifted by minus half line length (pushing top left)
-                       QPointF(myLine.p1().x()+d, // bottom right corner =
-                               myLine.p1().y()+d));
+                       (data->myLine.p1().x()-d, //           line center X shifted by minus half line length
+                        data->myLine.p1().y()-d), //          line center Y shifted by minus half line length (pushing top left)
+                       QPointF(data->myLine.p1().x()+d, // bottom right corner =
+                               data->myLine.p1().y()+d));
     }else
     {
         // il bounding rect sarà il bounding rect del CERCHIO di cui la linea dello stick è il RAGGIO! Questo per evitare che
         // l'immagine sia tagliata (in qualsiasi direzione)
         return  QRectF(QPointF                                                      // Upper left corner of rect =
-                       (0.5*(myLine.p1().x()+myLine.p2().x())-myLine.length()*0.5, //  line center X shifted by minus half line length
-                        0.5*(myLine.p1().y()+myLine.p2().y())-myLine.length()*0.5), // line center Y shifted by minus half line length (pushing top left)
-                       QPointF(0.5*(myLine.p1().x()+myLine.p2().x())+myLine.length()*0.5, // bottom right corner =
-                               0.5*(myLine.p1().y()+myLine.p2().y())+myLine.length()*0.5));     // line center shifted by adding half line length (pushing bottom right)
+                       (0.5*(data->myLine.p1().x()+data->myLine.p2().x())-data->myLine.length()*0.5, //  line center X shifted by minus half line length
+                        0.5*(data->myLine.p1().y()+data->myLine.p2().y())-data->myLine.length()*0.5), // line center Y shifted by minus half line length (pushing top left)
+                       QPointF(0.5*(data->myLine.p1().x()+data->myLine.p2().x())+data->myLine.length()*0.5, // bottom right corner =
+                               0.5*(data->myLine.p1().y()+data->myLine.p2().y())+data->myLine.length()*0.5));     // line center shifted by adding half line length (pushing bottom right)
     }
 }
 //funzione per aggiornare il rettangolo di refresh del disegno della scena per l'item grafico
-QRectF stick::updateBr(int mode)
+QRectF StickGraphicsItem::updateBr(int mode)
 {
     qreal oldP1x;
     qreal oldP1y;
@@ -374,9 +261,9 @@ QRectF stick::updateBr(int mode)
 
     // 1 Assicurati che a seconda della direzione della linea, il rettangolo abbia come P1 il punto più in alto a sx
     //      e come P2 il punto più in basso a destra
-    newBr.setX(newBr.x()-Pen.width()-HANDLESIZE);newBr.setY(newBr.y()-Pen.width()-HANDLESIZE); // TODO padding proporzionale alla dimensione della Penna
-    newBr.setWidth(newBr.width()+Pen.width()+HANDLESIZE);
-    newBr.setHeight(newBr.height()+Pen.width()+HANDLESIZE);
+    newBr.setX(newBr.x()-data->Pen.width()-HANDLESIZE);newBr.setY(newBr.y()-data->Pen.width()-HANDLESIZE); // TODO padding proporzionale alla dimensione della Penna
+    newBr.setWidth(newBr.width()+data->Pen.width()+HANDLESIZE);
+    newBr.setHeight(newBr.height()+data->Pen.width()+HANDLESIZE);
     this->br.getCoords(&oldP1x,&oldP1y,&oldP2x,&oldP2y);
     // Se stiamo muovendo l'oggetto, teniamo conto anche del precedente bounding rect, e li fondiamo
     // per creare un bounding rect che contenga sia quello nuovo che quello vecchio così da non generare ghosting
@@ -426,18 +313,17 @@ QRectF stick::updateBr(int mode)
 
 }
 //lo stick misura l'angolo effettivo dell'oggetto linea rispetto al piano di disegno
-void stick::calcAngle()
+void StickGraphicsItem::calcAngle()
 {
-    angleBuffer = myLine.angle();//(180/M_PI)*atan2(lineobject.line().dx(),lineobject.line().dy());
+    angleBuffer = data->myLine.angle();
 }
 
 //aggiorna la linea dello stick
-void stick::setLine(QLineF* line)
+void StickGraphicsItem::setLine(QLineF* line)
 {
-    //lineobject.setLine(*line);
-    myLine = *line;
+    data->myLine = *line;
 }
-void stick::refresh(int mode)
+void StickGraphicsItem::refresh(int mode)
 {
     prepareGeometryChange();    // necessario chiamare questa funzione per non lasciare trails ed evitare il ghosting durante la manipolazione e il disegno!
     br = updateBr(mode);
@@ -445,199 +331,191 @@ void stick::refresh(int mode)
     update();
 }
 //comando per cambiare la rotazione di uno stick
-void stick::rotate(QPointF *point)
+void StickGraphicsItem::rotate(QPointF *point)
 {
 
     //step 1 calcola l'angolo con alpha = atan2(dx/dy)
-    int dx = static_cast<int>(myLine.p1().x()-point->x());
-    int dy = static_cast<int>(-myLine.p1().y()+point->y());
+    int dx = static_cast<int>(data->myLine.p1().x()-point->x());
+    int dy = static_cast<int>(-data->myLine.p1().y()+point->y());
     float DX, DY = 0;
     float angle         = atan2(dx,dy)*180/M_PI;
     bool traslationOnly = false;
     //agisci sull'oggetto linea
-    QPointF pBuf        = getP2(&myLine);
+    QPointF pBuf        = getP2(&data->myLine);
     //setta il pivot dello stick
     //progettiamo lóffset degli stick figlio
-    QPointF oldEndPos   = myLine.p2();
+    QPointF oldEndPos   = data->myLine.p2();
     // lo stick punta al cursore che lo trascina
     //calcola se stiamo lavorando con l'origine del master stick
-    if(this->isMaster() && // todo master replacement
-            QLineF(*point,myLine.p1()).length()<QLineF(*point,myLine.p2()).length()) // se la selezione è più prossima all'orgine che al secondo punto
+    if(this->isMaster() &&
+            QLineF(*point,data->myLine.p1()).length()<QLineF(*point,data->myLine.p2()).length()) // se la selezione è più prossima all'orgine che al secondo punto
     {
-        oldEndPos   = myLine.p1();
+        oldEndPos   = data->myLine.p1();
         DX = oldEndPos.x()-point->x(); //opera una traslazione
         DY = oldEndPos.y()-point->y();
-        myLine.translate(-DX,-DY);
+        data->myLine.translate(-DX,-DY);
         traslationOnly = true;
     }
     else
     {
-        myLine.setAngle(-angle-90/*(angle+angleBuffer)*/);
+        data->myLine.setAngle(-angle-90);
     }
     refresh(1);
-    for(int i= 0; i<children.length();i++)
+    for(int i= 0; i<data->children.length();i++)
     {
+        StickData* child = data->children[i];
         if(traslationOnly){ // inc aso di sola traslazione dello stick non ricalcolare DX e DY
-            children[i]->myLine.translate(-DX,-DY);
+            child->myLine.translate(-DX,-DY);
         }
         // se non è uno stepchild oppure lo è ma stai ruotando uno stepchild a sua volta
-        else if( (children[i]->stepchild == false) || (this->stepchild == true && children[i]->stepchild == true)) // dall'altra estremità del master non spostare gli stick quando il master è ruotato
+        else if( (child->stepchild == false) || (data->stepchild == true && child->stepchild == true)) // dall'altra estremità del master non spostare gli stick quando il master è ruotato
         {
             //effettua la traslazione dovuta alla rotazione dell'estremo libero
-            DX = oldEndPos.x()-myLine.p2().x();
-            DY = oldEndPos.y()-myLine.p2().y();
-            children[i]->myLine.translate(-DX,-DY);
-            qDebug("DX %f, DY %f", DX,DY);
-            qDebug("X2= %f, Y2= %f", pBuf.x(),pBuf.y());
-
+            DX = oldEndPos.x()-data->myLine.p2().x();
+            DY = oldEndPos.y()-data->myLine.p2().y();
+            child->myLine.translate(-DX,-DY);
         }
-        static_cast<stick*>(children[i])->refresh(1); // bridge: dati di figura viva (Phase 2a)
+        if(child->view)
+            child->view->refresh(1);
     }
-    if((stickType == IMAGE ||stickType == CIRCLE|| stickType == RECT || stickType == TAPER || stickType == TRAPEZOID) && !traslationOnly){
-        imgAngle = angle;
-        //*stickImg = stickImg->transformed(QTransform().rotate(90-angle));
+    if((data->stickType == StickData::IMAGE ||data->stickType == StickData::CIRCLE|| data->stickType == StickData::RECT || data->stickType == StickData::TAPER || data->stickType == StickData::TRAPEZOID) && !traslationOnly){
+        data->imgAngle = angle;
     }
 
 }
 // funzione usata per fare le rotazioni dei singoli stick in modalità stickfigure rotation
 // angle è il delta di quanto lo vogliamo ruotare
-void stick::rotate(float angle){
+void StickGraphicsItem::rotate(float angle){
     // l'angolo viene settato, quindi in realtà andiamo ad aggiungere un delta
     angle = angleBuffer2+angle;
-    qDebug(" anglebuf = %f \r\n angle = %f\r\n",angleBuffer2,angle);
-    //angleBuffer = angle;
-    QPointF oldEndPos = myLine.p2();
-    myLine.setAngle(angle);
+    QPointF oldEndPos = data->myLine.p2();
+    data->myLine.setAngle(angle);
     float DX = 0;
     float DY = 0;
-    DX = oldEndPos.x()-myLine.p2().x(); //traslazione dei nodi figli
-    DY = oldEndPos.y()-myLine.p2().y();
+    DX = oldEndPos.x()-data->myLine.p2().x(); //traslazione dei nodi figli
+    DY = oldEndPos.y()-data->myLine.p2().y();
     refresh(1);
-    for(int i= 0; i<children.length();i++)
+    for(int i= 0; i<data->children.length();i++)
     {
+        StickData* child = data->children[i];
         // se non è uno stepchild oppure lo è ma stai ruotando uno stepchild a sua volta
-        if( (children[i]->stepchild == false) || (this->stepchild == true && children[i]->stepchild == true)) // dall'altra estremità del master non spostare gli stick quando il master è ruotato
+        if( (child->stepchild == false) || (data->stepchild == true && child->stepchild == true)) // dall'altra estremità del master non spostare gli stick quando il master è ruotato
         {
             //effettua la traslazione dovuta alla rotazione dell'estremo libero
-            children[i]->myLine.translate(-DX,-DY);
+            child->myLine.translate(-DX,-DY);
         }
-        static_cast<stick*>(children[i])->refresh(1); // bridge: dati di figura viva (Phase 2a)
+        if(child->view)
+            child->view->refresh(1);
     }
-    if(stickType == IMAGE ||stickType == CIRCLE|| stickType == TRAPEZOID || stickType == TAPER || stickType == RECT){
-        if(stickType == IMAGE)
-            imgAngle = -angle-90;
-        else
-            imgAngle = -angle-90;
-        //*stickImg = stickImg->transformed(QTransform().rotate(90-angle));
+    if(data->stickType == StickData::IMAGE ||data->stickType == StickData::CIRCLE|| data->stickType == StickData::TRAPEZOID || data->stickType == StickData::TAPER || data->stickType == StickData::RECT){
+        data->imgAngle = -angle-90;
     }
 }
 // this freely elongates sticks
-void stick::manipulate(QPointF *point)
+void StickGraphicsItem::manipulate(QPointF *point)
 {
     // set the new point
-    myLine.setP2(*point);
-    for(int i= 0; i<children.length();i++)
+    data->myLine.setP2(*point);
+    for(int i= 0; i<data->children.length();i++)
     {
+        StickData* child = data->children[i];
         //effettua la traslazione dovuta alla manipolazione dell'estremo libero
-        if(!(children[i]->stepchild && this->isMaster()) && children[i]->parent == this){ // todo master replacement
-            QPointF pfBuf = children[i]->myLine.p2();
-            children[i]->myLine = QLineF(*point,pfBuf);
-            if(children[i]->stickType == stick::IMAGE || children[i]->stickType == RECT
-                    || children[i]->stickType == TRAPEZOID || children[i]->stickType == TAPER){
-                children[i]->imgAngle = -atan2(children[i]->myLine.dx(),children[i]->myLine.dy())*180/M_PI;
+        if(!(child->stepchild && this->isMaster()) && child->parent == data){
+            QPointF pfBuf = child->myLine.p2();
+            child->myLine = QLineF(*point,pfBuf);
+            if(child->stickType == StickData::IMAGE || child->stickType == StickData::RECT
+                    || child->stickType == StickData::TRAPEZOID || child->stickType == StickData::TAPER){
+                child->imgAngle = -atan2(child->myLine.dx(),child->myLine.dy())*180/M_PI;
             }
-            static_cast<stick*>(children[i])->refresh(0); // bridge: dati di figura viva (Phase 2a)
+            if(child->view)
+                child->view->refresh(0);
         }
 
     }
     // se stiamo con un immagine ruotala anche
-    if(stickType == stick::IMAGE || stickType == RECT
-            || stickType == TRAPEZOID || stickType == TAPER|| stickType == CIRCLE){
-        imgAngle= -atan2(myLine.dx(),myLine.dy())*180/M_PI;
+    if(data->stickType == StickData::IMAGE || data->stickType == StickData::RECT
+            || data->stickType == StickData::TRAPEZOID || data->stickType == StickData::TAPER|| data->stickType == StickData::CIRCLE){
+        data->imgAngle= -atan2(data->myLine.dx(),data->myLine.dy())*180/M_PI;
     }
     refresh(0);
 }
 
-bool stick::isMaster() const
+bool StickGraphicsItem::isMaster() const
 {
     if(this->myStickFigure != nullptr)
-        return this->myStickFigure->masterStick == this;
+        return this->myStickFigure->masterStick == data;
     return false;
 }
 // è stato rilasciato il mouse termina la rotazione
-void stick::endRotation()
+void StickGraphicsItem::endRotation()
 {
     // refresha con l'opzione di ridimensionare i box
     refresh(0);
     // anche per tutti i children
-    for(int i= 0; i<children.length();i++)
+    for(int i= 0; i<data->children.length();i++)
     {
-        static_cast<stick*>(children[i])->refresh(0); // bridge: dati di figura viva (Phase 2a)
+        if(data->children[i]->view)
+            data->children[i]->view->refresh(0);
     }
 }
-QPointF stick::getP2(QLineF* line)
+QPointF StickGraphicsItem::getP2(QLineF* line)
 {
     float x = line->p1().x()+line->length()*cos(line->angle());
     float y = line->p1().y()+line->length()*sin(line->angle());
     return QPointF(x,y);
 }
-void stick::scale(float scaleFactor){
-    /*
-    float trueScale = 1+scaleBuffer-scaleFactor;
-    float oldLength = myLine.length();
-    scaleBuffer = scaleFactor;
-    */
-    QPointF oldEndPos = myLine.p2();
-    float oldLength = myLine.length();
+void StickGraphicsItem::scale(float scaleFactor){
+    QPointF oldEndPos = data->myLine.p2();
     float trueScale = scaleBuffer*scaleFactor;
     float DX = 0;
     float DY = 0;
-    myLine.setLength(trueScale);
-    DX = oldEndPos.x()-myLine.p2().x(); //traslazione dei nodi figli
-    DY = oldEndPos.y()-myLine.p2().y();
+    data->myLine.setLength(trueScale);
+    DX = oldEndPos.x()-data->myLine.p2().x(); //traslazione dei nodi figli
+    DY = oldEndPos.y()-data->myLine.p2().y();
     refresh(1);
-    float previousFactor = Pen.widthF()/widthBuffer;
-    Pen.setWidthF(widthBuffer*scaleFactor);
-    if(stickType == RECT){
-        imgWScale = (imgWScale/previousFactor)*scaleFactor;
+    float previousFactor = data->Pen.widthF()/widthBuffer;
+    data->Pen.setWidthF(widthBuffer*scaleFactor);
+    if(data->stickType == StickData::RECT){
+        data->imgWScale = (data->imgWScale/previousFactor)*scaleFactor;
     }
-    if(stickType == TRAPEZOID || stickType == TAPER){
-        imgWScale = (imgWScale/previousFactor)*scaleFactor;
-        imgHScale = (imgHScale/previousFactor)*scaleFactor;
+    if(data->stickType == StickData::TRAPEZOID || data->stickType == StickData::TAPER){
+        data->imgWScale = (data->imgWScale/previousFactor)*scaleFactor;
+        data->imgHScale = (data->imgHScale/previousFactor)*scaleFactor;
     }
-    for(int i= 0; i<children.length();i++)
+    for(int i= 0; i<data->children.length();i++)
     {
+        StickData* child = data->children[i];
         // se non è uno stepchild oppure lo è ma stai ruotando uno stepchild a sua volta
-        if( (children[i]->stepchild == false) || (this->stepchild == true && children[i]->stepchild == true)) // dall'altra estremità del master non spostare gli stick quando il master è ruotato
+        if( (child->stepchild == false) || (data->stepchild == true && child->stepchild == true)) // dall'altra estremità del master non spostare gli stick quando il master è ruotato
         {
             //effettua la traslazione dovuta alla rotazione dell'estremo libero
-            children[i]->myLine.translate(-DX,-DY);
-            static_cast<stick*>(children[i])->refresh(1); // bridge: dati di figura viva (Phase 2a)
+            child->myLine.translate(-DX,-DY);
+            if(child->view)
+                child->view->refresh(1);
         }
     }
-    qDebug("scale = %f \r\n",trueScale);
 }
-void stick::addImage(QImage* imgToAdd, QString name){
-    stickImgList.append(imgToAdd);
-    stickImg = imgToAdd;
+void StickGraphicsItem::addImage(QImage* imgToAdd, QString name){
+    data->stickImgList.append(imgToAdd);
+    data->stickImg = imgToAdd;
     QListWidgetItem * addedItem = new QListWidgetItem();
     QVariant newData(QVariant::fromValue(imgToAdd));
     addedItem->setData(Qt::UserRole,newData);
     addedItem->setData(Qt::DisplayRole,name);
     addedItem->setIcon(QIcon(QPixmap::fromImage(*imgToAdd)));
-    imgNameList.append(name);
+    data->imgNameList.append(name);
     imgListWidget->addItem(addedItem);
     populateImageListWidget();
 }
-void stick::removeImgFromList(int idx){
-    if(stickType == stick::IMAGE){
-        if(stickImgList.length()>1){
-            QImage* toRemove = stickImgList[idx];
-            stickImgList.removeAt(idx);
-            imgNameList.removeAt(idx);
+void StickGraphicsItem::removeImgFromList(int idx){
+    if(data->stickType == StickData::IMAGE){
+        if(data->stickImgList.length()>1){
+            QImage* toRemove = data->stickImgList[idx];
+            data->stickImgList.removeAt(idx);
+            data->imgNameList.removeAt(idx);
             QListWidgetItem * itemToRemove = imgListWidget->takeItem(idx);
-            if(toRemove== stickImg)
-                stickImg = stickImgList[0];
+            if(toRemove== data->stickImg)
+                data->stickImg = data->stickImgList[0];
             delete itemToRemove;
             delete toRemove;
 
@@ -647,17 +525,17 @@ void stick::removeImgFromList(int idx){
 
 
 }
-void stick::populateImageListWidget(){
+void StickGraphicsItem::populateImageListWidget(){
 
-    if(stickType == stick::IMAGE){
+    if(data->stickType == StickData::IMAGE){
         imgListWidget->clear();
         int j = 0;
-        for(QImage* img:stickImgList)
+        for(QImage* img:data->stickImgList)
         {
             QListWidgetItem * addedItem = new QListWidgetItem();
             QVariant newData(QVariant::fromValue(img));
             addedItem->setData(Qt::UserRole,newData);
-            addedItem->setData(Qt::DisplayRole,imgNameList[j]);
+            addedItem->setData(Qt::DisplayRole,data->imgNameList[j]);
             addedItem->setIcon(QIcon(QPixmap::fromImage(*img)));
             imgListWidget->addItem(addedItem);
             j++;

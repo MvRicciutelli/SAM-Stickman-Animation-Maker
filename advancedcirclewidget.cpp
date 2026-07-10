@@ -22,7 +22,7 @@ void advancedCircleWidget::on_circleSquashSlider_valueChanged(int value)
     circleSquashSpinbox->setValue(value);
     if(V->myAnimation->CurrentFrame()->CurrentStickFigure()!=nullptr){
         if(V->myAnimation->CurrentFrame()->CurrentStick()!=nullptr){
-            if(V->myAnimation->CurrentFrame()->CurrentStick()->stickType== stick::CIRCLE){
+            if(V->myAnimation->CurrentFrame()->CurrentStick()->stickType== StickData::CIRCLE){
                 if(value<0){
 
                     V->myAnimation->CurrentFrame()->CurrentStick()->imgWScale = (1-(-(float)value)/100);
@@ -30,7 +30,8 @@ void advancedCircleWidget::on_circleSquashSlider_valueChanged(int value)
                 else{
                     V->myAnimation->CurrentFrame()->CurrentStick()->imgWScale = (float)(1+(float)value/20);
                 }
-                V->myAnimation->CurrentFrame()->CurrentStick()->refresh(0);
+                if(V->myAnimation->CurrentFrame()->CurrentStick()->view)
+                    V->myAnimation->CurrentFrame()->CurrentStick()->view->refresh(0);
             }
         }
     }

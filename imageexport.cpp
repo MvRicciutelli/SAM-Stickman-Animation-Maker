@@ -26,13 +26,14 @@ void imageExport::render(int option)
         QPainter painter(renderImg); // painter che esegue il drawing sull immagine
         painter.setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
         renderScene.setSceneRect(myRect->rect());
-        // ora clona tutti gli stick nello stickfigure in una tempList, aggiungili alla scena fittizia
-        QList<stick*> tempList;
+        // questi stick sono VIVI: clona i dati prima di wrapparli, altrimenti il costruttore
+        // di stick ruberebbe il back-pointer data->view alla view reale sullo schermo
+        QList<StickData*> renderClones;
 
-        for(stick* s: f->totalSticks){
-            stick* clone = new stick(s);
-            tempList.append(clone);
-            renderScene.addItem(clone);
+        for(StickData* s: f->totalSticks){
+            StickData* clone = s->Clone();
+            renderClones.append(clone);
+            renderScene.addItem(new StickGraphicsItem(clone));
         }
 
         //disegna sull' immagine e salvala
@@ -44,7 +45,8 @@ void imageExport::render(int option)
         renderImg->save(itemPath);
         painter.end();
         delete renderImg;
-        renderScene.clear();
+        renderScene.clear(); // distruggi le view di rendering PRIMA di liberare i dati clonati
+        qDeleteAll(renderClones);
         //...add all other video frames here
     }
 

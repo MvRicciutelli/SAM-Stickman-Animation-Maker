@@ -9,6 +9,7 @@
 #include <QTabWidget>
 #include "myview.h"
 #include "uiItems.h"
+#include "framepresenter.h"
 
 extern QGraphicsScene *scene;
 extern QGraphicsRectItem *myRect;
@@ -49,20 +50,20 @@ class TestCharacterization : public QObject
 
     // replicates myView::drawCmd() for a LINE stick, press + release (myview.cpp:449) —
     // drawCmd itself is private and only reachable through mouse events
-    stick *DrawStick(QPointF from, QPointF to)
+    StickData *DrawStick(QPointF from, QPointF to)
     {
         StickFigure *figure = CurrentStickFigure();
         view->storeUndo();
         figure->startDrawing(&from, view->myPen, view->myBrush);
-        stick *drawn = figure->currentStick;
-        drawn->selected = true;
+        StickData *drawn = figure->currentStick;
+        FramePresenter::AttachView(drawn, scene);
+        drawn->view->selected = true;
         drawn->hardTop = hardTopCheck->isChecked();
         drawn->hardBottom = hardBottomCheck->isChecked();
         drawn->Pen = view->myPen;
-        scene->addItem(drawn);
         figure->endDrawing(&to);
-        scene->addItem(drawn->stickHandle[0]);
-        scene->addItem(drawn->stickHandle[1]);
+        scene->addItem(drawn->view->stickHandle[0]);
+        scene->addItem(drawn->view->stickHandle[1]);
         CurrentFrame()->updateIcon();
         view->myAnimation->updateTab(drawn->stickType);
         CurrentFrame()->totalSticks.append(drawn);
@@ -144,10 +145,10 @@ private slots:
 
     void StickLineRoundTrip()
     {
-        stick source;
+        StickData source;
         source.myLine = QLineF(1, 2, 3, 4);
         source.Z = 5.5;
-        source.stickType = stick::LINE;
+        source.stickType = StickData::LINE;
         source.stepchild = true;
         source.parentIdx = 7;
         source.order = 3;
@@ -160,7 +161,7 @@ private slots:
             QDataStream out(&bytes, QIODevice::WriteOnly);
             out << source;
         }
-        stick loaded;
+        StickData loaded;
         {
             QDataStream in(&bytes, QIODevice::ReadOnly);
             in >> loaded;
@@ -178,10 +179,10 @@ private slots:
 
     void StickCircleRoundTrip()
     {
-        stick source;
+        StickData source;
         source.myLine = QLineF(10, 20, 30, 40);
         source.Z = 1;
-        source.stickType = stick::CIRCLE;
+        source.stickType = StickData::CIRCLE;
         source.imgAngle = 33.5f;
         source.imgAngleOffset = 42; // regression: used to reset on every save/load/clone
         source.imgHScale = 1.5f;
@@ -195,7 +196,7 @@ private slots:
             QDataStream out(&bytes, QIODevice::WriteOnly);
             out << source;
         }
-        stick loaded;
+        StickData loaded;
         {
             QDataStream in(&bytes, QIODevice::ReadOnly);
             in >> loaded;
@@ -215,8 +216,8 @@ private slots:
     // while operator>> reads 4, desyncing every IMAGE-stick save
     void StickImageRoundTrip()
     {
-        stick source;
-        source.stickType = stick::IMAGE;
+        StickData source;
+        source.stickType = StickData::IMAGE;
         source.myLine = QLineF(0, 0, 0, 50);
         source.Z = 2;
         QImage *first_image = new QImage(8, 8, QImage::Format_ARGB32);
@@ -233,7 +234,7 @@ private slots:
             QDataStream out(&bytes, QIODevice::WriteOnly);
             out << source;
         }
-        stick loaded;
+        StickData loaded;
         {
             QDataStream in(&bytes, QIODevice::ReadOnly);
             in >> loaded;
@@ -350,14 +351,14 @@ private slots:
         StickFigure *pasted = AddStick();
         PopulateLiveStickFigure(pasted, *buffered, true, true);
         pasted->refresh(0);
-        for (stick *s : pasted->stickList)
+        for (StickData *s : pasted->stickList)
             CurrentFrame()->totalSticks.append(s);
         view->addHandles(pasted);
 
         QCOMPARE(pasted->stickList.count(), 2);
         QCOMPARE(pasted->stickList[1]->parent, pasted->stickList[0]);
         // pasted sticks really live on the scene (attach_to_scene = true)
-        QCOMPARE(pasted->stickList[0]->scene(), scene);
+        QCOMPARE(pasted->stickList[0]->view->scene(), scene);
     }
 
     // the imgListWidget cleanup moved from ~stick to explicit calls at the live-delete
@@ -366,12 +367,12 @@ private slots:
     void DeleteImageStickClearsImageListWidget()
     {
         AddFrame();
-        stick *drawn = DrawStick(QPointF(500, 100), QPointF(500, 200));
+        StickData *drawn = DrawStick(QPointF(500, 100), QPointF(500, 200));
         // upgrade to IMAGE like drawCmd's DRAWIMG branch (myview.cpp:486)
-        drawn->stickType = stick::IMAGE;
+        drawn->stickType = StickData::IMAGE;
         QImage *image = new QImage(8, 8, QImage::Format_ARGB32);
         image->fill(Qt::green);
-        drawn->addImage(image, "img");
+        drawn->view->addImage(image, "img");
         QCOMPARE(imgListWidget->count(), 1);
 
         // snapshotting the frame into the undo buffer (scratch path) must not touch the widget
@@ -479,17 +480,20 @@ private slots:
     {
         AddFrame();
         StickFigure *figure = CurrentStickFigure();
-        stick *img_stick = new stick();
+        StickData *img_stick = new StickData();
         img_stick->myLine = QLineF(700, 100, 700, 200);
-        img_stick->myStickFigure = figure;
-        img_stick->stickType = stick::IMAGE;
+        // attacca la view MENTRE il tipo è ancora LINE (default): il costruttore di stick
+        // chiama updateBr(0) subito, che per un IMAGE deferenzierebbe stickImg prima che
+        // addImage() lo assegni — stesso ordine di myView::drawCmd() (myview.cpp)
+        StickGraphicsItem *img_stick_view = FramePresenter::AttachView(img_stick, scene);
+        img_stick_view->myStickFigure = figure;
+        img_stick->stickType = StickData::IMAGE;
         QImage *image = new QImage(8, 8, QImage::Format_ARGB32);
         image->fill(Qt::blue);
-        img_stick->addImage(image, "leak-check"); // also registers an entry in imgListWidget
+        img_stick_view->addImage(image, "leak-check"); // also registers an entry in imgListWidget
         figure->stickList.append(img_stick);
         figure->masterStick = img_stick;
         figure->currentStick = img_stick;
-        scene->addItem(img_stick);
         CurrentFrame()->totalSticks.append(img_stick);
         QCOMPARE(imgListWidget->count(), 1);
 
@@ -540,13 +544,13 @@ private slots:
     {
         AddFrame();
         StickFigure *figure = CurrentStickFigure();
-        stick *drawn = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        StickData *drawn = DrawStick(QPointF(100, 100), QPointF(100, 200));
         QCOMPARE(figure->stickList.count(), 1);
 
         // replicates Widget::on_splitStick_clicked() (widget.cpp:1198)
         view->storeUndo();
         view->removeHandles(figure);
-        stick *added = figure->chop(figure->currentStick);
+        StickData *added = figure->chop(figure->currentStick);
         view->addHandles(figure);
         CurrentFrame()->totalSticks.append(added);
 
@@ -559,8 +563,8 @@ private slots:
         // replicates Widget::on_joinStick_clicked() (widget.cpp:1186), welding from the master
         figure->currentStick = drawn;
         view->storeUndo();
-        QList<stick *> welded = figure->weld(drawn);
-        for (stick *s : welded)
+        QList<StickData *> welded = figure->weld(drawn);
+        for (StickData *s : welded)
             CurrentFrame()->totalSticks.removeAll(s);
 
         QCOMPARE(figure->stickList.count(), 1);
@@ -571,9 +575,9 @@ private slots:
     {
         AddFrame();
         StickFigure *main_figure = CurrentStickFigure();
-        stick *main_stick = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        StickData *main_stick = DrawStick(QPointF(100, 100), QPointF(100, 200));
         StickFigure *to_join = AddStick("joined");
-        stick *join_master = DrawStick(QPointF(200, 200), QPointF(200, 300));
+        StickData *join_master = DrawStick(QPointF(200, 200), QPointF(200, 300));
         QCOMPARE(CurrentStickFigure(), to_join);
 
         // replicates the JOIN branch of myView::mousePressEvent() (myview.cpp:314)
@@ -582,8 +586,8 @@ private slots:
         view->addHandles(main_figure);
 
         QCOMPARE(main_figure->stickList.count(), 3); // original + invisible linker + clone
-        stick *linker = main_figure->stickList[1];
-        stick *joined_clone = main_figure->stickList[2];
+        StickData *linker = main_figure->stickList[1];
+        StickData *joined_clone = main_figure->stickList[2];
         QCOMPARE(linker->parent, main_stick);
         QCOMPARE(linker->Pen.style(), Qt::NoPen);
         QCOMPARE(joined_clone->parent, linker);
@@ -596,7 +600,7 @@ private slots:
         myStickFigureWidgetList->clearSelection();
         to_join->linkedItem->setSelected(true);
         view->deleteStickFigure();
-        for (stick *s : CurrentStickFigure()->stickList)
+        for (StickData *s : CurrentStickFigure()->stickList)
             if (!CurrentFrame()->totalSticks.contains(s))
                 CurrentFrame()->totalSticks.append(s);
         QCOMPARE(CurrentFrame()->stickFigures.count(), 1);
@@ -607,8 +611,8 @@ private slots:
     {
         AddFrame();
         StickFigure *figure = CurrentStickFigure();
-        stick *master_stick = DrawStick(QPointF(100, 100), QPointF(100, 200));
-        stick *child_stick = DrawStick(QPointF(100, 200), QPointF(150, 250));
+        StickData *master_stick = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        StickData *child_stick = DrawStick(QPointF(100, 200), QPointF(150, 250));
         QCOMPARE(child_stick->parent, master_stick);
         QCOMPARE(CurrentStickFigure()->currentStick, child_stick);
         int figures_before = CurrentFrame()->stickFigures.count();
@@ -630,8 +634,8 @@ private slots:
     {
         AddFrame();
         StickFigure *figure = CurrentStickFigure();
-        stick *old_master = DrawStick(QPointF(200, 100), QPointF(200, 200));
-        stick *new_master = DrawStick(QPointF(200, 200), QPointF(200, 300));
+        StickData *old_master = DrawStick(QPointF(200, 100), QPointF(200, 200));
+        StickData *new_master = DrawStick(QPointF(200, 200), QPointF(200, 300));
         QCOMPARE(figure->masterStick, old_master);
         QCOMPARE(figure->currentStick, new_master);
 
@@ -737,21 +741,87 @@ private slots:
         throwaway_view->moveToFrame(throwaway_frame);
         StickFigure *figure = throwaway_frame->addStickFigure(myStickFigureWidgetList);
 
-        stick *img_stick = new stick();
+        StickData *img_stick = new StickData();
         img_stick->myLine = QLineF(50, 50, 50, 150);
-        img_stick->myStickFigure = figure;
-        img_stick->stickType = stick::IMAGE;
+        // vedi UndoAddFrameFreesImageStickListWidgetEntries: attacca la view prima di
+        // passare a IMAGE, altrimenti updateBr(0) nel costruttore deferenzia stickImg==nullptr
+        StickGraphicsItem *img_stick_view = FramePresenter::AttachView(img_stick, scene);
+        img_stick_view->myStickFigure = figure;
+        img_stick->stickType = StickData::IMAGE;
         QImage *image = new QImage(8, 8, QImage::Format_ARGB32);
         image->fill(Qt::green);
-        img_stick->addImage(image, "shutdown-check");
+        img_stick_view->addImage(image, "shutdown-check");
         figure->stickList.append(img_stick);
         figure->masterStick = img_stick;
         figure->currentStick = img_stick;
-        scene->addItem(img_stick);
         QCOMPARE(imgListWidget->count(), 1);
 
         delete throwaway_view; // same cascade as Widget::~Widget()'s `delete view`
         QCOMPARE(imgListWidget->count(), 0);
+    }
+
+    // Prep A for REFACTOR_PLAN.md Phase 2c: synthetic QTest mouse events driven through the
+    // REAL mousePressEvent/mouseMoveEvent/mouseReleaseEvent overrides, not the DrawStick()/
+    // storeUndo() helpers used elsewhere that call model methods directly. This is the one
+    // code path (interactive drawing/dragging) no other test in this suite exercises, and
+    // exactly the surface Phase 2c's StickGraphicsItem/FramePresenter split touches most.
+    //
+    // view->mapFromScene(...) is used instead of hand-computed pixel coordinates because the
+    // scene-to-viewport transform depends on QGraphicsView's default centering/alignment,
+    // which this test doesn't need to (and shouldn't) hardcode.
+    void DrawViaRealMouseEvents()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        view->setTool(DRAW);
+        int sticks_before = CurrentStickFigure()->stickList.count();
+
+        QPoint p1 = view->mapFromScene(QPointF(100, 100));
+        QPoint p2 = view->mapFromScene(QPointF(100, 200));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, p1);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, p2);
+
+        QCOMPARE(CurrentStickFigure()->stickList.count(), sticks_before + 1);
+        StickData *drawn = CurrentStickFigure()->stickList.last();
+        QVERIFY(drawn->view && scene->items().contains(drawn->view));
+        QCOMPARE(drawn->stickType, (int)StickData::LINE);
+
+        view->setTool(NOTOOL);
+    }
+
+    // exercises a real drag gesture (mousePress + several mouseMove + mouseRelease) through
+    // the NOTOOL/CLAMP rotate path, then undo/redo — the multi-event-gesture shape
+    // FrameUndoCommand's design depends on (storeUndo() captures "before" at press time;
+    // "after" is captured lazily on the first undo — see myview.cpp), now driven by real
+    // QTest-synthesized events end to end instead of calling the model methods directly.
+    void DragRotateViaRealMouseEventsIsUndoable()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        DrawStick(QPointF(400, 100), QPointF(400, 200));
+        int figure_index = CurrentFrame()->stickFigures.indexOf(CurrentStickFigure());
+        QLineF original_line = CurrentStickFigure()->stickList[0]->myLine;
+
+        view->setTool(NOTOOL);
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                           view->mapFromScene(QPointF(400, 200)));
+        for (int i = 1; i <= 5; i++) {
+            QTest::mouseMove(view->viewport(),
+                              view->mapFromScene(QPointF(400 + i * 10, 200 - i * 5)));
+        }
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                             view->mapFromScene(QPointF(450, 175)));
+
+        QLineF dragged_line = CurrentFrame()->stickFigures[figure_index]->stickList[0]->myLine;
+        QVERIFY(dragged_line != original_line);
+
+        view->undo_stack.undo();
+        QCOMPARE(CurrentFrame()->stickFigures[figure_index]->stickList[0]->myLine, original_line);
+
+        view->undo_stack.redo();
+        QCOMPARE(CurrentFrame()->stickFigures[figure_index]->stickList[0]->myLine, dragged_line);
+
+        view->setTool(NOTOOL);
     }
 };
 

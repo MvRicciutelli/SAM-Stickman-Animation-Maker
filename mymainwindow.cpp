@@ -66,7 +66,7 @@ void myMainWindow::on_actionload_triggered()
         view->storeUndo();
         centralW->addStick();
         view->myAnimation->CurrentFrame()->CurrentStickFigure()->loadStickFigure(fileName);
-        for(stick*s:view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
+        for(StickData*s:view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
             view->myAnimation->CurrentFrame()->totalSticks.append(s);
         }
         view->addHandles(view->myAnimation->CurrentFrame()->CurrentStickFigure());

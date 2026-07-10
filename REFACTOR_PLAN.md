@@ -14,8 +14,9 @@ continue in a follow-up session.
 ## Goals
 
 - Keep the conceptual hierarchy exactly as-is: `Animation` → `Frame` →
-  `StickFigure` → `stick`. This refactor reshapes *how* each layer is
-  implemented, not what it conceptually owns.
+  `StickFigure` → `stick` (since Phase 2c, `stick` is split into
+  `StickData` + `StickGraphicsItem` — see Phase 2c). This refactor reshapes
+  *how* each layer is implemented, not what it conceptually owns.
 - Keep every existing feature and property working identically: undo/redo,
   frame/stickfigure/stick copy-paste, the stickfigure library, onion skin,
   merge/split, master-stick reassignment, rescale, video/image export,
@@ -419,25 +420,38 @@ buildable and test-verified):
   remaining declarations or assignments (grep-verified); their names only
   survive in comments explaining what was removed and why. App + tests
   build and pass unchanged (20 characterization tests).
-- [~] Phase 2c **descoped, deferred to an optional future phase** — decided
-  with the user 2026-07-08 after sizing the blast radius: retyping
-  `stickList` to `QList<StickData*>` plus building `StickGraphicsItem`/
-  `FramePresenter` touches 195+ call sites across `myview.cpp`/
-  `widget.cpp`/`frame.cpp`/`StickFigure.cpp`, including mouse-event
-  handling and `paint()` — code the QtTest suite cannot exercise (headless,
-  no `QApplication` event loop), so this diff would be the first in the
-  whole refactor not caught by an automated regression net. Crucially, by
-  this point 2c is no longer fixing a live bug source: the three root
-  causes in this plan's "Root diagnosis" are already resolved for every
-  *scratch* object (cause 1's uninitialized-`.scene` trap cannot occur —
-  `FrameData`/`StickFigureData` have no `.scene` member, ever; cause 2 is
-  gone — each data class has exactly one serialize behavior; cause 3 is
-  gone — undo/redo already clones in memory via `Extract`/`Populate`, no
-  stream). What 2c would still buy is architectural: `stick` stays a fused
-  data+view object for *live* figures only, which is a maintainability/
-  testability goal, not a correctness one. Given the size and the missing
-  test coverage for its riskiest surface, see "Phase 2c (deferred)" below
-  instead of executing it now.
+- [x] Phase 2c **completed 2026-07-10** — initially descoped/deferred
+  2026-07-08 (see the original rationale kept below for context), then
+  resumed after re-sizing the real blast radius via a compiler-guided
+  grep pass: ~76 sites (16 construction, ~24 already-flagged Phase 2a
+  bridge casts, 2 mouse-selection casts, 34 scene attach/detach), not the
+  195+ originally estimated. Before touching production code, added two
+  `QTest::mouseClick`/`mousePress`/`mouseMove`/`mouseRelease`-driven tests
+  (`DrawViaRealMouseEvents`, `DragRotateViaRealMouseEventsIsUndoable`) to
+  close exactly the headless-mouse/paint coverage gap the original
+  deferral flagged — verified green against the pre-refactor baseline
+  first. Implementation: `StickData` gained a non-owning `stick *view`
+  back-pointer (kept the field/file named `stick`/`stick.h`/`stick.cpp`
+  during the structural change; the class itself was renamed to
+  `StickGraphicsItem` in a final mechanical pass once the split compiled
+  and passed clean — filenames were deliberately left as `stick.h`/
+  `stick.cpp` to keep that pass's diff reviewable). `FramePresenter`
+  (`framepresenter.h/cpp`) ended up as two free functions
+  (`AttachView`/`DetachView`) rather than a stateful class — `myView`
+  already owned everything a "presenter" would need. `StickFigure::
+  stickList`/`masterStick`/`currentStick`, `Frame::totalSticks`, and every
+  tree pointer are `StickData*`; every call site that still needs the
+  view routes through `->view->` guarded by a null check (a `StickData`
+  can be view-less: scratch/buffer objects always are, and an
+  in-progress draw briefly is until `drawCmd()` calls `AttachView()`).
+  Found and fixed one real bug surfaced by the retype itself:
+  `StickFigure::deleteStick()` detached a live IMAGE stick's view without
+  first calling `RemoveImagesFromListWidget()` on it (only did so for its
+  *children*), leaking rows in `imgListWidget` — caught by
+  `DeleteImageStickClearsImageListWidget()`, one of the pre-existing
+  characterization tests, not a new one. App + tests build and pass (24
+  characterization tests, up from 20 — the two Prep-A mouse tests are now
+  permanent regression coverage for this exact surface).
 - **Dead-code finding while closing out Phase 2:** analysis of
   `switchFrameFlag`'s only two set-sites (`Widget::addFrame`, both removed
   by Phase 2b's paste/copy rewrites) showed it could never be `true` at
@@ -455,41 +469,48 @@ skin rendering, the stickfigure library (add/remove/load), depth/z-order
 controls, layer up/down — none of Phase 2's changes should be visible to
 the user.
 
-**Exit criteria (as descoped):** `copyFlag`, `libFlag`, `clearUndoFlag`,
+**Exit criteria:** `copyFlag`, `libFlag`, `clearUndoFlag`,
 `loadingAnimationFlag`, `switchFrameFlag` have zero remaining reads
 anywhere in the codebase (grep-verified) — met. `undoFlag` remains,
-narrowly scoped to "inside `undoRedo()`" (documented in `CLAUDE.md`). The
-original exit criteria's `FramePresenter`/`stick.cpp`-scene-call
-conditions are **not** met and are carried forward to the deferred
-Phase 2c below, should the project revisit it.
+narrowly scoped to "inside `undoRedo()`" (documented in `CLAUDE.md`) — this
+is an intentional, documented deviation, not a gap. The original exit
+criteria's `FramePresenter`/`stick.cpp`-scene-call conditions, deferred
+when 2c was descoped, were met when 2c was completed (see below).
 
-- [x] Phase 2 complete (as descoped — see Phase 2c note above)
+- [x] Phase 2 complete
+- [x] Phase 2c complete (see below — resumed after initial deferral)
 
 ---
 
-## Phase 2c (deferred) — `StickGraphicsItem` + `FramePresenter`
+## Phase 2c — `StickGraphicsItem` + `FramePresenter`
 
-**Status:** not scheduled. Revisit only if a concrete need arises (e.g. a
-future feature that wants to unit-test view-adjacent logic headlessly, or
-a maintainer decides the fused `stick` class is actively getting in the
-way). Do not start this without re-confirming the blast radius hasn't
-grown further and without a plan for exercising the mouse/paint paths
-(manual test matrix at minimum, ideally a `QTest::mouseClick`-based GUI
-test added first).
+**Status: complete 2026-07-10.** Originally descoped/deferred 2026-07-08
+(rationale kept below for context); resumed and finished in a later
+session once a compiler-guided grep pass showed the real blast radius
+(~76 sites) was much smaller than the initial 195+ estimate, and after
+adding `QTest`-driven mouse-event tests to cover the headless-mouse/paint
+gap the deferral had flagged. See the completion note under Phase 2's
+step list above for the full account of what was built and the one real
+bug (`deleteStick()`/`imgListWidget`) the retype surfaced.
 
-**Steps, if resumed:** create `StickGraphicsItem : public QGraphicsItem`
-holding a non-owning `StickData*`, reading `paint()`/`boundingRect()`/
-mouse handling from it. Switch `StickFigure::stickList` to
-`QList<StickData*>` with a parallel, view-owned `QList<StickGraphicsItem*>`
-kept 1:1 by index. Create `FramePresenter` (owned by `myView`) that,
-given a `FrameData*`, attaches/detaches `StickGraphicsItem`s, wires
-handles, and updates the frame-list preview icon — the one place
-scene/list-widget updates happen for a frame switch, called explicitly
-instead of triggered as a side effect of a data mutation. Delete the
-`static_cast<stick*>` bridge casts introduced in Phase 2a once nothing
-needs them.
+**Original deferral rationale (2026-07-08, kept for context):** retyping
+`stickList` to `QList<StickData*>` plus building `StickGraphicsItem`/
+`FramePresenter` touches 195+ call sites across `myview.cpp`/
+`widget.cpp`/`frame.cpp`/`StickFigure.cpp`, including mouse-event
+handling and `paint()` — code the QtTest suite could not exercise
+(headless, no `QApplication` event loop), so this diff would be the first
+in the whole refactor not caught by an automated regression net.
+Crucially, by that point 2c was no longer fixing a live bug source: the
+three root causes in this plan's "Root diagnosis" were already resolved
+for every *scratch* object (cause 1's uninitialized-`.scene` trap cannot
+occur — `FrameData`/`StickFigureData` have no `.scene` member, ever;
+cause 2 is gone — each data class has exactly one serialize behavior;
+cause 3 is gone — undo/redo already clones in memory via
+`Extract`/`Populate`, no stream). What 2c still bought was architectural:
+`stick` stayed a fused data+view object for *live* figures only, which
+was a maintainability/testability goal, not a correctness one.
 
-- [ ] Phase 2c (deferred) — not started
+- [x] Phase 2c complete
 
 ---
 

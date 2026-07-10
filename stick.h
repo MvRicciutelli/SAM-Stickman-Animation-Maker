@@ -18,16 +18,20 @@ extern QLabel *dbgLbl;
 class StickFigure;
 
 /**
- * @brief Scene-facing half of a stick: painting, bounding box, interactive manipulation.
+ * @brief The view: paints a StickData, handles mouse-driven interaction, owns nothing
+ *        persistent.
  *
- * Since REFACTOR_PLAN.md Phase 1a every persistent field lives in the StickData base;
- * this class only adds what needs a QGraphicsScene or reflects a live UI session:
- * the figure tree pointers, endpoint handles, selection/highlight state and the
- * geometry caches used while dragging. Deriving from both QGraphicsItem and StickData
- * is a temporary bridge — Phase 1b replaces it with a StickGraphicsItem that holds a
- * non-owning StickData pointer.
+ * REFACTOR_PLAN.md Phase 2c completes the split Phase 1a started: `StickGraphicsItem`
+ * (formerly `stick`) no longer derives from `StickData` (that bridge is gone) — it
+ * holds a non-owning `StickData*` (`data`) and adds only what genuinely needs a
+ * `QGraphicsScene` or reflects a live UI session: endpoint handles, selection/highlight
+ * state, and the geometry/angle caches used while dragging.
+ * `FramePresenter::AttachView()`/`DetachView()` (framepresenter.h) are the only code
+ * that constructs or destroys one for a stick actually on screen — everywhere else
+ * (undo, copy/paste, the library) works with `StickData` alone and never touches this
+ * class at all.
  */
-class stick:public QGraphicsItem, public StickData
+class StickGraphicsItem:public QGraphicsItem
 {
 
 public:
@@ -41,33 +45,29 @@ public:
     int type() const override { return Type; }
 
     /**
-     * @brief Builds a stick on an existing segment (interactive drawing path).
-     * @param line segment the stick is based on; copied, not retained.
+     * @brief Wraps a StickData for display; the data is not copied or owned.
+     * @param stick_data record to present; must outlive this view.
+     *
+     * Only constructor since Phase 2c — call sites that used to build a `stick` and
+     * its data together now build (or `Clone()`) a `StickData` first, then wrap it via
+     * `FramePresenter::AttachView()`.
      */
-    stick(QLineF *line);
+    StickGraphicsItem(StickData *stick_data);
 
     /**
-     * @brief Deep-copies another stick's persistent data (onion skins, icons, merge).
-     * @param S source stick; tree pointers and stepchild status are NOT copied.
+     * @brief Frees the endpoint handles. Does NOT touch `data` — non-owning.
      */
-    stick(stick *S);
+    ~StickGraphicsItem();
 
-    /**
-     * @brief Builds an empty stick, ready to be filled by deserialization.
-     */
-    stick();
-
-    /**
-     * @brief Frees the endpoint handles (image cleanup lives in ~StickData).
-     */
-    ~stick();
+    StickData *data = nullptr; ///< non-owning; the persistent record this view presents
 
     /**
      * @brief Empties this stick's rows from the image list widget.
      *
-     * Must be called by whoever deletes a LIVE (on-screen) IMAGE stick, right before
-     * the delete; scratch/buffer deletions must not call it. Replaces the flag-guarded
-     * cleanup the destructor performed before Phase 1b.
+     * Must be called by whoever detaches a LIVE (on-screen) IMAGE stick, right before
+     * destroying its view; scratch/buffer deletions must not call it (they have no
+     * view to call it on). Replaces the flag-guarded cleanup the destructor performed
+     * before Phase 1b.
      */
     void RemoveImagesFromListWidget();
 
@@ -104,15 +104,15 @@ public:
     void refresh(int mode);
 
     /**
+     * @brief Replaces the stick's segment.
+     * @param line new segment; copied into `data->myLine`.
+     */
+    void setLine(QLineF* line);
+
+    /**
      * @brief Finalizes an interactive rotation, refreshing this stick and its children.
      */
     void endRotation();
-
-    /**
-     * @brief Replaces the stick's segment.
-     * @param line new segment; copied into myLine.
-     */
-    void setLine(QLineF* line);
 
     /**
      * @brief Interactive rotation: points the stick towards the dragged position.
@@ -127,8 +127,8 @@ public:
     void manipulate(QPointF* point);
 
     /**
-     * @brief Tells whether this stick is its figure's master (tree root).
-     * @return true when the owning figure's masterStick is this stick.
+     * @brief Tells whether this stick's data is its figure's master (tree root).
+     * @return true when the owning figure's masterStick is this stick's data.
      */
     bool isMaster() const;
 
