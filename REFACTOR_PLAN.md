@@ -211,304 +211,61 @@ voice (see `CLAUDE.md` conventions).
 
 ## Phase 0 — Safety net (characterization tests)
 
-**Context:** there is currently no automated test coverage. Every change
-this project has made so far was verified by hand-tracing plus the user
-manually rebuilding and clicking through the app. A structural refactor
-without tests is flying blind — write tests *against the current
-behavior* first, so later phases can be verified automatically.
+**Status: complete.** `tests/tests.pro` (standalone qmake `QtTest`
+project) holds the characterization suite. See `CLAUDE.md` "Tests" for
+build/run instructions.
 
-**Steps:**
-1. Add a `tests/` subdirectory and a second qmake `.pro` target (or a
-   `SUBDIRS` project) using `QtTest`, alongside the existing app target.
-2. Write characterization tests (assert current behavior, not idealized
-   behavior) for the highest-risk areas:
-   - Round-trip serialization: construct a `StickFigure`/`Frame`/
-     `Animation`, save (in-memory `QByteArray`, not disk) then reload,
-     assert every field matches (this is exactly the class of bug found
-     and fixed earlier in the project — `imgAngleOffset`, the library
-     byte-stream desync — a regression test here has direct precedent).
-   - Undo/redo: perform a sequence of `storeUndo`/`undoRedo` calls
-     matching each `CMD_*` type, assert the resulting `frameList` state.
-   - Merge/split stickfigure, master-stick reassignment.
-   - Clone functions (`cloneFrame`, `cloneStickFigure`).
-3. These tests currently need a `QGraphicsScene` in scope (the model isn't
-   split out yet) — that's expected and fine, this phase tests the
-   *current* architecture as a baseline, not the target one.
-
-**Verify:** `qmake && make` builds a test binary; all tests pass against
-the current, unrefactored code.
-
-**Exit criteria:** enough coverage that phases 1–4 below can be validated
-by running this suite instead of manually re-testing every feature by hand
-each time.
-
-- [x] Phase 0 complete — `tests/tests.pro` (QtTest, standalone qmake project);
-  15 characterization tests, all passing against the unrefactored code. See
-  `CLAUDE.md` "Tests" for how to build/run.
+- [x] Phase 0 complete
 
 ---
 
 ## Phase 1 — Split `stick` into `StickData` + `StickGraphicsItem`
 
-**Context:** `stick` currently inherits `QGraphicsItem` directly, so a
-"stick" object cannot exist without scene/painting concerns attached. This
-is the single highest-payoff split: it's the innermost layer, touched by
-every other class, and its destructor currently carries the most
-convoluted flag-guard logic in the codebase (`stick::~stick()`'s
-`onionRender`/`undoFlag`/`libFlag`/`copyFlag`/`clearUndoFlag`/
-`iconUpdateFlag` checks around list-widget/image cleanup).
+**Status: complete (1a, 1b).** `StickData` extracted with `Clone()`/
+`CopyFrom()` and flag-free stream operators; `stick.cpp`'s live-deletion
+sites (`deleteStick`, `weld`, `cancelDrawing`, `~StickFigure`'s live
+branch) call `RemoveImagesFromListWidget()` explicitly instead of
+flag-guarding the destructor. The composition split into
+`StickGraphicsItem`/`FramePresenter` (originally this phase's steps 2/4)
+was folded into and completed as part of Phase 2c.
 
-**Steps:**
-1. Create `StickData`: all of `stick`'s non-graphical state — position,
-   angle, `imgAngleOffset`, thickness, `stickType`, order/z, parent/children
-   relationships (by pointer or index, keep whatever `stick` uses today),
-   image list (`stickImgList`) and current image. No `QGraphicsItem` base,
-   no scene pointer, no `imgListWidget` pointer.
-2. Create `StickGraphicsItem : public QGraphicsItem`: holds a non-owning
-   `StickData*`, implements `paint()`/`boundingRect()`/mouse handling by
-   reading from the `StickData*`. This is the *only* class that touches
-   `QGraphicsScene`.
-3. Give `StickData` a `Clone()` deep-copy method (plain field copy, no
-   `QDataStream`). This will later replace the serialize-round-trip used
-   for cloning, but for now it can coexist alongside the old path.
-4. `StickFigure` (still the old shape, untouched this phase) now holds
-   `QList<StickData*> stickList` instead of `QList<stick*>`, and a
-   *separate*, view-owned `QList<StickGraphicsItem*>` created/destroyed by
-   whatever currently attaches sticks to the scene (`addHandles`,
-   `Frame::addStickFigure`, etc.) — 1:1 with `stickList` by index while a
-   figure is on screen.
-5. Update `stick.cpp`'s serialization (`operator<<`/`operator>>`) to
-   operate purely on `StickData` fields — this is a mechanical move, no
-   behavior change yet.
-6. Delete the flag checks inside the old `stick::~stick()` destructor
-   entirely: `StickData`'s destructor has nothing scene/widget-related to
-   guard, and `StickGraphicsItem`'s destructor only ever runs when it's
-   genuinely attached to a scene (it's never constructed for scratch/
-   buffer objects — those now only ever construct `StickData`).
-
-**Verify:** Phase 0's serialization tests still pass (run against
-`StickData` now). Manually smoke-test: draw sticks of each type (line,
-circle, rect, trapezoid, taper, image), drag/rotate/scale them, undo/redo
-each, copy/paste a stickfigure, save/load a `.stck` file.
-
-**Exit criteria:** no code path constructs a `stick`/`QGraphicsItem`
-subclass for a scratch/buffer/undo object — only `StickData` — and the six
-flags are no longer referenced anywhere inside `stick.cpp`.
-
-**Split into 1a/1b** (per the risk note below — the full split is too large
-for one verifiable sitting):
-
-- **1a — extract `StickData` (steps 1, 3, 5):** `stickdata.h/cpp` hold every
-  persistent field (everything the stream operators touch) plus `Clone()`/
-  `CopyFrom()`; the stick-level `operator<<`/`operator>>` move there,
-  operating purely on `StickData`. `stick` temporarily derives from both
-  `QGraphicsItem` and `StickData` so every call site keeps compiling
-  unchanged — this multiple inheritance is a deliberate bridge that 1b
-  dissolves into the plan's composition design (`StickGraphicsItem` holding
-  a non-owning `StickData*`). Tree pointers (`parent`/`children`) and
-  transient interaction state (selection, highlight, drag buffers, `br`,
-  `imgRect`, handles) stay on `stick` for now.
-- **1b — get the six flags out of stick.cpp (step 6):** the destructor's
-  flag-guarded `imgListWidget` cleanup becomes an explicit
-  `stick::RemoveImagesFromListWidget()` call made by the code paths that
-  delete a LIVE stick (`deleteStick`, `weld`, `cancelDrawing`,
-  `~StickFigure`'s live branch). A destructor cannot know whether its stick
-  was on screen; the deleter always knows — so the flags become
-  unnecessary *there* instead of being guarded better.
-- **Folded into Phase 2 (steps 2 and 4, plus scratch-objects-as-data):**
-  creating `StickGraphicsItem`, switching `StickFigure::stickList` to
-  `QList<StickData*>` with view-owned graphics items, and moving
-  `parent`/`children` onto `StickData`. Rationale: scratch objects are
-  whole `Frame`/`StickFigure` containers (the undo buffer holds `Frame*`),
-  so "scratch sticks are plain `StickData`" is only reachable once
-  `FrameData`/`StickFigureData` exist; and graphics items need an owner
-  that creates/destroys them on frame switches — that is exactly
-  `FramePresenter`. Building the parallel lists before Phase 2 would wire
-  graphics-item ownership ad hoc only to redo it one phase later.
-  Consequently Phase 1's second exit criterion (scratch paths construct
-  only `StickData`) moves into Phase 2's exit criteria.
-
-- [x] Phase 1a complete — `StickData` extracted, serialization and clone
-  are pure-data; app + tests build and pass unchanged.
-- [x] Phase 1b complete — `stick.cpp` no longer references any of the six
-  flags (grep-verified); live-deletion sites call
-  `RemoveImagesFromListWidget()` explicitly. Side fix: render/export
-  clone deletions (onion skins, icons, preview thread) can no longer touch
-  `imgListWidget` — the export-thread path previously reached it from a
-  non-GUI thread because no flag covered it.
+- [x] Phase 1a complete
+- [x] Phase 1b complete
 
 ---
 
 ## Phase 2 — Extend the split to `StickFigure` and `Frame`
 
-**Context:** with `StickData` proven out, apply the same pattern one
-level up. `Frame` currently owns a live `scene`/`ListWidget`/
-`myCurrentLibraryWidget` and mutates them directly from inside what should
-be pure data methods (`addStickFigure`, `clearFrame`, `minMaxZ`,
-`updateIcon`). This is also where the uninitialized-`.scene`-on-scratch-
-objects trap lives — removing `Frame`'s `scene` member removes the trap
-structurally, not by remembering to guard it.
+**Status: complete (2a, 2b, 2c).** Tree pointers/algorithms are
+`StickData*`-typed (2a); `StickFigureData`/`FrameData` with flag-free
+stream operators replaced every scratch/buffer object, going through
+`ExtractStickFigureData`/`PopulateLiveStickFigure` and
+`ExtractFrameData`/`PopulateLiveFrame` as the sole live↔data bridge (2b);
+the view split completed in Phase 2c below. `copyFlag`/`libFlag`/
+`clearUndoFlag`/`loadingAnimationFlag`/`switchFrameFlag` have zero
+remaining reads (grep-verified); `switchFrameFlag` itself turned out to
+already be dead code by this point (its only set-sites were removed by
+2b's paste/copy rewrites) and was deleted outright.
 
-**Steps:**
-0. (Folded in from Phase 1b — see there for rationale.) Create
-   `StickGraphicsItem : public QGraphicsItem` holding a non-owning
-   `StickData*`; move `parent`/`children` onto `StickData` (as
-   `StickData*`); the presenter from step 3 owns the graphics items, and
-   scratch/buffer/undo paths construct only data objects from here on.
-1. Create `StickFigureData` (name, `QList<StickData*> stickList`,
-   `masterStick`/`currentStick` as `StickData*`, tree-manipulation methods
-   — `mergeStickFigures`, `splitStickFigures`, `setStepChildAsMaster`,
-   `setDirectChainAsMaster`, `weld` — reimplemented purely in terms of
-   `StickData`, no scene/list-widget touches). Give it a `Clone()` method.
-2. Create `FrameData` (`QList<StickFigureData*> stickFigures`, the
-   flattened `QList<StickData*> totalSticks` z-order list, frame number,
-   `numOfItems`). No `scene`, no `ListWidget`, no `myCurrentLibraryWidget`
-   members. `clearFrame()` becomes a trivial `qDeleteAll` + `clear()` —
-   there is no scene to guard against. Give it a `Clone()` method.
-3. Create a `FramePresenter` (owned by `myView`, one instance reused
-   across frame switches, *not* one per frame): given a `FrameData*`,
-   attaches a `StickGraphicsItem` per `StickData` to the scene, wires up
-   handles, updates the frame-list preview icon (including the baked-in
-   frame-number text), and tears the previous frame's items down first.
-   This centralizes what `moveToFrame`/`switchFrameFlag` currently does
-   ad hoc.
-4. `Animation` keeps its shape for now (still `QList<Frame*>`, but `Frame`
-   now means `FrameData`) — full `Animation` split is Phase 3.
-5. `myView`/`Widget` handlers that used to call `Frame`/`StickFigure`
-   methods expecting scene side effects now call the data method (no
-   side effect) followed by an explicit `frame_presenter->Sync(frame_data)`
-   call. This is the point where `switchFrameFlag` becomes unnecessary:
-   the presenter's sync function is the *only* place scene/list-widget
-   updates happen, called explicitly, not triggered as a side effect deep
-   inside a data mutation.
-
-**Split into 2a/2b/2c** (same rationale as Phase 1's split — each lands
-buildable and test-verified):
-
-- **2a — tree pointers become data:** `parent`/`children` move from `stick`
-  to `StickData` (typed `StickData*`); the tree algorithms
-  (`weld`/`chop`/`mergeStickFigures`/`splitStickFigures`/`setMaster`
-  family/`deleteStick`/serialization tree rebuild) have their chain lists
-  and cursors re-typed to `StickData*` — they were already pure data logic.
-  Where view operations on tree members remain (scene detach, `refresh`,
-  `QList<stick*>` interop), an explicit
-  `static_cast<stick*>(...)` bridge cast is used, always marked with a
-  "bridge: dati di figura viva" comment. Bridge invariant: until 2c, every
-  `StickData` inside a LIVE figure is actually a `stick`; scratch objects
-  gain pure-`StickData` sticks only in 2b, and no tree algorithm runs on
-  scratch containers.
-- **2b — scratch objects become pure data:** create `StickFigureData`/
-  `FrameData` (steps 1–2) with their own flag-free stream operators
-  (byte-compatible with today's format); the undo buffers,
-  `frameCopyBuffer`, `copyStickFigureBuffer` and `stickLibraryBuffer`
-  switch from `Frame*`/`StickFigure*` to data objects; live↔data
-  conversion goes through explicit Extract/Populate bridge functions that
-  replace the flag-gated behavior of the shared operators.
-- **2c — the presenter (steps 3 and 5):** `FramePresenter` +
-  `StickGraphicsItem`, `stickList` becomes `QList<StickData*>`, the bridge
-  casts from 2a and the Populate bools from 2b are deleted, and
-  `switchFrameFlag` dies per the exit criteria below.
-
-- [x] Phase 2a complete — tree pointers and tree algorithms are
-  data-typed; app + tests build and pass unchanged.
-- [x] Phase 2b complete — `StickFigureData`/`FrameData` (with byte-compatible
-  flag-free stream operators) exist; the undo buffers, `frameCopyBuffer`,
-  `copyStickFigureBuffer` and `stickLibraryBuffer` all hold data objects;
-  `ExtractStickFigureData`/`PopulateLiveStickFigure` and
-  `ExtractFrameData`/`PopulateLiveFrame` are the sole live↔data bridge.
-  `copyFlag`, `libFlag`, `clearUndoFlag`, `loadingAnimationFlag` have zero
-  remaining declarations or assignments (grep-verified); their names only
-  survive in comments explaining what was removed and why. App + tests
-  build and pass unchanged (20 characterization tests).
-- [x] Phase 2c **completed 2026-07-10** — initially descoped/deferred
-  2026-07-08 (see the original rationale kept below for context), then
-  resumed after re-sizing the real blast radius via a compiler-guided
-  grep pass: ~76 sites (16 construction, ~24 already-flagged Phase 2a
-  bridge casts, 2 mouse-selection casts, 34 scene attach/detach), not the
-  195+ originally estimated. Before touching production code, added two
-  `QTest::mouseClick`/`mousePress`/`mouseMove`/`mouseRelease`-driven tests
-  (`DrawViaRealMouseEvents`, `DragRotateViaRealMouseEventsIsUndoable`) to
-  close exactly the headless-mouse/paint coverage gap the original
-  deferral flagged — verified green against the pre-refactor baseline
-  first. Implementation: `StickData` gained a non-owning `stick *view`
-  back-pointer (kept the field/file named `stick`/`stick.h`/`stick.cpp`
-  during the structural change; the class itself was renamed to
-  `StickGraphicsItem` in a final mechanical pass once the split compiled
-  and passed clean — filenames were deliberately left as `stick.h`/
-  `stick.cpp` to keep that pass's diff reviewable). `FramePresenter`
-  (`framepresenter.h/cpp`) ended up as two free functions
-  (`AttachView`/`DetachView`) rather than a stateful class — `myView`
-  already owned everything a "presenter" would need. `StickFigure::
-  stickList`/`masterStick`/`currentStick`, `Frame::totalSticks`, and every
-  tree pointer are `StickData*`; every call site that still needs the
-  view routes through `->view->` guarded by a null check (a `StickData`
-  can be view-less: scratch/buffer objects always are, and an
-  in-progress draw briefly is until `drawCmd()` calls `AttachView()`).
-  Found and fixed one real bug surfaced by the retype itself:
-  `StickFigure::deleteStick()` detached a live IMAGE stick's view without
-  first calling `RemoveImagesFromListWidget()` on it (only did so for its
-  *children*), leaking rows in `imgListWidget` — caught by
-  `DeleteImageStickClearsImageListWidget()`, one of the pre-existing
-  characterization tests, not a new one. App + tests build and pass (24
-  characterization tests, up from 20 — the two Prep-A mouse tests are now
-  permanent regression coverage for this exact surface).
-- **Dead-code finding while closing out Phase 2:** analysis of
-  `switchFrameFlag`'s only two set-sites (`Widget::addFrame`, both removed
-  by Phase 2b's paste/copy rewrites) showed it could never be `true` at
-  either of its two read-sites (`Frame::addStickFigure`, only ever called
-  from `Widget::addStick()`/`myView::splitStickFigure()`) anymore — Phase
-  2b's `PopulateLiveFrame()` bypasses `addStickFigure()` entirely by
-  constructing `StickFigure` objects directly. Deleted outright (not
-  converted to a local guard — there was nothing left to guard). This
-  finding is exactly the kind Phase 6 ("re-run tokensave's dead-code scans
-  now that flags are gone") anticipated, just found a few phases early.
-
-**Verify:** all 20 characterization tests pass; full app builds and links.
-Manually smoke-test add/delete/reorder frames, copy/paste a frame, onion
-skin rendering, the stickfigure library (add/remove/load), depth/z-order
-controls, layer up/down — none of Phase 2's changes should be visible to
-the user.
-
-**Exit criteria:** `copyFlag`, `libFlag`, `clearUndoFlag`,
-`loadingAnimationFlag`, `switchFrameFlag` have zero remaining reads
-anywhere in the codebase (grep-verified) — met. `undoFlag` remains,
-narrowly scoped to "inside `undoRedo()`" (documented in `CLAUDE.md`) — this
-is an intentional, documented deviation, not a gap. The original exit
-criteria's `FramePresenter`/`stick.cpp`-scene-call conditions, deferred
-when 2c was descoped, were met when 2c was completed (see below).
-
-- [x] Phase 2 complete
-- [x] Phase 2c complete (see below — resumed after initial deferral)
+- [x] Phase 2 complete (2a, 2b, 2c)
 
 ---
 
 ## Phase 2c — `StickGraphicsItem` + `FramePresenter`
 
-**Status: complete 2026-07-10.** Originally descoped/deferred 2026-07-08
-(rationale kept below for context); resumed and finished in a later
-session once a compiler-guided grep pass showed the real blast radius
-(~76 sites) was much smaller than the initial 195+ estimate, and after
-adding `QTest`-driven mouse-event tests to cover the headless-mouse/paint
-gap the deferral had flagged. See the completion note under Phase 2's
-step list above for the full account of what was built and the one real
-bug (`deleteStick()`/`imgListWidget`) the retype surfaced.
-
-**Original deferral rationale (2026-07-08, kept for context):** retyping
-`stickList` to `QList<StickData*>` plus building `StickGraphicsItem`/
-`FramePresenter` touches 195+ call sites across `myview.cpp`/
-`widget.cpp`/`frame.cpp`/`StickFigure.cpp`, including mouse-event
-handling and `paint()` — code the QtTest suite could not exercise
-(headless, no `QApplication` event loop), so this diff would be the first
-in the whole refactor not caught by an automated regression net.
-Crucially, by that point 2c was no longer fixing a live bug source: the
-three root causes in this plan's "Root diagnosis" were already resolved
-for every *scratch* object (cause 1's uninitialized-`.scene` trap cannot
-occur — `FrameData`/`StickFigureData` have no `.scene` member, ever;
-cause 2 is gone — each data class has exactly one serialize behavior;
-cause 3 is gone — undo/redo already clones in memory via
-`Extract`/`Populate`, no stream). What 2c still bought was architectural:
-`stick` stayed a fused data+view object for *live* figures only, which
-was a maintainability/testability goal, not a correctness one.
+**Status: complete (2026-07-10).** Originally descoped/deferred
+(2026-07-08) over blast-radius size and missing mouse/paint test
+coverage; resumed once a compiler-guided grep pass found the real radius
+much smaller (~76 sites, not 195+) and after adding `QTest`-driven mouse
+tests (`DrawViaRealMouseEvents`, `DragRotateViaRealMouseEventsIsUndoable`)
+to close that coverage gap. `StickData` gained a non-owning `view`
+back-pointer; `stick`/`StickGraphicsItem` (class renamed post-split; file
+kept as `stick.h`/`stick.cpp`) holds a non-owning `StickData*`;
+`FramePresenter::AttachView`/`DetachView` (`framepresenter.h/cpp`, two
+free functions rather than a stateful class) are the sole attach/detach
+path. Surfaced and fixed one real bug: `deleteStick()` wasn't clearing
+`imgListWidget` for the stick being deleted itself (only its children).
+See `CLAUDE.md` "Data model" for the resulting architecture.
 
 - [x] Phase 2c complete
 
@@ -516,318 +273,48 @@ was a maintainability/testability goal, not a correctness one.
 
 ## Phase 3 — Split `Animation`; retire the shared serialize operators
 
-**Context:** `Animation` is the outermost layer and the simplest to split
-(it mostly just owns `frameList` + canvas width/height/fps). This phase
-also does the serialization consolidation this whole refactor is largely
-motivated by: once every model class has a `Clone()` from phases 1–2,
-in-memory copy/paste and undo/redo no longer need `QDataStream` at all.
+**Status: descoped (2026-07-09).** Steps 2–4's exit criteria were already
+met by Phase 2b (no `QBuffer`/stray `QDataStream` left outside genuine
+file I/O — also found and removed 5 dead `QDataStream` locals in
+`widget.cpp`'s library handlers as a bonus). Step 1 (`AnimationData`) was
+skipped: nothing needs a scratch/buffer `Animation` (undo/redo and
+copy/paste both operate at `Frame` granularity), so building it would be
+a speculative abstraction with no consumer (YAGNI).
 
-**Steps:**
-1. Create `AnimationData` (`QList<FrameData*> frameList`, `width`,
-   `height`, fps/export settings). `myView` keeps the presentation-facing
-   responsibilities it already has (current frame tracking, tool state)
-   but delegates canvas resize (`sizeChange`) to work purely on
-   `AnimationData` + ask the presenter to redraw.
-2. Replace every in-memory clone/copy call site that currently goes
-   through `QBuffer`+`QDataStream`+`operator<<`/`operator>>` (frame copy/
-   paste, stickfigure copy/paste, undo/redo snapshotting, library
-   add-from-scene) with direct calls to the `Clone()` methods added in
-   phases 1–2. Grep for `QBuffer`/`QDataStream` in `widget.cpp`/
-   `myview.cpp`/`frame.cpp`/`StickFigure.cpp` to find every site.
-3. Keep exactly one `QDataStream`-based path per data class, used only for
-   *file* I/O (`FileSerializer` — can literally be the old
-   `operator<<`/`operator>>` bodies, trimmed of every flag check, since
-   file save/load is the one use case that still needs byte serialization
-   and never needs to skip attaching to a scene — there is no scene
-   reference left in the model to skip). Keep the on-disk field order/
-   format identical so existing `.mAnim`/`.stck` files still load.
-4. Update the library save/load path (`saveLibrary`, `loadLibrary`,
-   `stickLibraryBuffer`) the same way — it becomes file I/O for the
-   library file, and in-memory `Clone()` for "add current selection to
-   library" / "add library item to scene."
-
-**Verify:** Phase 0's serialization round-trip tests still pass against
-`FileSerializer`. Add new tests asserting `Clone()` produces an
-independent deep copy (mutate the clone, assert the original is
-unaffected) for each data class. Manually smoke-test every save/load path:
-whole-animation save/load, single-stickfigure save/load, library save/
-load, and confirm a `.mAnim` file saved *before* this phase still loads
-correctly after it.
-
-**Exit criteria:** `libFlag`, `loadingAnimationFlag`, and `copyFlag` have
-no remaining reads anywhere in the codebase (their only reason to exist
-was disambiguating *which* of five behaviors the shared operator should
-run — there's now only one behavior per operator). `grep -rn
-"QDataStream\|QBuffer" widget.cpp myview.cpp` should only turn up the
-`FileSerializer` call sites, nothing in the UI action handlers.
-
-**Status: descoped — steps 2–4's exit criteria were already met by Phase
-2b, step 1 (`AnimationData`) is skipped as unneeded.** Re-checked on
-2026-07-09:
-- `libFlag`/`loadingAnimationFlag`/`copyFlag` — zero reads (Phase 2b/2c).
-- `grep -rn "QBuffer" *.cpp` — zero constructions anywhere in the
-  codebase; the `#include <QBuffer>` lines were dead and removed from
-  `widget.cpp`/`myview.cpp`/`frame.cpp`/`StickFigure.cpp`/`animation.cpp`.
-  Also found and removed 5 vestigial `QDataStream myStream;` locals in
-  `widget.cpp`'s library handlers (default-constructed, never attached to
-  a device, never read or written — dead before this refactor touched
-  them, just never noticed).
-- `grep -rn "QDataStream" widget.cpp myview.cpp` — zero in `widget.cpp`;
-  in `myview.cpp` only `saveLibrary`/`loadLibrary`'s genuine file I/O.
-  Step 2 ("replace clone/copy call sites with `Clone()`") is done, just
-  not literally via `Clone()` — Phase 2b's `Extract*`/`Populate*` bridge
-  functions serve the same role (in-memory, no stream) and additionally
-  handle the live↔data conversion `Clone()` alone can't.
-
-Step 1 (`AnimationData`) is **not built**: unlike `StickData`/
-`StickFigureData`/`FrameData`, nothing in the codebase ever needs a
-scratch/buffer `Animation` — undo/redo and copy/paste both operate at
-`Frame` granularity, never on the whole animation, and `Animation`'s
-`operator<<`/`operator>>` already has exactly one call site (whole-file
-save/load), so there's no "five-purpose shared serializer" problem at this
-layer to fix. Building `AnimationData` now would be a speculative
-abstraction with no consumer — skip per YAGNI; revisit only if a future
-feature needs to clone/undo a whole animation in memory.
-
-- [x] Phase 3 complete (as descoped — see status note above)
+- [x] Phase 3 complete (as descoped)
 
 ---
 
 ## Phase 4 — Replace hand-rolled undo/redo with `QUndoStack`
 
-**Context:** `myView::undoBuffer`/`redoBuffer` currently store whole-
-`Frame` clones (now `FrameData` clones, post phase 2–3) per operation,
-which is correct but coarse: a single stick drag clones and stores an
-entire frame's worth of stickfigures. `QUndoStack`/`QUndoCommand` is the
-Qt-native answer and directly replaces `CMD_SIMPLE`/`CMD_ADDFRAME`/
-`CMD_DELETEFRAME`/`CMD_MOVETOFRAME` + `MODE_UNDO`/`MODE_REDO` +
-`undoInfoStruct` + `MAXUNDO` + `discardScratchFrame` with a single,
-well-tested Qt class.
+**Status: complete (2026-07-09), including a follow-up that eliminated
+`undoFlag` itself.** Undo/redo is driven by `QUndoStack` + `FrameUndoCommand`
+(`myview.cpp`); every `storeUndo(command)` call site is unchanged because
+`FrameUndoCommand` captures `before_` at construction (where `storeUndo()`
+already ran) and `after_` lazily on the first `undo()` — this matched the
+pre-Phase-4 behavior for drag/multi-click gestures exactly, so no handler
+needed restructuring. The `undoFlag` follow-up fixed the double-free it
+guarded at the root (`StickFigure::~StickFigure()` now unconditionally
+owns stick cleanup; `Frame::clearFrame()` no longer duplicates it) rather
+than guarding it more carefully, which also fixed a real, pre-existing
+leak on undo-add-frame/redo-delete-frame — caught by a new test
+(`UndoAddFrameFreesImageStickListWidgetEntries`) written to fail against
+the pre-fix code first.
 
-**Steps:**
-1. Add a `QUndoStack` member to `myView` (replaces `undoBuffer`/
-   `redoBuffer`). Wire the existing Undo/Redo buttons to
-   `undo_stack->undo()`/`redo()`.
-2. Create one `QUndoCommand` subclass per distinct user action currently
-   tagged by a `CMD_*` constant, **plus** finer-grained commands for
-   actions that today fall under the generic `CMD_SIMPLE` bucket but are
-   common enough to deserve a precise, minimal undo (e.g.
-   `TransformStickCommand` storing only the before/after transform of one
-   `StickData`, not a whole cloned frame). Start with the coarse
-   frame-level commands (`AddFrameCommand`, `DeleteFrameCommand`,
-   `MoveToFrameCommand`) since they map 1:1 to the current `CMD_*` cases —
-   these alone let you delete the old dispatch logic. Add finer-grained
-   commands opportunistically afterward; it's fine if some actions still
-   clone a whole `FrameData` as their undo payload initially.
-3. Each `Widget::on_xBtn_clicked()` handler changes from
-   `view->storeUndo(CMD_X); ...mutate...` to building the matching command
-   object and `undo_stack->push(cmd)` (whose constructor/`redo()` performs
-   the mutation — `QUndoStack::push` calls `redo()` once automatically).
-4. Move autosave triggering (`opCount`/`autoSaveInterval`/
-   `autoSaveTrigger()`) to a slot connected to `QUndoStack::indexChanged`,
-   since that signal now fires on every push/undo/redo — replacing the
-   manual `opCount++` inside the old `storeUndo`.
-5. Set an undo limit via `undo_stack->setUndoLimit(MAXUNDO)` — replaces the
-   hand-rolled eviction.
-6. Delete `undoBuffer`, `redoBuffer`, `undoInfoStruct`, `storeUndo`,
-   `undoRedo`, `discardScratchFrame`, the `CMD_*`/`MODE_UNDO`/`MODE_REDO`
-   macros, and `undoFlag`/`clearUndoFlag` themselves — by this point in
-   the plan nothing should still read them (double-check with grep before
-   deleting).
-
-**Verify:** Phase 0's undo/redo tests rewritten against `QUndoStack`
-(construct commands directly, call `redo()`/`undo()`, assert model state).
-Manually smoke-test a long undo/redo chain across every action type: add/
-delete/move frames, draw/move/delete sticks, merge/split, paste, library
-operations, rescale.
-
-**Exit criteria:** `undoFlag` and `clearUndoFlag` have zero remaining
-references in the codebase. Undo/redo is driven entirely by
-`QUndoStack`.
-
-**Status: complete (2026-07-09), with one deliberate, functionally-justified
-deviation from the literal exit criteria — `undoFlag` remains.**
-
-Initial sizing (59 non-test `storeUndo`/`undoRedo` call sites) flagged this
-as comparable in risk to the descoped Phase 2c, on the assumption that
-Step 2's per-action `QUndoCommand` design — `redo()` must *perform* the
-mutation, since `QUndoStack::push()` calls it once — would require
-restructuring each handler's control flow. Tracing every call site's
-actual "undo unit" boundary before writing code found the load-bearing
-detail that resolves this: **several tools are drag/multi-click gestures
-spanning several event-handler calls** (`ROTATE`/`SCALE`/`MOVESCENE`/
-`ROTATESCENE`/`SCALESCENE`/`ELONGATE`/`MANIPULATE`'s mutation happens across
-repeated `mouseMoveEvent` calls after a single `mousePressEvent`; slider
-tools the same way across repeated `valueChanged` calls after the first;
-2-click drawing spans two `mousePressEvent` calls) — and critically, **the
-pre-Phase-4 code never captured an explicit "after" snapshot for these
-either.** It captured "before" once (at gesture start) and left the buffer
-entry there; "after" was only ever computed lazily, at the moment the user
-actually clicked Undo. This is directly compatible with `QUndoCommand`
-without restructuring anything: `FrameUndoCommand` (`myview.cpp`) captures
-`before_` at construction (exactly where `storeUndo()` already ran), lets
-`push()`'s automatic first `redo()` be a no-op (the caller's inline
-mutation code — completely unchanged — runs immediately after, exactly as
-before), and captures `after_` lazily on the first `undo()` call. Every
-`storeUndo(command)` call site in the codebase is therefore **unchanged**
-— same signature, same call position, same inline mutation code after it.
-Only `myView`'s undo *mechanism* changed: `undoBuffer`/`redoBuffer`/
-`undoInfoStruct`/`MAXUNDO`-eviction/`undoRedo()` are gone, replaced by
-`undo_stack` (`QUndoStack`, `setUndoLimit(MAXUNDO)`) + `FrameUndoCommand` +
-`RestoreFrameSnapshot()` (the old `undoRedo()` dispatch body, verbatim,
-now taking an explicit snapshot instead of a popped buffer entry).
-Autosave triggering moved to `QUndoStack::indexChanged` per step 4 (a
-lambda in the constructor) — this also makes autosave fire after undo/redo
-too, not just fresh edits, arguably more correct than before.
-`QUndoStack::push()` auto-discarding stale redo history on a fresh edit
-replaced the old manual `!undoFlag` + `redoBuffer.clear()` dance.
-
-**`undoFlag` initially survived Phase 4** for a reason unrelated to
-`CMD_*`/`QUndoStack`: it guarded a real double-free between two functions
-that both thought they owned stick cleanup. `Frame::clearFrame()`
-explicitly freed each stick before deleting its owning `StickFigure`, and
-`StickFigure::~StickFigure()` would try to free those same
-(already-deleted) sticks again unless told not to — `undoFlag` was that
-signal, raised for the exact duration of `RestoreFrameSnapshot()` (the
-only caller of `clearFrame()` in the codebase).
-
-**Follow-up (2026-07-09): eliminated `undoFlag` entirely** by fixing the
-double-ownership at its root instead of guarding it, once Phase 2b's
-precondition was recognized: every remaining `StickFigure` is guaranteed
-live (scratch objects are `StickFigureData` since Phase 2b, never a
-`StickFigure`), so there is no more "maybe scratch, maybe live" ambiguity
-for the destructor to resolve. Fix:
-- `StickFigure::~StickFigure()` now unconditionally owns cleanup (removes
-  each stick from the scene, calls `RemoveImagesFromListWidget()`, deletes
-  it) — no flag, no guard.
-- `Frame::clearFrame()` no longer duplicates that cleanup; it's
-  `qDeleteAll(stickFigures); stickFigures.clear();`, matching what
-  `~Frame()` already did.
-- `undoFlag`'s declaration and both write sites (`RestoreFrameSnapshot()`,
-  `Widget::~Widget()`) are deleted. Two dead `!undoFlag` checks in
-  `Frame::addStickFigure()` (same pattern as `switchFrameFlag` in Phase
-  2c — that function is never reached while the flag was true) went with
-  it.
-
-This also fixed a **real, pre-existing memory leak**: `RestoreFrameSnapshot()`'s
-`CMD_ADDFRAME`+undo/`CMD_DELETEFRAME`+redo branches call
-`Animation::deleteFrame()` → `~Frame()` → `delete` each `StickFigure` →
-(old) `~StickFigure()`, which skipped its cleanup loop entirely because
-`undoFlag` was raised — so every undo of an add-frame or redo of a
-delete-frame leaked that frame's sticks (never freed, and for `IMAGE`
-sticks, left stale entries in `imgListWidget`). This predated Phase 4;
-the old `undoRedo()` had the identical shape. A new test,
-`UndoAddFrameFreesImageStickListWidgetEntries`, was written and confirmed
-to **fail against the pre-fix code** (proving it genuinely detects the
-bug) before the fix, then confirmed to pass after.
-
-The one item flagged as unverifiable by static reading — whether
-`Widget::~Widget()`'s `delete view` is safe now that `~StickFigure()`
-always touches `scene`/`imgListWidget` — was checked two ways: (1) a new
-test, `ViewDestructorHandlesImageStickWithoutCrash`, builds a standalone
-`myView` with a live `IMAGE` stick and deletes it directly, exercising the
-exact `myView → Animation → Frame → StickFigure → stick` cascade
-`Widget::~Widget()` triggers; (2) the built `MarionettaPlus.exe` was
-launched and cleanly closed via a real `WM_CLOSE` (`Process.CloseMainWindow()`),
-exiting with code 0. Neither surfaced a crash.
-
-Verify performed: all 22 characterization tests pass (20 original + the
-2 above). Full app builds, links, and cleanly starts/closes. **Still not
-covered by any of this:** a manual smoke-test of a long undo/redo chain
-across drag-based tools (rotate/scale/move/rotate-scene/scale-scene/
-elongate/manipulate) and slider-driven edits (image offset/scale/rotation,
-rect/taper width/height) — these gesture-spanning call sites are what
-Phase 4's redesign depends on most, and they're real mouse/slider
-interaction the headless suite cannot drive.
-
-- [x] Phase 4 complete, including the `undoFlag` follow-up — zero
-  references to any of the original six flags remain anywhere in the
-  codebase. Pending: your manual smoke-test of the drag/slider gestures
-  noted above.
+- [x] Phase 4 complete, including the `undoFlag` follow-up
 
 ---
 
 ## Phase 5 — Delete the remaining flags and macros
 
-**Context:** by this point `switchFrameFlag` should be the only flag with
-any remaining reads (localized inside `FramePresenter`, if still needed
-at all as a plain local bool rather than a global). This phase is cleanup
-and macro removal — small, mechanical, but worth doing explicitly rather
-than leaving as debt.
-
-**Steps:**
-1. Confirm via grep that `undoFlag`, `copyFlag`, `libFlag`,
-   `loadingAnimationFlag`, `clearUndoFlag` are completely unreferenced;
-   delete their declarations (`extern bool ...`) from every file.
-2. If `switchFrameFlag` still exists, turn it into a local RAII scope
-   guard inside `FramePresenter::Sync()` (set true on entry, false on
-   exit via destructor) instead of a global — it should never need to be
-   visible outside that one function anymore.
-3. Replace the `CURRENTSTICKFIGURE`/`CURRENTFRAME` preprocessor macros
-   (which currently expand to a *different* expression per file —
-   `view->myAnimation->...` in some files, `myAnimation->...` in others,
-   `V->myAnimation->...` in the advanced-*-widget files) with real methods
-   — e.g. `Animation::currentFrame()`, `Frame::currentStickFigure()` —
-   called consistently from every file. This gives the compiler a fighting
-   chance at catching misuse that the macro form could never catch.
-
-**Verify:** full rebuild with no macro-related warnings; run the full
-Phase 0 test suite; manual smoke-test pass across all major features once
-more (this is the last structural phase — treat this as the release-
-candidate checkpoint).
-
-**Exit criteria:** `grep -rn "undoFlag\|copyFlag\|libFlag\|
-loadingAnimationFlag\|clearUndoFlag\|switchFrameFlag"` returns nothing.
-`grep -rn "define CURRENTSTICKFIGURE\|define CURRENTFRAME"` returns
-nothing.
-
-**Status: complete (2026-07-09).** Step 1: all five flags were already
-gone by the time this phase started (Phase 2b/2c/4's own follow-up work);
-this phase's grep just confirmed it — zero live reads/writes/declarations
-of any of the six original flags remain (`grep -n
-"\b(undoFlag|copyFlag|libFlag|loadingAnimationFlag|clearUndoFlag|switchFrameFlag)\s*[=;]"`
-returns nothing; their names survive only in comments explaining what was
-removed and why). Step 2 (`switchFrameFlag` → local RAII guard) is moot —
-`switchFrameFlag` isn't a lingering global needing localization, it's
-fully deleted (Phase 2c), and there's no `FramePresenter` to hold a local
-guard in anyway (Phase 2c deferred).
-
-Step 3: added `Animation::CurrentFrame()` (returns `Frame*&`) and
-`Frame::CurrentStickFigure()`/`Frame::CurrentStick()` (return
-`StickFigure*&`/`stick*&`) — trivial inline one-liner accessors in
-`animation.h`/`frame.h`, named in `UpperPascalCase` per this plan's naming
-convention (the plan's own step 3 text suggested lowercase names,
-written before that convention was formalized — `CurrentFrame`/
-`CurrentStickFigure` is what's actually consistent with every other
-method added since Phase 1). Returning a **reference to the pointer**
-(not the pointer by value) was the key design choice: it preserves every
-existing use of the macros verbatim, including the several sites that
-*assign* through them (e.g. `CURRENTSTICKFIGURE = selectedStickFigure;`
-in `Animation::updateSelection()`), without needing to hunt down and
-special-case each lvalue usage separately.
-
-All ~400 combined occurrences of `CS`/`CURRENTSTICKFIGURE`/`CURRENTFRAME`
-across 9 files (`widget.cpp`, `myview.cpp`, `mymainwindow.cpp`,
-`animation.cpp`, `frame.cpp`, and the four `advanced*widget.cpp` files)
-were replaced with the real method-call chain appropriate to that file's
-path to the `Animation` singleton (`myAnimation->...` inside `myView`'s
-own methods, `view->myAnimation->...` in `widget.cpp`/`mymainwindow.cpp`,
-`V->myAnimation->...` in the `advanced*widget.cpp` files,
-`currentFrame->...` inside `Animation`'s own methods). This was safe as a
-bulk mechanical substitution — verified beforehand that none of the three
-macro names ever appear as a substring of another identifier, string
-literal, or anywhere the replacement text itself would collide — and the
-compiler would have caught any missed/wrong substitution immediately
-(undeclared identifier), which none did: the full app and test suite
-built clean on the first attempt after the sweep.
-
-**Verify performed:** full rebuild (app + tests), zero errors. All 22
-characterization tests pass. `MarionettaPlus.exe` launched and cleanly
-closed via a real `WM_CLOSE`, exit code 0. Manual smoke-test of the full
-UI (drag tools, sliders, menus) is still outstanding from Phase 4 — this
-phase's changes are 1:1 text substitutions with no behavior change, so
-they don't add new smoke-test surface, but they don't reduce the Phase 4
-one either.
+**Status: complete (2026-07-09).** All six original flags confirmed gone
+(grep-verified; names survive only in explanatory comments). Replaced the
+`CURRENTSTICKFIGURE`/`CURRENTFRAME`/`CS` macros (~400 occurrences across 9
+files, each expanding to a different hand-written expression per file)
+with real accessor methods — `Animation::CurrentFrame()`,
+`Frame::CurrentStickFigure()`/`CurrentStick()` — returning a **reference
+to the pointer** so every existing assignment-through-macro call site
+kept compiling unchanged.
 
 - [x] Phase 5 complete
 
@@ -835,35 +322,19 @@ one either.
 
 ## Phase 6 — Expand tests, sweep dead code, update docs
 
-**Context:** with the model layer now fully Qt-widget-independent, this
-is the point where testing and future-extension payoff actually
-materializes — use it.
+**Status: complete (2026-07-10).** Added 3 pure-data tests exercising
+`FrameData`/`StickFigureData` clone-independence and round-trips with no
+`QGraphicsScene`/GUI involved (`FrameDataCloneRemapsReferences`,
+`FrameDataRoundTrip`, `StickFigureDataCloneDeepCopiesImages`) — 27
+characterization tests total. `tokensave`'s dead-code/unused-import scans
+are clean outside test-only Qt-slot false positives (`QTest` methods look
+"uncalled" to a static call graph; verified via `tokensave tool dead_code`/
+`unused_imports`, excluding `tests/`); a manual grep for the six retired
+flags and the old bridge-cast comment turned up nothing but explanatory
+prose. `CLAUDE.md`'s "Data model," "flag-guard system," "Command flow,"
+and "Serialization" sections describe the current, post-2c architecture.
 
-**Steps:**
-1. Expand the `tests/` suite: since `AnimationData`/`FrameData`/
-   `StickFigureData`/`StickData` no longer need a `QGraphicsScene` or
-   `QApplication` event loop to construct and manipulate, add direct
-   unit tests for tree operations (merge/split/master reassignment),
-   clone independence, and file round-trips, run without any GUI.
-2. Re-run tokensave's dead-code/unused-import scans now that flags and
-   macros are gone — the refactor will likely have orphaned a few now-
-   unreachable branches (e.g. any remaining `if(!undoFlag && ...)`-shaped
-   conditions that got simplified to always-true/false along the way and
-   were only partially cleaned up in earlier phases).
-3. Rewrite `CLAUDE.md`'s "Command flow," "Serialization," and "flag-guard
-   system" sections to describe the new architecture instead of the old
-   one — those sections currently document exactly what this plan
-   deletes; leaving them as-is after the refactor would actively mislead
-   the next session.
-4. Delete this file's completed checkboxes' sections if the user prefers
-   a clean repo afterward, or leave it as a historical record — ask the
-   user which they'd rather do once all phases are checked off.
-
-**Verify:** `tokensave` re-index; new test suite passes; `CLAUDE.md`
-accurately describes the post-refactor architecture (spot-check by
-re-reading it as if you were a new session with no other context).
-
-- [ ] Phase 6 complete
+- [x] Phase 6 complete
 
 ---
 

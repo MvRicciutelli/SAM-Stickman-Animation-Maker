@@ -321,6 +321,128 @@ private slots:
         delete copy;
     }
 
+    // Phase 6: DataCloneIsIndependent above only exercises LINE sticks (no images) —
+    // this covers the deep-image-copy path of StickData::CopyFrom() through the
+    // StickFigureData::Clone() wrapper, pure data, no scene/view involved
+    void StickFigureDataCloneDeepCopiesImages()
+    {
+        StickFigureData source;
+        StickData *imgStick = new StickData();
+        imgStick->stickType = StickData::IMAGE;
+        imgStick->myLine = QLineF(0, 0, 0, 50);
+        QImage *img = new QImage(4, 4, QImage::Format_ARGB32);
+        img->fill(Qt::red);
+        imgStick->stickImgList << img;
+        imgStick->stickImg = img;
+        source.stickList << imgStick;
+        source.masterStick = imgStick;
+
+        StickFigureData *copy = source.Clone();
+        QCOMPARE(copy->stickList.count(), 1);
+        QCOMPARE(copy->stickList[0]->stickImgList.count(), 1);
+        QVERIFY(copy->stickList[0]->stickImg != source.stickList[0]->stickImg); // deep copy, not a shared pointer
+        QCOMPARE(*copy->stickList[0]->stickImg, *source.stickList[0]->stickImg); // same pixels
+
+        // mutating the clone's image must not affect the source's
+        copy->stickList[0]->stickImg->fill(Qt::blue);
+        QCOMPARE(source.stickList[0]->stickImg->pixelColor(0, 0), QColor(Qt::red));
+
+        delete copy;
+    }
+
+    // Phase 6: FrameData::Clone() remaps totalSticks and currentStickFigure onto the
+    // cloned figures by index — this is easy to get wrong (stale pointers into the
+    // source) and had no direct pure-data test before
+    void FrameDataCloneRemapsReferences()
+    {
+        FrameData source;
+        source.frameNumber = 3;
+        source.numOfItems = 2;
+
+        StickFigureData *figureA = new StickFigureData();
+        StickData *stickA = new StickData();
+        stickA->myLine = QLineF(0, 0, 0, 50);
+        figureA->stickList << stickA;
+        figureA->masterStick = stickA;
+        figureA->currentStick = stickA;
+        source.stickFigures << figureA;
+
+        StickFigureData *figureB = new StickFigureData();
+        StickData *stickB = new StickData();
+        stickB->myLine = QLineF(0, 50, 0, 100);
+        figureB->stickList << stickB;
+        figureB->masterStick = stickB;
+        source.stickFigures << figureB;
+
+        // deliberately out of figure order, to prove the remap is index-based, not positional
+        source.totalSticks << stickB << stickA;
+        source.currentStickFigure = figureA;
+
+        FrameData *copy = source.Clone();
+        QCOMPARE(copy->stickFigures.count(), 2);
+        QVERIFY(copy->stickFigures[0] != figureA);
+        QCOMPARE(copy->totalSticks.count(), 2);
+        QCOMPARE(copy->totalSticks[0], copy->stickFigures[1]->stickList[0]); // was stickB
+        QCOMPARE(copy->totalSticks[1], copy->stickFigures[0]->stickList[0]); // was stickA
+        QCOMPARE(copy->currentStickFigure, copy->stickFigures[0]);
+
+        QLineF original_line = stickA->myLine;
+        copy->stickFigures[0]->stickList[0]->myLine.translate(10, 10);
+        QCOMPARE(stickA->myLine, original_line);
+
+        delete copy;
+    }
+
+    // Phase 6: FrameData's operator>> rebuilds totalSticks from each stick's `order`
+    // field, not from insertion/figure order (see framedata.cpp) — this is the one
+    // reordering behavior FrameSnapshotRoundTrip (which uses sequential orders via a
+    // live frame) never actually exercises
+    void FrameDataRoundTrip()
+    {
+        FrameData source;
+        source.frameNumber = 5;
+        source.numOfItems = 2;
+
+        StickFigureData *figureA = new StickFigureData();
+        StickData *stickA = new StickData();
+        stickA->myLine = QLineF(0, 0, 0, 50);
+        stickA->order = 1; // second in z-order despite being the first figure added
+        figureA->stickList << stickA;
+        figureA->masterStick = stickA;
+        figureA->currentStick = stickA;
+        source.stickFigures << figureA;
+
+        StickFigureData *figureB = new StickFigureData();
+        StickData *stickB = new StickData();
+        stickB->myLine = QLineF(0, 50, 0, 100);
+        stickB->order = 0; // first in z-order despite being the second figure added
+        figureB->stickList << stickB;
+        figureB->masterStick = stickB;
+        source.stickFigures << figureB;
+
+        source.currentStickFigure = figureA;
+
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << source;
+        }
+        FrameData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+
+        QCOMPARE(loaded.stickFigures.count(), 2);
+        QCOMPARE(loaded.frameNumber, source.frameNumber);
+        QCOMPARE(loaded.numOfItems, source.numOfItems);
+        QCOMPARE(loaded.totalSticks.count(), 2);
+        QCOMPARE(loaded.totalSticks[0]->myLine, stickB->myLine); // order 0
+        QCOMPARE(loaded.totalSticks[1]->myLine, stickA->myLine); // order 1
+        QVERIFY(loaded.currentStickFigure != nullptr);
+        QCOMPARE(loaded.currentStickFigure->currentStick->myLine, stickA->myLine);
+    }
+
     void CopyPasteStickFigure()
     {
         AddFrame();
