@@ -32,10 +32,10 @@ class TestCharacterization : public QObject
     // replicates Widget::addStick() (widget.cpp:421)
     StickFigure *AddStick(const QString &name = QString())
     {
-        return CurrentFrame()->addStickFigure(my_stick_figure_widget_list, name);
+        return CurrentFrame()->AddStickFigure(my_stick_figure_widget_list, name);
     }
 
-    // replicates Widget::addFrame() (widget.cpp:487)
+    // replicates Widget::AddFrame() (widget.cpp:487)
     Frame *AddFrame()
     {
         view->storeUndo(CMD_ADDFRAME);
@@ -54,20 +54,20 @@ class TestCharacterization : public QObject
     {
         StickFigure *figure = CurrentStickFigure();
         view->storeUndo();
-        figure->startDrawing(&from, view->myPen, view->myBrush);
+        figure->StartDrawing(&from, view->myPen, view->myBrush);
         StickData *drawn = figure->current_stick;
         FramePresenter::AttachView(drawn, scene);
         drawn->view->selected = true;
         drawn->hard_top = hard_top_check->isChecked();
         drawn->hard_bottom = hard_bottom_check->isChecked();
         drawn->pen = view->myPen;
-        figure->endDrawing(&to);
+        figure->EndDrawing(&to);
         scene->addItem(drawn->view->stick_handle[0]);
         scene->addItem(drawn->view->stick_handle[1]);
-        CurrentFrame()->updateIcon();
-        view->my_animation->updateTab(drawn->stick_type);
+        CurrentFrame()->UpdateIcon();
+        view->my_animation->UpdateTab(drawn->stick_type);
         CurrentFrame()->total_sticks.append(drawn);
-        view->my_animation->updateSelection(drawn);
+        view->my_animation->UpdateSelection(drawn);
         return drawn;
     }
 
@@ -129,7 +129,7 @@ private slots:
         advanced_rect_tab = new AdvancedTab;
         my_tab_widget = new QTabWidget;
         my_tab_widget->addTab(new QWidget, "tools");
-        my_tab_widget->addTab(new QWidget, "placeholder"); // updateTab() swaps index 1
+        my_tab_widget->addTab(new QWidget, "placeholder"); // UpdateTab() swaps index 1
 
         my_rect = new QGraphicsRectItem(0, 0, W, H);
         my_rect->setZValue(-100);
@@ -505,7 +505,7 @@ private slots:
         StickFigure *figure = CurrentStickFigure();
         int idx = figure->stick_list.indexOf(drawn);
         CurrentFrame()->total_sticks.removeAll(drawn);
-        figure->deleteStick(idx);
+        figure->DeleteStick(idx);
         figure->current_stick = nullptr; // the key handler moves selection to the parent (none here)
         QCOMPARE(figure->stick_list.count(), 0);
         QCOMPARE(img_list_widget->count(), 0);
@@ -565,7 +565,7 @@ private slots:
 
         // a "simple" edit: storeUndo(CMD_SIMPLE) + direct model mutation
         view->storeUndo(CMD_SIMPLE);
-        CurrentStickFigure()->traslate(10, 20);
+        CurrentStickFigure()->Traslate(10, 20);
         QLineF moved_line = CurrentStickFigure()->stick_list[0]->my_line;
         QVERIFY(moved_line != original_line);
 
@@ -593,8 +593,8 @@ private slots:
     }
 
     // isolates the CMD_ADDFRAME+undo path specifically: RestoreFrameSnapshot() calls
-    // Animation::deleteFrame() on the added frame (~Frame -> delete each StickFigure ->
-    // ~StickFigure()), which is a DIFFERENT code path from clearFrame() (used on the frame
+    // Animation::DeleteFrame() on the added frame (~Frame -> delete each StickFigure ->
+    // ~StickFigure()), which is a DIFFERENT code path from ClearFrame() (used on the frame
     // being restored INTO, not the one being removed). Built the image stick directly,
     // bypassing DrawStick()/storeUndo(), so only ONE undo command (CMD_ADDFRAME) exists —
     // undoing it must delete the whole added frame, sticks included, in a single step.
@@ -633,7 +633,7 @@ private slots:
 
         // replicates Widget::on_deleteFrameBtn_clicked() (widget.cpp:559)
         view->storeUndo(CMD_DELETEFRAME);
-        view->deleteFrame(CurrentFrame());
+        view->DeleteFrame(CurrentFrame());
         view->moveToFrame(CurrentFrame());
         QCOMPARE(view->my_animation->frame_list.count(), frames_before - 1);
 
@@ -672,7 +672,7 @@ private slots:
         // replicates Widget::on_splitStick_clicked() (widget.cpp:1198)
         view->storeUndo();
         view->removeHandles(figure);
-        StickData *added = figure->chop(figure->current_stick);
+        StickData *added = figure->Chop(figure->current_stick);
         view->addHandles(figure);
         CurrentFrame()->total_sticks.append(added);
 
@@ -685,7 +685,7 @@ private slots:
         // replicates Widget::on_joinStick_clicked() (widget.cpp:1186), welding from the master
         figure->current_stick = drawn;
         view->storeUndo();
-        QList<StickData *> welded = figure->weld(drawn);
+        QList<StickData *> welded = figure->Weld(drawn);
         for (StickData *s : welded)
             CurrentFrame()->total_sticks.removeAll(s);
 
@@ -704,7 +704,7 @@ private slots:
 
         // replicates the JOIN branch of MyView::mousePressEvent() (myview.cpp:314)
         view->removeHandles(main_figure);
-        mergeStickFigures(main_figure, main_stick, to_join);
+        MergeStickFigures(main_figure, main_stick, to_join);
         view->addHandles(main_figure);
 
         QCOMPARE(main_figure->stick_list.count(), 3); // original + invisible linker + clone
@@ -763,7 +763,7 @@ private slots:
 
         // replicates Widget::on_setMasterNodeBtn_clicked() (widget.cpp:1213)
         view->storeUndo();
-        figure->setMaster(new_master);
+        figure->SetMaster(new_master);
 
         QCOMPARE(figure->master_stick, new_master);
         QVERIFY(new_master->parent == nullptr);
@@ -793,11 +793,11 @@ private slots:
         int frame_count = view->my_animation->frame_list.count();
 
         QString path = QDir::temp().filePath("marionetta_phase0_test.mAnim");
-        view->my_animation->saveAnimation(path);
+        view->my_animation->SaveAnimation(path);
 
         // replicates the load flow in mymainwindow.cpp: clear undo, load, land on frame 0
         view->clearUndo();
-        view->my_animation->loadAnimation(path);
+        view->my_animation->LoadAnimation(path);
         QCOMPARE(view->my_animation->frame_list.count(), frame_count);
         view->moveToFrame(view->my_animation->frame_list[0]);
 
@@ -861,7 +861,7 @@ private slots:
         throwaway_view->my_animation->scene = scene;
         Frame *throwaway_frame = throwaway_view->setUpFrame(0);
         throwaway_view->moveToFrame(throwaway_frame);
-        StickFigure *figure = throwaway_frame->addStickFigure(my_stick_figure_widget_list);
+        StickFigure *figure = throwaway_frame->AddStickFigure(my_stick_figure_widget_list);
 
         StickData *img_stick = new StickData();
         img_stick->my_line = QLineF(50, 50, 50, 150);

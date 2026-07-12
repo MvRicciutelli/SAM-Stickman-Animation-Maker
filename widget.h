@@ -18,7 +18,7 @@ public:
     MyView *view;
 
     StickFigure* addStick();
-    void addFrame();
+    void AddFrame();
     Frame *setUpFrame(int pos);
     void createPaths();
     void detectLibraries();

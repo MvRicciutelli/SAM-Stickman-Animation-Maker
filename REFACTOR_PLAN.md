@@ -477,11 +477,38 @@ declaration *and* every call-through-a-different-chain at once. Verified
 after this batch with a real build + full `tst_characterization` run:
 27/27 pass.
 
-**Not yet started:** `Widget` (`widget.cpp`/`.h`), `MyView`
-(`myview.cpp`/`.h`), the remaining methods on `Frame`/`Animation`, and
-`framepresenter.cpp`/`.h`. Same discipline applies — `.ui`-objectName
-collision check plus full call-site/receiver check for any short or
-generic method name before renaming it.
+**Fifth checkpoint (2026-07-12, same day):** confirmed `framepresenter.h`/
+`.cpp` was already fully compliant (`AttachView`/`DetachView` were named
+correctly by the original refactor — no change needed). Renamed the
+remaining `StickFigure` methods (`StartDrawing`, `PreviewDrawing`,
+`EndDrawing`, `ReturnLine`, `CancelDrawing`, `DeleteStick`,
+`SaveStickFigure`, `SelectStick`, `SetLineFromPoint`, `UpdateZ`,
+`UpdateIcon`, `LoadStickFigure`, `RotateStickFigure`, `Traslate`, `Weld`,
+`Chop`, `SetMaster`, `SetDirectChainAsMaster`, `SetStepChildAsMaster`,
+`InvertMaster`, `StepDownMaster`, `UpdateBoundingRects`, `Elongate`,
+`MaxZ`, `MinZ`, `SelectOrigin`), the free functions `MergeStickFigures`/
+`SplitStickFigures`/`CloneStick`, `Frame`'s remaining methods
+(`RemoveStickFigure`, `AddStickFigure`, `UpdateRender`, `ClearFrame`,
+`NormalizeDepth`, `StickfigureToBottom`, `StickfigureToTop`, `MinMaxZ`,
+`StickfigureAboveBelow`, `CleanTotalSticks`) plus its `frameIcon`→
+`frame_icon` field, and `Animation`'s full method set (`AddFrame`,
+`UpdateSelection`, `DeleteFrame`, `SetupFrame`, `SaveAnimation`,
+`LoadAnimation`, `ClearAnimation`, `UpdateSliders`, `UpdateTab`).
+`weld`/`chop` were checked for collision with `QString::chop()` before
+renaming (none found — every call site resolves to a `StickFigure`
+instance). Verified after each batch with a real build + full
+`tst_characterization` run: 27/27 pass throughout, no new collisions this
+round.
+
+**Not yet started:** `Widget` (`widget.cpp`/`.h`) and `MyView`
+(`myview.cpp`/`.h`) — by far the two largest remaining files (52KB/60KB),
+with the most Qt-inheritance surface (`Widget : QWidget`,
+`MyView : QGraphicsView`) and therefore the highest concentration of
+possible virtual-override and generic-name collisions of any file touched
+so far. Same discipline applies — `.ui`-objectName collision check plus
+full call-site/receiver check for any short or generic method name before
+renaming it; expect this to be the slowest-per-symbol remaining stretch of
+Phase 7.
 
 **Context:** phases 1–6 write all *new* code in `snake_case`
 variables / `UpperPascalCase` functions and classes per the "Naming

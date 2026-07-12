@@ -10,7 +10,7 @@
 extern QListWidget * my_stick_figure_widget_list;
 Frame::Frame()
 {
-    frameIcon       = new QIcon();
+    frame_icon       = new QIcon();
     icon_img         = new QPixmap(50,50);
     current_stick_figure = nullptr;
 }
@@ -20,13 +20,13 @@ Frame::~Frame(){
         delete S;
     }
     delete icon_img;
-    delete frameIcon;
+    delete frame_icon;
     //delete renderImg;
 }
 // da Phase 2b questa funzione viene chiamata solo dai percorsi UI vivi (Widget::addStick
 // e i paste): la deserializzazione non passa più di qui (vedi PopulateLiveFrame), quindi
 // le guardie su libFlag/copyFlag/loadingAnimationFlag sono cadute con i rispettivi flag
-StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
+StickFigure* Frame::AddStickFigure(QListWidget * my_list_widget, QString name)
 {
     QString myName;
     if(name.count()== 0){
@@ -62,7 +62,7 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     addedItem->setData(Qt::UserRole,newData);
     addedItem->setData(Qt::DisplayRole,myName);
     addedItem->setIcon(*current_stick_figure->stick_figure_icon);
-    myListWidget->insertItem(myListWidget->currentRow()+1,addedItem);
+    my_list_widget->insertItem(my_list_widget->currentRow()+1,addedItem);
     // update current stickfigure
     current_stick_figure->Highlight(false); //de highlight old selection
     current_stick_figure->Highlight(true); //highlight new one
@@ -70,19 +70,19 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     scene->clearSelection(); //clear scene selection
     if(!current_stick_figure->stick_list.isEmpty())
     {
-        selectStick(current_stick_figure); // puo essere ridontante in quanto ci sta la callback di sticklayerView_currentItemChanged//update selected stick
+        SelectStick(current_stick_figure); // puo essere ridontante in quanto ci sta la callback di sticklayerView_currentItemChanged//update selected stick
     }
-    int tempIndex = myListWidget->currentRow();
-    myListWidget->clearSelection();
+    int tempIndex = my_list_widget->currentRow();
+    my_list_widget->clearSelection();
     addedItem->setSelected( true);
-    myListWidget->setCurrentRow(tempIndex+1);
+    my_list_widget->setCurrentRow(tempIndex+1);
     current_stick_figure->scene = scene;
 
     return stick_figure_buffer;
 }
 // Frame::addStickFigureToLibrary è stato eliminato (Phase 2b): la libreria contiene
 // StickFigureData e viene gestita interamente da MyView::addStickFigureToLibrary
-StickFigure* Frame::removeStickFigure(StickFigure* toRemove)
+StickFigure* Frame::RemoveStickFigure(StickFigure* toRemove)
 {
     if(stick_figures.count() > 0)
     {
@@ -100,7 +100,7 @@ StickFigure* Frame::removeStickFigure(StickFigure* toRemove)
     }
     return current_stick_figure;
 }
-StickData *Frame::selectStick(StickFigure* S, StickData* s)
+StickData *Frame::SelectStick(StickFigure* S, StickData* s)
 {
     int stickIdx = 0;
     if(s!=nullptr){
@@ -129,7 +129,7 @@ void Frame::Refresh(int mode){
         S->Refresh(mode);
     }
 }
-StickData *Frame::selectStick(QPointF point)
+StickData *Frame::SelectStick(QPointF point)
 {
     float distBuffer;
     float minDist;
@@ -139,7 +139,7 @@ StickData *Frame::selectStick(QPointF point)
     for(StickFigure * S: stick_figures)
     {
         // su un criterio di distanza dall'handle utile, scegli l'item stick più vicino per ogni stickfigure
-            idxBuffer = S->selectStick( &point);
+            idxBuffer = S->SelectStick( &point);
             distBuffer = QLineF(S->stick_list[idxBuffer]->my_line.p2(),point).length();
             //scegli il più vicino tra tutti gli stickfigure
             if(selectedIdx == -1 || (distBuffer<minDist))
@@ -186,7 +186,7 @@ FrameData *ExtractFrameData(const Frame &source_frame)
 /**
  * @details Rebuilds a live frame's content from data, replicating what the legacy
  * operator>> did per configuration: one live figure per data figure (created directly,
- * NOT via addStickFigure — no list-widget or selection side effects, moveToFrame()
+ * NOT via AddStickFigure — no list-widget or selection side effects, moveToFrame()
  * rebuilds those for the displayed frame), total_sticks rebuilt from each stick's order
  * with the legacy out-of-range guard, current selection restored from the data record
  * with the legacy bounds checks.
@@ -253,7 +253,7 @@ QDataStream & operator>> (QDataStream& stream, Frame& my_frame){
     PopulateLiveFrame(&my_frame, data, false, false);
     return stream;
 }
-float Frame::minMaxZ(int option){
+float Frame::MinMaxZ(int option){
     if(total_sticks.isEmpty())
         return 0;
     float peak = total_sticks[0]->z;
@@ -269,8 +269,8 @@ float Frame::minMaxZ(int option){
     }
     return peak;
 }
-void Frame::stickfigureToBottom(StickFigure* S){
-    S->updateZ(minMaxZ(0));
+void Frame::StickfigureToBottom(StickFigure* S){
+    S->UpdateZ(MinMaxZ(0));
     int min = -1;
     for(int j = total_sticks.length()-1;j>min;j--){
         if(S->stick_list.contains(total_sticks[j])){
@@ -281,8 +281,8 @@ void Frame::stickfigureToBottom(StickFigure* S){
     }
 
 }
-void Frame::stickfigureToTop(StickFigure* S){
-    S->updateZ(minMaxZ(1));
+void Frame::StickfigureToTop(StickFigure* S){
+    S->UpdateZ(MinMaxZ(1));
     int max = total_sticks.length()-1;
     for(int j = 0; j<max;j++){
         if(S->stick_list.contains(total_sticks[j])){
@@ -294,9 +294,9 @@ void Frame::stickfigureToTop(StickFigure* S){
 
 }
 
-void Frame::stickfigureAboveBelow(StickFigure* toMove, StickFigure *previous, int mode){
+void Frame::StickfigureAboveBelow(StickFigure* toMove, StickFigure *previous, int mode){
 
-    mode == 1?toMove->updateZ(previous->maxZ()): toMove->updateZ(previous->minZ());
+    mode == 1?toMove->UpdateZ(previous->MaxZ()): toMove->UpdateZ(previous->MinZ());
     int peakIdx = 0;
     QList<StickData*> sticksToMove;
     if(mode == 1){
@@ -334,10 +334,10 @@ void Frame::stickfigureAboveBelow(StickFigure* toMove, StickFigure *previous, in
 }
 /**
  * @details Since Phase 2c the render clones need their own StickData (see
- * StickFigure::updateIcon() for why) — cloned, wrapped, rendered, then the views are
+ * StickFigure::UpdateIcon() for why) — cloned, wrapped, rendered, then the views are
  * freed via icoScene.clear() BEFORE the cloned data (~stick reads data->view).
  */
-void Frame::updateIcon()
+void Frame::UpdateIcon()
 {
     //crea una scena fittizia, falla bianca e delle stesse dimensioni di quella principale
     QGraphicsScene icoScene;
@@ -368,9 +368,9 @@ void Frame::updateIcon()
     painter.setFont(numberFont);
     painter.drawText(numberBand, Qt::AlignCenter, QString::number(frame_number));
     // imposta l'iconea
-    delete frameIcon;
-    frameIcon = new QIcon(*icon_img);
-    linked_item->setIcon(*frameIcon);
+    delete frame_icon;
+    frame_icon = new QIcon(*icon_img);
+    linked_item->setIcon(*frame_icon);
     linked_item->setData(Qt::DisplayRole, QString()); // il numero è già nell'iconea: evita di mostrarlo due volte
 
     painter.end();
@@ -378,7 +378,7 @@ void Frame::updateIcon()
     qDeleteAll(renderClones);
 }
 
-void Frame::updateRender(){
+void Frame::UpdateRender(){
     /* obsoleto, vedi storico pre-Phase-2c */
 }
 /**
@@ -387,18 +387,18 @@ void Frame::updateRender(){
  * img_list_widget entries, the sticks themselves), so there is nothing left for this
  * function to duplicate.
  */
-void Frame::clearFrame(){
+void Frame::ClearFrame(){
     qDeleteAll(stick_figures);
     stick_figures.clear();
 
 }
 
-void Frame::normalizeDepth()
+void Frame::NormalizeDepth()
 {
 
 
 }
-void Frame::cleanTotalSticks(void){
+void Frame::CleanTotalSticks(void){
     QList<StickData*> temp;
     for(StickFigure* S:stick_figures){
         for(StickData *s:S->stick_list){

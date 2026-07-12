@@ -8,7 +8,7 @@ class Frame
 public:
     Frame();
     ~Frame();
-    //StickFigure* addStickFigure(QListWidgetItem* item);
+    //StickFigure* AddStickFigure(QListWidgetItem* item);
     QList<StickFigure*> stick_figures;
     StickFigure* stick_figure_buffer;
     StickFigure* current_stick_figure;
@@ -29,28 +29,28 @@ public:
      * exactly as before.
      */
     StickData*& CurrentStick() { return current_stick_figure->current_stick; }
-    StickData *selectStick(QPointF point);
-    StickData *selectStick(StickFigure* S, StickData* s= nullptr);
-    StickFigure* removeStickFigure(StickFigure* toRemove);
-    QIcon* frameIcon;
+    StickData *SelectStick(QPointF point);
+    StickData *SelectStick(StickFigure* S, StickData* s= nullptr);
+    StickFigure* RemoveStickFigure(StickFigure* toRemove);
+    QIcon* frame_icon;
     int num_of_items = 0;
     QPixmap * icon_img;
     //QImage * renderImg;
     QGraphicsScene * scene;
     int frame_number = 0;
     QListWidgetItem * linked_item;
-    void updateIcon();
+    void UpdateIcon();
     QList <StickData*> total_sticks;
-    StickFigure *addStickFigure( QListWidget *myListWidget, QString name = "");
-    void updateRender();
-    void clearFrame();
-    void normalizeDepth();
+    StickFigure *AddStickFigure( QListWidget *my_list_widget, QString name = "");
+    void UpdateRender();
+    void ClearFrame();
+    void NormalizeDepth();
     void Refresh(int mode = 0);
-    void stickfigureToBottom(StickFigure *S);
-    void stickfigureToTop(StickFigure *S);
-    float minMaxZ(int option);
-    void stickfigureAboveBelow(StickFigure *toMove, StickFigure *previous, int mode);
-    void cleanTotalSticks();
+    void StickfigureToBottom(StickFigure *S);
+    void StickfigureToTop(StickFigure *S);
+    float MinMaxZ(int option);
+    void StickfigureAboveBelow(StickFigure *toMove, StickFigure *previous, int mode);
+    void CleanTotalSticks();
 };
 Q_DECLARE_METATYPE(Frame*);
 
@@ -81,7 +81,7 @@ FrameData *ExtractFrameData(const Frame &source_frame);
 /**
  * @brief Rebuilds a live frame's content from a data record (restore/paste/load target).
  * @param target_frame live frame to fill; must start with no stickfigures
- *        (fresh from setUpFrame() or just cleared by clearFrame()).
+ *        (fresh from setUpFrame() or just cleared by ClearFrame()).
  * @param source_data record to copy from (left untouched).
  * @param attach_to_scene forwarded to PopulateLiveStickFigure() for every figure.
  * @param update_icons forwarded to PopulateLiveStickFigure() for every figure.

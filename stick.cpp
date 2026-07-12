@@ -44,8 +44,8 @@ StickGraphicsItem::~StickGraphicsItem(){
     delete stick_handle[1] ;
 }
 /**
- * @details Called right before a LIVE stick's view is detached (deleteStick, weld,
- * cancelDrawing, FramePresenter::DetachView()): empties the rows this stick's images
+ * @details Called right before a LIVE stick's view is detached (DeleteStick, Weld,
+ * CancelDrawing, FramePresenter::DetachView()): empties the rows this stick's images
  * occupy in the image list widget, which mirrors the on-screen selected IMAGE stick.
  * Scratch deletions (undo/copy/library buffers never have a view at all) and render
  * clones (onion skins, icons, preview/export — see below) simply never call it.

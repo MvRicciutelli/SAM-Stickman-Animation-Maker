@@ -10,7 +10,7 @@ public:
     int version = 1;
     QList<Frame*> frame_list;
     Frame *frame_buffer;
-    Frame * addFrame(QListWidgetItem* item, int pos);
+    Frame * AddFrame(QListWidgetItem* item, int pos);
     Frame* current_frame;
     /**
      * @brief Accessor for the currently displayed frame.
@@ -21,17 +21,17 @@ public:
      * symbol-searchable, compiler-checked method instead of blind text substitution.
      */
     Frame*& CurrentFrame() { return current_frame; }
-    void updateSelection(StickData* item);
-    void updateSelection(StickFigure* item);
-    void updateSelection(QPointF point);
+    void UpdateSelection(StickData* item);
+    void UpdateSelection(StickFigure* item);
+    void UpdateSelection(QPointF point);
     QGraphicsScene * scene;
-    Frame *deleteFrame(Frame* frame);
-    Frame *setupFrame(int pos);
-    void saveAnimation(QString fileName);
-    void loadAnimation(QString name);
-    void clearAnimation();
-    void updateSliders();
-    void updateTab(int t);
+    Frame *DeleteFrame(Frame* frame);
+    Frame *SetupFrame(int pos);
+    void SaveAnimation(QString fileName);
+    void LoadAnimation(QString name);
+    void ClearAnimation();
+    void UpdateSliders();
+    void UpdateTab(int t);
     int width;
     int height;
 };

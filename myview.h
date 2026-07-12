@@ -53,7 +53,7 @@ public:
     ~MyView();
     unsigned int tool = NOTOOL;
     void setTool(int Tool);
-    StickFigure *addStickFigure(QListWidgetItem* item);
+    StickFigure *AddStickFigure(QListWidgetItem* item);
     Animation * my_animation;
     void deleteStickFigure();
     QPen    myPen;
@@ -98,7 +98,7 @@ public:
      * then the live frame already *is* the after-state and needs no separate copy.
      */
     void storeUndo(int command = CMD_SIMPLE);
-    void deleteFrame(Frame *frame);
+    void DeleteFrame(Frame *frame);
     Frame *setUpFrame(int pos);
     void mapMyCoords(QPointF &myCoord, QPointF startingPoint);
     void clearUndo();

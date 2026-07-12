@@ -47,7 +47,7 @@ void AdvancedTaperWidget::on_taperWidthSlider_valueChanged(int value)
 void AdvancedTaperWidget::on_taperWidthSlider_sliderReleased()
 {
     taperWSliderFlag = false;
-    V->my_animation->current_frame->updateIcon();
+    V->my_animation->current_frame->UpdateIcon();
 }
 
 void AdvancedTaperWidget::on_taperHeightSpinbox_valueChanged(int arg1)
@@ -77,7 +77,7 @@ void AdvancedTaperWidget::on_taperHeightSlider_valueChanged(int value)
 void AdvancedTaperWidget::on_taperHeightSlider_sliderReleased()
 {
     taperHSliderFlag = false;
-    V->my_animation->current_frame->updateIcon();
+    V->my_animation->current_frame->UpdateIcon();
 }
 
 void AdvancedTaperWidget::on_taperWidthSpinbox_valueChanged(int arg1)
@@ -97,7 +97,7 @@ void AdvancedTaperWidget::on_hardTopTaperCheck_stateChanged(int arg1)
     V->storeUndo();
     V->my_animation->CurrentFrame()->CurrentStick()->hard_top=((bool) arg1);
     V->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
-    V->my_animation->current_frame->updateIcon();
+    V->my_animation->current_frame->UpdateIcon();
 }
 
 void AdvancedTaperWidget::on_hardBottomTaperCheck_stateChanged(int arg1)
@@ -107,5 +107,5 @@ void AdvancedTaperWidget::on_hardBottomTaperCheck_stateChanged(int arg1)
    V->storeUndo();
    V->my_animation->CurrentFrame()->CurrentStick()->hard_bottom=((bool) arg1);
    V->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
-   V->my_animation->current_frame->updateIcon();
+   V->my_animation->current_frame->UpdateIcon();
 }

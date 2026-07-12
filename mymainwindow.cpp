@@ -53,7 +53,7 @@ void MyMainWindow::on_actionsave_triggered()
     QString fileName = QFileDialog::getSaveFileName(this,tr("Save StickFigure"),
                        my_stick_figures_folder.path(), "Stickfigure (*.stck)");
     if(fileName.length()>1 && view->my_animation->CurrentFrame()->CurrentStickFigure()){
-        view->my_animation->CurrentFrame()->CurrentStickFigure()->saveStickFigure(fileName);
+        view->my_animation->CurrentFrame()->CurrentStickFigure()->SaveStickFigure(fileName);
     }
 }
 
@@ -65,7 +65,7 @@ void MyMainWindow::on_actionload_triggered()
     if(QFile::exists(fileName)){
         view->storeUndo();
         central_w->addStick();
-        view->my_animation->CurrentFrame()->CurrentStickFigure()->loadStickFigure(fileName);
+        view->my_animation->CurrentFrame()->CurrentStickFigure()->LoadStickFigure(fileName);
         for(StickData*s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
             view->my_animation->CurrentFrame()->total_sticks.append(s);
         }
@@ -81,7 +81,7 @@ void MyMainWindow::on_actionsave_animation_triggered()
     // vuoto e non deve invalidare il path del file gia' aperto (rompe autosave e "Save")
     if(fileName.length()>1){
         animation_path = fileName;
-        view->my_animation->saveAnimation(fileName);
+        view->my_animation->SaveAnimation(fileName);
         opCount = 0;
     }
 }
@@ -96,7 +96,7 @@ void MyMainWindow::on_actionload_animation_triggered()
         view->clearUndo();
         animation_path = fileName;
         loadFile = true;
-        view->my_animation->loadAnimation(fileName);
+        view->my_animation->LoadAnimation(fileName);
         // Animation::operator>> gia' applica W/H/my_rect dal file caricato; se il file e'
         // corrotto puo' interrompersi lasciando frame_list vuota, quindi va controllata qui
         if(!view->my_animation->frame_list.isEmpty()){
@@ -182,7 +182,7 @@ void MyMainWindow::ExportImageSequence(QString path, int option){
 void MyMainWindow::on_actionsave_animation_current_triggered()
 {
     if(QFile::exists(animation_path)){
-        view->my_animation->saveAnimation(animation_path);
+        view->my_animation->SaveAnimation(animation_path);
         opCount = 0;
     }
     else{
@@ -205,8 +205,8 @@ void MyMainWindow::on_actionNew_Blank_Animation_triggered()
         // il vecchio file salvato con la nuova animazione vuota
         view->clearUndo();
         animation_path.clear();
-        view->my_animation->clearAnimation();
-        myWidget->addFrame();
+        view->my_animation->ClearAnimation();
+        myWidget->AddFrame();
         opCount = 0;
     }
 }

@@ -26,7 +26,7 @@ Animation::Animation()
 
 }
 
-Frame *Animation::addFrame(QListWidgetItem* item, int pos)
+Frame *Animation::AddFrame(QListWidgetItem* item, int pos)
 {
 
     frame_buffer = new Frame();
@@ -41,7 +41,7 @@ Frame *Animation::addFrame(QListWidgetItem* item, int pos)
     frame_buffer->linked_item = item;
     return frame_buffer;
 }
-Frame *Animation::deleteFrame(Frame *frame){
+Frame *Animation::DeleteFrame(Frame *frame){
     int frameNum = frame_list.indexOf(frame);
     if(frame_list.count()>=1){
         frame_list.removeAll(frame);
@@ -76,7 +76,7 @@ Frame *Animation::deleteFrame(Frame *frame){
     }
     return current_frame;
 }
-void Animation::updateSelection(QPointF point)
+void Animation::UpdateSelection(QPointF point)
 {
     float distBuffer;
     float minDist;
@@ -94,7 +94,7 @@ void Animation::updateSelection(QPointF point)
     for(StickFigure * S: current_frame->stick_figures)
     {
         if(S->stick_list.count()>=1) {
-            idxBuffer = S->selectStick( &point);
+            idxBuffer = S->SelectStick( &point);
             // aggiorna il buffer col punto 1 o 2 a seconda se stiamo selezionando lo stick master
             if(S->selecting_origin )
                 distBuffer = QLineF(S->stick_list[idxBuffer]->my_line.p1(),point).length();
@@ -116,7 +116,7 @@ void Animation::updateSelection(QPointF point)
     // "stickfigure corrente" salvato era un layer vuoto (operator>> lo lascia nullptr in quel caso)
     if(current_frame->CurrentStickFigure() && current_frame->CurrentStick()){
         if(selectedStickFigure->stick_list[selectedIdx]->stick_type != current_frame->CurrentStick()->stick_type){
-            updateTab(selectedStickFigure->stick_list[selectedIdx]->stick_type );
+            UpdateTab(selectedStickFigure->stick_list[selectedIdx]->stick_type );
         }
     }
 
@@ -129,12 +129,12 @@ void Animation::updateSelection(QPointF point)
     }
 
 
-    updateSliders();
+    UpdateSliders();
 
 
 
 }
-void Animation::updateTab(int t){
+void Animation::UpdateTab(int t){
     int idx = my_tab_widget->currentIndex();
     my_tab_widget->removeTab(1);
     if(t == StickData::IMAGE){
@@ -161,7 +161,7 @@ void Animation::updateTab(int t){
     }
     my_tab_widget->setCurrentIndex(idx);
 }
-void Animation::updateSelection(StickData* s)
+void Animation::UpdateSelection(StickData* s)
 {
     //update current frame
 
@@ -186,11 +186,11 @@ void Animation::updateSelection(StickData* s)
          s->view->selected = true;
      }
     }
-    updateSliders();
+    UpdateSliders();
     //int idx = frame_buffer->current_stick_figure->itemList.indexOf(item);
 
 }
-void Animation::updateSelection(StickFigure* S)
+void Animation::UpdateSelection(StickFigure* S)
 {
     //update current frame
     if(S==current_frame->CurrentStickFigure())
@@ -208,13 +208,13 @@ void Animation::updateSelection(StickFigure* S)
     // update current stick
     scene->clearSelection(); //clear scene selection
     if(!S->stick_list.isEmpty()){
-        current_frame->selectStick(S); //update selected stick
+        current_frame->SelectStick(S); //update selected stick
     }
 
 
 }
 
-void Animation::updateSliders(){
+void Animation::UpdateSliders(){
     StickData *cs = current_frame->CurrentStick();
     if(current_frame->CurrentStick() == nullptr)
         return;
@@ -258,7 +258,7 @@ void Animation::updateSliders(){
     edit_line_thickness_slider->setValue(cs->pen.width());
     elongate_spinbox->setValue(  current_frame->CurrentStick()->my_line.length());
 }
-Frame* Animation::setupFrame(int pos){
+Frame* Animation::SetupFrame(int pos){
     QString name;
     name.asprintf("%d",pos);
 
@@ -272,14 +272,14 @@ Frame* Animation::setupFrame(int pos){
         }
     }
     my_frame_widget_list->insertItem(pos,addedItem);
-    Frame * addedFrame = addFrame(addedItem, pos);
+    Frame * addedFrame = AddFrame(addedItem, pos);
     addedFrame->frame_number = pos;
     addedFrame->linked_item = addedItem;
     // popola l'entry QListWidget con puntatore ed iconea del frame
     QVariant newData(QVariant::fromValue(addedFrame));
     addedItem->setData(Qt::UserRole,newData);
     addedItem->setData(Qt::DisplayRole,name);
-    addedItem->setIcon(*addedFrame->frameIcon);
+    addedItem->setIcon(*addedFrame->frame_icon);
     // update other frames
     return addedFrame;
 }
@@ -321,17 +321,17 @@ QDataStream &operator>>(QDataStream& stream,Animation& my_animation){
         return stream;
     }
     for(int i = 0;i<frameNum;i++){
-        Frame* addedFrame = my_animation.setupFrame(i);
+        Frame* addedFrame = my_animation.SetupFrame(i);
         stream>>*addedFrame;
         if(stream.status() != QDataStream::Ok){
             // file troncato a metà frame: fermati qui, i frame già letti restano validi
             break;
         }
-        addedFrame->updateIcon();
+        addedFrame->UpdateIcon();
     }
     return stream;
 }
-void Animation::saveAnimation(QString fileName){
+void Animation::SaveAnimation(QString fileName){
     QFile file(fileName);
     if(!file.open(QIODevice::WriteOnly))
     {
@@ -341,7 +341,7 @@ void Animation::saveAnimation(QString fileName){
     out << *this;
     file.close();
 }
-void Animation::loadAnimation(QString name)
+void Animation::LoadAnimation(QString name)
 {
 
     QFile file(name);
@@ -350,7 +350,7 @@ void Animation::loadAnimation(QString name)
         return;
     }
     QDataStream out(&file);
-    clearAnimation();
+    ClearAnimation();
     // niente più loadingAnimationFlag: l'operator>> di Frame non attacca alla scena né
     // renderizza icone per costruzione (vedi PopulateLiveFrame), non serve una guardia
     out >> *this;
@@ -358,12 +358,12 @@ void Animation::loadAnimation(QString name)
     qDebug("load finished");
 
 }
-void Animation::clearAnimation(){
+void Animation::ClearAnimation(){
     clearingAnimation = true;
     QList <Frame*> clonedList = frame_list;
     for(Frame* f: clonedList){
 
-        deleteFrame(f);
+        DeleteFrame(f);
     }
     my_frame_widget_list->clear();
     //my_frame_widget_list->takeItem(my_frame_widget_list->row(f->linked_item));

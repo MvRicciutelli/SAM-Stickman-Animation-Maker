@@ -14,19 +14,19 @@ public:
     ~StickFigure();
     StickFigure(QListWidgetItem* item);
     StickFigure();
-    void  startDrawing(QPointF* point, QPen pen, QBrush brush);
-    void  previewDrawing(QPointF* point);
-    void  endDrawing(QPointF* point);
-    void  returnLine();
-    void  cancelDrawing();
-    void deleteStick(int idx);
-    void saveStickFigure(QString name);
+    void  StartDrawing(QPointF* point, QPen pen, QBrush brush);
+    void  PreviewDrawing(QPointF* point);
+    void  EndDrawing(QPointF* point);
+    void  ReturnLine();
+    void  CancelDrawing();
+    void DeleteStick(int idx);
+    void SaveStickFigure(QString name);
     int draw_count;
     int stick_num = 0;
     int version = 1;
-    int selectStick( QPointF * point);
+    int SelectStick( QPointF * point);
     QList<StickData*>stick_list;
-    void setLineFromPoint(QPointF *point);
+    void SetLineFromPoint(QPointF *point);
     QLineF line_buffer;
     StickData* current_stick = nullptr;
     StickData* master_stick = nullptr;
@@ -34,40 +34,40 @@ public:
     void Highlight(bool setting);
     QListWidgetItem* linked_item;
     QGraphicsScene * scene;
-    void updateZ(float value);
+    void UpdateZ(float value);
     QIcon*stick_figure_icon = nullptr;
     QPixmap * icon_img = nullptr;
     QPointF origin_pos_buffer;
     float scene_rotation_buffer = 0;
     QString name;
 
-    void updateIcon();
+    void UpdateIcon();
     bool selecting_origin = false;
-    void loadStickFigure(QString name);
+    void LoadStickFigure(QString name);
     void Refresh(int mode = 0);
 
-    void rotateStickFigure(QPointF *coord, QList<StickGraphicsItem*>sticks, bool completeRotation);
+    void RotateStickFigure(QPointF *coord, QList<StickGraphicsItem*>sticks, bool completeRotation);
     void Scale(QPointF *coord);
-    void traslate(qreal dx, qreal dy);
+    void Traslate(qreal dx, qreal dy);
 
-    QList<StickData*> weld(StickData *master);
-    StickData* chop(StickData *origin);
-    void setMaster(StickData *toMaster);
-    void setDirectChainAsMaster(StickData *toMaster);
-    void setStepChildAsMaster(StickData *toMaster);
-    void invertMaster(StickData *toMaster);
-    void stepDownMaster(StickData *toMaster);
-    void updateBoundingRects();
-    void elongate(QPointF newEndPoint, StickData *myStick);
-    float maxZ();
-    float minZ();
+    QList<StickData*> Weld(StickData *master);
+    StickData* Chop(StickData *origin);
+    void SetMaster(StickData *toMaster);
+    void SetDirectChainAsMaster(StickData *toMaster);
+    void SetStepChildAsMaster(StickData *toMaster);
+    void InvertMaster(StickData *toMaster);
+    void StepDownMaster(StickData *toMaster);
+    void UpdateBoundingRects();
+    void Elongate(QPointF newEndPoint, StickData *myStick);
+    float MaxZ();
+    float MinZ();
     float MeasureDistanceFromLine(QPointF p, QLineF l);
 private:
 
     QPointF p0;
     QPointF p1;
-    StickData* stick_buffer = nullptr; ///< in-progress stick's data; a view is attached separately by the caller (see startDrawing())
-    int selectOrigin( QPointF * point);
+    StickData* stick_buffer = nullptr; ///< in-progress stick's data; a view is attached separately by the caller (see StartDrawing())
+    int SelectOrigin( QPointF * point);
     StickData* parent_buffer = nullptr;
     QGraphicsScene * my_scene = nullptr;
 
@@ -112,12 +112,12 @@ StickFigureData *ExtractStickFigureData(const StickFigure &source_figure);
 void PopulateLiveStickFigure(StickFigure *target_figure, const StickFigureData &source_data,
                              bool attach_to_scene, bool update_icon);
 
-void mergeStickFigures(StickFigure* mainStickFigure, StickData* mainStick,StickFigure* toJoin);
-void splitStickFigures(StickFigure* split, StickData* origin,StickFigure* branch);
+void MergeStickFigures(StickFigure* mainStickFigure, StickData* mainStick,StickFigure* toJoin);
+void SplitStickFigures(StickFigure* split, StickData* origin,StickFigure* branch);
 /**
  * @brief Deep-copies a stick's persistent data (plain field copy since Phase 1a).
  * @param dest freshly-constructed record to fill.
  * @param src record to copy from; tree pointers are not copied.
  */
-void cloneStick(StickData* dest, StickData*src);
+void CloneStick(StickData* dest, StickData*src);
 #endif // StickFigure_H
