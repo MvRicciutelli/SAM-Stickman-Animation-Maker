@@ -48,7 +48,7 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     {
         if(!stick_figures.isEmpty() && !current_stick_figure->stick_list.isEmpty())
         {
-            current_stick_figure->highlight(false); //de highlight old selection
+            current_stick_figure->Highlight(false); //de highlight old selection
         }
     }
     stick_figure_buffer = new StickFigure(addedItem);
@@ -64,8 +64,8 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     addedItem->setIcon(*current_stick_figure->stick_figure_icon);
     myListWidget->insertItem(myListWidget->currentRow()+1,addedItem);
     // update current stickfigure
-    current_stick_figure->highlight(false); //de highlight old selection
-    current_stick_figure->highlight(true); //highlight new one
+    current_stick_figure->Highlight(false); //de highlight old selection
+    current_stick_figure->Highlight(true); //highlight new one
     // update current stick
     scene->clearSelection(); //clear scene selection
     if(!current_stick_figure->stick_list.isEmpty())
@@ -107,7 +107,7 @@ StickData *Frame::selectStick(StickFigure* S, StickData* s)
         if(S->stick_list.contains(s))
             stickIdx = S->stick_list.indexOf(s);
     }
-    S->highlight(true);
+    S->Highlight(true);
     if(S->stick_list[stickIdx]->view)
         S->stick_list[stickIdx]->view->setSelected(true);
     S->current_stick = S->stick_list[stickIdx];
@@ -116,7 +116,7 @@ StickData *Frame::selectStick(StickFigure* S, StickData* s)
 
     return S->stick_list[stickIdx];
 }
-void Frame::refresh(int mode){
+void Frame::Refresh(int mode){
     for(StickData*s:total_sticks){
         if(s->view)
             scene->removeItem(s->view);
@@ -126,7 +126,7 @@ void Frame::refresh(int mode){
             scene->addItem(s->view);
     }
     for(StickFigure*S:stick_figures){
-        S->refresh(mode);
+        S->Refresh(mode);
     }
 }
 StickData *Frame::selectStick(QPointF point)

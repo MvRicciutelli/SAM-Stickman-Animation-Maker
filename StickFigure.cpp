@@ -135,7 +135,7 @@ void StickFigure::previewDrawing(QPointF *point)
 {
     setLineFromPoint(point);
     if(stick_buffer->view)
-        stick_buffer->view->refresh(1);
+        stick_buffer->view->Refresh(1);
     if(stick_buffer->stick_type == StickData::IMAGE ||
             stick_buffer->stick_type == StickData::RECT||
             (stick_buffer->stick_type == StickData::TRAPEZOID)||
@@ -144,11 +144,11 @@ void StickFigure::previewDrawing(QPointF *point)
         stick_buffer->img_angle= -atan2(stick_buffer->my_line.dx(),stick_buffer->my_line.dy())*180/M_PI;
     }
 }
-void StickFigure::refresh(int mode)
+void StickFigure::Refresh(int mode)
 {
     for(StickData* s:stick_list){
         if(s->view)
-            s->view->refresh(mode);
+            s->view->Refresh(mode);
     }
 }
 
@@ -161,7 +161,7 @@ void StickFigure::setLineFromPoint(QPointF *point)
     stick_buffer->my_line = line_buffer;
 }
 
-void StickFigure::highlight(bool setting)
+void StickFigure::Highlight(bool setting)
 {
     for(StickData* s:this->stick_list)
     {
@@ -198,7 +198,7 @@ void StickFigure::endDrawing(QPointF *point)
     // assegna l'elemento padre
     stick_buffer->parent = parent_buffer;
     if(stick_buffer->view)
-        stick_buffer->view->refresh(0);
+        stick_buffer->view->Refresh(0);
     // INSERISCILO COME FIGLIO DI TUTTA LA GERARCHIA PRECEDENTE
     while(parent_buffer){
         parent_buffer->children.append(stick_buffer);
@@ -208,7 +208,7 @@ void StickFigure::endDrawing(QPointF *point)
         parent_buffer = parent_buffer->parent;
     }
     if(stick_buffer->stick_type == StickData::IMAGE && stick_buffer->view){
-        stick_buffer->view->imgRect = calcImgRect(stick_buffer->my_line,stick_buffer->stick_img->size());
+        stick_buffer->view->img_rect = CalcImgRect(stick_buffer->my_line,stick_buffer->stick_img->size());
     }
     scene->clearSelection();
     if(stick_buffer->view)
@@ -233,7 +233,7 @@ void StickFigure::cancelDrawing()
     draw_count   = 0;
     if(!stick_list.isEmpty() && current_stick){
         current_stick->view->selected = true; // qui current_stick era già sulla scena (non è quello appena scartato)
-        current_stick->view->refresh(0);
+        current_stick->view->Refresh(0);
     }
 }
 
@@ -243,7 +243,7 @@ int StickFigure::selectOrigin( QPointF * point)
     //seleziona lo stick più vicino
     int idx = selectStick(point);
         //controlla quale estremità è la più vicina e aseconda di quale essa sia restituisci il punto
-        if(measureDistanceFromLine(*point,stick_list[idx]->my_line) >
+        if(MeasureDistanceFromLine(*point,stick_list[idx]->my_line) >
                 QLineF(stick_list[idx]->my_line.p1(),*point).length())
         {
             // il p1 del masterstick è un eccezione e va considerata come possibile origine
@@ -256,7 +256,7 @@ int StickFigure::selectOrigin( QPointF * point)
         }
      return idx;
 }
-float StickFigure::measureDistanceFromLine(QPointF p, QLineF l){
+float StickFigure::MeasureDistanceFromLine(QPointF p, QLineF l){
     float dist = QLineF(l.p2(),p).length();
     return dist;
 
@@ -268,11 +268,11 @@ int StickFigure::selectStick( QPointF * point)
     float currentDist = 0;
     int chosenIdx = stick_list.indexOf(master_stick);
     //inizializziamo a partire dall'origine del master_stick
-    minDist = measureDistanceFromLine(*point,stick_list[0]->my_line);
+    minDist = MeasureDistanceFromLine(*point,stick_list[0]->my_line);
     while(idx< stick_list.length())
     {
         // i punti inizio-fine dello stick corrente
-        currentDist = measureDistanceFromLine(*point,stick_list[idx]->my_line);
+        currentDist = MeasureDistanceFromLine(*point,stick_list[idx]->my_line);
         // se la distanza è più bassa di quella minima registrata dal luogo del mouse
         if(currentDist<= minDist)
         {
@@ -425,8 +425,8 @@ void PopulateLiveStickFigure(StickFigure *target_figure, const StickFigureData &
         if (attach_to_scene){
             StickGraphicsItem *view = FramePresenter::AttachView(live_stick, target_figure->scene);
             if(live_stick == target_figure->master_stick){
-                view->stickHandle[0]->setBrush(QBrush(Qt::green));
-                view->stickHandle[0]->setZValue(101);
+                view->stick_handle[0]->setBrush(QBrush(Qt::green));
+                view->stick_handle[0]->setZValue(101);
             }
         }
     }
@@ -472,7 +472,7 @@ void StickFigure::saveStickFigure(QString name)
 void StickFigure::updateBoundingRects(){
     for(StickData*s:stick_list){
         if(s->view)
-            s->view->updateBr(0);
+            s->view->UpdateBr(0);
     }
 }
 // cloneStickFigure è stato eliminato (Phase 2b): i chiamanti passano da
@@ -535,7 +535,7 @@ QList<StickData*> StickFigure::weld(StickData* master){
         }
         delete s;
     }
-    refresh(0);
+    Refresh(0);
     return toWeld;
 }
 // splitta uno stick in due parti, quella originale h il ruolo di genitore e quella splittata si inserisce nella catena dei figli
@@ -577,7 +577,7 @@ StickData*  StickFigure::chop(StickData* origin){
     FramePresenter::AttachView(toAdd,scene);
     stick_list.append(toAdd);
 
-    refresh(0);
+    Refresh(0);
     return toAdd;
 }
 
@@ -623,12 +623,12 @@ void StickFigure::rotateStickFigure(QPointF *coord, QList<StickGraphicsItem*> st
     angle -= startingAngle;
     for(StickGraphicsItem *s:sticks){
 
-        s->rotate(angle);
+        s->Rotate(angle);
     }
 
 }
 extern bool start_stick_figure_scale;
-void StickFigure::scale(QPointF *coord){
+void StickFigure::Scale(QPointF *coord){
     float scale = 0;
     static float startingDist = 0;
     static QPointF startingPoint;
@@ -646,7 +646,7 @@ void StickFigure::scale(QPointF *coord){
     scale = actualDistance/startingDist;
     for(StickData* s:stick_list){
         if(s->view)
-            s->view->scale(scale);
+            s->view->Scale(scale);
     }
     qDebug("scale = %f \r\n",scale);
 }
@@ -654,7 +654,7 @@ void StickFigure::traslate(qreal dx, qreal dy){
     for(StickData*s:stick_list){
         s->my_line.translate(dx,dy);
         if(s->view)
-            s->view->refresh(1);
+            s->view->Refresh(1);
     }
 }
 void mergeStickFigures(StickFigure* mainStickFigure, StickData* mainStick,StickFigure* toJoin){
@@ -679,7 +679,7 @@ void mergeStickFigures(StickFigure* mainStickFigure, StickData* mainStick,StickF
         matchIndexes.append(toAdd);
         StickGraphicsItem *toAddView = FramePresenter::AttachView(toAdd,mainStickFigure->scene);
 
-        toAddView->refresh(0);
+        toAddView->Refresh(0);
     }
     int i = 0;
     for(StickData* s: toJoin->stick_list){
@@ -721,7 +721,7 @@ void mergeStickFigures(StickFigure* mainStickFigure, StickData* mainStick,StickF
     QList<StickData*> stepChildToRemove;
     for(StickData* child:toJoin->master_stick->children){
         // solo i figli DIRETTI del vecchio master vengono davvero riparentati a linker (vedi sopra
-        // "s->stepchild && s->parent->isMaster()"): un nipote stepchild più in profondità mantiene il
+        // "s->stepchild && s->parent->IsMaster()"): un nipote stepchild più in profondità mantiene il
         // suo parent originale, quindi resta un discendente legittimo del master clonato e non va tolto
         if(child->stepchild && child->parent == toJoin->master_stick)
             stepChildToRemove.append(matchIndexes[toJoin->stick_list.indexOf(child)]);
@@ -882,7 +882,7 @@ void StickFigure::setStepChildAsMaster(StickData* toMaster){
     //riassegna il ruolo del master
     master_stick = toMaster;
 
-    refresh(0);
+    Refresh(0);
 }
 // rendi uno stick, che non era uno stepchild, nuovo master dello stickfigure
 // gli stick possono raggrupparsi in:
@@ -1029,7 +1029,7 @@ void StickFigure::setDirectChainAsMaster(StickData* toMaster){
     }
     toMaster->stepchild = false;
     master_stick = toMaster;
-    refresh(0);
+    Refresh(0);
 }
 // questo algoritmo serve a cambiare l'estremità in cui vi è il punto di origine di un master con un estremo libero
 //  - lo stick master non cambia, ma p1 e p2 si scambiano tra loro
@@ -1078,7 +1078,7 @@ void StickFigure::invertMaster(StickData* toMaster){
     // aggiorna lo status di master..ma non serve neanche
     master_stick = toMaster;
     toMaster->stepchild = false;
-    refresh(0);
+    Refresh(0);
 }
 // questo algoritmo semplificato rende master uno stick che correntemente è
 // uno stepchild diretto del master attuale, in pratica
@@ -1128,7 +1128,7 @@ void StickFigure::stepDownMaster(StickData* toMaster){
     toMaster->stepchild = false;
     toMaster->parent = nullptr;
 
-    refresh(0);
+    Refresh(0);
 }
 // sets new endpoint of the stick and traslates all its children
 void StickFigure::elongate(QPointF newEndPoint, StickData* myStick){
@@ -1147,7 +1147,7 @@ void StickFigure::elongate(QPointF newEndPoint, StickData* myStick){
             || myStick->stick_type  == StickData::TRAPEZOID || myStick->stick_type  == StickData::TAPER){
         myStick->img_angle= -atan2(myStick->my_line.dx(),myStick->my_line.dy())*180/M_PI;
     }
-    refresh(0);
+    Refresh(0);
 
 }
 // seleziona quale algoritmo usare a seconda dello stick che deve diventare master
@@ -1155,8 +1155,8 @@ void StickFigure::setMaster(StickData* toMaster){
     QList<StickData*> figli;
     QList<StickData*> figliastri;
     if(master_stick->view){
-        master_stick->view->stickHandle[0]->setBrush(QBrush(Qt::red));
-        master_stick->view->stickHandle[0]->setZValue(100);
+        master_stick->view->stick_handle[0]->setBrush(QBrush(Qt::red));
+        master_stick->view->stick_handle[0]->setZValue(100);
     }
     //prima, considerando il master, vedi quanti sick nascono dal suo punto di origine (figliastri) e quanti nascono dal suo estremo libero (figli)
     for(StickData*s:stick_list){
@@ -1181,8 +1181,8 @@ void StickFigure::setMaster(StickData* toMaster){
     else
         setDirectChainAsMaster(toMaster); // masterscelto fa parte dei vecchi stepchild
     if(master_stick->view){
-        master_stick->view->stickHandle[0]->setBrush(QBrush(Qt::green));
-        master_stick->view->stickHandle[0]->setZValue(101);
+        master_stick->view->stick_handle[0]->setBrush(QBrush(Qt::green));
+        master_stick->view->stick_handle[0]->setZValue(101);
     }
 }
 void splitStickFigures(StickFigure* split, StickData* origin,StickFigure* branch){
@@ -1218,7 +1218,7 @@ void splitStickFigures(StickFigure* split, StickData* origin,StickFigure* branch
         }
         i++;
         StickGraphicsItem *view = FramePresenter::AttachView(s,split->scene);
-        view->refresh(0);
+        view->Refresh(0);
     }
 
     split->deleteStick( split->stick_list.indexOf(origin));

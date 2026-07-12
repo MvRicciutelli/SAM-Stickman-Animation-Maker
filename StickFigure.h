@@ -31,7 +31,7 @@ public:
     StickData* current_stick = nullptr;
     StickData* master_stick = nullptr;
     qreal base_z;
-    void highlight(bool setting);
+    void Highlight(bool setting);
     QListWidgetItem* linked_item;
     QGraphicsScene * scene;
     void updateZ(float value);
@@ -44,10 +44,10 @@ public:
     void updateIcon();
     bool selecting_origin = false;
     void loadStickFigure(QString name);
-    void refresh(int mode = 0);
+    void Refresh(int mode = 0);
 
     void rotateStickFigure(QPointF *coord, QList<StickGraphicsItem*>sticks, bool completeRotation);
-    void scale(QPointF *coord);
+    void Scale(QPointF *coord);
     void traslate(qreal dx, qreal dy);
 
     QList<StickData*> weld(StickData *master);
@@ -61,7 +61,7 @@ public:
     void elongate(QPointF newEndPoint, StickData *myStick);
     float maxZ();
     float minZ();
-    float measureDistanceFromLine(QPointF p, QLineF l);
+    float MeasureDistanceFromLine(QPointF p, QLineF l);
 private:
 
     QPointF p0;

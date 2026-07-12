@@ -433,15 +433,55 @@ above) and verified with a real build + full `tst_characterization` run
 **Not yet started:** member functions *inside* the core classes — `Widget`
 (`widget.cpp`/`.h`), `MyView` (`myview.cpp`/`.h`), the remaining methods on
 `StickFigure`/`Frame`/`Animation`, `stick.cpp`/`.h` (`StickGraphicsItem`),
-and `framepresenter.cpp`/`.h`. This is the largest and highest-risk
-remaining slice: hundreds of methods, many interconnected via signals/
-slots, some with short/generic names (`scale`, `refresh`, `highlight`)
-that need an explicit usage-scope check — not just a `.ui`-objectName
-grep — before a blanket rename, since a generic word is more likely to
-appear as an unrelated local/parameter name than the distinctive
-multi-word identifiers handled so far. Continue file-by-file,
-collision-checked, build-verified; check both `.ui` objectNames *and*
-plain usage-scope for any short/generic name before renaming it.
+and `framepresenter.cpp`/`.h`.
+
+**Fourth checkpoint (2026-07-12, same day):** renamed `StickGraphicsItem`
+(`stick.h`/`.cpp`) and `StickFigure`'s method set, plus
+`StickGraphicsItem`'s remaining fields (`rotationSpinboxBuffer`→
+`rotation_spinbox_buffer`, `scaleBuffer`/`widthBuffer`/`angleBuffer`/
+`angleBuffer2`→snake_case, `imgRect`→`img_rect`, `stickHandle`→
+`stick_handle`). Most methods (`getP2`, `calcImg`, `setLine`,
+`endRotation`, `manipulate`, `isMaster`, `updateBr`, `addImage`,
+`populateImageListWidget`, `removeImgFromList`, `calcAngle`,
+`constructBr`, `sceneRemover`, `calcImgRect`, `refresh`,
+`measureDistanceFromLine`) were safe blanket renames — but three names
+needed the "explicit usage-scope check, not just `.ui`" this status note
+previously flagged as the next risk, and all three actually hit it:
+- `highlight` is a **field** on `StickGraphicsItem` (bool) but a
+  **method** on `StickFigure`. Renamed only occurrences followed by `(`
+  (`s/\bhighlight\b(?=\s*\()/Highlight/g`), leaving the one bare field
+  read/write untouched.
+- `rotate` collided with real `QPainter::rotate(qreal)` calls in
+  `stick.cpp`'s `paint()`. Renamed everything except occurrences
+  immediately preceded by `painter->` (6 call sites correctly excluded).
+- `scale` collided with real `QGraphicsView::scale(qreal,qreal)` — both
+  our custom `StickGraphicsItem::scale(float)` and Qt's view-zoom calls
+  read as `X->scale(...)`, so a `->`-prefix check alone (which worked
+  fine for every earlier rename) wasn't enough; only a **double**
+  indirection (`->view->scale(`, meaning "go through a StickData/
+  StickFigure to reach the view") is ours, while a **bare** `view->
+  scale(...)` is Qt's. Renamed via a lookbehind requiring the literal
+  `->view->` prefix. This still missed the method's own declaration/
+  definition and one call site reached through `CurrentStickFigure()->
+  scale(...)` (no `->view->` in front) — none of those are call-through-
+  the-view patterns, so the lookbehind correctly didn't touch them, but
+  they still needed the rename by hand. Caught immediately by the build
+  (`'class StickFigure' has no member named 'scale'`) and fixed.
+
+Lesson generalized for the remaining classes: **before renaming a method,
+grep every call site of that exact name across the whole codebase and
+group them by receiver, not just by textual prefix** — a name shared
+across unrelated classes (or shadowing a real Qt method) needs the classes
+distinguished, and a single regex rarely catches 100% of a method's own
+declaration *and* every call-through-a-different-chain at once. Verified
+after this batch with a real build + full `tst_characterization` run:
+27/27 pass.
+
+**Not yet started:** `Widget` (`widget.cpp`/`.h`), `MyView`
+(`myview.cpp`/`.h`), the remaining methods on `Frame`/`Animation`, and
+`framepresenter.cpp`/`.h`. Same discipline applies — `.ui`-objectName
+collision check plus full call-site/receiver check for any short or
+generic method name before renaming it.
 
 **Context:** phases 1–6 write all *new* code in `snake_case`
 variables / `UpperPascalCase` functions and classes per the "Naming

@@ -39,7 +39,7 @@ void AdvancedTab::on_rectWidthSlider_valueChanged(int value)
         V->storeUndo();
     }
     V->my_animation->CurrentFrame()->CurrentStick()->img_w_scale = value;
-    V->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
+    V->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
 
 }
 
@@ -49,7 +49,7 @@ void AdvancedTab::on_rectWidthSpinbox_valueChanged(int arg1)
     if(V->my_animation->CurrentFrame()->CurrentStick()==nullptr)
         return;
     V->my_animation->CurrentFrame()->CurrentStick()->img_w_scale = arg1;
-    V->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
+    V->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
     ui->rectWidthSlider->setValue(arg1);
 }
 

@@ -2,7 +2,7 @@
 #include "sleeper.h"
 #include "imageexport.h"
 extern bool playBack;
-extern void sceneRemover(QGraphicsScene *sceneToClear);
+extern void SceneRemover(QGraphicsScene *sceneToClear);
 extern  bool busyPlay;
 extern MySleeper *play;
 bool pausePressed;
@@ -17,7 +17,7 @@ MySleeper::MySleeper(MyView * V, int time)
     // connetti il segnale del thread di fine elaborazione allo slot che partire la riproduzione
     QObject::connect(previewGenerator,&ImageExport::ImageExportFinished,this,&MySleeper::StartPlaying);
     playBack = true;
-    sceneRemover(v->scene());
+    SceneRemover(v->scene());
     previewGenerator->start(); // fai partire il thread
 
 

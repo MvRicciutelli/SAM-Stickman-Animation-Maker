@@ -45,7 +45,7 @@ public:
     void updateRender();
     void clearFrame();
     void normalizeDepth();
-    void refresh(int mode = 0);
+    void Refresh(int mode = 0);
     void stickfigureToBottom(StickFigure *S);
     void stickfigureToTop(StickFigure *S);
     float minMaxZ(int option);

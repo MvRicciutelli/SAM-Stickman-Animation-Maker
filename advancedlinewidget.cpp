@@ -32,7 +32,7 @@ void AdvancedLineWidget::on_editLineThicknessSlider_valueChanged(int value)
             V->my_animation->CurrentFrame()->CurrentStick()->pen.setWidth(value);
             V->myPen.setWidth(value);
             if(V->my_animation->CurrentFrame()->CurrentStick()->view)
-                V->my_animation->CurrentFrame()->CurrentStick()->view->refresh(1);
+                V->my_animation->CurrentFrame()->CurrentStick()->view->Refresh(1);
         }
     }
 }

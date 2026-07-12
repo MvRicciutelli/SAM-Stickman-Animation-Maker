@@ -62,8 +62,8 @@ class TestCharacterization : public QObject
         drawn->hard_bottom = hard_bottom_check->isChecked();
         drawn->pen = view->myPen;
         figure->endDrawing(&to);
-        scene->addItem(drawn->view->stickHandle[0]);
-        scene->addItem(drawn->view->stickHandle[1]);
+        scene->addItem(drawn->view->stick_handle[0]);
+        scene->addItem(drawn->view->stick_handle[1]);
         CurrentFrame()->updateIcon();
         view->my_animation->updateTab(drawn->stick_type);
         CurrentFrame()->total_sticks.append(drawn);
@@ -472,7 +472,7 @@ private slots:
         view->storeUndo(CMD_SIMPLE);
         StickFigure *pasted = AddStick();
         PopulateLiveStickFigure(pasted, *buffered, true, true);
-        pasted->refresh(0);
+        pasted->Refresh(0);
         for (StickData *s : pasted->stick_list)
             CurrentFrame()->total_sticks.append(s);
         view->addHandles(pasted);
@@ -494,7 +494,7 @@ private slots:
         drawn->stick_type = StickData::IMAGE;
         QImage *image = new QImage(8, 8, QImage::Format_ARGB32);
         image->fill(Qt::green);
-        drawn->view->addImage(image, "img");
+        drawn->view->AddImage(image, "img");
         QCOMPARE(img_list_widget->count(), 1);
 
         // snapshotting the frame into the undo buffer (scratch path) must not touch the widget
@@ -605,14 +605,14 @@ private slots:
         StickData *img_stick = new StickData();
         img_stick->my_line = QLineF(700, 100, 700, 200);
         // attacca la view MENTRE il tipo è ancora LINE (default): il costruttore di stick
-        // chiama updateBr(0) subito, che per un IMAGE deferenzierebbe stick_img prima che
-        // addImage() lo assegni — stesso ordine di MyView::drawCmd() (myview.cpp)
+        // chiama UpdateBr(0) subito, che per un IMAGE deferenzierebbe stick_img prima che
+        // AddImage() lo assegni — stesso ordine di MyView::drawCmd() (myview.cpp)
         StickGraphicsItem *img_stick_view = FramePresenter::AttachView(img_stick, scene);
         img_stick_view->my_stick_figure = figure;
         img_stick->stick_type = StickData::IMAGE;
         QImage *image = new QImage(8, 8, QImage::Format_ARGB32);
         image->fill(Qt::blue);
-        img_stick_view->addImage(image, "leak-check"); // also registers an entry in img_list_widget
+        img_stick_view->AddImage(image, "leak-check"); // also registers an entry in img_list_widget
         figure->stick_list.append(img_stick);
         figure->master_stick = img_stick;
         figure->current_stick = img_stick;
@@ -866,13 +866,13 @@ private slots:
         StickData *img_stick = new StickData();
         img_stick->my_line = QLineF(50, 50, 50, 150);
         // vedi UndoAddFrameFreesImageStickListWidgetEntries: attacca la view prima di
-        // passare a IMAGE, altrimenti updateBr(0) nel costruttore deferenzia stick_img==nullptr
+        // passare a IMAGE, altrimenti UpdateBr(0) nel costruttore deferenzia stick_img==nullptr
         StickGraphicsItem *img_stick_view = FramePresenter::AttachView(img_stick, scene);
         img_stick_view->my_stick_figure = figure;
         img_stick->stick_type = StickData::IMAGE;
         QImage *image = new QImage(8, 8, QImage::Format_ARGB32);
         image->fill(Qt::green);
-        img_stick_view->addImage(image, "shutdown-check");
+        img_stick_view->AddImage(image, "shutdown-check");
         figure->stick_list.append(img_stick);
         figure->master_stick = img_stick;
         figure->current_stick = img_stick;

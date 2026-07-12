@@ -132,7 +132,7 @@ protected:
     virtual void keyPressEvent(QKeyEvent *event) override;
 private:
     void drawCmd(QPointF* point, int mode);
-    void rotate(QGraphicsLineItem* item);
+    void Rotate(QGraphicsLineItem* item);
     void updateRotationBuffer();
     void changeTool();
 

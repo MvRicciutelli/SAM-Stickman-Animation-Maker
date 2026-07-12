@@ -58,7 +58,7 @@ Frame *Animation::deleteFrame(Frame *frame){
         //delete my_rect;
         /*if(!clearingAnimation)
             scene->clear(); // risky*/
-        sceneRemover(scene);
+        SceneRemover(scene);
         //my_rect = new QGraphicsRectItem(0,0,W,H); // RENEW IT
         if(!frame_list.isEmpty() && !clearingAnimation){
             if(frameNum>=frame_list.count())
@@ -87,8 +87,8 @@ void Animation::updateSelection(QPointF point)
     scene->clearSelection();
     StickFigure *selectedStickFigure = nullptr;
     if(current_frame->CurrentStickFigure() != nullptr){
-        current_frame->CurrentStickFigure()->highlight(false);
-        current_frame->CurrentStickFigure()->refresh(0);
+        current_frame->CurrentStickFigure()->Highlight(false);
+        current_frame->CurrentStickFigure()->Refresh(0);
     }
 
     for(StickFigure * S: current_frame->stick_figures)
@@ -99,7 +99,7 @@ void Animation::updateSelection(QPointF point)
             if(S->selecting_origin )
                 distBuffer = QLineF(S->stick_list[idxBuffer]->my_line.p1(),point).length();
             else{
-                distBuffer = S->measureDistanceFromLine(point,S->stick_list[idxBuffer]->my_line);
+                distBuffer = S->MeasureDistanceFromLine(point,S->stick_list[idxBuffer]->my_line);
             }
             if(selectedIdx == -1 || (distBuffer<minDist))
             {
@@ -122,7 +122,7 @@ void Animation::updateSelection(QPointF point)
 
     current_frame->CurrentStickFigure() = selectedStickFigure;
     current_frame->CurrentStick() = current_frame->CurrentStickFigure()->stick_list[selectedIdx];
-    current_frame->CurrentStickFigure()->highlight(true);
+    current_frame->CurrentStickFigure()->Highlight(true);
     if(current_frame->CurrentStick()->view){
         current_frame->CurrentStick()->view->setSelected(true);
         current_frame->CurrentStick()->view->selected = true;
@@ -167,14 +167,14 @@ void Animation::updateSelection(StickData* s)
 
     // update current stickfigure
     scene->clearSelection();
-    current_frame->CurrentStickFigure()->highlight(false);
+    current_frame->CurrentStickFigure()->Highlight(false);
 
     for(StickFigure *S : current_frame->stick_figures)
     {
         if(S->stick_list.contains(s))
         {
             current_frame->CurrentStickFigure() = S;
-            S->highlight(true);
+            S->Highlight(true);
         }
     }
     // update current stick
@@ -198,12 +198,12 @@ void Animation::updateSelection(StickFigure* S)
     // update current stickfigure
     if(current_frame->CurrentStickFigure() !=nullptr)
     {
-        current_frame->CurrentStickFigure()->highlight(false); //de highlight old selection
+        current_frame->CurrentStickFigure()->Highlight(false); //de highlight old selection
     }
 
     current_frame->CurrentStickFigure() = S; //update current_stick_figure buffer
 
-    S->highlight(true); //highlight new one
+    S->Highlight(true); //highlight new one
 
     // update current stick
     scene->clearSelection(); //clear scene selection
@@ -308,7 +308,7 @@ QDataStream &operator>>(QDataStream& stream,Animation& my_animation){
     W = my_animation.width;
     H = my_animation.height;
     my_rect->setRect(0,0,W,H);
-    sceneRemover(scene);
+    SceneRemover(scene);
     limit_rect->setRect(-my_rect->rect().width()/10, -my_rect->rect().height()/10, my_rect->rect().width()*1.1, my_rect->rect().height()*1.1);
 
     scene->addItem(my_rect);
@@ -367,7 +367,7 @@ void Animation::clearAnimation(){
     }
     my_frame_widget_list->clear();
     //my_frame_widget_list->takeItem(my_frame_widget_list->row(f->linked_item));
-    sceneRemover(scene);
+    SceneRemover(scene);
     //scene->clear();
     clearingAnimation = false;
 

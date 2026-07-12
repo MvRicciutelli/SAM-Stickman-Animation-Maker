@@ -31,7 +31,7 @@ void AdvancedCircleWidget::on_circleSquashSlider_valueChanged(int value)
                     V->my_animation->CurrentFrame()->CurrentStick()->img_w_scale = (float)(1+(float)value/20);
                 }
                 if(V->my_animation->CurrentFrame()->CurrentStick()->view)
-                    V->my_animation->CurrentFrame()->CurrentStick()->view->refresh(0);
+                    V->my_animation->CurrentFrame()->CurrentStick()->view->Refresh(0);
             }
         }
     }
