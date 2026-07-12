@@ -668,6 +668,7 @@ void MergeStickFigures(StickFigure* main_stick_figure, StickData* main_stick,Sti
 
     linker->stick_type = StickData::LINE;
     linker->pen= Qt::NoPen;
+    linker->is_linker = true;
     FramePresenter::AttachView(linker,main_stick_figure->scene);
     if(main_stick->stepchild)
         linker->stepchild = true;
@@ -1221,7 +1222,18 @@ void SplitStickFigures(StickFigure* split, StickData* origin,StickFigure* branch
         view->Refresh(0);
     }
 
+    StickData* origin_parent = origin->parent;
     split->DeleteStick( split->stick_list.indexOf(origin));
+    // un merge precedente puo' aver lasciato un linker invisibile (StickData::is_linker) come
+    // genitore di origin: se questo split l'ha appena svuotato di tutti i suoi discendenti va
+    // rimosso anche lui, altrimenti resta per sempre nella figura ospite con le sue maniglie
+    // visibili (bug: la maniglia del master della figura appena scollegata resta attaccata
+    // all'altra figura). Risale la catena in caso di merge concatenati.
+    while(origin_parent && origin_parent->is_linker && origin_parent->children.isEmpty()){
+        StickData* next = origin_parent->parent;
+        split->DeleteStick(split->stick_list.indexOf(origin_parent));
+        origin_parent = next;
+    }
 }
 float StickFigure::MinZ(){
     if(stick_list.isEmpty()){

@@ -752,6 +752,50 @@ private slots:
         QCOMPARE(figure->stick_list[0], master_stick);
     }
 
+    void MergeThenSplitRemovesOrphanedLinker()
+    {
+        AddFrame();
+        StickFigure *main_figure = CurrentStickFigure();
+        StickData *main_stick = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        StickFigure *to_join = AddStick("joined");
+        StickData *join_master = DrawStick(QPointF(200, 200), QPointF(200, 300));
+
+        // replicates the JOIN branch of MyView::mousePressEvent() (myview.cpp:314)
+        view->RemoveHandles(main_figure);
+        MergeStickFigures(main_figure, main_stick, to_join);
+        view->AddHandles(main_figure);
+        my_stick_figure_widget_list->clearSelection();
+        to_join->linked_item->setSelected(true);
+        view->DeleteStickFigure();
+        for (StickData *s : CurrentStickFigure()->stick_list)
+            if (!CurrentFrame()->total_sticks.contains(s))
+                CurrentFrame()->total_sticks.append(s);
+
+        QCOMPARE(CurrentStickFigure(), main_figure);
+        QCOMPARE(main_figure->stick_list.count(), 3); // main + invisible linker + joined clone
+        StickData *linker = main_figure->stick_list[1];
+        QVERIFY(linker->is_linker);
+        StickData *joined_clone = main_figure->stick_list[2];
+
+        // split the joined-in branch back off (replicates Widget::on_splitBtn_clicked())
+        main_figure->current_stick = joined_clone;
+        view->SplitStickFigure();
+
+        // regression test: the now-childless linker must not survive the split, or its
+        // endpoint handles get re-added to main_figure's scene forever by AddHandles() -
+        // visually a "copy of the master handle" stuck on the now-disconnected figure
+        QCOMPARE(main_figure->stick_list.count(), 1);
+        QCOMPARE(main_figure->stick_list[0], main_stick);
+        for (StickData *s : main_figure->stick_list)
+            QVERIFY(!s->is_linker);
+
+        StickFigure *branch = CurrentStickFigure();
+        QVERIFY(branch != main_figure);
+        QCOMPARE(branch->stick_list.count(), 1);
+        QCOMPARE(branch->master_stick, branch->stick_list[0]);
+        QCOMPARE(branch->stick_list[0]->my_line, join_master->my_line);
+    }
+
     void SetMasterOnDirectChain()
     {
         AddFrame();

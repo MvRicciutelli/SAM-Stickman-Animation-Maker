@@ -31,6 +31,7 @@ void StickData::CopyFrom(const StickData &source)
 {
     version = source.version;
     stick_type = source.stick_type;
+    is_linker = source.is_linker;
     z = source.z;
     stepchild = source.stepchild;
     my_line = source.my_line;
