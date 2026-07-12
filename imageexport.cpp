@@ -62,7 +62,7 @@ void ImageExport::run()
         Render(renderOption);
         renderFlag = false;
     }else{
-        V->preparePreview();
+        V->PreparePreview();
 
     }
     emit ImageExportFinished(renderOption);

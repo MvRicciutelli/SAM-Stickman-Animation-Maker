@@ -105,7 +105,7 @@ StickFigureData *ExtractStickFigureData(const StickFigure &source_figure);
  * @param source_data record to copy from (left untouched).
  * @param attach_to_scene true adds a view for each rebuilt stick to the figure's scene
  *        member (paste and .stck load); false leaves them detached (file load, where
- *        moveToFrame() attaches the displayed frame afterwards).
+ *        MoveToFrame() attaches the displayed frame afterwards).
  * @param update_icon true renders the layer icon at the end (skipped on file load,
  *        where only the displayed frame's icons matter — historical perf fix).
  */

@@ -64,7 +64,7 @@ QDataStream & operator<< (QDataStream& stream, const Frame& my_frame);
 
 /**
  * @brief Streams data into a live frame WITHOUT attaching sticks to the scene
- *        (file load path — moveToFrame() attaches the displayed frame afterwards).
+ *        (file load path — MoveToFrame() attaches the displayed frame afterwards).
  * @param stream source stream.
  * @param my_frame live frame to fill; must start empty.
  * @return the stream, for chaining.
@@ -81,7 +81,7 @@ FrameData *ExtractFrameData(const Frame &source_frame);
 /**
  * @brief Rebuilds a live frame's content from a data record (restore/paste/load target).
  * @param target_frame live frame to fill; must start with no stickfigures
- *        (fresh from setUpFrame() or just cleared by ClearFrame()).
+ *        (fresh from SetUpFrame() or just cleared by ClearFrame()).
  * @param source_data record to copy from (left untouched).
  * @param attach_to_scene forwarded to PopulateLiveStickFigure() for every figure.
  * @param update_icons forwarded to PopulateLiveStickFigure() for every figure.

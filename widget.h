@@ -19,7 +19,7 @@ public:
 
     StickFigure* addStick();
     void AddFrame();
-    Frame *setUpFrame(int pos);
+    Frame *SetUpFrame(int pos);
     void createPaths();
     void detectLibraries();
     void createJson(QString path);

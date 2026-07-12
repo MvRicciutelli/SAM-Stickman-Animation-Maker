@@ -36,7 +36,7 @@ void AdvancedTab::on_rectWidthSlider_valueChanged(int value)
     if(rectWSliderFlag == false){
         rectWSliderFlag = true;
 
-        V->storeUndo();
+        V->StoreUndo();
     }
     V->my_animation->CurrentFrame()->CurrentStick()->img_w_scale = value;
     V->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();

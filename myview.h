@@ -52,16 +52,16 @@ public:
     explicit MyView(QWidget *parent = nullptr);
     ~MyView();
     unsigned int tool = NOTOOL;
-    void setTool(int Tool);
+    void SetTool(int new_tool);
     StickFigure *AddStickFigure(QListWidgetItem* item);
     Animation * my_animation;
-    void deleteStickFigure();
-    QPen    myPen;
-    QBrush  myBrush;
-    StickFigureData* copyStickFigureBuffer = nullptr; ///< owned copy-paste buffer (pure data since Phase 2b)
-    void moveToFrame(Frame *frame);
-    void updateOnionSkins();
-    QList<QGraphicsPixmapItem*> onionSkins;
+    void DeleteStickFigure();
+    QPen    my_pen;
+    QBrush  my_brush;
+    StickFigureData* copy_stick_figure_buffer = nullptr; ///< owned copy-paste buffer (pure data since Phase 2b)
+    void MoveToFrame(Frame *frame);
+    void UpdateOnionSkins();
+    QList<QGraphicsPixmapItem*> onion_skins;
 
     /**
      * @brief Undo/redo history, replacing the hand-rolled undoBuffer/redoBuffer
@@ -97,31 +97,31 @@ public:
      * time this edit is undone (see FrameUndoCommand in myview.cpp), since until
      * then the live frame already *is* the after-state and needs no separate copy.
      */
-    void storeUndo(int command = CMD_SIMPLE);
+    void StoreUndo(int command = CMD_SIMPLE);
     void DeleteFrame(Frame *frame);
-    Frame *setUpFrame(int pos);
-    void mapMyCoords(QPointF &myCoord, QPointF startingPoint);
-    void clearUndo();
-    void loadLibrary(QString fileName, int mode = 0);
-    StickFigure *addStickFigureToLibrary();
-    QList<QGraphicsPixmapItem*> previewList;
-    void removeFromLibrary();
-    void setGraphics(bool all, int attribute);
-    void splitStickFigure();
-    void clearCurrentLib();
-    void sizeChange(int option);
-    void scaleFrame(Frame *F, float scaleAmount, QRectF R);
-    void preparePreview();
-    void displayPreview(int idx);
-    void arrowSelection();
-    void moveStickFigureZ(int increment, int mode);
-    void updateFrameOrder(Frame *f);
-    void addHandles(StickFigure*S);
-    void removeHandles(StickFigure*S);
+    Frame *SetUpFrame(int pos);
+    void MapMyCoords(QPointF &myCoord, QPointF startingPoint);
+    void ClearUndo();
+    void LoadLibrary(QString fileName, int mode = 0);
+    StickFigure *AddStickFigureToLibrary();
+    QList<QGraphicsPixmapItem*> preview_list;
+    void RemoveFromLibrary();
+    void SetGraphics(bool all, int attribute);
+    void SplitStickFigure();
+    void ClearCurrentLib();
+    void SizeChange(int option);
+    void ScaleFrame(Frame *F, float scaleAmount, QRectF R);
+    void PreparePreview();
+    void DisplayPreview(int idx);
+    void ArrowSelection();
+    void MoveStickFigureZ(int increment, int mode);
+    void UpdateFrameOrder(Frame *f);
+    void AddHandles(StickFigure*S);
+    void RemoveHandles(StickFigure*S);
 public slots:
-    void saveLibrary(QString fileName);
+    void SaveLibrary(QString fileName);
 signals:
-    void  autoSaveTrigger();
+    void  AutoSaveTrigger();
 
 
     // QWidget interface
@@ -131,10 +131,10 @@ protected:
     virtual void mousePressEvent(QMouseEvent *event) override;
     virtual void keyPressEvent(QKeyEvent *event) override;
 private:
-    void drawCmd(QPointF* point, int mode);
+    void DrawCmd(QPointF* point, int mode);
     void Rotate(QGraphicsLineItem* item);
-    void updateRotationBuffer();
-    void changeTool();
+    void UpdateRotationBuffer();
+    void ChangeTool();
 
     // QWidget interface
 

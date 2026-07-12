@@ -37,7 +37,7 @@ void AdvancedTaperWidget::on_taperWidthSlider_valueChanged(int value)
     if(taperWSliderFlag == false){
         taperWSliderFlag = true;
 
-        V->storeUndo();
+        V->StoreUndo();
     }
     V->my_animation->CurrentFrame()->CurrentStick()->img_w_scale = value;
     V->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
@@ -68,7 +68,7 @@ void AdvancedTaperWidget::on_taperHeightSlider_valueChanged(int value)
     if(taperHSliderFlag == false){
         taperHSliderFlag = true;
 
-        V->storeUndo();
+        V->StoreUndo();
     }
     V->my_animation->CurrentFrame()->CurrentStick()->img_h_scale = value;
     V->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
@@ -94,7 +94,7 @@ void AdvancedTaperWidget::on_hardTopTaperCheck_stateChanged(int arg1)
 {
     if(V->my_animation->CurrentFrame()->CurrentStick()==nullptr)
         return;
-    V->storeUndo();
+    V->StoreUndo();
     V->my_animation->CurrentFrame()->CurrentStick()->hard_top=((bool) arg1);
     V->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
     V->my_animation->current_frame->UpdateIcon();
@@ -104,7 +104,7 @@ void AdvancedTaperWidget::on_hardBottomTaperCheck_stateChanged(int arg1)
 {
    if(V->my_animation->CurrentFrame()->CurrentStick()==nullptr)
        return;
-   V->storeUndo();
+   V->StoreUndo();
    V->my_animation->CurrentFrame()->CurrentStick()->hard_bottom=((bool) arg1);
    V->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
    V->my_animation->current_frame->UpdateIcon();

@@ -93,7 +93,7 @@ StickFigure::StickFigure()
 }
 /**
  * @details Since Phase 2c only builds the StickData for the stick being drawn — no
- * view exists yet. The caller (MyView::drawCmd()) attaches one via
+ * view exists yet. The caller (MyView::DrawCmd()) attaches one via
  * FramePresenter::AttachView() right after this returns, then paints the master
  * handle green if this turned out to be the figure's first stick (moved out of here:
  * doing it required a view, which didn't exist yet at this point).

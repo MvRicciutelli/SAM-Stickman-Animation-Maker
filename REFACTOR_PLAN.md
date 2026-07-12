@@ -500,15 +500,40 @@ instance). Verified after each batch with a real build + full
 `tst_characterization` run: 27/27 pass throughout, no new collisions this
 round.
 
-**Not yet started:** `Widget` (`widget.cpp`/`.h`) and `MyView`
-(`myview.cpp`/`.h`) — by far the two largest remaining files (52KB/60KB),
-with the most Qt-inheritance surface (`Widget : QWidget`,
-`MyView : QGraphicsView`) and therefore the highest concentration of
-possible virtual-override and generic-name collisions of any file touched
-so far. Same discipline applies — `.ui`-objectName collision check plus
-full call-site/receiver check for any short or generic method name before
-renaming it; expect this to be the slowest-per-symbol remaining stretch of
-Phase 7.
+**Sixth checkpoint (2026-07-12, same day):** renamed `MyView`'s remaining
+methods (`SetTool`, `DeleteStickFigure`, `MoveToFrame`,
+`UpdateOnionSkins`, `StoreUndo`, `SetUpFrame`, `MapMyCoords`, `ClearUndo`,
+`LoadLibrary`, `AddStickFigureToLibrary`, `RemoveFromLibrary`,
+`SetGraphics`, `SplitStickFigure`, `ClearCurrentLib`, `SizeChange`,
+`ScaleFrame`, `PreparePreview`, `DisplayPreview`, `ArrowSelection`,
+`MoveStickFigureZ`, `UpdateFrameOrder`, `AddHandles`, `RemoveHandles`,
+`SaveLibrary`, `DrawCmd`, `UpdateRotationBuffer`, `ChangeTool`), the
+`AutoSaveTrigger` signal, and its fields (`myPen`→`my_pen`, `myBrush`→
+`my_brush`, `copyStickFigureBuffer`→`copy_stick_figure_buffer`,
+`onionSkins`→`onion_skins`, `previewList`→`preview_list`). All Qt virtual
+overrides (`mouseReleaseEvent`, `mouseMoveEvent`, `mousePressEvent`,
+`keyPressEvent`, `wheelEvent`) correctly left untouched. One more
+parameter/member collision like `setTool`'s: `SetTool(int Tool)`'s
+parameter would have collided with the `tool` member once lowercased
+(`tool = tool;`, a silent no-op) — renamed the parameter to `new_tool`
+instead of `tool`. Verified with a real build + full
+`tst_characterization` run: 27/27 pass.
+
+Member-level scope note: this and every checkpoint above renamed class
+names, member fields, and member functions — not every local/loop
+variable inside long method bodies (e.g. `myview.cpp`'s mouse-event
+handlers are hundreds of lines with many local variables still in
+`camelCase`). Treated as acceptable scope for Phase 7's core goal
+(consistent public API surface); exhaustively renaming every local
+variable in every function body is a much larger, lower-value tail that
+can be a later pass if wanted, not a blocker on calling Phase 7 "done."
+
+**Not yet started:** `Widget` (`widget.cpp`/`.h`) — the largest remaining
+file (52KB), with the most Qt-inheritance surface (`Widget : QWidget`) and
+therefore the highest remaining concentration of possible virtual-override
+and generic-name collisions. Same discipline applies — `.ui`-objectName
+collision check plus full call-site/receiver check for any short or
+generic method name before renaming it.
 
 **Context:** phases 1–6 write all *new* code in `snake_case`
 variables / `UpperPascalCase` functions and classes per the "Naming

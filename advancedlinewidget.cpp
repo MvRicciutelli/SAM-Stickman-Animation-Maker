@@ -30,7 +30,7 @@ void AdvancedLineWidget::on_editLineThicknessSlider_valueChanged(int value)
             line_edit_thickness_width_spinbox->setRange(0,0.5*sqrt(pow(W,2)+pow(H,2)));
             line_edit_thickness_width_spinbox->setValue(value);
             V->my_animation->CurrentFrame()->CurrentStick()->pen.setWidth(value);
-            V->myPen.setWidth(value);
+            V->my_pen.setWidth(value);
             if(V->my_animation->CurrentFrame()->CurrentStick()->view)
                 V->my_animation->CurrentFrame()->CurrentStick()->view->Refresh(1);
         }

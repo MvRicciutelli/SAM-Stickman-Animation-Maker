@@ -80,8 +80,8 @@ StickFigure* Frame::AddStickFigure(QListWidget * my_list_widget, QString name)
 
     return stick_figure_buffer;
 }
-// Frame::addStickFigureToLibrary è stato eliminato (Phase 2b): la libreria contiene
-// StickFigureData e viene gestita interamente da MyView::addStickFigureToLibrary
+// Frame::AddStickFigureToLibrary è stato eliminato (Phase 2b): la libreria contiene
+// StickFigureData e viene gestita interamente da MyView::AddStickFigureToLibrary
 StickFigure* Frame::RemoveStickFigure(StickFigure* toRemove)
 {
     if(stick_figures.count() > 0)
@@ -186,7 +186,7 @@ FrameData *ExtractFrameData(const Frame &source_frame)
 /**
  * @details Rebuilds a live frame's content from data, replicating what the legacy
  * operator>> did per configuration: one live figure per data figure (created directly,
- * NOT via AddStickFigure — no list-widget or selection side effects, moveToFrame()
+ * NOT via AddStickFigure — no list-widget or selection side effects, MoveToFrame()
  * rebuilds those for the displayed frame), total_sticks rebuilt from each stick's order
  * with the legacy out-of-range guard, current selection restored from the data record
  * with the legacy bounds checks.
@@ -212,7 +212,7 @@ void PopulateLiveFrame(Frame *target_frame, const FrameData &source_data,
     for (StickFigure *figure : target_frame->stick_figures) {
         for (StickData *s : figure->stick_list) {
             // s->order presuppone di formare una permutazione perfetta 0..count-1: se per qualche
-            // motivo non lo è (es. mai passato da updateFrameOrder()), senza questo controllo si
+            // motivo non lo è (es. mai passato da UpdateFrameOrder()), senza questo controllo si
             // scrive fuori dai limiti di total_sticks (corruzione dell'heap, crash non immediato)
             if (s->order >= 0 && s->order < target_frame->total_sticks.count())
                 target_frame->total_sticks[s->order] = s;
@@ -245,7 +245,7 @@ QDataStream & operator<< (QDataStream& stream, const Frame& my_frame){
 /**
  * @details Wrapper kept for the whole-animation file load path: sticks stay detached
  * and icons unrendered (the historical loadingAnimationFlag behavior) because
- * moveToFrame() attaches and refreshes the frame that actually gets displayed.
+ * MoveToFrame() attaches and refreshes the frame that actually gets displayed.
  */
 QDataStream & operator>> (QDataStream& stream, Frame& my_frame){
     FrameData data;

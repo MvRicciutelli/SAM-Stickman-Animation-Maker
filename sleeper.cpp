@@ -37,8 +37,8 @@ Q_SLOT void MySleeper::Connected()
 {
 
    if (v->my_animation->frame_list.count()>counter && pausePressed == false){
-       //v->moveToFrame(v->my_animation->frame_list[counter]);
-       v->displayPreview(counter);
+       //v->MoveToFrame(v->my_animation->frame_list[counter]);
+       v->DisplayPreview(counter);
        timer.start();
        counter++;
 
@@ -48,13 +48,13 @@ Q_SLOT void MySleeper::Connected()
        timer.stop();
        //v->scene()->clear();
        int i = 0;
-       for(QGraphicsPixmapItem * item:v->previewList){
+       for(QGraphicsPixmapItem * item:v->preview_list){
            if(i<=counter)
                 v->scene()->removeItem(item);
            delete item;
        }
-       v->previewList.clear();
-       v->moveToFrame(v->my_animation->frame_list[counter-1]);
+       v->preview_list.clear();
+       v->MoveToFrame(v->my_animation->frame_list[counter-1]);
        busyPlay = false;
        // evita che 'play' resti pendente dopo l'auto-distruzione (oggi busyPlay già impedisce
        // che venga riletto prima del prossimo click su Play, ma così è sicuro anche in futuro)

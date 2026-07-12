@@ -63,13 +63,13 @@ void MyMainWindow::on_actionload_triggered()
     QString fileName = QFileDialog::getOpenFileName(this,tr("Load StickFigure"),
                        my_stick_figures_folder.path(), "Stickfigure (*.stck)");
     if(QFile::exists(fileName)){
-        view->storeUndo();
+        view->StoreUndo();
         central_w->addStick();
         view->my_animation->CurrentFrame()->CurrentStickFigure()->LoadStickFigure(fileName);
         for(StickData*s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
             view->my_animation->CurrentFrame()->total_sticks.append(s);
         }
-        view->addHandles(view->my_animation->CurrentFrame()->CurrentStickFigure());
+        view->AddHandles(view->my_animation->CurrentFrame()->CurrentStickFigure());
     }
 }
 
@@ -90,17 +90,17 @@ void MyMainWindow::on_actionload_animation_triggered()
 {
     QString fileName = QFileDialog::getOpenFileName(this,tr("Load Animation"),
                        my_animations_folder.path(), "Marionetta Animation (*.mAnim)");
-    // clearUndo/animation_path vanno toccati solo se l'utente conferma un file valido: annullare
+    // ClearUndo/animation_path vanno toccati solo se l'utente conferma un file valido: annullare
     // la dialog non deve cancellare la cronologia undo o il path dell'animazione corrente
     if(QFile::exists(fileName)){
-        view->clearUndo();
+        view->ClearUndo();
         animation_path = fileName;
         loadFile = true;
         view->my_animation->LoadAnimation(fileName);
         // Animation::operator>> gia' applica W/H/my_rect dal file caricato; se il file e'
         // corrotto puo' interrompersi lasciando frame_list vuota, quindi va controllata qui
         if(!view->my_animation->frame_list.isEmpty()){
-            view->moveToFrame(view->my_animation->frame_list[0]);
+            view->MoveToFrame(view->my_animation->frame_list[0]);
         }
         loadFile = false;
         opCount = 0;
@@ -200,10 +200,10 @@ void MyMainWindow::on_actionNew_Blank_Animation_triggered()
                                     );
     if(ret == QMessageBox::Yes)
     {
-        // senza clearUndo() l'undo buffer terrebbe frame della vecchia animazione applicabili
+        // senza ClearUndo() l'undo buffer terrebbe frame della vecchia animazione applicabili
         // a questa nuova; senza azzerare animation_path, "Save" sovrascriverebbe silenziosamente
         // il vecchio file salvato con la nuova animazione vuota
-        view->clearUndo();
+        view->ClearUndo();
         animation_path.clear();
         view->my_animation->ClearAnimation();
         myWidget->AddFrame();
@@ -215,7 +215,7 @@ void MyMainWindow::GetAnimationParams(int optionVal){
     W   = myOptions->width;
     H   = myOptions->height;
     handle_size = myOptions->handleSize;
-    view->sizeChange(optionVal);
+    view->SizeChange(optionVal);
     myWidget->writeJson();
     autoSaveInterval = myOptions->autoSaveInterval;
     // deleteLater invece di delete: questo slot viene chiamato dal click handler del bottone
@@ -328,7 +328,7 @@ void MyMainWindow::on_actionExport_as_image_sequence_triggered()
         ExportImageSequence(fileName,NONE);
 }
 void MyMainWindow::DoConnections(){
-        QObject::connect(view, &MyView::autoSaveTrigger,this, &MyMainWindow::AutoSave);
+        QObject::connect(view, &MyView::AutoSaveTrigger,this, &MyMainWindow::AutoSave);
 }
 void MyMainWindow::closeEvent(QCloseEvent *event)
 {
