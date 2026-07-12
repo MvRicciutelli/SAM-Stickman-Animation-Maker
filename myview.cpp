@@ -48,7 +48,7 @@ extern int opCount;
 
 #define MAXUNDO 50 ///< cap on undo_stack depth, enforced via QUndoStack::setUndoLimit()
 
-myView::myView(QWidget *parent) : QGraphicsView(parent)
+MyView::MyView(QWidget *parent) : QGraphicsView(parent)
 {
     onionRender = false;
     myAnimation = new Animation();
@@ -71,7 +71,7 @@ myView::myView(QWidget *parent) : QGraphicsView(parent)
     });
 }
 
-myView::~myView()
+MyView::~MyView()
 {
     for (StickFigure* S : myAnimation->CurrentFrame()->stickFigures)
     {
@@ -85,14 +85,14 @@ myView::~myView()
     delete copyStickFigureBuffer;
 }
 
-void myView::setTool(int Tool)
+void MyView::setTool(int Tool)
 {
     changeTool();
 
     tool = Tool;
 }
 
-void myView::deleteStickFigure()
+void MyView::deleteStickFigure()
 {
     bool updateCurrentStickFigure =  false;
     if(myStickFigureWidgetList->selectedItems().count() == 1 && myAnimation->currentFrame->stickFigures.count()>1)
@@ -137,7 +137,7 @@ void myView::deleteStickFigure()
 
 }
 //cambia l'ordine di profondità dello stickfigure selezionato
-void myView::moveStickFigureZ(int increment, int mode)
+void MyView::moveStickFigureZ(int increment, int mode)
 {
     if(myStickFigureWidgetList->count() <= 1 )
         return;
@@ -211,7 +211,7 @@ void myView::moveStickFigureZ(int increment, int mode)
     }
 */
 }
-void myView::mapMyCoords(QPointF& myCoord, QPointF startingPoint){
+void MyView::mapMyCoords(QPointF& myCoord, QPointF startingPoint){
     coord = mapToScene(startingPoint.x(),startingPoint.y());
     if(myCoord.x()<-myRect->rect().width()/10)
         myCoord.setX(-myRect->rect().width()/10);
@@ -222,7 +222,7 @@ void myView::mapMyCoords(QPointF& myCoord, QPointF startingPoint){
     if(myCoord.x()>myRect->rect().width()+myRect->rect().width()/10)
         myCoord.setX(myRect->rect().width()+myRect->rect().width()/10);
 }
-void myView::mousePressEvent(QMouseEvent *event)
+void MyView::mousePressEvent(QMouseEvent *event)
 {
     if(event->button()==Qt::LeftButton){
         isPressed = true;
@@ -373,7 +373,7 @@ void myView::mousePressEvent(QMouseEvent *event)
     //QGraphicsView::mousePressEvent(event);
 }
 
-void myView::keyPressEvent(QKeyEvent *event)
+void MyView::keyPressEvent(QKeyEvent *event)
 {
     switch(event->key())
     {
@@ -442,7 +442,7 @@ void myView::keyPressEvent(QKeyEvent *event)
 
     QGraphicsView::keyPressEvent(event);
 }
-void myView::arrowSelection(){
+void MyView::arrowSelection(){
     if(myAnimation->CurrentFrame()->stickFigures.isEmpty())
         return;
     if(myAnimation->CurrentFrame()->totalSticks.empty())
@@ -459,7 +459,7 @@ void myView::arrowSelection(){
 // il disegno di una linea conta 2 click
 // il primo determina lo starting point
 // il secondo l'end point
-void myView::drawCmd(QPointF* point, int mode)
+void MyView::drawCmd(QPointF* point, int mode)
 {
     if(!myAnimation->currentFrame->stickFigures.isEmpty() && myAnimation->CurrentFrame()->CurrentStickFigure() != nullptr)
     {
@@ -532,7 +532,7 @@ void myView::drawCmd(QPointF* point, int mode)
 
 }
 //Esci dallo strumento che stai usando
-void myView::changeTool()
+void MyView::changeTool()
 {
     switch(tool)
     {
@@ -605,7 +605,7 @@ void myView::changeTool()
     }
 }
 
-void myView::wheelEvent(QWheelEvent *event)
+void MyView::wheelEvent(QWheelEvent *event)
 {
     if(myAnimation->CurrentFrame()->CurrentStickFigure() !=nullptr){
         if(!myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.isEmpty() && myAnimation->CurrentFrame()->CurrentStickFigure()->currentStick!=nullptr){
@@ -637,7 +637,7 @@ void myView::wheelEvent(QWheelEvent *event)
 
 
 // mouse rilasciato
-void myView::mouseReleaseEvent(QMouseEvent *event)
+void MyView::mouseReleaseEvent(QMouseEvent *event)
 {
     if(event->button()==Qt::LeftButton){
         isPressed = false;
@@ -677,7 +677,7 @@ void myView::mouseReleaseEvent(QMouseEvent *event)
 // Se il mouse viene mosso durante il disegno di una linea continua ad aggiornarne il disegno
 // Se viene mosso durante una pressione con stick selezionato, agisci sul relativo puntatore all'elemento linea
 // per ruotarla seguendo il mouse
-void myView::mouseMoveEvent(QMouseEvent *event)
+void MyView::mouseMoveEvent(QMouseEvent *event)
 {
     static QPointF prevCoord(0,0);
     mapMyCoords(coord, event->pos());
@@ -904,7 +904,7 @@ void myView::mouseMoveEvent(QMouseEvent *event)
     QGraphicsView::mouseMoveEvent(event);
 }
 //funzione usata per riscalare interamente il frame quando si riscala l'animazione intera
-void myView::scaleFrame(Frame* F, float scaleAmount, QRectF R){
+void MyView::scaleFrame(Frame* F, float scaleAmount, QRectF R){
     QPointF center(R.width()/2,R.height()/2);
     if(F->stickFigures.isEmpty())
         return;
@@ -925,7 +925,7 @@ void myView::scaleFrame(Frame* F, float scaleAmount, QRectF R){
 
     }
 }
-Frame* myView::setUpFrame(int pos){
+Frame* MyView::setUpFrame(int pos){
     //decidi il nome
     //int intName = 0;
     /*if(myAnimation->frameList.count()>=1){
@@ -934,7 +934,7 @@ Frame* myView::setUpFrame(int pos){
     }*/
     return myAnimation->setupFrame(pos);
 }
-void myView::deleteFrame(Frame* frame){
+void MyView::deleteFrame(Frame* frame){
     int frameNum = frame->frameNumber;
     myFrameWidgetList->takeItem(myFrameWidgetList->row(frame->linkedItem));
     myAnimation->deleteFrame(frame);
@@ -948,7 +948,7 @@ void myView::deleteFrame(Frame* frame){
     myAnimation->currentFrame->linkedItem->setSelected(true);
 }
 // routine per passare da un frame ad un altro, svuota la scena, svuota le widget list, ripopola entrambi, aggiorna onion skins e selezioni
-void myView::moveToFrame(Frame* frame){
+void MyView::moveToFrame(Frame* frame){
     // rimuovi tutti gli stick dalla scena
     auto currentScene = scene();
     auto num = currentScene->items();
@@ -1050,7 +1050,7 @@ void myView::moveToFrame(Frame* frame){
     myAnimation->CurrentFrame()->refresh(0);
 }
 // routine per calcolare gli onion skins, prima cancellali, ridisegnali su un immagine, e aggiungi l'immagine alla scena
-void myView::updateOnionSkins(){
+void MyView::updateOnionSkins(){
     // svuota i buffer di immagine vecchi (presneti nella scena) immagazzinati nel ciclo for precedente
     for(QGraphicsPixmapItem* P:onionSkins){
         scene()->removeItem(P);
@@ -1130,7 +1130,7 @@ void myView::updateOnionSkins(){
 class FrameUndoCommand : public QUndoCommand
 {
 public:
-    FrameUndoCommand(myView *view, int command_tag)
+    FrameUndoCommand(MyView *view, int command_tag)
         : view_(view), command_tag_(command_tag)
     {
         before_ = ExtractFrameData(*view_->myAnimation->currentFrame);
@@ -1155,7 +1155,7 @@ public:
         view_->RestoreFrameSnapshot(command_tag_, MODE_UNDO, before_);
     }
 private:
-    myView *view_;
+    MyView *view_;
     int command_tag_;
     FrameData *before_ = nullptr;
     FrameData *after_ = nullptr;
@@ -1168,7 +1168,7 @@ private:
  * No flag needed here anymore: `Frame::clearFrame()` and `~StickFigure()` each own
  * exactly the cleanup they perform, so nothing needs to skip work for the other.
  */
-void myView::RestoreFrameSnapshot(int command_tag, int mode, FrameData *snapshot)
+void MyView::RestoreFrameSnapshot(int command_tag, int mode, FrameData *snapshot)
 {
     // se è un undo su un addframe, o un redo su un deleteframe ci sta da rimuovere un frame
     if((command_tag == CMD_ADDFRAME && mode == MODE_UNDO)||
@@ -1214,7 +1214,7 @@ void myView::RestoreFrameSnapshot(int command_tag, int mode, FrameData *snapshot
  * made a fresh edit instead of redoing) — automatically discards the now-stale redo
  * history. `QUndoStack` does that as part of `push()`.
  */
-void myView::storeUndo(int command){
+void MyView::storeUndo(int command){
     if(myAnimation->frameList.isEmpty())
     {
         return;
@@ -1222,7 +1222,7 @@ void myView::storeUndo(int command){
     updateFrameOrder(myAnimation->CurrentFrame());
     undo_stack.push(new FrameUndoCommand(this, command));
 }
-void myView::updateFrameOrder(Frame* f){
+void MyView::updateFrameOrder(Frame* f){
     int j = 0;
     for(StickData*s:myAnimation->CurrentFrame()->totalSticks)
     {
@@ -1248,7 +1248,7 @@ void myView::updateFrameOrder(Frame* f){
     */
 }
 
-void myView::addHandles(StickFigure *S)
+void MyView::addHandles(StickFigure *S)
 {
     for(StickData*s:S->stickList){
         if(!s->view) continue;
@@ -1261,7 +1261,7 @@ void myView::addHandles(StickFigure *S)
     }
 }
 
-void myView::removeHandles(StickFigure *S)
+void MyView::removeHandles(StickFigure *S)
 {
 
     for(StickData*s:S->stickList)
@@ -1277,7 +1277,7 @@ void myView::removeHandles(StickFigure *S)
  * frees its own before_/after_ FrameData in its destructor) — the old manual
  * per-entry delete loop and the clearUndoFlag choreography around it are both gone.
  */
-void myView::clearUndo(){
+void MyView::clearUndo(){
     undo_stack.clear();
 }
 /**
@@ -1309,7 +1309,7 @@ static QIcon RenderLibraryIcon(const StickFigureData &figure_data){
  * the "library" behavior inside the shared operators is gone; FrameData's operator<<
  * has exactly one behavior.
  */
-void myView::saveLibrary(QString fileName){
+void MyView::saveLibrary(QString fileName){
     QFile file(fileName);
     if(!file.open(QIODevice::WriteOnly)){
         return;
@@ -1322,7 +1322,7 @@ void myView::saveLibrary(QString fileName){
  * @details The library buffer owns plain data: replacing it is delete + new, no
  * per-figure cleanup choreography (freeLibraryFrame is gone).
  */
-void myView::clearCurrentLib(){
+void MyView::clearCurrentLib(){
     myCurrentLibraryWidget->clear();
     delete stickLibraryBuffer;
     stickLibraryBuffer = new FrameData();
@@ -1332,7 +1332,7 @@ void myView::clearCurrentLib(){
  * entries: each item stores its StickFigureData pointer and an icon rendered from the
  * data. mode!=0 keeps the widget untouched (legacy semantics, currently unused).
  */
-void myView::loadLibrary(QString fileName, int mode){
+void MyView::loadLibrary(QString fileName, int mode){
     QFile file(fileName);
     if(!file.open(QIODevice::ReadOnly)){
         return;
@@ -1359,7 +1359,7 @@ void myView::loadLibrary(QString fileName, int mode){
  * buffer and creates its widget entry (insert-after-current + select, as before).
  * @return the live source figure, or nullptr if it has no sticks.
  */
-StickFigure* myView::addStickFigureToLibrary(){
+StickFigure* MyView::addStickFigureToLibrary(){
     if(myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.count()>0)
     {
         StickFigureData *figure_data = ExtractStickFigureData(*myAnimation->CurrentFrame()->CurrentStickFigure());
@@ -1384,7 +1384,7 @@ StickFigure* myView::addStickFigureToLibrary(){
  * @details Removes the selected entry from both the widget and the data buffer; the
  * record is freed with a plain delete (it owns its sticks, nothing else to detach).
  */
-void myView::removeFromLibrary(){
+void MyView::removeFromLibrary(){
     // get selected item
     int idx = myCurrentLibraryWidget->currentRow();
     if(idx<0 || idx>=myCurrentLibraryWidget->count()) // niente selezionato: senza questo, takeItem(-1) torna nullptr e va in crash sotto
@@ -1395,7 +1395,7 @@ void myView::removeFromLibrary(){
     stickLibraryBuffer->stickFigures.removeAll(toRemove);
     delete toRemove;
 }
-void myView::setGraphics(bool all, int attribute){
+void MyView::setGraphics(bool all, int attribute){
     storeUndo(CMD_SIMPLE);
     if(!all){
         if(attribute == ATTRIBUTE_PENCOLOR)
@@ -1429,9 +1429,9 @@ void myView::setGraphics(bool all, int attribute){
     myAnimation->CurrentFrame()->CurrentStickFigure()->updateIcon();
 }
 /**
- * @brief myView::splitStickFigure
+ * @brief MyView::splitStickFigure
  */
-void myView::splitStickFigure(){
+void MyView::splitStickFigure(){
     if(myAnimation->CurrentFrame()->CurrentStickFigure()== nullptr || myAnimation->CurrentFrame()->CurrentStick() == nullptr)
     {
         QMessageBox::about(this,"error","No stick item selected");
@@ -1468,7 +1468,7 @@ void myView::splitStickFigure(){
     myAnimation->CurrentFrame()->CurrentStickFigure()->updateIcon();
 
 }
-void myView::sizeChange(int option){
+void MyView::sizeChange(int option){
 
     QRectF oldRect = myRect->rect();
     QPointF oldCenter = myRect->rect().center();
@@ -1513,7 +1513,7 @@ void myView::sizeChange(int option){
     //()->addItem(myRect);
    // scene()->update(0,0,1000,1000);
 }
-void myView::preparePreview(){
+void MyView::preparePreview(){
 
     playBack = true;
     for(Frame* f :myAnimation->frameList){
@@ -1548,7 +1548,7 @@ void myView::preparePreview(){
     }
     playBack = false;
 }
-void myView::displayPreview(int idx){
+void MyView::displayPreview(int idx){
     // rimuovi il pixmap del frame precedente: altrimenti si accumula uno per frame per tutta
     // la riproduzione, invece di essere ripulito solo (tutto insieme) quando la riproduzione finisce
     if(idx>0)

@@ -45,12 +45,12 @@
 #define ATTRIBUTE_BRUSHSIZE 3
 
 
-class myView : public QGraphicsView
+class MyView : public QGraphicsView
 {
     Q_OBJECT
 public:
-    explicit myView(QWidget *parent = nullptr);
-    ~myView();
+    explicit MyView(QWidget *parent = nullptr);
+    ~MyView();
     unsigned int tool = NOTOOL;
     void setTool(int Tool);
     StickFigure *addStickFigure(QListWidgetItem* item);
@@ -82,7 +82,7 @@ public:
      * @param snapshot the frame content to restore; not modified or taken over.
      *
      * Called only by FrameUndoCommand::undo()/redo() (myview.cpp) — public because
-     * that class lives outside myView, not because other callers are expected.
+     * that class lives outside MyView, not because other callers are expected.
      */
     void RestoreFrameSnapshot(int command_tag, int mode, FrameData *snapshot);
 

@@ -15,7 +15,7 @@ class Widget : public QWidget
 public:
     Widget(QWidget *parent = nullptr);
     ~Widget();
-    myView *view;
+    MyView *view;
 
     StickFigure* addStick();
     void addFrame();

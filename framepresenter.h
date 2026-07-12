@@ -10,7 +10,7 @@
  * A small, stateless pair of functions rather than the stateful "owns the whole
  * frame's presentation" class the plan originally sketched — most of that job
  * (tearing down/rebuilding a frame's list-widget entries, onion skins, icons) already
- * lives in `myView::moveToFrame()` and stayed there; what genuinely needed a single,
+ * lives in `MyView::moveToFrame()` and stayed there; what genuinely needed a single,
  * consistent entry point was just "how does one `StickData` get a `stick` view, and
  * how does it lose one," which is what these two functions are.
  */
@@ -26,7 +26,7 @@ namespace FramePresenter {
  * Constructs a `stick` wrapping `stick_data` (wiring `stick_data->view` as a side
  * effect of the constructor) and adds it to `scene`. Does not add the endpoint
  * handles to the scene — callers that want them visible/interactive call
- * `myView::addHandles()` separately, exactly as before this phase, since not every
+ * `MyView::addHandles()` separately, exactly as before this phase, since not every
  * attach wants them (render clones for onion skins/icons never do).
  */
 StickGraphicsItem *AttachView(StickData *stick_data, QGraphicsScene *scene);
@@ -39,7 +39,7 @@ StickGraphicsItem *AttachView(StickData *stick_data, QGraphicsScene *scene);
  *
  * Mirrors `AttachView()`: removes the view from `scene` and deletes it (the
  * destructor clears `stick_data->view` back to null). Does not touch the endpoint
- * handles' scene membership — callers call `myView::removeHandles()` first, same
+ * handles' scene membership — callers call `MyView::removeHandles()` first, same
  * division of labor as `AttachView()`.
  */
 void DetachView(StickData *stick_data, QGraphicsScene *scene);

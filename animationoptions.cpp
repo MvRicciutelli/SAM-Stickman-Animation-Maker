@@ -4,9 +4,9 @@
 #include <QMessageBox>
 
 float AR = 1.0;
-animationOptions::animationOptions(QWidget *parent, int W, int H, int FPS,int handles, int autoSaveInput) :
+AnimationOptions::AnimationOptions(QWidget *parent, int W, int H, int FPS,int handles, int autoSaveInput) :
     QWidget(parent),
-    ui(new Ui::animationOptions)
+    ui(new Ui::AnimationOptions)
 {
     ui->setupUi(this);
     ui->widthSpinbox->setValue(W);
@@ -17,12 +17,12 @@ animationOptions::animationOptions(QWidget *parent, int W, int H, int FPS,int ha
     AR = (float)W/(float)H;
 }
 
-animationOptions::~animationOptions()
+AnimationOptions::~AnimationOptions()
 {
     delete ui;
 }
 
-void animationOptions::on_okBtn_clicked()
+void AnimationOptions::on_okBtn_clicked()
 {
     int optionVal;
     width               = ui->widthSpinbox->value();
@@ -43,35 +43,35 @@ void animationOptions::on_okBtn_clicked()
                                     QMessageBox::Yes | QMessageBox::No
                                     );
     if(ret == QMessageBox::Yes)
-        emit dialogOut(optionVal);
+        emit DialogOut(optionVal);
 
 }
 
-void animationOptions::on_widthSpinbox_valueChanged(int arg1)
+void AnimationOptions::on_widthSpinbox_valueChanged(int arg1)
 {
 
 }
 
-void animationOptions::on_heightSpinbox_valueChanged(int arg1)
+void AnimationOptions::on_heightSpinbox_valueChanged(int arg1)
 {
 
 }
 
-void animationOptions::on_widthSpinbox_editingFinished()
+void AnimationOptions::on_widthSpinbox_editingFinished()
 {
     if(ui->lockAspectRatioCheckbox->isChecked()){
         ui->heightSpinbox->setValue((int)qRound(ui->widthSpinbox->value()/AR));
     }
 }
 
-void animationOptions::on_heightSpinbox_editingFinished()
+void AnimationOptions::on_heightSpinbox_editingFinished()
 {
     if(ui->lockAspectRatioCheckbox->isChecked()){
         ui->widthSpinbox->setValue((int)qRound(ui->heightSpinbox->value()*AR));
     }
 }
 
-void animationOptions::on_handlesSizeSpinBox_valueChanged(int arg1)
+void AnimationOptions::on_handlesSizeSpinBox_valueChanged(int arg1)
 {
 
 }

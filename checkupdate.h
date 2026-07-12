@@ -3,14 +3,14 @@
 #include <QThread>
 
 
-class checkUpdate : public QThread
+class CheckUpdate : public QThread
 {
     Q_OBJECT
 public:
-    explicit checkUpdate();
+    explicit CheckUpdate();
 
 signals:
-    void updatePresent(const QString &s);
+    void UpdatePresent(const QString &s);
 
     // QThread interface
 protected:

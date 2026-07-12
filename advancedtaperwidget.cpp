@@ -5,7 +5,7 @@
 #include <QCheckBox>
 extern int W;
 extern int H;
-extern myView *V;
+extern MyView *V;
 bool taperWSliderFlag = false;
 bool taperHSliderFlag = false;
 

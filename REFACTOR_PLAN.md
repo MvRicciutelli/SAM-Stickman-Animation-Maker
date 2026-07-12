@@ -340,6 +340,43 @@ and "Serialization" sections describe the current, post-2c architecture.
 
 ## Phase 7 — Naming convention harmonization sweep
 
+**Status: in progress (2026-07-12).** Class renames done: `myView` →
+`MyView`, `myMainWindow` → `MyMainWindow` (+ `.ui` `<class>` tag),
+`mySleeper` → `MySleeper`, `checkUpdate` → `CheckUpdate`, `imageExport` →
+`ImageExport`, `ffmpegExport` → `FfmpegExport` (+ `.ui`), `animationOptions`
+→ `AnimationOptions` (+ `.ui`), `advancedTab` → `AdvancedTab` (+ `.ui`),
+each with their own hand-written members renamed too (e.g.
+`updatePresent`→`UpdatePresent`, `centralW`→`central_w`,
+`advancedRectTab`→`advanced_rect_tab`). Confined so far to: `sleeper.*`,
+`checkupdate.*`, `imageexport.*`, `ffmpegexport.*`, `animationoptions.*`,
+`advancedtab.*`, `mymainwindow.*`, `main.cpp`, plus the touched
+cross-references in `widget.cpp`/`animation.cpp`/`tests/*`. Verified via a
+real 64-bit MinGW build (`/c/Qt/Tools/mingw1120_64`, matching Qt 6.6.1's
+`mingw_64` — an earlier verification attempt against a stray 32-bit
+toolchain on PATH produced misleading linker errors unrelated to the
+rename, since corrected) plus a full `tst_characterization` run: 27/27
+pass. One real mistake caught and fixed during this pass: a blanket
+`advancedTab`→`AdvancedTab` sed also matched `ui->advancedTab` in
+`widget.cpp` — the auto-generated accessor for an unrelated `.ui` tab-page
+widget that happens to share the same objectName as the class. Reverted
+those two call sites back to lowercase; left the `.ui` objectName itself
+untouched (correct per the exceptions list — only `advancedtab.ui`'s own
+`<class>`/root-widget were renamed, not the coincidentally-named child
+widget living inside `widget.ui`). Lesson for the remaining sweep: after
+each class rename, explicitly grep for `ui->` + the old name before
+trusting a blanket substitution, since `.ui`-generated accessor names don't
+distinguish "the class" from "a same-named objectName."
+
+**Not yet started:** the large remaining surface — `uiItems.h`'s ~40
+global widget-pointer variables (`fpsSpinBox`, `onionSkinSB`, etc.,
+referenced hundreds of times across `widget.cpp`), and the member
+functions/variables inside `widget.cpp`, `myview.cpp`/`.h`,
+`StickFigure.cpp`, `frame.cpp`, `animation.cpp`, `stick.cpp`,
+`stickdata.cpp`, `stickfiguredata.cpp`, `framedata.cpp`,
+`framepresenter.cpp`, and the remaining `advanced*widget.cpp` classes
+(`advancedLineWidget`, `advancedCircleWidget`, `advancedTaperWidget`).
+Continue in the same file-by-file, build-verified manner.
+
 **Context:** phases 1–6 write all *new* code in `snake_case`
 variables / `UpperPascalCase` functions and classes per the "Naming
 convention" section above, but leave old, not-yet-touched code (whatever

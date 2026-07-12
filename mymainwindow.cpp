@@ -26,29 +26,29 @@ int opCount = 0;
 bool renderFlag = false;
 QDir renderFolder;
 QString animationPath = "";
-animationOptions* myOptions = nullptr;
+AnimationOptions* myOptions = nullptr;
 bool loadFile = false;
-imageExport *exporter = nullptr;
+ImageExport *exporter = nullptr;
 QString aviExportFolder;
 QStringList ffmpegOptions;
-myMainWindow::myMainWindow(QWidget *parent) :
+MyMainWindow::MyMainWindow(QWidget *parent) :
     QMainWindow(parent),
-    ui(new Ui::myMainWindow)
+    ui(new Ui::MyMainWindow)
 {
     ui->setupUi(this);
-    checkUpdate* Check = new checkUpdate();
-    QObject::connect(Check, &checkUpdate::updatePresent,this, &myMainWindow::updatePresent);
+    CheckUpdate* Check = new CheckUpdate();
+    QObject::connect(Check, &CheckUpdate::UpdatePresent,this, &MyMainWindow::UpdatePresent);
     Check->start();
 
 }
 
 
-myMainWindow::~myMainWindow()
+MyMainWindow::~MyMainWindow()
 {
     delete ui;
 }
 
-void myMainWindow::on_actionsave_triggered()
+void MyMainWindow::on_actionsave_triggered()
 {
     QString fileName = QFileDialog::getSaveFileName(this,tr("Save StickFigure"),
                        myStickFiguresFolder.path(), "Stickfigure (*.stck)");
@@ -57,14 +57,14 @@ void myMainWindow::on_actionsave_triggered()
     }
 }
 
-void myMainWindow::on_actionload_triggered()
+void MyMainWindow::on_actionload_triggered()
 {
 
     QString fileName = QFileDialog::getOpenFileName(this,tr("Load StickFigure"),
                        myStickFiguresFolder.path(), "Stickfigure (*.stck)");
     if(QFile::exists(fileName)){
         view->storeUndo();
-        centralW->addStick();
+        central_w->addStick();
         view->myAnimation->CurrentFrame()->CurrentStickFigure()->loadStickFigure(fileName);
         for(StickData*s:view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
             view->myAnimation->CurrentFrame()->totalSticks.append(s);
@@ -73,7 +73,7 @@ void myMainWindow::on_actionload_triggered()
     }
 }
 
-void myMainWindow::on_actionsave_animation_triggered()
+void MyMainWindow::on_actionsave_animation_triggered()
 {
     QString fileName = QFileDialog::getSaveFileName(this,tr("Save Animation"),
                        myAnimationsFolder.path(), "Marionetta Animation (*.mAnim)");
@@ -86,7 +86,7 @@ void myMainWindow::on_actionsave_animation_triggered()
     }
 }
 
-void myMainWindow::on_actionload_animation_triggered()
+void MyMainWindow::on_actionload_animation_triggered()
 {
     QString fileName = QFileDialog::getOpenFileName(this,tr("Load Animation"),
                        myAnimationsFolder.path(), "Marionetta Animation (*.mAnim)");
@@ -107,7 +107,7 @@ void myMainWindow::on_actionload_animation_triggered()
     }
 }
 
-void myMainWindow::on_actionexport_as_AVI_file_triggered()
+void MyMainWindow::on_actionexport_as_AVI_file_triggered()
 {
     //QVideoEncoder encoder;
     /*
@@ -130,12 +130,12 @@ void myMainWindow::on_actionexport_as_AVI_file_triggered()
     renderFolder.setPath(path);
     // per ogni frame crea una scena temporanea, popolala con cloni degli sticks del progetto,
     // renderizza la scena su una QImage tramite un painter e salva l'immagine nella cartella
-    emptyDirectory( path);
+    EmptyDirectory( path);
     QString fullpath  = path+"/render.png";
-    exportImageSequence(fullpath, AVI);
+    ExportImageSequence(fullpath, AVI);
 
 }
-void myMainWindow::exportAvi(){
+void MyMainWindow::ExportAvi(){
     // generate folder for renderings
     QString fileName = aviExportFolder;
     QString imgPath = programFolder.path()+"/render";
@@ -166,20 +166,20 @@ void myMainWindow::exportAvi(){
     delete p;
 
 }
-void myMainWindow::exportImageSequence(QString path, int option){
+void MyMainWindow::ExportImageSequence(QString path, int option){
     // evita di avviare un secondo export mentre uno precedente è ancora in corso: altrimenti
     // il puntatore globale exporter verrebbe sovrascritto e il thread precedente resterebbe orfano
     if(exporter && exporter->isRunning()){
         QMessageBox::information(this,"Export in progress","An export is already running, please wait for it to finish.");
         return;
     }
-    exporter = new imageExport(this,path,option);
-    QObject::connect(exporter,&imageExport::imageExportFinished,this,&myMainWindow::imageRenderOver);
+    exporter = new ImageExport(this,path,option);
+    QObject::connect(exporter,&ImageExport::ImageExportFinished,this,&MyMainWindow::ImageRenderOver);
     exporter->start();
 
 }
 
-void myMainWindow::on_actionsave_animation_current_triggered()
+void MyMainWindow::on_actionsave_animation_current_triggered()
 {
     if(QFile::exists(animationPath)){
         view->myAnimation->saveAnimation(animationPath);
@@ -190,7 +190,7 @@ void myMainWindow::on_actionsave_animation_current_triggered()
     }
 }
 
-void myMainWindow::on_actionNew_Blank_Animation_triggered()
+void MyMainWindow::on_actionNew_Blank_Animation_triggered()
 {
 
     int ret  = QMessageBox::warning(this, tr("Warning"),
@@ -210,7 +210,7 @@ void myMainWindow::on_actionNew_Blank_Animation_triggered()
         opCount = 0;
     }
 }
-void myMainWindow::getAnimationParams(int optionVal){
+void MyMainWindow::GetAnimationParams(int optionVal){
     FPS = myOptions->fps;
     W   = myOptions->width;
     H   = myOptions->height;
@@ -223,7 +223,7 @@ void myMainWindow::getAnimationParams(int optionVal){
     // stack di chiamata è ancora attivo
     myOptions->deleteLater();
 }
-void myMainWindow::on_actionAnimation_Options_triggered()
+void MyMainWindow::on_actionAnimation_Options_triggered()
 {
     // se è già aperto, portalo in primo piano invece di aprirne un altro (perderesti il puntatore al precedente)
     if(myOptions){
@@ -231,18 +231,18 @@ void myMainWindow::on_actionAnimation_Options_triggered()
         myOptions->activateWindow();
         return;
     }
-    myOptions = new animationOptions(nullptr,W,H,FPS,HANDLESIZE,autoSaveInterval);
+    myOptions = new AnimationOptions(nullptr,W,H,FPS,HANDLESIZE,autoSaveInterval);
     // senza questo, chiudere la finestra senza premere OK la nasconde soltanto: non viene mai distrutta
     myOptions->setAttribute(Qt::WA_DeleteOnClose);
     myOptions->show();
-    QObject::connect(myOptions, &animationOptions::dialogOut,this, &myMainWindow::getAnimationParams);
+    QObject::connect(myOptions, &AnimationOptions::DialogOut,this, &MyMainWindow::GetAnimationParams);
     QObject::connect(myOptions, &QObject::destroyed, this, [this](){ myOptions = nullptr; });
 }
 
-void myMainWindow::on_actionExport_video_using_FFMPEG_triggered()
+void MyMainWindow::on_actionExport_video_using_FFMPEG_triggered()
 {
     if(QFile::exists(FFMPEGPath)){
-        exportUsingFFMPEG();
+        ExportUsingFFMPEG();
     }
     else{
         QMessageBox::about(this,"FFMPEG Location","Please locate where ffmpeg executable is located on your system");
@@ -252,32 +252,32 @@ void myMainWindow::on_actionExport_video_using_FFMPEG_triggered()
                 if(QFileInfo(QFile(fileName)).fileName()=="ffmpeg.exe"){
                     FFMPEGPath = fileName;
                     myWidget->writeJson();
-                    exportUsingFFMPEG();
+                    ExportUsingFFMPEG();
                 }
         }
     }
 }
 
-ffmpegExport* ffmpegDialog = nullptr;
-void myMainWindow::exportUsingFFMPEG(){
+FfmpegExport* ffmpegDialog = nullptr;
+void MyMainWindow::ExportUsingFFMPEG(){
     // se è già aperta, portala in primo piano invece di aprirne un'altra (perderesti il puntatore alla precedente)
     if(ffmpegDialog){
         ffmpegDialog->raise();
         ffmpegDialog->activateWindow();
         return;
     }
-    ffmpegDialog = new ffmpegExport;
+    ffmpegDialog = new FfmpegExport;
     ffmpegDialog->show();
-    QObject::connect(ffmpegDialog, &ffmpegExport::exportVideo,this, &myMainWindow::startffmpegRender);
+    QObject::connect(ffmpegDialog, &FfmpegExport::ExportVideo,this, &MyMainWindow::StartFFMPEGRender);
     QObject::connect(ffmpegDialog, &QObject::destroyed, this, [](){ ffmpegDialog = nullptr; });
 }
 
-void myMainWindow::startffmpegRender(QStringList options){
+void MyMainWindow::StartFFMPEGRender(QStringList options){
     // per ogni frame crea una scena temporanea, popolala con cloni degli sticks del progetto,
     // renderizza la scena su una QImage tramite un painter e salva l'immagine nella cartella
     ffmpegOptions = options;
-    emptyDirectory( renderFolder.path());
-    exportImageSequence(renderFolder.path()+"/img.png", FFMPEG);
+    EmptyDirectory( renderFolder.path());
+    ExportImageSequence(renderFolder.path()+"/img.png", FFMPEG);
     //
 
     //QString imagePath = programFolder.path()+"/render";
@@ -285,28 +285,28 @@ void myMainWindow::startffmpegRender(QStringList options){
 
 }
 
-void myMainWindow::autoSave()
+void MyMainWindow::AutoSave()
 {
     on_actionsave_animation_current_triggered();
 }
 
-void myMainWindow::updatePresent(QString ver)
+void MyMainWindow::UpdatePresent(QString ver)
 {
     QMessageBox::about(this,"Old version Alert", "A newer version of this Software is available at Marionetta's website for download!");
 }
 // se questa funzione è stata chiamata per l'auto render avi, chiama una funzione che apra il processo
 // stessa cosa se originariamente l'esportazione delle immagini dovrà invece essere usata da ffmpeg
-void myMainWindow::imageRenderOver(int option){
+void MyMainWindow::ImageRenderOver(int option){
     // added delete exporter
     delete exporter;
-    // azzeralo subito: la guardia in exportImageSequence legge questo puntatore, e dopo la delete sarebbe pendente
+    // azzeralo subito: la guardia in ExportImageSequence legge questo puntatore, e dopo la delete sarebbe pendente
     exporter = nullptr;
     switch(option){
     case NONE:
 
         break;
     case AVI:
-        exportAvi();
+        ExportAvi();
         break;
     case FFMPEG:
         QProcess *p = new QProcess(this);
@@ -319,18 +319,18 @@ void myMainWindow::imageRenderOver(int option){
 }
 
 
-void myMainWindow::on_actionExport_as_image_sequence_triggered()
+void MyMainWindow::on_actionExport_as_image_sequence_triggered()
 {
 
     QString fileName = QFileDialog::getSaveFileName(this,tr("Save animation as a sequence of images"),
                        "C:/", "PNG Image (*.png)");
     if(fileName.length()>0)
-        exportImageSequence(fileName,NONE);
+        ExportImageSequence(fileName,NONE);
 }
-void myMainWindow::doConnections(){
-        QObject::connect(view, &myView::autoSaveTrigger,this, &myMainWindow::autoSave);
+void MyMainWindow::DoConnections(){
+        QObject::connect(view, &MyView::autoSaveTrigger,this, &MyMainWindow::AutoSave);
 }
-void myMainWindow::closeEvent(QCloseEvent *event)
+void MyMainWindow::closeEvent(QCloseEvent *event)
 {
     // se un export è ancora in corso, attendi che finisca prima di chiudere l'app: altrimenti
     // il thread (ora figlio di questa finestra) verrebbe distrutto mentre è ancora in esecuzione
@@ -361,7 +361,7 @@ void myMainWindow::closeEvent(QCloseEvent *event)
         QMainWindow::closeEvent(event);
 }
 
-void myMainWindow::on_actionAbout_triggered()
+void MyMainWindow::on_actionAbout_triggered()
 {
     QMessageBox::about(this, "About Marionetta 1.00",
                                   "Marionetta is a FREE stickfigure animation software designed and created"
@@ -379,7 +379,7 @@ void myMainWindow::on_actionAbout_triggered()
 
 extern QString license;
 extern int termsAccepted;
-void myMainWindow::on_actionTerms_and_Conditions_triggered()
+void MyMainWindow::on_actionTerms_and_Conditions_triggered()
 {
     //QMessageBox::information(this, " conditions",license);
     license_info_begin:

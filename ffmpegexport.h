@@ -4,16 +4,16 @@
 #include <QWidget>
 
 namespace Ui {
-class ffmpegExport;
+class FfmpegExport;
 }
 
-class ffmpegExport : public QWidget
+class FfmpegExport : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit ffmpegExport(QWidget *parent = nullptr);
-    ~ffmpegExport();
+    explicit FfmpegExport(QWidget *parent = nullptr);
+    ~FfmpegExport();
 
 private slots:
     void on_exportVideoBtn_clicked();
@@ -29,9 +29,9 @@ private slots:
     void on_gifRadioBtn_clicked();
 
 private:
-    Ui::ffmpegExport *ui;
+    Ui::FfmpegExport *ui;
  signals:
-  void  exportVideo(QStringList options);
+  void  ExportVideo(QStringList options);
 };
-void emptyDirectory(QString path);
+void EmptyDirectory(QString path);
 #endif // FFMPEGEXPORT_H

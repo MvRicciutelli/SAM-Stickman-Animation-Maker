@@ -6,12 +6,12 @@
 #define SUBVERSION 9
 #define R 0
 extern QDir programFolder;
-checkUpdate::checkUpdate()
+CheckUpdate::CheckUpdate()
 {
 
 }
 
-void checkUpdate::run(){
+void CheckUpdate::run(){
     QProcess *p = new QProcess(this);
     QStringList paramList;
     QString output;
@@ -54,7 +54,7 @@ void checkUpdate::run(){
             }
         }
         update:
-            emit updatePresent(output);
+            emit UpdatePresent(output);
 
     }
     cleanup:

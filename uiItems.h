@@ -44,7 +44,7 @@ extern QSlider* editLineThicknessSlider;
 extern QSlider* taperHSlider;
 extern QCheckBox* hardTopCheck;
 extern QCheckBox* hardBottomCheck;
-extern advancedTab* advancedRectTab;
+extern AdvancedTab* advanced_rect_tab;
 extern QTabWidget* myTabWidget;
 extern QWidget * advancedImgTab;
 extern advancedLineWidget* advancedLineTab;

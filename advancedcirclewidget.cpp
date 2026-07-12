@@ -1,7 +1,7 @@
 #include "advancedcirclewidget.h"
 #include "ui_advancedcirclewidget.h"
 #include "uiItems.h"
-extern myView *V;
+extern MyView *V;
 
 advancedCircleWidget::advancedCircleWidget(QWidget *parent) :
     QWidget(parent),

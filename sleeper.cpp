@@ -4,18 +4,18 @@
 extern bool playBack;
 extern void sceneRemover(QGraphicsScene *sceneToClear);
 extern  bool busyPlay;
-extern mySleeper *play;
+extern MySleeper *play;
 bool pausePressed;
 int intervalTime = 0;
-imageExport *previewGenerator;
-mySleeper::mySleeper(myView * V, int time)
+ImageExport *previewGenerator;
+MySleeper::MySleeper(MyView * V, int time)
 {
     v = V;
     counter = 0;
     intervalTime = time;
-    previewGenerator = new imageExport(this,"",PREVIEW); // è un thread
+    previewGenerator = new ImageExport(this,"",PREVIEW); // è un thread
     // connetti il segnale del thread di fine elaborazione allo slot che partire la riproduzione
-    QObject::connect(previewGenerator,&imageExport::imageExportFinished,this,&mySleeper::startPlaying);
+    QObject::connect(previewGenerator,&ImageExport::ImageExportFinished,this,&MySleeper::StartPlaying);
     playBack = true;
     sceneRemover(v->scene());
     previewGenerator->start(); // fai partire il thread
@@ -23,17 +23,17 @@ mySleeper::mySleeper(myView * V, int time)
 
 }
 
-void mySleeper::startPlaying()
+void MySleeper::StartPlaying()
 {
-    connect(&timer, SIGNAL(timeout()), SLOT(connected()));
+    connect(&timer, SIGNAL(timeout()), SLOT(Connected()));
     timer.setSingleShot(false);
     timer.setInterval(intervalTime);
     timer.start();
 }
-void mySleeper::stop(){
+void MySleeper::Stop(){
     pausePressed = true;
 }
-Q_SLOT void mySleeper::connected()
+Q_SLOT void MySleeper::Connected()
 {
 
    if (v->myAnimation->frameList.count()>counter && pausePressed == false){

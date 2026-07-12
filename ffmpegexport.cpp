@@ -10,9 +10,9 @@ QString outputFile = "";
 extern QString FFMPEGPath;
 extern QDir programFolder;
 extern QDir renderFolder;
-ffmpegExport::ffmpegExport(QWidget *parent) :
+FfmpegExport::FfmpegExport(QWidget *parent) :
     QWidget(parent),
-    ui(new Ui::ffmpegExport)
+    ui(new Ui::FfmpegExport)
 {
     ui->setupUi(this);
     ui->fpsSpinbox->setValue(FPS);
@@ -20,7 +20,7 @@ ffmpegExport::ffmpegExport(QWidget *parent) :
     setAttribute(Qt::WA_DeleteOnClose);
 }
 
-ffmpegExport::~ffmpegExport()
+FfmpegExport::~FfmpegExport()
 {
     delete ui;
 }
@@ -29,7 +29,7 @@ ffmpegExport::~ffmpegExport()
 //https://walterebert.com/blog/creating-wmv-videos-with-ffmpeg/
 // https://hamelot.io/visualization/using-ffmpeg-to-convert-a-set-of-images-into-a-video/
 // https://trac.ffmpeg.org/wiki/Encode/MPEG-4
-void ffmpegExport::on_exportVideoBtn_clicked()
+void FfmpegExport::on_exportVideoBtn_clicked()
 {
     // Prima salviamo tutit i frame come immagini, poi chiamiamo ffmpeg.exe per convertirle in video
     QString imagePath = programFolder.path()+"/render";
@@ -60,12 +60,12 @@ void ffmpegExport::on_exportVideoBtn_clicked()
        {}
     paramList<<"-crf"<<"25"<<// quality
                 outputFile;
-    emit exportVideo(paramList);
+    emit ExportVideo(paramList);
     /*paramList<<"-i"<<"C:/Users/Argasio/Documents/GitHub/MarionettaPlus/MarionettaPlus/input.mp4"
             <<"C:/Users/Argasio/Documents/GitHub/MarionettaPlus/MarionettaPlus/output.webm";*/
 }
 
-void ffmpegExport::on_selectFolderBtn_clicked()
+void FfmpegExport::on_selectFolderBtn_clicked()
 {
     QString fileName = "";
     if(ui->mp4RadioBtn->isChecked()){
@@ -92,7 +92,7 @@ void ffmpegExport::on_selectFolderBtn_clicked()
 
 }
 
-void ffmpegExport::on_aviRadioButton_clicked()
+void FfmpegExport::on_aviRadioButton_clicked()
 {
     if(outputFile.length()>1){
         int extBegin = outputFile.lastIndexOf(".")+1;
@@ -104,7 +104,7 @@ void ffmpegExport::on_aviRadioButton_clicked()
     }
 }
 
-void ffmpegExport::on_mp4RadioBtn_clicked()
+void FfmpegExport::on_mp4RadioBtn_clicked()
 {
     if(outputFile.length()>1){
         int extBegin = outputFile.lastIndexOf(".")+1;
@@ -116,7 +116,7 @@ void ffmpegExport::on_mp4RadioBtn_clicked()
     }
 }
 
-void ffmpegExport::on_vmwRadioBtn_clicked()
+void FfmpegExport::on_vmwRadioBtn_clicked()
 {
     if(outputFile.length()>1){
         int extBegin = outputFile.lastIndexOf(".")+1;
@@ -128,7 +128,7 @@ void ffmpegExport::on_vmwRadioBtn_clicked()
     }
 }
 
-void emptyDirectory(QString path){
+void EmptyDirectory(QString path){
     QDir dir(path);
     dir.setNameFilters(QStringList() << "*.*");
     dir.setFilter(QDir::Files);
@@ -138,7 +138,7 @@ void emptyDirectory(QString path){
     }
 }
 
-void ffmpegExport::on_gifRadioBtn_clicked()
+void FfmpegExport::on_gifRadioBtn_clicked()
 {
     if(outputFile.length()>1){
         int extBegin = outputFile.lastIndexOf(".")+1;

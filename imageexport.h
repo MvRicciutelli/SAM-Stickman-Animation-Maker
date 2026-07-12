@@ -9,15 +9,15 @@
 #define AVI 2
 #define PREVIEW 3
 #define NONE 0
-extern myView *V;
-class imageExport : public QThread
+extern MyView *V;
+class ImageExport : public QThread
 {
     Q_OBJECT
 public:
-    explicit imageExport(QObject *parent = nullptr, QString path = "", int option = NONE);
-    void render(int option);
+    explicit ImageExport(QObject *parent = nullptr, QString path = "", int option = NONE);
+    void Render(int option);
 signals:
-    void imageExportFinished(int option);
+    void ImageExportFinished(int option);
 public slots:
 
 

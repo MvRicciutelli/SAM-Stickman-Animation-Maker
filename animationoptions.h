@@ -8,16 +8,16 @@
 #define REPO 1
 #define REPOSCALE 2
 namespace Ui {
-class animationOptions;
+class AnimationOptions;
 }
 
-class animationOptions : public QWidget
+class AnimationOptions : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit animationOptions(QWidget *parent = nullptr, int W =800, int H = 600, int FPS = 24,int handles = 10, int autoSaveInput = 50);
-    ~animationOptions();
+    explicit AnimationOptions(QWidget *parent = nullptr, int W =800, int H = 600, int FPS = 24,int handles = 10, int autoSaveInput = 50);
+    ~AnimationOptions();
     int width = 1;
     int height = 1;
     int fps = 24;
@@ -37,9 +37,9 @@ private slots:
     void on_handlesSizeSpinBox_valueChanged(int arg1);
 
 private:
-    Ui::animationOptions *ui;
+    Ui::AnimationOptions *ui;
 signals:
-    void dialogOut(int optionVal);
+    void DialogOut(int optionVal);
 };
 
 #endif // ANIMATIONOPTIONS_H

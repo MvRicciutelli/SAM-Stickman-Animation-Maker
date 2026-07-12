@@ -7,7 +7,7 @@
 extern int W;
 extern int H;
 
-extern myView *V;
+extern MyView *V;
 advancedLineWidget::advancedLineWidget(QWidget *parent) :
     QWidget(parent),
     ui(new Ui::advancedLineWidget)

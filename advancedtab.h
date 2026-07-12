@@ -4,16 +4,16 @@
 #include <QWidget>
 
 namespace Ui {
-class advancedTab;
+class AdvancedTab;
 }
 
-class advancedTab : public QWidget
+class AdvancedTab : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit advancedTab(QWidget *parent = nullptr);
-    ~advancedTab();
+    explicit AdvancedTab(QWidget *parent = nullptr);
+    ~AdvancedTab();
 
 private slots:
     void on_imgHOffsetSpinbox_valueChanged(int arg1);
@@ -25,7 +25,7 @@ private slots:
     void on_rectWidthSlider_sliderReleased();
 
 private:
-    Ui::advancedTab *ui;
+    Ui::AdvancedTab *ui;
 
 };
 

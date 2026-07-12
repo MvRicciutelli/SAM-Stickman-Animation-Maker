@@ -141,7 +141,7 @@ void Animation::updateTab(int t){
         myTabWidget->insertTab(1,advancedImgTab,"Image Editing");
     }
     else if(t == StickData::RECT){
-        myTabWidget->insertTab(1,advancedRectTab,"Rect Editing");
+        myTabWidget->insertTab(1,advanced_rect_tab,"Rect Editing");
     }
     else if(t == StickData::LINE){
         myTabWidget->insertTab(1,advancedLineTab,"Line Editing");

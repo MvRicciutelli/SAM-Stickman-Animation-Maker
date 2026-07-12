@@ -15,7 +15,7 @@ extern QGraphicsScene *scene;
 extern QGraphicsRectItem *myRect;
 extern QGraphicsRectItem *limitRect;
 extern QPointF onionOffset;
-extern myView *V;
+extern MyView *V;
 extern int W;
 extern int H;
 extern FrameData *stickLibraryBuffer;
@@ -24,7 +24,7 @@ class TestCharacterization : public QObject
 {
     Q_OBJECT
 
-    myView *view = nullptr;
+    MyView *view = nullptr;
 
     Frame *CurrentFrame() { return view->myAnimation->currentFrame; }
     StickFigure *CurrentStickFigure() { return CurrentFrame()->currentStickFigure; }
@@ -48,7 +48,7 @@ class TestCharacterization : public QObject
         return added_frame;
     }
 
-    // replicates myView::drawCmd() for a LINE stick, press + release (myview.cpp:449) —
+    // replicates MyView::drawCmd() for a LINE stick, press + release (myview.cpp:449) —
     // drawCmd itself is private and only reachable through mouse events
     StickData *DrawStick(QPointF from, QPointF to)
     {
@@ -117,7 +117,7 @@ private slots:
         dbgLbl = new QLabel;
 
         scene = new QGraphicsScene;
-        view = new myView;
+        view = new MyView;
         V = view;
         view->setScene(scene);
         view->myAnimation->scene = scene;
@@ -126,7 +126,7 @@ private slots:
         advancedLineTab = new advancedLineWidget;
         advancedCircleTab = new advancedCircleWidget;
         advancedTaperTab = new advancedTaperWidget;
-        advancedRectTab = new advancedTab;
+        advanced_rect_tab = new AdvancedTab;
         myTabWidget = new QTabWidget;
         myTabWidget->addTab(new QWidget, "tools");
         myTabWidget->addTab(new QWidget, "placeholder"); // updateTab() swaps index 1
@@ -606,7 +606,7 @@ private slots:
         img_stick->myLine = QLineF(700, 100, 700, 200);
         // attacca la view MENTRE il tipo è ancora LINE (default): il costruttore di stick
         // chiama updateBr(0) subito, che per un IMAGE deferenzierebbe stickImg prima che
-        // addImage() lo assegni — stesso ordine di myView::drawCmd() (myview.cpp)
+        // addImage() lo assegni — stesso ordine di MyView::drawCmd() (myview.cpp)
         StickGraphicsItem *img_stick_view = FramePresenter::AttachView(img_stick, scene);
         img_stick_view->myStickFigure = figure;
         img_stick->stickType = StickData::IMAGE;
@@ -702,7 +702,7 @@ private slots:
         StickData *join_master = DrawStick(QPointF(200, 200), QPointF(200, 300));
         QCOMPARE(CurrentStickFigure(), to_join);
 
-        // replicates the JOIN branch of myView::mousePressEvent() (myview.cpp:314)
+        // replicates the JOIN branch of MyView::mousePressEvent() (myview.cpp:314)
         view->removeHandles(main_figure);
         mergeStickFigures(main_figure, main_stick, to_join);
         view->addHandles(main_figure);
@@ -849,14 +849,14 @@ private slots:
     }
 
     // exercises the exact destructor cascade Widget::~Widget()'s `delete view` triggers
-    // (myView -> Animation -> Frame -> StickFigure -> stick) with an IMAGE stick present,
-    // on a throwaway myView instance — proves removing undoFlag's guard from
+    // (MyView -> Animation -> Frame -> StickFigure -> stick) with an IMAGE stick present,
+    // on a throwaway MyView instance — proves removing undoFlag's guard from
     // ~StickFigure() didn't turn app shutdown into a crash: scene->removeItem() and
     // RemoveImagesFromListWidget() now run unconditionally, and this is where they'd
     // fault if `scene`/`imgListWidget` weren't still valid at that point.
     void ViewDestructorHandlesImageStickWithoutCrash()
     {
-        myView *throwaway_view = new myView();
+        MyView *throwaway_view = new MyView();
         throwaway_view->setScene(scene);
         throwaway_view->myAnimation->scene = scene;
         Frame *throwaway_frame = throwaway_view->setUpFrame(0);

@@ -7,29 +7,29 @@
 #include <QObject>
 #include <checkupdate.h>
 namespace Ui {
-class myMainWindow;
+class MyMainWindow;
 }
 
-class myMainWindow : public QMainWindow
+class MyMainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    explicit myMainWindow(QWidget *parent = nullptr);
-    ~myMainWindow();
-    myView *view;
-    Widget *centralW;
+    explicit MyMainWindow(QWidget *parent = nullptr);
+    ~MyMainWindow();
+    MyView *view;
+    Widget *central_w;
 
-    void doConnections();
-    void exportImageSequence(QString path, int option);
-    void exportUsingFFMPEG();
-    void exportAvi();
+    void DoConnections();
+    void ExportImageSequence(QString path, int option);
+    void ExportUsingFFMPEG();
+    void ExportAvi();
 public slots:
-    void getAnimationParams(int optionVal);
-    void startffmpegRender(QStringList options);
-    void autoSave();
-    void updatePresent(QString ver);
-    void imageRenderOver(int option);
+    void GetAnimationParams(int optionVal);
+    void StartFFMPEGRender(QStringList options);
+    void AutoSave();
+    void UpdatePresent(QString ver);
+    void ImageRenderOver(int option);
 private slots:
     void on_actionsave_triggered();
 
@@ -57,7 +57,7 @@ private slots:
     void on_actionTerms_and_Conditions_triggered();
 
 private:
-    Ui::myMainWindow *ui;
+    Ui::MyMainWindow *ui;
 
 
     // QWidget interface

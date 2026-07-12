@@ -4,13 +4,13 @@
 #include "uiItems.h"
 extern int W;
 extern int H;
-extern myView *V;
+extern MyView *V;
 bool rectWSliderFlag = false;
 
 
-advancedTab::advancedTab(QWidget *parent) :
+AdvancedTab::AdvancedTab(QWidget *parent) :
     QWidget(parent),
-    ui(new Ui::advancedTab)
+    ui(new Ui::AdvancedTab)
 {
     ui->setupUi(this);
     ui->rectWidthSlider->setRange(0,W);
@@ -18,17 +18,17 @@ advancedTab::advancedTab(QWidget *parent) :
     advancedRectSlider = ui->rectWidthSlider;
 }
 
-advancedTab::~advancedTab()
+AdvancedTab::~AdvancedTab()
 {
     delete ui;
 }
 
-void advancedTab::on_imgHOffsetSpinbox_valueChanged(int arg1)
+void AdvancedTab::on_imgHOffsetSpinbox_valueChanged(int arg1)
 {
 
 }
 
-void advancedTab::on_rectWidthSlider_valueChanged(int value)
+void AdvancedTab::on_rectWidthSlider_valueChanged(int value)
 {
     ui->rectWidthSpinbox->setValue(value);
     if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
@@ -43,7 +43,7 @@ void advancedTab::on_rectWidthSlider_valueChanged(int value)
 
 }
 
-void advancedTab::on_rectWidthSpinbox_valueChanged(int arg1)
+void AdvancedTab::on_rectWidthSpinbox_valueChanged(int arg1)
 {
     ui->rectWidthSlider->setValue(arg1);
     if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
@@ -53,7 +53,7 @@ void advancedTab::on_rectWidthSpinbox_valueChanged(int arg1)
     ui->rectWidthSlider->setValue(arg1);
 }
 
-void advancedTab::on_rectWidthSlider_sliderReleased()
+void AdvancedTab::on_rectWidthSlider_sliderReleased()
 {
     rectWSliderFlag = false;
 }

@@ -81,7 +81,7 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     return stickFigureBuffer;
 }
 // Frame::addStickFigureToLibrary è stato eliminato (Phase 2b): la libreria contiene
-// StickFigureData e viene gestita interamente da myView::addStickFigureToLibrary
+// StickFigureData e viene gestita interamente da MyView::addStickFigureToLibrary
 StickFigure* Frame::removeStickFigure(StickFigure* toRemove)
 {
     if(stickFigures.count() > 0)

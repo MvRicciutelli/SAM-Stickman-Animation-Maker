@@ -59,7 +59,7 @@ int termsAccepted = 0;
 QString imageNameBuffer;
 QGraphicsScene *scene;
 Ui::Widget *myUi;
-myView* V;
+MyView* V;
 QList <StickFigure*> layerList;
 QTextEdit * stickFigureNameText;
 QGraphicsRectItem *myRect;
@@ -106,7 +106,7 @@ QSlider* editLineThicknessSlider;
 QSlider* taperHSlider;
 QCheckBox* hardTopCheck;
 QCheckBox* hardBottomCheck;
-advancedTab* advancedRectTab;
+AdvancedTab* advanced_rect_tab;
 QTabWidget* myTabWidget;
 QWidget * advancedImgTab;
 advancedLineWidget *advancedLineTab;
@@ -174,7 +174,7 @@ Widget::Widget(QWidget *parent)
     depthSpinbox = ui->depthSpinbox;
     depthSlider = ui->depthSlider;
     imgListWidget = ui->imgListWidget;
-    advancedRectTab = new advancedTab();
+    advanced_rect_tab = new AdvancedTab();
    // dbgLbl = ui->debugLabel;
     createPaths();
     detectLibraries();
@@ -191,7 +191,7 @@ Widget::Widget(QWidget *parent)
     }
     scene = new QGraphicsScene(this);
     //crea il pannello e collegalo alla scena
-    view = new myView(this);
+    view = new MyView(this);
     V = view;
     view->setBackgroundBrush(QBrush(QColor(Qt::darkGray)));
     scene->setBackgroundBrush(QBrush(QColor(Qt::white)));
@@ -395,8 +395,8 @@ Widget::~Widget()
     delete advancedCircleTab;
     advancedTaperTab->setParent(nullptr);
     delete advancedTaperTab;
-    advancedRectTab->setParent(nullptr);
-    delete advancedRectTab;
+    advanced_rect_tab->setParent(nullptr);
+    delete advanced_rect_tab;
     delete ui;
 }
 
@@ -561,7 +561,7 @@ void Widget::on_stickLayerView_itemDoubleClicked(QListWidgetItem *item)
     S->name = text;
 }
 bool busyPlay = false;
-mySleeper *play;
+MySleeper *play;
 void Widget::on_PlayButton_clicked()
 {
     if(busyPlay == false){
@@ -578,10 +578,10 @@ void Widget::on_PlayButton_clicked()
         if(delay>5)
             delay = delay/2;
         busyPlay = true;
-        play = new mySleeper(view,delay);
+        play = new MySleeper(view,delay);
         onionSkinSB->setValue(onions);
     }else{
-        play->stop();
+        play->Stop();
     }
     //view->moveToFrame(view->myAnimation->frameList[0]);
 

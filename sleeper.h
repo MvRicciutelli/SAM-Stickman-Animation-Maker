@@ -3,19 +3,19 @@
 #include <QThread>
 #include <QTimer>
 #include "myview.h"
-class mySleeper:public QObject
+class MySleeper:public QObject
 {
     Q_OBJECT
     QTimer timer;
-    myView* v;
+    MyView* v;
     int counter = 0;
 
 public:
-    mySleeper(myView * V, int time);
-    void stop();
+    MySleeper(MyView * V, int time);
+    void Stop();
 public slots:
-    void startPlaying();
-    Q_SLOT void connected();
+    void StartPlaying();
+    Q_SLOT void Connected();
 
 };
 #endif // SLEEPER_H

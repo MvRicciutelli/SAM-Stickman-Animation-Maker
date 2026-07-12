@@ -8,17 +8,17 @@ extern int H;
 extern QGraphicsRectItem* myRect;
 QString exportPath;
 int renderOption = NONE;
-imageExport::imageExport(QObject *parent, QString path, int option)
+ImageExport::ImageExport(QObject *parent, QString path, int option)
     // il costruttore base va chiamato esplicitamente, altrimenti il parent passato dal chiamante
     // viene ignorato e Qt non ha modo di ripulire questo thread quando il parent viene distrutto
-    // (sicuro solo perché myMainWindow::closeEvent aspetta che il thread finisca prima di chiudere)
+    // (sicuro solo perché MyMainWindow::closeEvent aspetta che il thread finisca prima di chiudere)
     : QThread(parent)
 {
     exportPath = path;
     renderOption = option;
 }
 extern bool renderFlag;
-void imageExport::render(int option)
+void ImageExport::Render(int option)
 {
     for(Frame* f :V->myAnimation->frameList){
         QGraphicsScene renderScene; //scena fittizia
@@ -51,21 +51,21 @@ void imageExport::render(int option)
     }
 
 
-    //emit imageExportFinished(renderOption);
+    //emit ImageExportFinished(renderOption);
 
 }
 
-void imageExport::run()
+void ImageExport::run()
 {
     if(renderOption != PREVIEW){
         renderFlag = true;
-        render(renderOption);
+        Render(renderOption);
         renderFlag = false;
     }else{
         V->preparePreview();
 
     }
-    emit imageExportFinished(renderOption);
+    emit ImageExportFinished(renderOption);
     quit();
     deleteLater();
 }
