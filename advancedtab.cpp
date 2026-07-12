@@ -2,8 +2,8 @@
 #include "ui_advancedtab.h"
 #include "myview.h"
 #include "uiItems.h"
-extern int W;
-extern int H;
+extern qint32 W;
+extern qint32 H;
 extern MyView *V;
 bool rectWSliderFlag = false;
 

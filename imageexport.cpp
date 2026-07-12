@@ -3,8 +3,8 @@
 #include <QImage>
 #include <QPainter>
 
-extern int W;
-extern int H;
+extern qint32 W;
+extern qint32 H;
 extern QGraphicsRectItem* my_rect;
 QString exportPath;
 int renderOption = NONE;

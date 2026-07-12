@@ -7,7 +7,7 @@ class Animation
 {
 public:
     Animation();
-    int version = 1;
+    qint32 version = 1;
     QList<Frame*> frame_list;
     Frame *frame_buffer;
     Frame * AddFrame(QListWidgetItem* item, int pos);
@@ -32,8 +32,8 @@ public:
     void ClearAnimation();
     void UpdateSliders();
     void UpdateTab(int t);
-    int width;
-    int height;
+    qint32 width;
+    qint32 height;
 };
 Q_DECLARE_METATYPE(Animation*)
 QDataStream &operator<<(QDataStream& stream, const Animation& my_animation);

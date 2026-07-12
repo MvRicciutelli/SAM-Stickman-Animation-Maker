@@ -53,14 +53,14 @@ FrameData *FrameData::Clone() const
  */
 QDataStream &operator<<(QDataStream &stream, const FrameData &frame_data)
 {
-    stream << (int)frame_data.stick_figures.count();
+    stream << (qint32)frame_data.stick_figures.count();
     stream << frame_data.num_of_items;
     stream << frame_data.frame_number;
-    stream << (int)frame_data.stick_figures.indexOf(frame_data.current_stick_figure);
+    stream << (qint32)frame_data.stick_figures.indexOf(frame_data.current_stick_figure);
     if (frame_data.current_stick_figure)
-        stream << (int)frame_data.current_stick_figure->stick_list.indexOf(frame_data.current_stick_figure->current_stick);
+        stream << (qint32)frame_data.current_stick_figure->stick_list.indexOf(frame_data.current_stick_figure->current_stick);
     else
-        stream << 0;
+        stream << (qint32)0;
     for (StickFigureData *figure : frame_data.stick_figures)
         stream << *figure;
     return stream;
@@ -74,9 +74,9 @@ QDataStream &operator<<(QDataStream &stream, const FrameData &frame_data)
  */
 QDataStream &operator>>(QDataStream &stream, FrameData &frame_data)
 {
-    int max = 0;
-    int currentStickIdx = 0;
-    int currentStickFigureIdx = 0;
+    qint32 max = 0;
+    qint32 currentStickIdx = 0;
+    qint32 currentStickFigureIdx = 0;
     stream >> max;
     stream >> frame_data.num_of_items;
     stream >> frame_data.frame_number;

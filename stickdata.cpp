@@ -81,7 +81,7 @@ StickData *StickData::Clone() const
  */
 QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
 {
-    stream << stick_data.z;
+    stream << (double)stick_data.z; // explicit double: qreal itself is float on some Qt builds
     stream << stick_data.version;
     stream << stick_data.stick_type;
     stream << stick_data.is_linker;
@@ -105,8 +105,8 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
         stream << stick_data.hard_bottom;
 
         if (stick_data.stick_type == StickData::IMAGE) {
-            stream << (int)stick_data.stick_img_list.length();
-            stream << (int)stick_data.stick_img_list.indexOf(stick_data.stick_img);
+            stream << (qint32)stick_data.stick_img_list.length();
+            stream << (qint32)stick_data.stick_img_list.indexOf(stick_data.stick_img);
             int j = 0;
             for (QImage *i : stick_data.stick_img_list) {
                 stream << *i;
@@ -127,7 +127,9 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
  */
 QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
 {
-    stream >> stick_data.z;
+    double z_value = 0;
+    stream >> z_value; // matches the explicit double written by operator<<, regardless of qreal's local width
+    stick_data.z = z_value;
     stream >> stick_data.version;
     stream >> stick_data.stick_type;
     stream >> stick_data.is_linker;
@@ -150,8 +152,8 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
         stream >> stick_data.hard_top;
         stream >> stick_data.hard_bottom;
         if (stick_data.stick_type == StickData::IMAGE) {
-            int numOfImgs;
-            int stickImgIdx;
+            qint32 numOfImgs;
+            qint32 stickImgIdx;
             stream >> numOfImgs;
             stream >> stickImgIdx;
             for (int i = 0; i < numOfImgs; i++) {

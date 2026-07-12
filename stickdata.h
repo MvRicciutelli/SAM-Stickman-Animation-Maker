@@ -97,8 +97,8 @@ public:
 
     // ------- persistent fields (exactly what operator<</operator>> read and write) ------
 
-    int version = 1;                ///< serialization format version of this record
-    int stick_type = StickType::LINE;///< StickType value; drives painting and serialization
+    qint32 version = 1;              ///< serialization format version of this record
+    qint32 stick_type = StickType::LINE;///< StickType value; drives painting and serialization
     /**
      * @brief True only for the invisible bridge stick MergeStickFigures() creates to
      *        connect a joined figure's former master into the host figure's tree.
@@ -108,17 +108,19 @@ public:
      * endpoint handles, re-added by MyView::AddHandles()) behind forever.
      */
     bool is_linker = false;
-    qreal z = 0;                    ///< depth used for scene z-ordering between sticks
+    qreal z = 0;                    ///< depth used for scene z-ordering between sticks; streamed as an
+                                     ///< explicit double (qreal itself can be float or double depending
+                                     ///< on how Qt was built, so the field's own width isn't stable)
     bool stepchild = false;         ///< true when attached to the parent's origin (P1) instead of its free end
     QLineF my_line;                  ///< the segment the stick is built on, in scene coordinates
-    int parent_idx = 0;              ///< index of the parent stick inside its figure's stick_list; -1 for the master (only meaningful during (de)serialization)
+    qint32 parent_idx = 0;           ///< index of the parent stick inside its figure's stick_list; -1 for the master (only meaningful during (de)serialization)
     QPen pen;                       ///< outline color/thickness
     QBrush brush;                   ///< fill for the shape types (CIRCLE/RECT/TRAPEZOID/TAPER)
-    int order = 0;                  ///< position inside Frame::total_sticks (frame-wide draw order)
+    qint32 order = 0;                ///< position inside Frame::total_sticks (frame-wide draw order)
     float img_angle = 0;             ///< orientation of the image/shape, follows the line direction
     float img_w_scale = 1;            ///< horizontal scale of the image, or shape width
     float img_h_scale = 1;            ///< vertical scale of the image, or second shape width
-    int img_angle_offset = 0;         ///< extra user rotation on top of img_angle (IMAGE only)
+    qint32 img_angle_offset = 0;      ///< extra user rotation on top of img_angle (IMAGE only)
     QPointF img_offset = QPointF(0, 0); ///< user translation of the image relative to the stick (IMAGE only)
     bool hard_top = false;           ///< TAPER: draw the far end flat instead of rounded
     bool hard_bottom = false;        ///< TAPER: draw the near end flat instead of rounded

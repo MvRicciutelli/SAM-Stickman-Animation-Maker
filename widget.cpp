@@ -117,8 +117,8 @@ QSpinBox * circle_squash_spinbox;
 FrameData * frame_copy_buffer = nullptr; ///< buffer copia-frame: solo dati da Phase 2b
 
 //----------------------
-int W                   = DEFAULTWIDTH;
-int H                   = DEFAULTHEIGHT;
+qint32 W                   = DEFAULTWIDTH;
+qint32 H                   = DEFAULTHEIGHT;
 int FPS                 = DEFAULTFPS;
 int handle_size          = DEFAULTHANDLES;
 int auto_save_interval    = DEFAULTAUTOSAVE;

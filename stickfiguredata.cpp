@@ -61,12 +61,12 @@ StickFigureData *StickFigureData::Clone() const
 QDataStream &operator<<(QDataStream &stream, const StickFigureData &figure_data)
 {
     stream << figure_data.version;
-    stream << (int)figure_data.stick_list.count(); // beware, stream types must correspond! qsizetype != int
+    stream << (qint32)figure_data.stick_list.count(); // beware, stream types must correspond! qsizetype != qint32
     stream << figure_data.name;
-    stream << (int)figure_data.stick_list.indexOf(figure_data.current_stick);
+    stream << (qint32)figure_data.stick_list.indexOf(figure_data.current_stick);
     for (StickData *stick_data : figure_data.stick_list) {
         if (stick_data != figure_data.master_stick)
-            stick_data->parent_idx = (int)figure_data.stick_list.indexOf(stick_data->parent);
+            stick_data->parent_idx = (qint32)figure_data.stick_list.indexOf(stick_data->parent);
         else
             stick_data->parent_idx = -1;
         stream << *stick_data;
@@ -83,8 +83,8 @@ QDataStream &operator<<(QDataStream &stream, const StickFigureData &figure_data)
  */
 QDataStream &operator>>(QDataStream &stream, StickFigureData &figure_data)
 {
-    int max = 0;
-    int current_stick_idx = -1;
+    qint32 max = 0;
+    qint32 current_stick_idx = -1;
     stream >> figure_data.version;
     stream >> max;
     stream >> figure_data.name;

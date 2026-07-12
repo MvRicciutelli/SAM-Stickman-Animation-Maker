@@ -10,8 +10,8 @@
 #include <ffmpegexport.h>
 #include <QMessageBox>
 extern QDir program_folder;
-extern int W;
-extern int H;
+extern qint32 W;
+extern qint32 H;
 extern int FPS;
 extern int auto_save_interval;
 extern QGraphicsRectItem *my_rect;

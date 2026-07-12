@@ -35,8 +35,8 @@ public:
     QList<StickFigureData*> stick_figures;          ///< owned figures of this frame
     QList<StickData*> total_sticks;                 ///< frame-wide draw order; references sticks owned by stick_figures
     StickFigureData *current_stick_figure = nullptr; ///< remembered selection; points into stick_figures
-    int frame_number = 0;                           ///< position of the frame in the animation
-    int num_of_items = 0;                            ///< count of sticks meant to be on scene (legacy semantics)
+    qint32 frame_number = 0;                         ///< position of the frame in the animation
+    qint32 num_of_items = 0;                          ///< count of sticks meant to be on scene (legacy semantics)
 };
 
 /**

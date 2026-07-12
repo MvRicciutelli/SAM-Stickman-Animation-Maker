@@ -3,8 +3,8 @@
 #include "myview.h"
 #include "uiItems.h"
 #include <QCheckBox>
-extern int W;
-extern int H;
+extern qint32 W;
+extern qint32 H;
 extern MyView *V;
 bool taperWSliderFlag = false;
 bool taperHSliderFlag = false;

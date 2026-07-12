@@ -16,8 +16,8 @@ extern QGraphicsRectItem *my_rect;
 extern QGraphicsRectItem *limit_rect;
 extern QPointF onion_offset;
 extern MyView *V;
-extern int W;
-extern int H;
+extern qint32 W;
+extern qint32 H;
 extern FrameData *stick_library_buffer;
 
 class TestCharacterization : public QObject

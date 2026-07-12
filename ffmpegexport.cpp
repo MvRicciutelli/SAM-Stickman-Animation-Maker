@@ -3,8 +3,8 @@
 
 #include <QFileDialog>
 #include <QProcess>
-extern int W;
-extern int H;
+extern qint32 W;
+extern qint32 H;
 extern int FPS;
 QString outputFile = "";
 extern QString FFMPEGPath;

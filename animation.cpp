@@ -9,8 +9,8 @@
 #include <QCheckBox>
 #include "uiItems.h"
 
-extern int W;
-extern int H;
+extern qint32 W;
+extern qint32 H;
 extern QPointF onion_offset;
 extern QGraphicsRectItem *my_rect;
 extern QGraphicsRectItem *limit_rect;
@@ -286,7 +286,7 @@ Frame* Animation::SetupFrame(int pos){
 // Animation::cloneFrame è stato eliminato (Phase 2b): il ripristino di undo/redo passa
 // da PopulateLiveFrame() e le copie in-memory da ExtractFrameData()
 QDataStream &operator<<(QDataStream& stream, const Animation& my_animation){
-    int frameNum = my_animation.frame_list.count();
+    qint32 frameNum = (qint32)my_animation.frame_list.count();
     stream<<my_animation.version;
     stream<<frameNum;
     stream<<W;
@@ -297,7 +297,7 @@ QDataStream &operator<<(QDataStream& stream, const Animation& my_animation){
     return stream;
 }
 QDataStream &operator>>(QDataStream& stream,Animation& my_animation){
-    int frameNum = 0;
+    qint32 frameNum = 0;
     stream>>my_animation.version;
     stream>>frameNum;
     stream>>my_animation.width;

@@ -4,8 +4,8 @@
 #include "animation.h"
 #include "stick.h"
 #include "uiItems.h"
-extern int W;
-extern int H;
+extern qint32 W;
+extern qint32 H;
 
 extern MyView *V;
 AdvancedLineWidget::AdvancedLineWidget(QWidget *parent) :
