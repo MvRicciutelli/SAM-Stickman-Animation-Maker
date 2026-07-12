@@ -71,19 +71,6 @@ public:
 
     // ------- figure-tree relationships (Phase 2a: moved here from the legacy stick) ------
 
-    /**
-     * @brief True only for the invisible bridge stick MergeStickFigures() creates to
-     *        connect a joined figure's former master into the host figure's tree.
-     *
-     * In-memory only — deliberately NOT part of the operator<</operator>> byte layout
-     * (see the field-order note below), since it only needs to survive Clone()-based
-     * copies (undo/redo, copy/paste, library — Phase 3 confirmed none of those touch
-     * the stream anymore). SplitStickFigures() uses this to recognize and garbage-collect
-     * a linker that a split has left with no remaining children, rather than leaving it
-     * (and its endpoint handles, re-added by MyView::AddHandles()) behind forever.
-     */
-    bool is_linker = false;
-
     StickData *parent = nullptr;    ///< parent stick inside the figure tree; nullptr for the master
     /**
      * @brief ALL descendants in the figure tree, flattened — not just direct children.
@@ -112,6 +99,15 @@ public:
 
     int version = 1;                ///< serialization format version of this record
     int stick_type = StickType::LINE;///< StickType value; drives painting and serialization
+    /**
+     * @brief True only for the invisible bridge stick MergeStickFigures() creates to
+     *        connect a joined figure's former master into the host figure's tree.
+     *
+     * SplitStickFigures() uses this to recognize and garbage-collect a linker that a
+     * split has left with no remaining children, rather than leaving it (and its
+     * endpoint handles, re-added by MyView::AddHandles()) behind forever.
+     */
+    bool is_linker = false;
     qreal z = 0;                    ///< depth used for scene z-ordering between sticks
     bool stepchild = false;         ///< true when attached to the parent's origin (P1) instead of its free end
     QLineF my_line;                  ///< the segment the stick is built on, in scene coordinates

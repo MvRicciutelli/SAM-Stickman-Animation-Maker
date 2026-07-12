@@ -430,7 +430,13 @@ void PopulateLiveStickFigure(StickFigure *target_figure, const StickFigureData &
             }
         }
     }
-    if (target_figure->stick_list.count() > 0)
+    // ripristina la selezione: prima si azzerava sempre al primo stick, perdendo quanto
+    // ExtractStickFigureData() aveva correttamente catturato (visibile su copia/incolla,
+    // dove non c'è alcun vincolo di formato legacy a giustificarlo)
+    int current_index = source_data.stick_list.indexOf(source_data.current_stick);
+    if (current_index >= 0)
+        target_figure->current_stick = target_figure->stick_list[current_index];
+    else if (target_figure->stick_list.count() > 0)
         target_figure->current_stick = target_figure->stick_list[0];
     if (update_icon)
         target_figure->UpdateIcon();

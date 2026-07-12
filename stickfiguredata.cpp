@@ -52,16 +52,18 @@ StickFigureData *StickFigureData::Clone() const
 }
 
 /**
- * @details Byte-for-byte the layout the legacy StickFigure operator wrote, so existing
- * .stck/.mAnim/.marlib files stay compatible: version, stick count, name, then each
- * stick prefixed by nothing (parent_idx travels inside the stick record; -1 marks the
- * master). No flag guards — this operator writes data and nothing else.
+ * @details version, stick count, name, current_stick's index (-1 if none — added when
+ * this was found to be silently dropped by every load/populate path; no longer
+ * byte-compatible with the pre-refactor format, which never carried this field at all),
+ * then each stick (parent_idx travels inside the stick record; -1 marks the master).
+ * No flag guards — this operator writes data and nothing else.
  */
 QDataStream &operator<<(QDataStream &stream, const StickFigureData &figure_data)
 {
     stream << figure_data.version;
     stream << (int)figure_data.stick_list.count(); // beware, stream types must correspond! qsizetype != int
     stream << figure_data.name;
+    stream << (int)figure_data.stick_list.indexOf(figure_data.current_stick);
     for (StickData *stick_data : figure_data.stick_list) {
         if (stick_data != figure_data.master_stick)
             stick_data->parent_idx = (int)figure_data.stick_list.indexOf(stick_data->parent);
@@ -82,9 +84,11 @@ QDataStream &operator<<(QDataStream &stream, const StickFigureData &figure_data)
 QDataStream &operator>>(QDataStream &stream, StickFigureData &figure_data)
 {
     int max = 0;
+    int current_stick_idx = -1;
     stream >> figure_data.version;
     stream >> max;
     stream >> figure_data.name;
+    stream >> current_stick_idx;
     // difesa in profondità come nel vecchio operator>>: il target è sempre appena
     // costruito, ma un riuso futuro non deve far trapelare gli stick precedenti
     qDeleteAll(figure_data.stick_list);
@@ -113,7 +117,9 @@ QDataStream &operator>>(QDataStream &stream, StickFigureData &figure_data)
             figure_data.master_stick = stick_data;
         }
     }
-    if (figure_data.stick_list.count() > 0)
+    if (current_stick_idx >= 0 && current_stick_idx < figure_data.stick_list.count())
+        figure_data.current_stick = figure_data.stick_list[current_stick_idx];
+    else if (figure_data.stick_list.count() > 0)
         figure_data.current_stick = figure_data.stick_list[0];
     return stream;
 }

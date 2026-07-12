@@ -84,6 +84,7 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
     stream << stick_data.z;
     stream << stick_data.version;
     stream << stick_data.stick_type;
+    stream << stick_data.is_linker;
     stream << stick_data.stepchild;
     stream << stick_data.my_line;
     stream << stick_data.parent_idx;
@@ -129,6 +130,7 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
     stream >> stick_data.z;
     stream >> stick_data.version;
     stream >> stick_data.stick_type;
+    stream >> stick_data.is_linker;
     stream >> stick_data.stepchild;
     stream >> stick_data.my_line;
     stream >> stick_data.parent_idx;

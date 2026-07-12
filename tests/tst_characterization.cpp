@@ -268,6 +268,7 @@ private slots:
         step_child->stepchild = true;
         master->children << step_child;
         source.stick_list << step_child;
+        source.current_stick = child;
 
         QByteArray bytes;
         {
@@ -283,6 +284,7 @@ private slots:
         QCOMPARE(loaded.stick_list.count(), 3);
         QCOMPARE(loaded.name, source.name);
         QCOMPARE(loaded.master_stick, loaded.stick_list[0]);
+        QCOMPARE(loaded.current_stick, loaded.stick_list[1]); // regression: used to always reset to stick_list[0]
         QVERIFY(loaded.stick_list[0]->parent == nullptr);
         QCOMPARE(loaded.stick_list[1]->parent, loaded.stick_list[0]);
         QCOMPARE(loaded.stick_list[2]->parent, loaded.stick_list[0]);
@@ -461,6 +463,7 @@ private slots:
         QCOMPARE(buffered->stick_list[1]->my_line, source->stick_list[1]->my_line);
         QCOMPARE(buffered->stick_list[1]->parent, buffered->stick_list[0]);
         QCOMPARE(buffered->master_stick, buffered->stick_list[0]);
+        QCOMPARE(buffered->current_stick, buffered->stick_list[1]); // last-drawn stick is current
 
         // deep copy: mutating the buffer leaves the source untouched
         QLineF source_line = source->stick_list[0]->my_line;
@@ -479,6 +482,9 @@ private slots:
 
         QCOMPARE(pasted->stick_list.count(), 2);
         QCOMPARE(pasted->stick_list[1]->parent, pasted->stick_list[0]);
+        // regression: PopulateLiveStickFigure used to always reset current_stick to
+        // stick_list[0], discarding what ExtractStickFigureData had just captured
+        QCOMPARE(pasted->current_stick, pasted->stick_list[1]);
         // pasted sticks really live on the scene (attach_to_scene = true)
         QCOMPARE(pasted->stick_list[0]->view->scene(), scene);
     }
