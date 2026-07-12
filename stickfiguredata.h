@@ -37,22 +37,22 @@ public:
 
     int version = 1;                    ///< serialization format version of this record
     QString name;                       ///< user-visible layer name
-    QList<StickData*> stickList;        ///< owned sticks forming the figure
-    StickData *masterStick = nullptr;   ///< tree root; points into stickList
-    StickData *currentStick = nullptr;  ///< remembered selection; points into stickList
+    QList<StickData*> stick_list;        ///< owned sticks forming the figure
+    StickData *master_stick = nullptr;   ///< tree root; points into stick_list
+    StickData *current_stick = nullptr;  ///< remembered selection; points into stick_list
 };
 Q_DECLARE_METATYPE(StickFigureData*)
 
 /**
  * @brief Serializes a figure record (same byte layout as the pre-refactor operator).
  * @param stream destination stream.
- * @param figure_data record to write; per-stick parentIdx is recomputed here.
+ * @param figure_data record to write; per-stick parent_idx is recomputed here.
  * @return the stream, for chaining.
  */
 QDataStream &operator<<(QDataStream &stream, const StickFigureData &figure_data);
 
 /**
- * @brief Deserializes a figure record, rebuilding the stick tree from parentIdx.
+ * @brief Deserializes a figure record, rebuilding the stick tree from parent_idx.
  * @param stream source stream.
  * @param figure_data record to fill (existing sticks are freed defensively).
  * @return the stream, for chaining.

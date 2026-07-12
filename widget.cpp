@@ -197,10 +197,10 @@ Widget::Widget(QWidget *parent)
     scene->setBackgroundBrush(QBrush(QColor(Qt::white)));
     auto num = scene->items();
     view->setScene(scene);
-    view->myAnimation->scene = scene;
+    view->my_animation->scene = scene;
     addFrame();
     num = scene->items();
-    view->myAnimation->CurrentFrame()->CurrentStickFigure() = view->myAnimation->CurrentFrame()->stickFigures[0];
+    view->my_animation->CurrentFrame()->CurrentStickFigure() = view->my_animation->CurrentFrame()->stick_figures[0];
     //inserisci il pannello nella finestra
     ui->viewLayout->addWidget(view);
     //json read
@@ -346,7 +346,7 @@ void Widget::createPaths(){
     }
     my_animations_folder = QDir(path+"/MarionettaPlus/myAnimations");
     if(!my_animations_folder.exists()){
-        qDebug("myAnimation folder created");
+        qDebug("my_animation folder created");
         my_animations_folder.mkpath(path+"/MarionettaPlus/myAnimations");
     }
     my_stick_figures_folder = QDir(path+"/MarionettaPlus/myStickFigures");
@@ -418,7 +418,7 @@ void Widget::on_addStickBtn_clicked()
 }
 
 StickFigure* Widget::addStick(){
-    StickFigure * added = view->myAnimation->CurrentFrame()->addStickFigure(ui->stickLayerView, stick_figure_name_text->toPlainText());
+    StickFigure * added = view->my_animation->CurrentFrame()->addStickFigure(ui->stickLayerView, stick_figure_name_text->toPlainText());
     stick_figure_name_text->clear();
     return added;
 }
@@ -435,7 +435,7 @@ void Widget::on_stickLayerView_currentItemChanged(QListWidgetItem *current, QLis
         qDebug("layer clicked");
         QVariant  retrievedData = (current->data(Qt::UserRole));
         StickFigure* cs = qvariant_cast<StickFigure*>(retrievedData);
-        view->myAnimation->updateSelection(cs);
+        view->my_animation->updateSelection(cs);
 
     }
 
@@ -487,9 +487,9 @@ void Widget::addFrame(void)
 {
     view->storeUndo(CMD_ADDFRAME);
     int pos = 0;
-    if(view->myAnimation->frameList.count()>=1)
+    if(view->my_animation->frame_list.count()>=1)
     {
-        pos = view->myAnimation->CurrentFrame()->frameNumber+1;
+        pos = view->my_animation->CurrentFrame()->frame_number+1;
     }
     Frame* addedFrame = setUpFrame(pos);
     view->moveToFrame(addedFrame);
@@ -497,7 +497,7 @@ void Widget::addFrame(void)
     auto num = scene->items();
     addStick();
     num = scene->items();
-    //view->myAnimation->storeUndo();
+    //view->my_animation->storeUndo();
 }
 
 // questa funzione crea il frame e gli oggetti lista appropriati
@@ -509,22 +509,22 @@ void Widget::on_copyFrame_clicked()
 {
     view->storeUndo(CMD_ADDFRAME);
     // snapshot dati del frame corrente (Phase 2b): niente stream né switchFrameFlag
-    FrameData *snapshot = ExtractFrameData(*view->myAnimation->CurrentFrame());
+    FrameData *snapshot = ExtractFrameData(*view->my_animation->CurrentFrame());
     // prepare new frame
     int pos = 0;
-    if(view->myAnimation->frameList.count()>=1)
+    if(view->my_animation->frame_list.count()>=1)
     {
-        pos = view->myAnimation->CurrentFrame()->frameNumber+1;
+        pos = view->my_animation->CurrentFrame()->frame_number+1;
     }
     Frame* addedFrame = setUpFrame(pos);
     PopulateLiveFrame(addedFrame,*snapshot,true,true);
     delete snapshot;
     // update frame name
-    addedFrame->frameNumber++;
+    addedFrame->frame_number++;
     // move to new frame
     view->moveToFrame(addedFrame);
     // update list icons
-    view->updateFrameOrder(view->myAnimation->CurrentFrame());
+    view->updateFrameOrder(view->my_animation->CurrentFrame());
 
 }
 
@@ -535,10 +535,10 @@ void Widget::on_onionSkinSpinBox_valueChanged(const QString &arg1)
 
 void Widget::on_deleteFrameBtn_clicked()
 {
-    if(view->myAnimation->frameList.count()>1){
+    if(view->my_animation->frame_list.count()>1){
         view->storeUndo(CMD_DELETEFRAME);
-        view->deleteFrame(view->myAnimation->CurrentFrame());
-        view->moveToFrame(view->myAnimation->CurrentFrame());
+        view->deleteFrame(view->my_animation->CurrentFrame());
+        view->moveToFrame(view->my_animation->CurrentFrame());
     }
 }
 
@@ -566,12 +566,12 @@ void Widget::on_PlayButton_clicked()
 {
     if(busyPlay == false){
         //parti dal frame 0, scegli il framerate
-        view->moveToFrame(view->myAnimation->frameList[0]);
+        view->moveToFrame(view->my_animation->frame_list[0]);
         int fps = fps_spin_box->value();
         int onions = onion_skin_sb->value();
         // non voglio onionskins in questa modalità
         onion_skin_sb->setValue(0);
-        view->moveToFrame(view->myAnimation->frameList[0]);
+        view->moveToFrame(view->my_animation->frame_list[0]);
 
         // calcola il delay da usare nel timer di passaggio da un frame al segunte
         int delay = 1000/fps;
@@ -583,7 +583,7 @@ void Widget::on_PlayButton_clicked()
     }else{
         play->Stop();
     }
-    //view->moveToFrame(view->myAnimation->frameList[0]);
+    //view->moveToFrame(view->my_animation->frame_list[0]);
 
 }
 
@@ -592,7 +592,7 @@ void Widget::on_zoomInBtn_clicked()
     view->scale(1/zoomLvl,1/zoomLvl);
     zoomLvl*=2;
     view->scale(zoomLvl,zoomLvl);
-    view->moveToFrame(view->myAnimation->CurrentFrame());
+    view->moveToFrame(view->my_animation->CurrentFrame());
 }
 
 void Widget::on_zoomOutBtn_clicked()
@@ -601,14 +601,14 @@ void Widget::on_zoomOutBtn_clicked()
     view->scale(1/zoomLvl,1/zoomLvl);
     zoomLvl/=2;
     view->scale(zoomLvl,zoomLvl);
-    view->moveToFrame(view->myAnimation->CurrentFrame());
+    view->moveToFrame(view->my_animation->CurrentFrame());
 }
 
 void Widget::on_resetZoomBtn_clicked()
 {
     view->scale(1/zoomLvl,1/zoomLvl);
     zoomLvl = 1.0;
-    view->moveToFrame(view->myAnimation->CurrentFrame());
+    view->moveToFrame(view->my_animation->CurrentFrame());
 }
 
 void Widget::on_drawImageBtn_clicked()
@@ -625,7 +625,7 @@ void Widget::on_drawImageBtn_clicked()
 }
 void Widget::on_addImgBtn_clicked()
 {
-    StickData* cs = view->myAnimation->CurrentFrame()->CurrentStick();
+    StickData* cs = view->my_animation->CurrentFrame()->CurrentStick();
     QString fileName = QFileDialog::getOpenFileName(this,tr("Load Image"),
                        "C:/", tr("Images (*.png *.bmp *.jpg)"));
     if(fileName.length()>0 && cs->view){
@@ -639,15 +639,15 @@ void Widget::on_addImgBtn_clicked()
 
 void Widget::on_removeImgBtn_clicked()
 {
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure()== nullptr)
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure()== nullptr)
         return;
-    if(view->myAnimation->CurrentFrame()->CurrentStick() != nullptr){
-        if(view->myAnimation->CurrentFrame()->CurrentStick()->stickType == StickData::IMAGE && view->myAnimation->CurrentFrame()->CurrentStick()->stickImgList.length()>1
-                && view->myAnimation->CurrentFrame()->CurrentStick()->view){
+    if(view->my_animation->CurrentFrame()->CurrentStick() != nullptr){
+        if(view->my_animation->CurrentFrame()->CurrentStick()->stick_type == StickData::IMAGE && view->my_animation->CurrentFrame()->CurrentStick()->stick_img_list.length()>1
+                && view->my_animation->CurrentFrame()->CurrentStick()->view){
             int idx = img_list_widget->currentRow(); // indice immagine correntmente selezionata
             view->storeUndo();
-            view->myAnimation->CurrentFrame()->CurrentStick()->view->removeImgFromList(idx);
-            view->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh(0);
+            view->my_animation->CurrentFrame()->CurrentStick()->view->removeImgFromList(idx);
+            view->my_animation->CurrentFrame()->CurrentStickFigure()->refresh(0);
         }
     }
 }
@@ -656,11 +656,11 @@ void Widget::on_removeImgBtn_clicked()
 void Widget::on_setImgBtn_clicked()
 {
     int idx = img_list_widget->currentRow(); // indice immagine correntmente selezionata
-    if(view->myAnimation->CurrentFrame()->CurrentStick() != nullptr){
-        if(view->myAnimation->CurrentFrame()->CurrentStick()->stickType == StickData::IMAGE){
+    if(view->my_animation->CurrentFrame()->CurrentStick() != nullptr){
+        if(view->my_animation->CurrentFrame()->CurrentStick()->stick_type == StickData::IMAGE){
             view->storeUndo();
-            view->myAnimation->CurrentFrame()->CurrentStick()->stickImg = view->myAnimation->CurrentFrame()->CurrentStick()->stickImgList[idx];
-            view->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh(0);
+            view->my_animation->CurrentFrame()->CurrentStick()->stick_img = view->my_animation->CurrentFrame()->CurrentStick()->stick_img_list[idx];
+            view->my_animation->CurrentFrame()->CurrentStickFigure()->refresh(0);
         }
     }
 }
@@ -760,17 +760,17 @@ void Widget::on_addItemFromLibraryToSceneBtn_clicked()
     QVariant  retrievedData = (itemToAdd->data(Qt::UserRole));
     StickFigureData* toAdd = qvariant_cast<StickFigureData*>(retrievedData);
     PopulateLiveStickFigure(added,*toAdd,true,true);
-    for(StickData*s:added->stickList){
-        view->myAnimation->CurrentFrame()->totalSticks.append(s);
+    for(StickData*s:added->stick_list){
+        view->my_animation->CurrentFrame()->total_sticks.append(s);
     }
     view->addHandles(added);
-    added->linkedItem->setData(Qt::DisplayRole,added->name);
-    view->myAnimation->updateSelection(added);
-    my_stick_figure_widget_list->setCurrentRow(my_stick_figure_widget_list->row(added->linkedItem));
+    added->linked_item->setData(Qt::DisplayRole,added->name);
+    view->my_animation->updateSelection(added);
+    my_stick_figure_widget_list->setCurrentRow(my_stick_figure_widget_list->row(added->linked_item));
     added->refresh();
     //added->refresh();
     //scene->update();
-    //view->myAnimation->CurrentFrame()->CurrentStickFigure()->loadStickFigure(fileName)
+    //view->my_animation->CurrentFrame()->CurrentStickFigure()->loadStickFigure(fileName)
 }
 
 void Widget::on_saveCurrentLibraryBtn_clicked()
@@ -793,11 +793,11 @@ void Widget::on_saveCurrentLibraryBtn_clicked()
 
 void Widget::on_imgHOffsetSlider_valueChanged(int value)
 {
-    StickData*cs =  view->myAnimation->CurrentFrame()->CurrentStick();
+    StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
     if(cs == nullptr)
         return;
     else{
-        if(cs->stickType == StickData::IMAGE){
+        if(cs->stick_type == StickData::IMAGE){
             if(!sliderFlags.sliderHOffset){
                 view->storeUndo(CMD_SIMPLE);
                 sliderFlags.sliderHOffset = true;
@@ -805,8 +805,8 @@ void Widget::on_imgHOffsetSlider_valueChanged(int value)
             float val = 0;
             val = (float)img_h_offset_slider->value();
             img_h_offset_spinbox->setValue(img_h_offset_slider->value());
-            cs->imgOffset.setX(val);
-             view->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
+            cs->img_offset.setX(val);
+             view->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
         }
     }
 }
@@ -814,11 +814,11 @@ void Widget::on_imgHOffsetSlider_valueChanged(int value)
 
 void Widget::on_imgVOfsetSlider_valueChanged(int value)
 {
-    StickData*cs =  view->myAnimation->CurrentFrame()->CurrentStick();
+    StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
     if(cs == nullptr)
         return;
     else{
-        if(cs->stickType == StickData::IMAGE){
+        if(cs->stick_type == StickData::IMAGE){
             float val = 0;
             if(!sliderFlags.sliderVOffset){
                 view->storeUndo(CMD_SIMPLE);
@@ -826,19 +826,19 @@ void Widget::on_imgVOfsetSlider_valueChanged(int value)
             }
             img_v_offset_spinbox->setValue(img_v_offset_slider->value());
             val = (float)img_v_offset_slider->value();
-            cs->imgOffset.setY(val);
-             view->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
+            cs->img_offset.setY(val);
+             view->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
         }
     }
 }
 
 void Widget::on_imgWSlider_valueChanged(int value)
 {
-    StickData*cs =  view->myAnimation->CurrentFrame()->CurrentStick();
+    StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
     if(cs == nullptr)
         return;
     else{
-        if(cs->stickType == StickData::IMAGE){
+        if(cs->stick_type == StickData::IMAGE){
             float scale = 0;
             if(!sliderFlags.sliderWScale){
                 view->storeUndo(CMD_SIMPLE);
@@ -846,19 +846,19 @@ void Widget::on_imgWSlider_valueChanged(int value)
             }
             img_width_slider->value()>0?scale = (float)img_width_slider->value()/10+1:scale = 1/((float)(-img_width_slider->value())/10+1);
             img_width_spinbox->setValue(img_width_slider->value());
-            cs->imgWScale = scale;
-            view->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
+            cs->img_w_scale = scale;
+            view->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
         }
     }
 }
 
 void Widget::on_imgHSlider_valueChanged(int value)
 {
-    StickData*cs =  view->myAnimation->CurrentFrame()->CurrentStick();
+    StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
     if(cs == nullptr)
         return;
     else{
-        if(cs->stickType == StickData::IMAGE){
+        if(cs->stick_type == StickData::IMAGE){
             float scale = 0;
             if(!sliderFlags.sliderHScale){
                 view->storeUndo(CMD_SIMPLE);
@@ -866,19 +866,19 @@ void Widget::on_imgHSlider_valueChanged(int value)
             }
             img_height_slider->value()>0?scale = (float)img_height_slider->value()/10+1 : scale = 1/((float)(-img_height_slider->value())/10+1);
             img_height_spinbox->setValue(img_height_slider->value());
-            cs->imgHScale = scale;
-             view->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
+            cs->img_h_scale = scale;
+             view->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
         }
     }
 }
 
 void Widget::on_imgRotationSlider_valueChanged(int value)
 {
-    StickData*cs =  view->myAnimation->CurrentFrame()->CurrentStick();
+    StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
     if(cs == nullptr)
         return;
     else{
-        if(cs->stickType == StickData::IMAGE){
+        if(cs->stick_type == StickData::IMAGE){
             if(!sliderFlags.sliderRot){
                 view->storeUndo(CMD_SIMPLE);
                 sliderFlags.sliderRot = true;
@@ -886,8 +886,8 @@ void Widget::on_imgRotationSlider_valueChanged(int value)
             float val = 0;
             val =img_rotation_slider->value();
             img_rotation_spinbox->setValue(val);
-            cs->imgAngleOffset = val;
-             view->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
+            cs->img_angle_offset = val;
+             view->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
         }
     }
 }
@@ -1019,14 +1019,14 @@ extern bool start_stick_figure_scale;
 void Widget::on_stickFigureScaleSpinbox_editingFinished()
 {
     view->storeUndo();
-    for(StickData*s:view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
+    for(StickData*s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
         if(s->view){
-            s->view->scaleBuffer = s->myLine.length();
-            s->view->widthBuffer = s->Pen.width();
+            s->view->scaleBuffer = s->my_line.length();
+            s->view->widthBuffer = s->pen.width();
         }
     }
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure() != nullptr){
-        for(StickData* s:view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
+        for(StickData* s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
             if(s->view)
                 s->view->scale((float)stick_figure_scale_spinbox->value()/100);
 
@@ -1039,12 +1039,12 @@ void Widget::on_stickFigureScaleSpinbox_editingFinished()
 void Widget::on_stickFigureRotationSpinbox_editingFinished()
 {
     view->storeUndo();
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure() != nullptr){
-        for(StickData* s:view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
+        for(StickData* s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
             if(s->view){
-                s->view->angleBuffer2 = s->myLine.angle();
+                s->view->angleBuffer2 = s->my_line.angle();
                 s->view->rotate(stick_figure_rotation_spinbox->value());
-                s->view->angleBuffer2 = s->myLine.angle();
+                s->view->angleBuffer2 = s->my_line.angle();
             }
         }
 
@@ -1069,12 +1069,12 @@ void Widget::on_rotateSceneBtn_clicked()
 
 void Widget::on_verticalFlipBtn_clicked()
 {
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure() != nullptr){
-        for(StickData* s:view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
-            //s->myLine.setAngle(s->myLine.angle()+180);
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
+        for(StickData* s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
+            //s->my_line.setAngle(s->my_line.angle()+180);
             if(s->view){
-                s->view->angleBuffer2 = s->myLine.angle();
-                s->view->rotate((-2*s->myLine.angle()));
+                s->view->angleBuffer2 = s->my_line.angle();
+                s->view->rotate((-2*s->my_line.angle()));
             }
             //s->refresh(0);
         }
@@ -1083,12 +1083,12 @@ void Widget::on_verticalFlipBtn_clicked()
 
 void Widget::on_HorizontalFlipBtn_clicked()
 {
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure() != nullptr){
-        for(StickData* s:view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
-            //s->myLine.setAngle(s->myLine.angle()+180);
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
+        for(StickData* s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
+            //s->my_line.setAngle(s->my_line.angle()+180);
             if(s->view){
-                s->view->angleBuffer2 = s->myLine.angle();
-                s->view->rotate(2*(90-s->myLine.angle()));
+                s->view->angleBuffer2 = s->my_line.angle();
+                s->view->rotate(2*(90-s->my_line.angle()));
             }
             //s->refresh(0);
         }
@@ -1097,11 +1097,11 @@ void Widget::on_HorizontalFlipBtn_clicked()
 
 void Widget::on_copyStickFigureBtn_clicked()
 {
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure() != nullptr){
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
         // il buffer è puro dato (Phase 2b): liberarlo e riestrarlo è tutto qui,
         // niente copyFlag e niente pulizia manuale degli stick
         delete view->copyStickFigureBuffer;
-        view->copyStickFigureBuffer = ExtractStickFigureData(*view->myAnimation->CurrentFrame()->CurrentStickFigure());
+        view->copyStickFigureBuffer = ExtractStickFigureData(*view->my_animation->CurrentFrame()->CurrentStickFigure());
     }
 }
 
@@ -1112,8 +1112,8 @@ void Widget::on_pasteStickFigureBtn_clicked()
        StickFigure* added =addStick();
        PopulateLiveStickFigure(added,*view->copyStickFigureBuffer,true,true);
        added->refresh(0);
-       for(StickData*s:added->stickList){
-           view->myAnimation->CurrentFrame()->totalSticks.append(s);
+       for(StickData*s:added->stick_list){
+           view->my_animation->CurrentFrame()->total_sticks.append(s);
 
        }
        view->addHandles(added);
@@ -1126,12 +1126,12 @@ void Widget::on_pasteStickFigureBtn_clicked()
 
 void Widget::on_joinBtn_clicked()
 {
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure()== nullptr){
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure()== nullptr){
         QMessageBox::about(this,"Error","First you must select a stickfigure");
         return;
 
     }else{
-        if(view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.count()==0){
+        if(view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.count()==0){
             QMessageBox::about(this,"Error","current stickfigure is empty cannot join an empty stickfigure");
             return;
         }else{
@@ -1155,39 +1155,39 @@ void Widget::on_splitBtn_clicked()
 
 void Widget::on_joinStick_clicked()
 {
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure() == nullptr || view->myAnimation->CurrentFrame()->CurrentStick() == nullptr)
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr || view->my_animation->CurrentFrame()->CurrentStick() == nullptr)
         return;
     view->storeUndo();
-    QList<StickData*> toWeld = view->myAnimation->CurrentFrame()->CurrentStickFigure()->weld(view->myAnimation->CurrentFrame()->CurrentStick());
+    QList<StickData*> toWeld = view->my_animation->CurrentFrame()->CurrentStickFigure()->weld(view->my_animation->CurrentFrame()->CurrentStick());
     for(StickData*s:toWeld){
-        view->myAnimation->CurrentFrame()->totalSticks.removeAll(s);
+        view->my_animation->CurrentFrame()->total_sticks.removeAll(s);
     }
-    //view->myAnimation->CurrentFrame()->cleanTotalSticks();
+    //view->my_animation->CurrentFrame()->cleanTotalSticks();
 }
 
 void Widget::on_splitStick_clicked()
 {
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure() == nullptr || view->myAnimation->CurrentFrame()->CurrentStick() == nullptr)
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr || view->my_animation->CurrentFrame()->CurrentStick() == nullptr)
     {
         return;
     }
     view->storeUndo();
-    view->removeHandles(view->myAnimation->CurrentFrame()->CurrentStickFigure());
-    StickData* added = view->myAnimation->CurrentFrame()->CurrentStickFigure()->chop(view->myAnimation->CurrentFrame()->CurrentStick());
-    view->addHandles(view->myAnimation->CurrentFrame()->CurrentStickFigure());
-    view->myAnimation->CurrentFrame()->totalSticks.append(added);
+    view->removeHandles(view->my_animation->CurrentFrame()->CurrentStickFigure());
+    StickData* added = view->my_animation->CurrentFrame()->CurrentStickFigure()->chop(view->my_animation->CurrentFrame()->CurrentStick());
+    view->addHandles(view->my_animation->CurrentFrame()->CurrentStickFigure());
+    view->my_animation->CurrentFrame()->total_sticks.append(added);
 }
 
 
 
 void Widget::on_setMasterNodeBtn_clicked()
 {
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure() == nullptr ||
-            view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.isEmpty()||
-            view->myAnimation->CurrentFrame()->CurrentStick() == nullptr)
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr ||
+            view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty()||
+            view->my_animation->CurrentFrame()->CurrentStick() == nullptr)
         return;
     view->storeUndo();
-    view->myAnimation->CurrentFrame()->CurrentStickFigure()->setMaster(view->myAnimation->CurrentFrame()->CurrentStick());
+    view->my_animation->CurrentFrame()->CurrentStickFigure()->setMaster(view->my_animation->CurrentFrame()->CurrentStick());
 }
 
 void Widget::on_createNewLibraryBtn_clicked()
@@ -1213,36 +1213,36 @@ void Widget::on_createNewLibraryBtn_clicked()
 
 void Widget::on_setAllDepthBtn_clicked()
 {
-    if(!view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.isEmpty()){
+    if(!view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty()){
         view->storeUndo(CMD_SIMPLE);
         float val = depth_spinbox->value();
-        for(StickData* s:view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
-            s->Z = val;
+        for(StickData* s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
+            s->z = val;
             if(s->view)
                 s->view->setZValue(val); // mancava: senza setZValue() il riordino non si vedeva a schermo
         }
-        view->myAnimation->CurrentFrame()->CurrentStickFigure()->baseZ = val;
-        // riordina totalSticks in base alla nuova Z: usato da push-to-top/bottom e move-stick-up/down
+        view->my_animation->CurrentFrame()->CurrentStickFigure()->base_z = val;
+        // riordina total_sticks in base alla nuova Z: usato da push-to-top/bottom e move-stick-up/down
         // per trovare il vicino corretto, altrimenti restava nell'ordine (ormai sbagliato) precedente
-        std::sort(view->myAnimation->CurrentFrame()->totalSticks.begin(),view->myAnimation->CurrentFrame()->totalSticks.end(),
-                  [](StickData* a, StickData* b){ return a->Z < b->Z; });
-        view->myAnimation->CurrentFrame()->refresh();
+        std::sort(view->my_animation->CurrentFrame()->total_sticks.begin(),view->my_animation->CurrentFrame()->total_sticks.end(),
+                  [](StickData* a, StickData* b){ return a->z < b->z; });
+        view->my_animation->CurrentFrame()->refresh();
     }
 }
 
 void Widget::on_setDepthBtn_clicked()
 {
-    if(!view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.isEmpty()
-            && view->myAnimation->CurrentFrame()->CurrentStick()){
+    if(!view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty()
+            && view->my_animation->CurrentFrame()->CurrentStick()){
         view->storeUndo(CMD_SIMPLE);
         float val = depth_spinbox->value();
-        view->myAnimation->CurrentFrame()->CurrentStick()->Z = val;
-        if(view->myAnimation->CurrentFrame()->CurrentStick()->view)
-            view->myAnimation->CurrentFrame()->CurrentStick()->view->setZValue(val); // mancava: senza setZValue() il riordino non si vedeva a schermo
-        // riordina totalSticks in base alla nuova Z, per lo stesso motivo di on_setAllDepthBtn_clicked
-        std::sort(view->myAnimation->CurrentFrame()->totalSticks.begin(),view->myAnimation->CurrentFrame()->totalSticks.end(),
-                  [](StickData* a, StickData* b){ return a->Z < b->Z; });
-        view->myAnimation->CurrentFrame()->refresh();
+        view->my_animation->CurrentFrame()->CurrentStick()->z = val;
+        if(view->my_animation->CurrentFrame()->CurrentStick()->view)
+            view->my_animation->CurrentFrame()->CurrentStick()->view->setZValue(val); // mancava: senza setZValue() il riordino non si vedeva a schermo
+        // riordina total_sticks in base alla nuova Z, per lo stesso motivo di on_setAllDepthBtn_clicked
+        std::sort(view->my_animation->CurrentFrame()->total_sticks.begin(),view->my_animation->CurrentFrame()->total_sticks.end(),
+                  [](StickData* a, StickData* b){ return a->z < b->z; });
+        view->my_animation->CurrentFrame()->refresh();
     }
 }
 
@@ -1288,80 +1288,80 @@ void Widget::on_drawTrapezoidBtn_clicked()
 
 void Widget::on_moveStickFigureToCenterBtn_clicked()
 {
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure() == nullptr)
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr)
         return;
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.isEmpty())
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty())
         return;
-    int dx = -view->myAnimation->CurrentFrame()->CurrentStickFigure()->masterStick->myLine.p1().x()+W/2;
-    int dy = -view->myAnimation->CurrentFrame()->CurrentStickFigure()->masterStick->myLine.p1().y()+H/2;
-    view->myAnimation->CurrentFrame()->CurrentStickFigure()->traslate(dx,dy);
+    int dx = -view->my_animation->CurrentFrame()->CurrentStickFigure()->master_stick->my_line.p1().x()+W/2;
+    int dy = -view->my_animation->CurrentFrame()->CurrentStickFigure()->master_stick->my_line.p1().y()+H/2;
+    view->my_animation->CurrentFrame()->CurrentStickFigure()->traslate(dx,dy);
 }
 
 void Widget::on_pushToTopBtn_clicked()
 {
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure() == nullptr)
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr)
         return;
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.isEmpty() || view->myAnimation->CurrentFrame()->CurrentStick()== nullptr)
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty() || view->my_animation->CurrentFrame()->CurrentStick()== nullptr)
         return;
     view->storeUndo();
-    view->myAnimation->CurrentFrame()->totalSticks.move(view->myAnimation->CurrentFrame()->totalSticks.indexOf(view->myAnimation->CurrentFrame()->CurrentStick()),view->myAnimation->CurrentFrame()->totalSticks.length()-1);
+    view->my_animation->CurrentFrame()->total_sticks.move(view->my_animation->CurrentFrame()->total_sticks.indexOf(view->my_animation->CurrentFrame()->CurrentStick()),view->my_animation->CurrentFrame()->total_sticks.length()-1);
 
-    float maxZ = view->myAnimation->CurrentFrame()->CurrentStick()->Z;
-    for(StickFigure* S:view->myAnimation->CurrentFrame()->stickFigures){
-        for(StickData*s:S->stickList){
-            if(s->Z>maxZ){
-                maxZ = s->Z;
+    float maxZ = view->my_animation->CurrentFrame()->CurrentStick()->z;
+    for(StickFigure* S:view->my_animation->CurrentFrame()->stick_figures){
+        for(StickData*s:S->stick_list){
+            if(s->z>maxZ){
+                maxZ = s->z;
             }
         }
     }
     if(maxZ>MAXDEPTH)
         maxZ = MAXDEPTH;
 
-    view->myAnimation->CurrentFrame()->CurrentStick()->Z = maxZ;
-    if(view->myAnimation->CurrentFrame()->CurrentStick()->view)
-        view->myAnimation->CurrentFrame()->CurrentStick()->view->setZValue(view->myAnimation->CurrentFrame()->CurrentStick()->Z);
+    view->my_animation->CurrentFrame()->CurrentStick()->z = maxZ;
+    if(view->my_animation->CurrentFrame()->CurrentStick()->view)
+        view->my_animation->CurrentFrame()->CurrentStick()->view->setZValue(view->my_animation->CurrentFrame()->CurrentStick()->z);
 
-    view->myAnimation->CurrentFrame()->refresh();
+    view->my_animation->CurrentFrame()->refresh();
 
 }
 
 void Widget::on_pushToButtonBtn_clicked()
 {
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure() == nullptr)
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr)
         return;
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.isEmpty() || view->myAnimation->CurrentFrame()->CurrentStick()== nullptr)
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty() || view->my_animation->CurrentFrame()->CurrentStick()== nullptr)
         return;
     view->storeUndo();
-    view->myAnimation->CurrentFrame()->totalSticks.move(view->myAnimation->CurrentFrame()->totalSticks.indexOf(view->myAnimation->CurrentFrame()->CurrentStick()),0);
+    view->my_animation->CurrentFrame()->total_sticks.move(view->my_animation->CurrentFrame()->total_sticks.indexOf(view->my_animation->CurrentFrame()->CurrentStick()),0);
 
-    float minZ = view->myAnimation->CurrentFrame()->CurrentStick()->Z;
-    for(StickFigure* S:view->myAnimation->CurrentFrame()->stickFigures){
-        for(StickData*s:S->stickList){
-            if(s->Z<minZ){
-                minZ = s->Z;
+    float minZ = view->my_animation->CurrentFrame()->CurrentStick()->z;
+    for(StickFigure* S:view->my_animation->CurrentFrame()->stick_figures){
+        for(StickData*s:S->stick_list){
+            if(s->z<minZ){
+                minZ = s->z;
             }
         }
     }
     if(minZ<MINDEPTH)
         minZ = MINDEPTH;
 
-    view->myAnimation->CurrentFrame()->CurrentStick()->Z = minZ;
-    if(view->myAnimation->CurrentFrame()->CurrentStick()->view)
-        view->myAnimation->CurrentFrame()->CurrentStick()->view->setZValue(view->myAnimation->CurrentFrame()->CurrentStick()->Z);
+    view->my_animation->CurrentFrame()->CurrentStick()->z = minZ;
+    if(view->my_animation->CurrentFrame()->CurrentStick()->view)
+        view->my_animation->CurrentFrame()->CurrentStick()->view->setZValue(view->my_animation->CurrentFrame()->CurrentStick()->z);
 
-    view->myAnimation->CurrentFrame()->refresh();
+    view->my_animation->CurrentFrame()->refresh();
 }
 
 
 
 void Widget::on_elongateSpinbox_editingFinished()
 {
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure()!= nullptr && view->myAnimation->CurrentFrame()->CurrentStick() !=nullptr){
-        QLineF lineBuf = view->myAnimation->CurrentFrame()->CurrentStick()->myLine;
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure()!= nullptr && view->my_animation->CurrentFrame()->CurrentStick() !=nullptr){
+        QLineF lineBuf = view->my_animation->CurrentFrame()->CurrentStick()->my_line;
         lineBuf.setLength(elongate_spinbox->value());
         QPointF coord= lineBuf.p2();
 
-        view->myAnimation->CurrentFrame()->CurrentStickFigure()->elongate(coord,view->myAnimation->CurrentFrame()->CurrentStick());
+        view->my_animation->CurrentFrame()->CurrentStickFigure()->elongate(coord,view->my_animation->CurrentFrame()->CurrentStick());
     }
 
 }
@@ -1380,44 +1380,44 @@ void Widget::on_pushStickFigureToBottom_clicked()
 
 void Widget::on_moveStickUp_clicked()
 {
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure() == nullptr)
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr)
         return;
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.isEmpty() || view->myAnimation->CurrentFrame()->CurrentStick()== nullptr)
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty() || view->my_animation->CurrentFrame()->CurrentStick()== nullptr)
         return;
     view->storeUndo();
-    int oldIdx = view->myAnimation->CurrentFrame()->totalSticks.indexOf(view->myAnimation->CurrentFrame()->CurrentStick());
-    int newIdx = view->myAnimation->CurrentFrame()->totalSticks.indexOf(view->myAnimation->CurrentFrame()->CurrentStick())+1;
-    if(newIdx >= view->myAnimation->CurrentFrame()->totalSticks.length())
+    int oldIdx = view->my_animation->CurrentFrame()->total_sticks.indexOf(view->my_animation->CurrentFrame()->CurrentStick());
+    int newIdx = view->my_animation->CurrentFrame()->total_sticks.indexOf(view->my_animation->CurrentFrame()->CurrentStick())+1;
+    if(newIdx >= view->my_animation->CurrentFrame()->total_sticks.length())
         return;
     StickData* minorBuffer = nullptr;
     //1 scansiona la lista cerca se ci sta uno sopra con Z uguale
-    for(StickData*s:view->myAnimation->CurrentFrame()->totalSticks){
-        if(s!=view->myAnimation->CurrentFrame()->CurrentStick() && (s->Z==view->myAnimation->CurrentFrame()->CurrentStick()->Z && view->myAnimation->CurrentFrame()->totalSticks.indexOf(s)>oldIdx))
+    for(StickData*s:view->my_animation->CurrentFrame()->total_sticks){
+        if(s!=view->my_animation->CurrentFrame()->CurrentStick() && (s->z==view->my_animation->CurrentFrame()->CurrentStick()->z && view->my_animation->CurrentFrame()->total_sticks.indexOf(s)>oldIdx))
         {
             if(minorBuffer == nullptr){
                 minorBuffer = s;
             }
-            else if(view->myAnimation->CurrentFrame()->totalSticks.indexOf(s)<view->myAnimation->CurrentFrame()->totalSticks.indexOf(minorBuffer)){
+            else if(view->my_animation->CurrentFrame()->total_sticks.indexOf(s)<view->my_animation->CurrentFrame()->total_sticks.indexOf(minorBuffer)){
                 minorBuffer = s;
             }
         }
     }
     if(minorBuffer != nullptr){
-        view->myAnimation->CurrentFrame()->totalSticks.move(oldIdx,view->myAnimation->CurrentFrame()->totalSticks.indexOf(minorBuffer));
-        view->myAnimation->CurrentFrame()->refresh(0);
+        view->my_animation->CurrentFrame()->total_sticks.move(oldIdx,view->my_animation->CurrentFrame()->total_sticks.indexOf(minorBuffer));
+        view->my_animation->CurrentFrame()->refresh(0);
         return;
     }
-    for(StickData*s:view->myAnimation->CurrentFrame()->totalSticks){
-        if(s!=view->myAnimation->CurrentFrame()->CurrentStick() && (s->Z>view->myAnimation->CurrentFrame()->CurrentStick()->Z ))
+    for(StickData*s:view->my_animation->CurrentFrame()->total_sticks){
+        if(s!=view->my_animation->CurrentFrame()->CurrentStick() && (s->z>view->my_animation->CurrentFrame()->CurrentStick()->z ))
         {
             if(minorBuffer == nullptr){
                 minorBuffer = s;
             }
-            else if(s->Z <= minorBuffer->Z){
-                if(s->Z == minorBuffer->Z && view->myAnimation->CurrentFrame()->totalSticks.indexOf(s)<view->myAnimation->CurrentFrame()->totalSticks.indexOf(minorBuffer)){
+            else if(s->z <= minorBuffer->z){
+                if(s->z == minorBuffer->z && view->my_animation->CurrentFrame()->total_sticks.indexOf(s)<view->my_animation->CurrentFrame()->total_sticks.indexOf(minorBuffer)){
                     minorBuffer = s;
                 }
-                else if(s->Z<minorBuffer->Z){
+                else if(s->z<minorBuffer->z){
                     minorBuffer = s;
                 }
             }
@@ -1425,10 +1425,10 @@ void Widget::on_moveStickUp_clicked()
     }
     if(minorBuffer !=nullptr){
 
-        view->myAnimation->CurrentFrame()->CurrentStick()->Z = minorBuffer->Z;
-        if(oldIdx<view->myAnimation->CurrentFrame()->totalSticks.indexOf(minorBuffer))
-            view->myAnimation->CurrentFrame()->totalSticks.move(oldIdx,view->myAnimation->CurrentFrame()->totalSticks.indexOf(minorBuffer));
-        view->myAnimation->CurrentFrame()->refresh(0);
+        view->my_animation->CurrentFrame()->CurrentStick()->z = minorBuffer->z;
+        if(oldIdx<view->my_animation->CurrentFrame()->total_sticks.indexOf(minorBuffer))
+            view->my_animation->CurrentFrame()->total_sticks.move(oldIdx,view->my_animation->CurrentFrame()->total_sticks.indexOf(minorBuffer));
+        view->my_animation->CurrentFrame()->refresh(0);
         return;
 
     }
@@ -1436,44 +1436,44 @@ void Widget::on_moveStickUp_clicked()
 
 void Widget::on_moveStickDown_clicked()
 {
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure() == nullptr)
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr)
         return;
-    if(view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.isEmpty() || view->myAnimation->CurrentFrame()->CurrentStick()== nullptr)
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty() || view->my_animation->CurrentFrame()->CurrentStick()== nullptr)
         return;
     view->storeUndo();
-    int oldIdx = view->myAnimation->CurrentFrame()->totalSticks.indexOf(view->myAnimation->CurrentFrame()->CurrentStick());
-    int newIdx = view->myAnimation->CurrentFrame()->totalSticks.indexOf(view->myAnimation->CurrentFrame()->CurrentStick())-1;
+    int oldIdx = view->my_animation->CurrentFrame()->total_sticks.indexOf(view->my_animation->CurrentFrame()->CurrentStick());
+    int newIdx = view->my_animation->CurrentFrame()->total_sticks.indexOf(view->my_animation->CurrentFrame()->CurrentStick())-1;
     if(newIdx < 0)
         return;
     StickData* minorBuffer = nullptr;
     //1 scansiona la lista cerca se ci sta uno sotto con Z uguale
-    for(StickData*s:view->myAnimation->CurrentFrame()->totalSticks){
-        if(s!=view->myAnimation->CurrentFrame()->CurrentStick() && (s->Z==view->myAnimation->CurrentFrame()->CurrentStick()->Z && view->myAnimation->CurrentFrame()->totalSticks.indexOf(s)<oldIdx))
+    for(StickData*s:view->my_animation->CurrentFrame()->total_sticks){
+        if(s!=view->my_animation->CurrentFrame()->CurrentStick() && (s->z==view->my_animation->CurrentFrame()->CurrentStick()->z && view->my_animation->CurrentFrame()->total_sticks.indexOf(s)<oldIdx))
         {
             if(minorBuffer == nullptr){
                 minorBuffer = s;
             }
-            else if(view->myAnimation->CurrentFrame()->totalSticks.indexOf(s)>view->myAnimation->CurrentFrame()->totalSticks.indexOf(minorBuffer)){
+            else if(view->my_animation->CurrentFrame()->total_sticks.indexOf(s)>view->my_animation->CurrentFrame()->total_sticks.indexOf(minorBuffer)){
                 minorBuffer = s;
             }
         }
     }
     if(minorBuffer != nullptr){
-        view->myAnimation->CurrentFrame()->totalSticks.move(oldIdx,view->myAnimation->CurrentFrame()->totalSticks.indexOf(minorBuffer));
-        view->myAnimation->CurrentFrame()->refresh(0);
+        view->my_animation->CurrentFrame()->total_sticks.move(oldIdx,view->my_animation->CurrentFrame()->total_sticks.indexOf(minorBuffer));
+        view->my_animation->CurrentFrame()->refresh(0);
         return;
     }
-    for(StickData*s:view->myAnimation->CurrentFrame()->totalSticks){
-        if(s!=view->myAnimation->CurrentFrame()->CurrentStick() && (s->Z<view->myAnimation->CurrentFrame()->CurrentStick()->Z ))
+    for(StickData*s:view->my_animation->CurrentFrame()->total_sticks){
+        if(s!=view->my_animation->CurrentFrame()->CurrentStick() && (s->z<view->my_animation->CurrentFrame()->CurrentStick()->z ))
         {
             if(minorBuffer == nullptr){
                 minorBuffer = s;
             }
-            else if(s->Z >= minorBuffer->Z){
-                if(s->Z == minorBuffer->Z && view->myAnimation->CurrentFrame()->totalSticks.indexOf(s)>view->myAnimation->CurrentFrame()->totalSticks.indexOf(minorBuffer)){
+            else if(s->z >= minorBuffer->z){
+                if(s->z == minorBuffer->z && view->my_animation->CurrentFrame()->total_sticks.indexOf(s)>view->my_animation->CurrentFrame()->total_sticks.indexOf(minorBuffer)){
                     minorBuffer = s;
                 }
-                else if(s->Z>minorBuffer->Z){
+                else if(s->z>minorBuffer->z){
                     minorBuffer = s;
                 }
             }
@@ -1481,10 +1481,10 @@ void Widget::on_moveStickDown_clicked()
     }
     if(minorBuffer !=nullptr){
 
-        view->myAnimation->CurrentFrame()->CurrentStick()->Z = minorBuffer->Z;
-        if(oldIdx>view->myAnimation->CurrentFrame()->totalSticks.indexOf(minorBuffer))
-            view->myAnimation->CurrentFrame()->totalSticks.move(oldIdx,view->myAnimation->CurrentFrame()->totalSticks.indexOf(minorBuffer));
-        view->myAnimation->CurrentFrame()->refresh(0);
+        view->my_animation->CurrentFrame()->CurrentStick()->z = minorBuffer->z;
+        if(oldIdx>view->my_animation->CurrentFrame()->total_sticks.indexOf(minorBuffer))
+            view->my_animation->CurrentFrame()->total_sticks.move(oldIdx,view->my_animation->CurrentFrame()->total_sticks.indexOf(minorBuffer));
+        view->my_animation->CurrentFrame()->refresh(0);
         return;
 
     }
@@ -1531,7 +1531,7 @@ void Widget::on_cpyFrame_clicked()
 {
     // il buffer è puro dato (Phase 2b): estrazione diretta, niente stream né flag
     delete frameCopyBuffer;
-    frameCopyBuffer = ExtractFrameData(*view->myAnimation->CurrentFrame());
+    frameCopyBuffer = ExtractFrameData(*view->my_animation->CurrentFrame());
 }
 
 void Widget::on_pasteFrame_clicked()
@@ -1539,28 +1539,28 @@ void Widget::on_pasteFrame_clicked()
 
     view->storeUndo();
     // add a new stickfigure per every stickfigure in the copy buffer
-    for(StickFigureData*S:frameCopyBuffer->stickFigures){
+    for(StickFigureData*S:frameCopyBuffer->stick_figures){
         StickFigure *added = addStick();
         PopulateLiveStickFigure(added,*S,true,true);
-        for(StickData*s:added->stickList){
-            view->myAnimation->CurrentFrame()->totalSticks.append(s);
+        for(StickData*s:added->stick_list){
+            view->my_animation->CurrentFrame()->total_sticks.append(s);
         }
         view->addHandles(added); // mancava: senza questo i manici degli stick incollati non comparivano
-        added->linkedItem->setData(Qt::DisplayRole,added->name);
+        added->linked_item->setData(Qt::DisplayRole,added->name);
         added->updateIcon(); // mancava: l'icona del layer incollato restava quella vuota di addStick()
-        if(frameCopyBuffer->stickFigures.last() == S){
-            view->myAnimation->updateSelection(added);
-            my_stick_figure_widget_list->setCurrentRow(my_stick_figure_widget_list->row(added->linkedItem));
+        if(frameCopyBuffer->stick_figures.last() == S){
+            view->my_animation->updateSelection(added);
+            my_stick_figure_widget_list->setCurrentRow(my_stick_figure_widget_list->row(added->linked_item));
         }
     }
     // move to new frame
-    view->myAnimation->CurrentFrame()->refresh();
+    view->my_animation->CurrentFrame()->refresh();
     // updateFrameOrder (sotto) NON aggiorna nessuna icona nonostante il commento originale:
-    // aggiorna solo StickGraphicsItem::order/numOfItems. L'anteprima del frame va aggiornata esplicitamente qui.
-    view->myAnimation->CurrentFrame()->updateIcon();
+    // aggiorna solo StickGraphicsItem::order/num_of_items. L'anteprima del frame va aggiornata esplicitamente qui.
+    view->my_animation->CurrentFrame()->updateIcon();
 
     // update list icons
-    view->updateFrameOrder(view->myAnimation->CurrentFrame());
+    view->updateFrameOrder(view->my_animation->CurrentFrame());
 }
 
 

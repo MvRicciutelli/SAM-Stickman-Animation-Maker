@@ -390,18 +390,58 @@ never a `->`-prefixed accessor, verified by grepping every `.ui`
 batch with a real build + a full `tst_characterization` run: 27/27 pass
 throughout.
 
-**Not yet started:** member functions/variables *inside* the core classes
-— `Widget` (`widget.cpp`/`.h`), `MyView` (`myview.cpp`/`.h`),
-`StickFigure.cpp`, `frame.cpp`, `animation.cpp`, `stick.cpp`
-(`StickGraphicsItem`), `stickdata.cpp`, `stickfiguredata.cpp`,
-`framedata.cpp`, `framepresenter.cpp`. This is the largest and highest-risk
-remaining slice: these classes have hundreds of methods each, many
-interconnected via signals/slots, and — per the pattern found twice above
-— some non-slot method names may still collide with `.ui` accessor names
-in ways a blanket rename won't catch without the same collision-check
-discipline. Continue in the same file-by-file, collision-checked,
-build-verified manner; do the `.ui`-objectName collision grep *before*
-each class's method rename, not after.
+**Third checkpoint (2026-07-12, same day):** renamed every `snake_case`-due
+field across the whole model/live class family, in one coordinated pass
+since `*Data` and their live counterparts intentionally share field names:
+- `StickData` (`stickdata.h/cpp`): `stickType`→`stick_type`, `myLine`→
+  `my_line`, `parentIdx`→`parent_idx`, `Pen`→`pen`, `Brush`→`brush`,
+  `imgAngle*`/`imgWScale`/`imgHScale`/`imgOffset`→ snake_case, `hardTop`/
+  `hardBottom`→snake_case, `stickImg*`/`imgNameList`→snake_case, and
+  `Z`→`z` (handled separately — a bare single-letter name is too generic
+  for a blanket word-boundary rename; scoped to `->Z`/`.Z` member access
+  plus the declaration, which still missed one *implicit* same-class
+  access (`Z = source.z;` inside `StickData::CopyFrom`, no `this->` or
+  `->` prefix) — caught by the build, fixed by hand. Lesson: a field
+  short enough to need scoped-rather-than-blanket renaming should also be
+  grepped for implicit no-prefix self-access before trusting the build to
+  catch it, not after.
+- `StickFigureData`/`StickFigure` shared fields: `stickList`→`stick_list`,
+  `masterStick`→`master_stick`, `currentStick`→`current_stick`.
+- `StickFigure`'s own remaining fields (`drawCount`, `stickNum`,
+  `lineBuffer`, `baseZ`, `linkedItem`, `stickFigureIcon`, `iconImg`,
+  `originPosBuffer`, `sceneRotationBuffer`, `selectingOrigin`,
+  `stickBuffer`, `parentBuffer`, `myScene`, plus the `myStickFigure`
+  stream-operator parameter) → snake_case.
+- `FrameData`/`Frame` shared fields: `stickFigures`→`stick_figures`,
+  `stickFigureBuffer`→`stick_figure_buffer`, `currentStickFigure`→
+  `current_stick_figure` (case-sensitive rename — the already-correct
+  `CurrentStickFigure()` accessor method from Phase 5 was left untouched,
+  confirmed by grep before and after), `numOfItems`→`num_of_items`,
+  `frameNumber`→`frame_number`, `totalSticks`→`total_sticks`, and the
+  `myFrame` stream-operator parameter.
+- `Animation`: `frameList`→`frame_list`, `frameBuffer`→`frame_buffer`,
+  `currentFrame`→`current_frame` (same case-sensitive care around
+  `CurrentFrame()`), and `myAnimation`→`my_animation` (506 references —
+  the largest single-symbol rename so far, but zero `.ui` collision risk
+  since it's a plain member, not Designer-backed).
+
+Every one of the above was `.ui`-objectName-collision-checked before
+renaming (none had collisions except the `Z`/implicit-access lesson
+above) and verified with a real build + full `tst_characterization` run
+(27/27) after each batch.
+
+**Not yet started:** member functions *inside* the core classes — `Widget`
+(`widget.cpp`/`.h`), `MyView` (`myview.cpp`/`.h`), the remaining methods on
+`StickFigure`/`Frame`/`Animation`, `stick.cpp`/`.h` (`StickGraphicsItem`),
+and `framepresenter.cpp`/`.h`. This is the largest and highest-risk
+remaining slice: hundreds of methods, many interconnected via signals/
+slots, some with short/generic names (`scale`, `refresh`, `highlight`)
+that need an explicit usage-scope check — not just a `.ui`-objectName
+grep — before a blanket rename, since a generic word is more likely to
+appear as an unrelated local/parameter name than the distinctive
+multi-word identifiers handled so far. Continue file-by-file,
+collision-checked, build-verified; check both `.ui` objectNames *and*
+plain usage-scope for any short/generic name before renaming it.
 
 **Context:** phases 1–6 write all *new* code in `snake_case`
 variables / `UpperPascalCase` functions and classes per the "Naming

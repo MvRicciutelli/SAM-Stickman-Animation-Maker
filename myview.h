@@ -54,7 +54,7 @@ public:
     unsigned int tool = NOTOOL;
     void setTool(int Tool);
     StickFigure *addStickFigure(QListWidgetItem* item);
-    Animation * myAnimation;
+    Animation * my_animation;
     void deleteStickFigure();
     QPen    myPen;
     QBrush  myBrush;

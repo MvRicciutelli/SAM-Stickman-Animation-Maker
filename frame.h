@@ -9,38 +9,38 @@ public:
     Frame();
     ~Frame();
     //StickFigure* addStickFigure(QListWidgetItem* item);
-    QList<StickFigure*> stickFigures;
-    StickFigure* stickFigureBuffer;
-    StickFigure* currentStickFigure;
+    QList<StickFigure*> stick_figures;
+    StickFigure* stick_figure_buffer;
+    StickFigure* current_stick_figure;
     /**
      * @brief Accessor for the currently selected stickfigure in this frame.
-     * @return reference to `currentStickFigure`, so reads and assignments
+     * @return reference to `current_stick_figure`, so reads and assignments
      *         (`CurrentStickFigure() = someFigure`) both work like the raw member did.
      *
      * Replaces the `CURRENTSTICKFIGURE` macro (Phase 5).
      */
-    StickFigure*& CurrentStickFigure() { return currentStickFigure; }
+    StickFigure*& CurrentStickFigure() { return current_stick_figure; }
     /**
      * @brief Accessor for the currently selected stick within `CurrentStickFigure()`.
-     * @return reference to that stickfigure's `currentStick`.
+     * @return reference to that stickfigure's `current_stick`.
      *
      * Replaces the `CS` macro (Phase 5). Same as the macro, this dereferences
-     * `currentStickFigure` without a null check — callers are responsible for that,
+     * `current_stick_figure` without a null check — callers are responsible for that,
      * exactly as before.
      */
-    StickData*& CurrentStick() { return currentStickFigure->currentStick; }
+    StickData*& CurrentStick() { return current_stick_figure->current_stick; }
     StickData *selectStick(QPointF point);
     StickData *selectStick(StickFigure* S, StickData* s= nullptr);
     StickFigure* removeStickFigure(StickFigure* toRemove);
     QIcon* frameIcon;
-    int numOfItems = 0;
-    QPixmap * iconImg;
+    int num_of_items = 0;
+    QPixmap * icon_img;
     //QImage * renderImg;
     QGraphicsScene * scene;
-    int frameNumber = 0;
-    QListWidgetItem * linkedItem;
+    int frame_number = 0;
+    QListWidgetItem * linked_item;
     void updateIcon();
-    QList <StickData*> totalSticks;
+    QList <StickData*> total_sticks;
     StickFigure *addStickFigure( QListWidget *myListWidget, QString name = "");
     void updateRender();
     void clearFrame();
@@ -57,19 +57,19 @@ Q_DECLARE_METATYPE(Frame*);
 /**
  * @brief Streams a live frame by extracting its data first (file save path).
  * @param stream destination stream.
- * @param myFrame live frame to write.
+ * @param my_frame live frame to write.
  * @return the stream, for chaining.
  */
-QDataStream & operator<< (QDataStream& stream, const Frame& myFrame);
+QDataStream & operator<< (QDataStream& stream, const Frame& my_frame);
 
 /**
  * @brief Streams data into a live frame WITHOUT attaching sticks to the scene
  *        (file load path — moveToFrame() attaches the displayed frame afterwards).
  * @param stream source stream.
- * @param myFrame live frame to fill; must start empty.
+ * @param my_frame live frame to fill; must start empty.
  * @return the stream, for chaining.
  */
-QDataStream & operator>> (QDataStream& stream, Frame& myFrame);
+QDataStream & operator>> (QDataStream& stream, Frame& my_frame);
 
 /**
  * @brief Snapshots a live frame into a pure-data record (undo/copy source).

@@ -18,7 +18,7 @@ class StickGraphicsItem; // defined in stick.h; forward-declared to avoid a head
  * This is the model side of the stick/StickGraphicsItem split (REFACTOR_PLAN.md Phase 1,
  * completed by Phase 2c). A StickData can exist without a QGraphicsScene, so scratch/
  * buffer/undo objects built from it never need any global flag guard. Field names keep
- * their historical spelling (`myLine`, `Pen`, ...) until the Phase 7 naming sweep, so
+ * their historical spelling (`my_line`, `pen`, ...) until the Phase 7 naming sweep, so
  * existing call sites compile unchanged.
  */
 class StickData
@@ -32,9 +32,9 @@ public:
      * format breaks.
      */
     enum StickType{
-        LINE = 5,       ///< plain segment, drawn with Pen only
+        LINE = 5,       ///< plain segment, drawn with pen only
         CIRCLE = 6,     ///< ellipse whose radius is the stick line
-        IMAGE = 7,      ///< user-imported image, needs stickImgList/stickImg
+        IMAGE = 7,      ///< user-imported image, needs stick_img_list/stick_img
         RECT = 16,      ///< rectangle extruded along the stick line
         TRAPEZOID = 17, ///< four-point polygon with independent end widths
         TAPER = 18      ///< trapezoid with rounded (pie) ends
@@ -46,7 +46,7 @@ public:
     StickData();
 
     /**
-     * @brief Frees the owned image copies in stickImgList.
+     * @brief Frees the owned image copies in stick_img_list.
      *
      * Virtual so a derived object (today the legacy `stick`) can be deleted through a
      * StickData pointer once containers switch to StickData* in Phase 1b.
@@ -77,7 +77,7 @@ public:
      *
      * Historical invariant kept as-is: every ancestor lists every descendant. Direct
      * children are the entries whose parent points back at this stick. Not serialized
-     * directly — rebuilt from parentIdx on load.
+     * directly — rebuilt from parent_idx on load.
      */
     QList<StickData*> children;
 
@@ -98,24 +98,24 @@ public:
     // ------- persistent fields (exactly what operator<</operator>> read and write) ------
 
     int version = 1;                ///< serialization format version of this record
-    int stickType = StickType::LINE;///< StickType value; drives painting and serialization
-    qreal Z = 0;                    ///< depth used for scene z-ordering between sticks
+    int stick_type = StickType::LINE;///< StickType value; drives painting and serialization
+    qreal z = 0;                    ///< depth used for scene z-ordering between sticks
     bool stepchild = false;         ///< true when attached to the parent's origin (P1) instead of its free end
-    QLineF myLine;                  ///< the segment the stick is built on, in scene coordinates
-    int parentIdx = 0;              ///< index of the parent stick inside its figure's stickList; -1 for the master (only meaningful during (de)serialization)
-    QPen Pen;                       ///< outline color/thickness
-    QBrush Brush;                   ///< fill for the shape types (CIRCLE/RECT/TRAPEZOID/TAPER)
-    int order = 0;                  ///< position inside Frame::totalSticks (frame-wide draw order)
-    float imgAngle = 0;             ///< orientation of the image/shape, follows the line direction
-    float imgWScale = 1;            ///< horizontal scale of the image, or shape width
-    float imgHScale = 1;            ///< vertical scale of the image, or second shape width
-    int imgAngleOffset = 0;         ///< extra user rotation on top of imgAngle (IMAGE only)
-    QPointF imgOffset = QPointF(0, 0); ///< user translation of the image relative to the stick (IMAGE only)
-    bool hardTop = false;           ///< TAPER: draw the far end flat instead of rounded
-    bool hardBottom = false;        ///< TAPER: draw the near end flat instead of rounded
-    QImage *stickImg = nullptr;     ///< currently displayed image; points into stickImgList, not separately owned
-    QList<QImage*> stickImgList;    ///< owned image variants of an IMAGE stick
-    QList<QString> imgNameList;     ///< display names of stickImgList entries, parallel by index
+    QLineF my_line;                  ///< the segment the stick is built on, in scene coordinates
+    int parent_idx = 0;              ///< index of the parent stick inside its figure's stick_list; -1 for the master (only meaningful during (de)serialization)
+    QPen pen;                       ///< outline color/thickness
+    QBrush brush;                   ///< fill for the shape types (CIRCLE/RECT/TRAPEZOID/TAPER)
+    int order = 0;                  ///< position inside Frame::total_sticks (frame-wide draw order)
+    float img_angle = 0;             ///< orientation of the image/shape, follows the line direction
+    float img_w_scale = 1;            ///< horizontal scale of the image, or shape width
+    float img_h_scale = 1;            ///< vertical scale of the image, or second shape width
+    int img_angle_offset = 0;         ///< extra user rotation on top of img_angle (IMAGE only)
+    QPointF img_offset = QPointF(0, 0); ///< user translation of the image relative to the stick (IMAGE only)
+    bool hard_top = false;           ///< TAPER: draw the far end flat instead of rounded
+    bool hard_bottom = false;        ///< TAPER: draw the near end flat instead of rounded
+    QImage *stick_img = nullptr;     ///< currently displayed image; points into stick_img_list, not separately owned
+    QList<QImage*> stick_img_list;    ///< owned image variants of an IMAGE stick
+    QList<QString> img_name_list;     ///< display names of stick_img_list entries, parallel by index
 };
 
 /**

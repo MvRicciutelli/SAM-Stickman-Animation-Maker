@@ -20,7 +20,7 @@ ImageExport::ImageExport(QObject *parent, QString path, int option)
 extern bool renderFlag;
 void ImageExport::Render(int option)
 {
-    for(Frame* f :V->myAnimation->frameList){
+    for(Frame* f :V->my_animation->frame_list){
         QGraphicsScene renderScene; //scena fittizia
         QImage *renderImg = new QImage(W,H,QImage::Format_ARGB32); //immagine temporanea
         QPainter painter(renderImg); // painter che esegue il drawing sull immagine
@@ -30,7 +30,7 @@ void ImageExport::Render(int option)
         // di stick ruberebbe il back-pointer data->view alla view reale sullo schermo
         QList<StickData*> renderClones;
 
-        for(StickData* s: f->totalSticks){
+        for(StickData* s: f->total_sticks){
             StickData* clone = s->Clone();
             renderClones.append(clone);
             renderScene.addItem(new StickGraphicsItem(clone));
@@ -41,7 +41,7 @@ void ImageExport::Render(int option)
         painter.setBackground(QBrush(QColor(Qt::white)));
         renderScene.render(&painter);
         QString itemPath = exportPath;
-        itemPath.insert(exportPath.lastIndexOf("."),"_"+QString::number(f->frameNumber));
+        itemPath.insert(exportPath.lastIndexOf("."),"_"+QString::number(f->frame_number));
         renderImg->save(itemPath);
         painter.end();
         delete renderImg;

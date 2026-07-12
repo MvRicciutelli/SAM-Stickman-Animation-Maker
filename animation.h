@@ -8,19 +8,19 @@ class Animation
 public:
     Animation();
     int version = 1;
-    QList<Frame*> frameList;
-    Frame *frameBuffer;
+    QList<Frame*> frame_list;
+    Frame *frame_buffer;
     Frame * addFrame(QListWidgetItem* item, int pos);
-    Frame* currentFrame;
+    Frame* current_frame;
     /**
      * @brief Accessor for the currently displayed frame.
-     * @return reference to `currentFrame`, so both reads and assignments
+     * @return reference to `current_frame`, so both reads and assignments
      *         (`CurrentFrame() = someFrame`) work exactly like the raw member did.
      *
      * Replaces the `CURRENTFRAME` macro (Phase 5) — same expression, but as a real,
      * symbol-searchable, compiler-checked method instead of blind text substitution.
      */
-    Frame*& CurrentFrame() { return currentFrame; }
+    Frame*& CurrentFrame() { return current_frame; }
     void updateSelection(StickData* item);
     void updateSelection(StickFigure* item);
     void updateSelection(QPointF point);
@@ -36,6 +36,6 @@ public:
     int height;
 };
 Q_DECLARE_METATYPE(Animation*)
-QDataStream &operator<<(QDataStream& stream, const Animation& myAnimation);
-QDataStream &operator>>(QDataStream& stream,Animation& myAnimation);
+QDataStream &operator<<(QDataStream& stream, const Animation& my_animation);
+QDataStream &operator>>(QDataStream& stream,Animation& my_animation);
 #endif // ANIMATION_H

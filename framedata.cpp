@@ -8,14 +8,14 @@ FrameData::FrameData()
 }
 
 /**
- * @details Owns only the figures; totalSticks holds non-owning references into them,
+ * @details Owns only the figures; total_sticks holds non-owning references into them,
  * so freeing the figures is the whole cleanup. This one-liner replaces the old
  * discardScratchFrame()/freeLibraryFrame() flag dances.
  */
 FrameData::~FrameData()
 {
-    qDeleteAll(stickFigures);
-    stickFigures.clear();
+    qDeleteAll(stick_figures);
+    stick_figures.clear();
 }
 
 /**
@@ -25,23 +25,23 @@ FrameData::~FrameData()
 FrameData *FrameData::Clone() const
 {
     FrameData *copy = new FrameData();
-    copy->frameNumber = frameNumber;
-    copy->numOfItems = numOfItems;
-    for (StickFigureData *figure : stickFigures)
-        copy->stickFigures.append(figure->Clone());
+    copy->frame_number = frame_number;
+    copy->num_of_items = num_of_items;
+    for (StickFigureData *figure : stick_figures)
+        copy->stick_figures.append(figure->Clone());
     // rimappa la lista di z-order sui cloni cercando (figura, indice stick) dell'originale
-    for (StickData *ordered_stick : totalSticks) {
-        for (int figure_index = 0; figure_index < stickFigures.count(); figure_index++) {
-            int stick_index = stickFigures[figure_index]->stickList.indexOf(ordered_stick);
+    for (StickData *ordered_stick : total_sticks) {
+        for (int figure_index = 0; figure_index < stick_figures.count(); figure_index++) {
+            int stick_index = stick_figures[figure_index]->stick_list.indexOf(ordered_stick);
             if (stick_index >= 0) {
-                copy->totalSticks.append(copy->stickFigures[figure_index]->stickList[stick_index]);
+                copy->total_sticks.append(copy->stick_figures[figure_index]->stick_list[stick_index]);
                 break;
             }
         }
     }
-    int current_index = stickFigures.indexOf(currentStickFigure);
+    int current_index = stick_figures.indexOf(current_stick_figure);
     if (current_index >= 0)
-        copy->currentStickFigure = copy->stickFigures[current_index];
+        copy->current_stick_figure = copy->stick_figures[current_index];
     return copy;
 }
 
@@ -53,24 +53,24 @@ FrameData *FrameData::Clone() const
  */
 QDataStream &operator<<(QDataStream &stream, const FrameData &frame_data)
 {
-    stream << (int)frame_data.stickFigures.count();
-    stream << frame_data.numOfItems;
-    stream << frame_data.frameNumber;
-    stream << (int)frame_data.stickFigures.indexOf(frame_data.currentStickFigure);
-    if (frame_data.currentStickFigure)
-        stream << (int)frame_data.currentStickFigure->stickList.indexOf(frame_data.currentStickFigure->currentStick);
+    stream << (int)frame_data.stick_figures.count();
+    stream << frame_data.num_of_items;
+    stream << frame_data.frame_number;
+    stream << (int)frame_data.stick_figures.indexOf(frame_data.current_stick_figure);
+    if (frame_data.current_stick_figure)
+        stream << (int)frame_data.current_stick_figure->stick_list.indexOf(frame_data.current_stick_figure->current_stick);
     else
         stream << 0;
-    for (StickFigureData *figure : frame_data.stickFigures)
+    for (StickFigureData *figure : frame_data.stick_figures)
         stream << *figure;
     return stream;
 }
 
 /**
- * @details Mirror of operator<<. totalSticks is rebuilt from each stick's order field
+ * @details Mirror of operator<<. total_sticks is rebuilt from each stick's order field
  * with the same out-of-range guard the legacy operator had (a non-permutation order
  * must not write out of bounds). The current selection is restored via the two indices
- * with the legacy bounds checks; on failure currentStickFigure stays null.
+ * with the legacy bounds checks; on failure current_stick_figure stays null.
  */
 QDataStream &operator>>(QDataStream &stream, FrameData &frame_data)
 {
@@ -78,32 +78,32 @@ QDataStream &operator>>(QDataStream &stream, FrameData &frame_data)
     int currentStickIdx = 0;
     int currentStickFigureIdx = 0;
     stream >> max;
-    stream >> frame_data.numOfItems;
-    stream >> frame_data.frameNumber;
+    stream >> frame_data.num_of_items;
+    stream >> frame_data.frame_number;
     stream >> currentStickFigureIdx;
     stream >> currentStickIdx;
 
-    qDeleteAll(frame_data.stickFigures);
-    frame_data.stickFigures.clear();
-    frame_data.totalSticks.clear();
-    frame_data.currentStickFigure = nullptr;
+    qDeleteAll(frame_data.stick_figures);
+    frame_data.stick_figures.clear();
+    frame_data.total_sticks.clear();
+    frame_data.current_stick_figure = nullptr;
 
     for (int i = 0; i < max; i++) {
         StickFigureData *figure = new StickFigureData();
-        frame_data.stickFigures.append(figure);
+        frame_data.stick_figures.append(figure);
         stream >> *figure;
-        frame_data.totalSticks.append(figure->stickList);
+        frame_data.total_sticks.append(figure->stick_list);
     }
-    for (StickFigureData *figure : frame_data.stickFigures) {
-        for (StickData *stick_data : figure->stickList) {
-            if (stick_data->order >= 0 && stick_data->order < frame_data.totalSticks.count())
-                frame_data.totalSticks[stick_data->order] = stick_data;
+    for (StickFigureData *figure : frame_data.stick_figures) {
+        for (StickData *stick_data : figure->stick_list) {
+            if (stick_data->order >= 0 && stick_data->order < frame_data.total_sticks.count())
+                frame_data.total_sticks[stick_data->order] = stick_data;
         }
     }
-    if (currentStickIdx >= 0 && currentStickFigureIdx >= 0 && currentStickFigureIdx < frame_data.stickFigures.length()) {
-        if (currentStickIdx < frame_data.stickFigures[currentStickFigureIdx]->stickList.length()) {
-            frame_data.currentStickFigure = frame_data.stickFigures[currentStickFigureIdx];
-            frame_data.currentStickFigure->currentStick = frame_data.currentStickFigure->stickList[currentStickIdx];
+    if (currentStickIdx >= 0 && currentStickFigureIdx >= 0 && currentStickFigureIdx < frame_data.stick_figures.length()) {
+        if (currentStickIdx < frame_data.stick_figures[currentStickFigureIdx]->stick_list.length()) {
+            frame_data.current_stick_figure = frame_data.stick_figures[currentStickFigureIdx];
+            frame_data.current_stick_figure->current_stick = frame_data.current_stick_figure->stick_list[currentStickIdx];
         }
     }
     return stream;

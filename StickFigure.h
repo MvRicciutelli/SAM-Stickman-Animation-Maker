@@ -21,28 +21,28 @@ public:
     void  cancelDrawing();
     void deleteStick(int idx);
     void saveStickFigure(QString name);
-    int drawCount;
-    int stickNum = 0;
+    int draw_count;
+    int stick_num = 0;
     int version = 1;
     int selectStick( QPointF * point);
-    QList<StickData*>stickList;
+    QList<StickData*>stick_list;
     void setLineFromPoint(QPointF *point);
-    QLineF lineBuffer;
-    StickData* currentStick = nullptr;
-    StickData* masterStick = nullptr;
-    qreal baseZ;
+    QLineF line_buffer;
+    StickData* current_stick = nullptr;
+    StickData* master_stick = nullptr;
+    qreal base_z;
     void highlight(bool setting);
-    QListWidgetItem* linkedItem;
+    QListWidgetItem* linked_item;
     QGraphicsScene * scene;
     void updateZ(float value);
-    QIcon*stickFigureIcon = nullptr;
-    QPixmap * iconImg = nullptr;
-    QPointF originPosBuffer;
-    float sceneRotationBuffer = 0;
+    QIcon*stick_figure_icon = nullptr;
+    QPixmap * icon_img = nullptr;
+    QPointF origin_pos_buffer;
+    float scene_rotation_buffer = 0;
     QString name;
 
     void updateIcon();
-    bool selectingOrigin = false;
+    bool selecting_origin = false;
     void loadStickFigure(QString name);
     void refresh(int mode = 0);
 
@@ -66,10 +66,10 @@ private:
 
     QPointF p0;
     QPointF p1;
-    StickData* stickBuffer = nullptr; ///< in-progress stick's data; a view is attached separately by the caller (see startDrawing())
+    StickData* stick_buffer = nullptr; ///< in-progress stick's data; a view is attached separately by the caller (see startDrawing())
     int selectOrigin( QPointF * point);
-    StickData* parentBuffer = nullptr;
-    QGraphicsScene * myScene = nullptr;
+    StickData* parent_buffer = nullptr;
+    QGraphicsScene * my_scene = nullptr;
 
 
 };
@@ -79,18 +79,18 @@ Q_DECLARE_METATYPE(StickFigure*)
 /**
  * @brief Streams a live figure by extracting its data first (.stck save path).
  * @param stream destination stream.
- * @param myStickFigure live figure to write.
+ * @param my_stick_figure live figure to write.
  * @return the stream, for chaining.
  */
-QDataStream &operator<<(QDataStream& stream, const StickFigure& myStickFigure);
+QDataStream &operator<<(QDataStream& stream, const StickFigure& my_stick_figure);
 
 /**
  * @brief Streams data into a live figure, attaching it to the scene (.stck load path).
  * @param stream source stream.
- * @param myStickFigure live figure to fill; must have a valid scene member.
+ * @param my_stick_figure live figure to fill; must have a valid scene member.
  * @return the stream, for chaining.
  */
-QDataStream &operator>>(QDataStream& stream,StickFigure& myStickFigure);
+QDataStream &operator>>(QDataStream& stream,StickFigure& my_stick_figure);
 
 /**
  * @brief Snapshots a live figure into a pure-data record (undo/copy/library source).

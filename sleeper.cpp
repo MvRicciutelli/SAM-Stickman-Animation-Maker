@@ -36,8 +36,8 @@ void MySleeper::Stop(){
 Q_SLOT void MySleeper::Connected()
 {
 
-   if (v->myAnimation->frameList.count()>counter && pausePressed == false){
-       //v->moveToFrame(v->myAnimation->frameList[counter]);
+   if (v->my_animation->frame_list.count()>counter && pausePressed == false){
+       //v->moveToFrame(v->my_animation->frame_list[counter]);
        v->displayPreview(counter);
        timer.start();
        counter++;
@@ -54,7 +54,7 @@ Q_SLOT void MySleeper::Connected()
            delete item;
        }
        v->previewList.clear();
-       v->moveToFrame(v->myAnimation->frameList[counter-1]);
+       v->moveToFrame(v->my_animation->frame_list[counter-1]);
        busyPlay = false;
        // evita che 'play' resti pendente dopo l'auto-distruzione (oggi busyPlay già impedisce
        // che venga riletto prima del prossimo click su Play, ma così è sicuro anche in futuro)

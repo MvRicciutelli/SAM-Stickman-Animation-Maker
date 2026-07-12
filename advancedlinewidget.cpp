@@ -24,15 +24,15 @@ AdvancedLineWidget::~AdvancedLineWidget()
 
 void AdvancedLineWidget::on_editLineThicknessSlider_valueChanged(int value)
 {
-    if(V->myAnimation->CurrentFrame()->CurrentStickFigure() != nullptr){
-        if(V->myAnimation->CurrentFrame()->CurrentStick() != nullptr){
+    if(V->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
+        if(V->my_animation->CurrentFrame()->CurrentStick() != nullptr){
             edit_line_thickness_slider->setRange(0,0.5*sqrt(pow(W,2)+pow(H,2)));
             line_edit_thickness_width_spinbox->setRange(0,0.5*sqrt(pow(W,2)+pow(H,2)));
             line_edit_thickness_width_spinbox->setValue(value);
-            V->myAnimation->CurrentFrame()->CurrentStick()->Pen.setWidth(value);
+            V->my_animation->CurrentFrame()->CurrentStick()->pen.setWidth(value);
             V->myPen.setWidth(value);
-            if(V->myAnimation->CurrentFrame()->CurrentStick()->view)
-                V->myAnimation->CurrentFrame()->CurrentStick()->view->refresh(1);
+            if(V->my_animation->CurrentFrame()->CurrentStick()->view)
+                V->my_animation->CurrentFrame()->CurrentStick()->view->refresh(1);
         }
     }
 }

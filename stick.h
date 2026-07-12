@@ -105,7 +105,7 @@ public:
 
     /**
      * @brief Replaces the stick's segment.
-     * @param line new segment; copied into `data->myLine`.
+     * @param line new segment; copied into `data->my_line`.
      */
     void setLine(QLineF* line);
 
@@ -128,7 +128,7 @@ public:
 
     /**
      * @brief Tells whether this stick's data is its figure's master (tree root).
-     * @return true when the owning figure's masterStick is this stick's data.
+     * @return true when the owning figure's master_stick is this stick's data.
      */
     bool isMaster() const;
 
@@ -143,7 +143,7 @@ public:
     float angleBuffer2 = 0;          ///< usato nella rotazione di tutto lo stickfigure
     QRectF imgRect;                  ///< legacy image placement rect (derived, not serialized)
     QGraphicsEllipseItem* stickHandle[2]; ///< red/green endpoint handles shown on the scene
-    StickFigure* myStickFigure = nullptr; ///< owning figure; needed by isMaster()
+    StickFigure* my_stick_figure = nullptr; ///< owning figure; needed by isMaster()
 
     /**
      * @brief Recomputes the cached bounding rect.
@@ -178,7 +178,7 @@ public:
 
     /**
      * @brief Removes one image variant (and its list widget entry).
-     * @param idx index into stickImgList/imgNameList.
+     * @param idx index into stick_img_list/img_name_list.
      */
     void removeImgFromList(int idx);
 

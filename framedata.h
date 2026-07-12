@@ -22,7 +22,7 @@ public:
     FrameData();
 
     /**
-     * @brief Frees the owned stickfigures (totalSticks only references their sticks).
+     * @brief Frees the owned stickfigures (total_sticks only references their sticks).
      */
     virtual ~FrameData();
 
@@ -32,11 +32,11 @@ public:
      */
     FrameData *Clone() const;
 
-    QList<StickFigureData*> stickFigures;          ///< owned figures of this frame
-    QList<StickData*> totalSticks;                 ///< frame-wide draw order; references sticks owned by stickFigures
-    StickFigureData *currentStickFigure = nullptr; ///< remembered selection; points into stickFigures
-    int frameNumber = 0;                           ///< position of the frame in the animation
-    int numOfItems = 0;                            ///< count of sticks meant to be on scene (legacy semantics)
+    QList<StickFigureData*> stick_figures;          ///< owned figures of this frame
+    QList<StickData*> total_sticks;                 ///< frame-wide draw order; references sticks owned by stick_figures
+    StickFigureData *current_stick_figure = nullptr; ///< remembered selection; points into stick_figures
+    int frame_number = 0;                           ///< position of the frame in the animation
+    int num_of_items = 0;                            ///< count of sticks meant to be on scene (legacy semantics)
 };
 
 /**
@@ -48,7 +48,7 @@ public:
 QDataStream &operator<<(QDataStream &stream, const FrameData &frame_data);
 
 /**
- * @brief Deserializes a frame record, rebuilding totalSticks from each stick's order.
+ * @brief Deserializes a frame record, rebuilding total_sticks from each stick's order.
  * @param stream source stream.
  * @param frame_data record to fill (existing figures are freed defensively).
  * @return the stream, for chaining.

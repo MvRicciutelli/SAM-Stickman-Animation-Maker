@@ -52,8 +52,8 @@ void MyMainWindow::on_actionsave_triggered()
 {
     QString fileName = QFileDialog::getSaveFileName(this,tr("Save StickFigure"),
                        my_stick_figures_folder.path(), "Stickfigure (*.stck)");
-    if(fileName.length()>1 && view->myAnimation->CurrentFrame()->CurrentStickFigure()){
-        view->myAnimation->CurrentFrame()->CurrentStickFigure()->saveStickFigure(fileName);
+    if(fileName.length()>1 && view->my_animation->CurrentFrame()->CurrentStickFigure()){
+        view->my_animation->CurrentFrame()->CurrentStickFigure()->saveStickFigure(fileName);
     }
 }
 
@@ -65,11 +65,11 @@ void MyMainWindow::on_actionload_triggered()
     if(QFile::exists(fileName)){
         view->storeUndo();
         central_w->addStick();
-        view->myAnimation->CurrentFrame()->CurrentStickFigure()->loadStickFigure(fileName);
-        for(StickData*s:view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
-            view->myAnimation->CurrentFrame()->totalSticks.append(s);
+        view->my_animation->CurrentFrame()->CurrentStickFigure()->loadStickFigure(fileName);
+        for(StickData*s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
+            view->my_animation->CurrentFrame()->total_sticks.append(s);
         }
-        view->addHandles(view->myAnimation->CurrentFrame()->CurrentStickFigure());
+        view->addHandles(view->my_animation->CurrentFrame()->CurrentStickFigure());
     }
 }
 
@@ -81,7 +81,7 @@ void MyMainWindow::on_actionsave_animation_triggered()
     // vuoto e non deve invalidare il path del file gia' aperto (rompe autosave e "Save")
     if(fileName.length()>1){
         animation_path = fileName;
-        view->myAnimation->saveAnimation(fileName);
+        view->my_animation->saveAnimation(fileName);
         opCount = 0;
     }
 }
@@ -96,11 +96,11 @@ void MyMainWindow::on_actionload_animation_triggered()
         view->clearUndo();
         animation_path = fileName;
         loadFile = true;
-        view->myAnimation->loadAnimation(fileName);
+        view->my_animation->loadAnimation(fileName);
         // Animation::operator>> gia' applica W/H/my_rect dal file caricato; se il file e'
-        // corrotto puo' interrompersi lasciando frameList vuota, quindi va controllata qui
-        if(!view->myAnimation->frameList.isEmpty()){
-            view->moveToFrame(view->myAnimation->frameList[0]);
+        // corrotto puo' interrompersi lasciando frame_list vuota, quindi va controllata qui
+        if(!view->my_animation->frame_list.isEmpty()){
+            view->moveToFrame(view->my_animation->frame_list[0]);
         }
         loadFile = false;
         opCount = 0;
@@ -148,7 +148,7 @@ void MyMainWindow::ExportAvi(){
                     <<"24"
                     <<QString::number(W)
                     <<QString::number(H)
-                    <<QString::number(view->myAnimation->frameList.count());
+                    <<QString::number(view->my_animation->frame_list.count());
     // la path in cui si trova l'é'eseguibile di marionetta
     QString exePath = QCoreApplication::applicationDirPath();
     // estrai il file exporter di avi
@@ -182,7 +182,7 @@ void MyMainWindow::ExportImageSequence(QString path, int option){
 void MyMainWindow::on_actionsave_animation_current_triggered()
 {
     if(QFile::exists(animation_path)){
-        view->myAnimation->saveAnimation(animation_path);
+        view->my_animation->saveAnimation(animation_path);
         opCount = 0;
     }
     else{
@@ -205,7 +205,7 @@ void MyMainWindow::on_actionNew_Blank_Animation_triggered()
         // il vecchio file salvato con la nuova animazione vuota
         view->clearUndo();
         animation_path.clear();
-        view->myAnimation->clearAnimation();
+        view->my_animation->clearAnimation();
         myWidget->addFrame();
         opCount = 0;
     }

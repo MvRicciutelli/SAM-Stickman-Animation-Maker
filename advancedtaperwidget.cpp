@@ -32,80 +32,80 @@ AdvancedTaperWidget::~AdvancedTaperWidget()
 void AdvancedTaperWidget::on_taperWidthSlider_valueChanged(int value)
 {
     ui->taperWidthSpinbox->setValue(value);
-    if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
+    if(V->my_animation->CurrentFrame()->CurrentStick()==nullptr)
         return;
     if(taperWSliderFlag == false){
         taperWSliderFlag = true;
 
         V->storeUndo();
     }
-    V->myAnimation->CurrentFrame()->CurrentStick()->imgWScale = value;
-    V->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
+    V->my_animation->CurrentFrame()->CurrentStick()->img_w_scale = value;
+    V->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
 
 }
 
 void AdvancedTaperWidget::on_taperWidthSlider_sliderReleased()
 {
     taperWSliderFlag = false;
-    V->myAnimation->currentFrame->updateIcon();
+    V->my_animation->current_frame->updateIcon();
 }
 
 void AdvancedTaperWidget::on_taperHeightSpinbox_valueChanged(int arg1)
 {
     ui->taperHeightSlider->setValue(arg1);
-    if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
+    if(V->my_animation->CurrentFrame()->CurrentStick()==nullptr)
         return;
-    V->myAnimation->CurrentFrame()->CurrentStick()->imgHScale = arg1;
-    V->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
+    V->my_animation->CurrentFrame()->CurrentStick()->img_h_scale = arg1;
+    V->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
     ui->taperHeightSlider->setValue(arg1);
 }
 
 void AdvancedTaperWidget::on_taperHeightSlider_valueChanged(int value)
 {
     ui->taperHeightSpinbox->setValue(value);
-    if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
+    if(V->my_animation->CurrentFrame()->CurrentStick()==nullptr)
         return;
     if(taperHSliderFlag == false){
         taperHSliderFlag = true;
 
         V->storeUndo();
     }
-    V->myAnimation->CurrentFrame()->CurrentStick()->imgHScale = value;
-    V->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
+    V->my_animation->CurrentFrame()->CurrentStick()->img_h_scale = value;
+    V->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
 }
 
 void AdvancedTaperWidget::on_taperHeightSlider_sliderReleased()
 {
     taperHSliderFlag = false;
-    V->myAnimation->currentFrame->updateIcon();
+    V->my_animation->current_frame->updateIcon();
 }
 
 void AdvancedTaperWidget::on_taperWidthSpinbox_valueChanged(int arg1)
 {
     ui->taperWidthSlider->setValue(arg1);
-    if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
+    if(V->my_animation->CurrentFrame()->CurrentStick()==nullptr)
         return;
-    V->myAnimation->CurrentFrame()->CurrentStick()->imgWScale = arg1;
-    V->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
+    V->my_animation->CurrentFrame()->CurrentStick()->img_w_scale = arg1;
+    V->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
     ui->taperWidthSlider->setValue(arg1);
 }
 
 void AdvancedTaperWidget::on_hardTopTaperCheck_stateChanged(int arg1)
 {
-    if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
+    if(V->my_animation->CurrentFrame()->CurrentStick()==nullptr)
         return;
     V->storeUndo();
-    V->myAnimation->CurrentFrame()->CurrentStick()->hardTop=((bool) arg1);
-    V->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
-    V->myAnimation->currentFrame->updateIcon();
+    V->my_animation->CurrentFrame()->CurrentStick()->hard_top=((bool) arg1);
+    V->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
+    V->my_animation->current_frame->updateIcon();
 }
 
 void AdvancedTaperWidget::on_hardBottomTaperCheck_stateChanged(int arg1)
 {
-   if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
+   if(V->my_animation->CurrentFrame()->CurrentStick()==nullptr)
        return;
    V->storeUndo();
-   V->myAnimation->CurrentFrame()->CurrentStick()->hardBottom=((bool) arg1);
-   V->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
-   V->myAnimation->currentFrame->updateIcon();
+   V->my_animation->CurrentFrame()->CurrentStick()->hard_bottom=((bool) arg1);
+   V->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
+   V->my_animation->current_frame->updateIcon();
 }

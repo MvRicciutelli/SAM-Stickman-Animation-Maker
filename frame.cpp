@@ -11,15 +11,15 @@ extern QListWidget * my_stick_figure_widget_list;
 Frame::Frame()
 {
     frameIcon       = new QIcon();
-    iconImg         = new QPixmap(50,50);
-    currentStickFigure = nullptr;
+    icon_img         = new QPixmap(50,50);
+    current_stick_figure = nullptr;
 }
 Frame::~Frame(){
-    for(StickFigure* S: stickFigures)
+    for(StickFigure* S: stick_figures)
     {
         delete S;
     }
-    delete iconImg;
+    delete icon_img;
     delete frameIcon;
     //delete renderImg;
 }
@@ -31,7 +31,7 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     QString myName;
     if(name.count()== 0){
         int intName = 0;
-        if(!stickFigures.isEmpty()){
+        if(!stick_figures.isEmpty()){
             intName = my_stick_figure_widget_list->currentRow()+1;
         }
 
@@ -44,88 +44,88 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
 
     QListWidgetItem * addedItem = new QListWidgetItem();
 
-    if(currentStickFigure!=nullptr)
+    if(current_stick_figure!=nullptr)
     {
-        if(!stickFigures.isEmpty() && !currentStickFigure->stickList.isEmpty())
+        if(!stick_figures.isEmpty() && !current_stick_figure->stick_list.isEmpty())
         {
-            currentStickFigure->highlight(false); //de highlight old selection
+            current_stick_figure->highlight(false); //de highlight old selection
         }
     }
-    stickFigureBuffer = new StickFigure(addedItem);
-    stickFigures.append(stickFigureBuffer);
+    stick_figure_buffer = new StickFigure(addedItem);
+    stick_figures.append(stick_figure_buffer);
     //seleziona l'ordine z in base all'ordine di creazione
-    stickFigureBuffer->baseZ = stickFigures.count();
+    stick_figure_buffer->base_z = stick_figures.count();
     //aggiorna lo stickfigure corrente
-    currentStickFigure = stickFigureBuffer;
-    currentStickFigure->name = myName;
-    QVariant newData(QVariant::fromValue(currentStickFigure));
+    current_stick_figure = stick_figure_buffer;
+    current_stick_figure->name = myName;
+    QVariant newData(QVariant::fromValue(current_stick_figure));
     addedItem->setData(Qt::UserRole,newData);
     addedItem->setData(Qt::DisplayRole,myName);
-    addedItem->setIcon(*currentStickFigure->stickFigureIcon);
+    addedItem->setIcon(*current_stick_figure->stick_figure_icon);
     myListWidget->insertItem(myListWidget->currentRow()+1,addedItem);
     // update current stickfigure
-    currentStickFigure->highlight(false); //de highlight old selection
-    currentStickFigure->highlight(true); //highlight new one
+    current_stick_figure->highlight(false); //de highlight old selection
+    current_stick_figure->highlight(true); //highlight new one
     // update current stick
     scene->clearSelection(); //clear scene selection
-    if(!currentStickFigure->stickList.isEmpty())
+    if(!current_stick_figure->stick_list.isEmpty())
     {
-        selectStick(currentStickFigure); // puo essere ridontante in quanto ci sta la callback di sticklayerView_currentItemChanged//update selected stick
+        selectStick(current_stick_figure); // puo essere ridontante in quanto ci sta la callback di sticklayerView_currentItemChanged//update selected stick
     }
     int tempIndex = myListWidget->currentRow();
     myListWidget->clearSelection();
     addedItem->setSelected( true);
     myListWidget->setCurrentRow(tempIndex+1);
-    currentStickFigure->scene = scene;
+    current_stick_figure->scene = scene;
 
-    return stickFigureBuffer;
+    return stick_figure_buffer;
 }
 // Frame::addStickFigureToLibrary è stato eliminato (Phase 2b): la libreria contiene
 // StickFigureData e viene gestita interamente da MyView::addStickFigureToLibrary
 StickFigure* Frame::removeStickFigure(StickFigure* toRemove)
 {
-    if(stickFigures.count() > 0)
+    if(stick_figures.count() > 0)
     {
-        stickFigures.removeAll(toRemove);
+        stick_figures.removeAll(toRemove);
         delete toRemove;
-        if(!stickFigures.isEmpty())
-            currentStickFigure = stickFigures[0];
+        if(!stick_figures.isEmpty())
+            current_stick_figure = stick_figures[0];
         else
         {
             qDebug("removed all sticks");
-            currentStickFigure = nullptr;
+            current_stick_figure = nullptr;
         }
-        stickFigureBuffer = currentStickFigure;
+        stick_figure_buffer = current_stick_figure;
 
     }
-    return currentStickFigure;
+    return current_stick_figure;
 }
 StickData *Frame::selectStick(StickFigure* S, StickData* s)
 {
     int stickIdx = 0;
     if(s!=nullptr){
-        if(S->stickList.contains(s))
-            stickIdx = S->stickList.indexOf(s);
+        if(S->stick_list.contains(s))
+            stickIdx = S->stick_list.indexOf(s);
     }
     S->highlight(true);
-    if(S->stickList[stickIdx]->view)
-        S->stickList[stickIdx]->view->setSelected(true);
-    S->currentStick = S->stickList[stickIdx];
-    if(S->currentStick->view)
-        S->currentStick->view->selected = true;
+    if(S->stick_list[stickIdx]->view)
+        S->stick_list[stickIdx]->view->setSelected(true);
+    S->current_stick = S->stick_list[stickIdx];
+    if(S->current_stick->view)
+        S->current_stick->view->selected = true;
 
-    return S->stickList[stickIdx];
+    return S->stick_list[stickIdx];
 }
 void Frame::refresh(int mode){
-    for(StickData*s:totalSticks){
+    for(StickData*s:total_sticks){
         if(s->view)
             scene->removeItem(s->view);
     }
-    for(StickData*s:totalSticks){
+    for(StickData*s:total_sticks){
         if(s->view)
             scene->addItem(s->view);
     }
-    for(StickFigure*S:stickFigures){
+    for(StickFigure*S:stick_figures){
         S->refresh(mode);
     }
 }
@@ -136,11 +136,11 @@ StickData *Frame::selectStick(QPointF point)
     int idxBuffer;
     int selectedIdx = -1;
     StickFigure *selectedStickFigure;
-    for(StickFigure * S: stickFigures)
+    for(StickFigure * S: stick_figures)
     {
         // su un criterio di distanza dall'handle utile, scegli l'item stick più vicino per ogni stickfigure
             idxBuffer = S->selectStick( &point);
-            distBuffer = QLineF(S->stickList[idxBuffer]->myLine.p2(),point).length();
+            distBuffer = QLineF(S->stick_list[idxBuffer]->my_line.p2(),point).length();
             //scegli il più vicino tra tutti gli stickfigure
             if(selectedIdx == -1 || (distBuffer<minDist))
             {
@@ -149,11 +149,11 @@ StickData *Frame::selectStick(QPointF point)
                 selectedStickFigure = S;
             }
     }
-    if(selectedStickFigure->stickList[selectedIdx]->view)
-        selectedStickFigure->stickList[selectedIdx]->view->setSelected(true); //for scene
-    if(selectedStickFigure->currentStick->view)
-        selectedStickFigure->currentStick->view->selected = true; //for rendering purpose
-    return selectedStickFigure->stickList[selectedIdx];
+    if(selectedStickFigure->stick_list[selectedIdx]->view)
+        selectedStickFigure->stick_list[selectedIdx]->view->setSelected(true); //for scene
+    if(selectedStickFigure->current_stick->view)
+        selectedStickFigure->current_stick->view->selected = true; //for rendering purpose
+    return selectedStickFigure->stick_list[selectedIdx];
 }
 /**
  * @details Snapshot copy of a live frame into pure data: every figure is extracted,
@@ -164,21 +164,21 @@ StickData *Frame::selectStick(QPointF point)
 FrameData *ExtractFrameData(const Frame &source_frame)
 {
     FrameData *data = new FrameData();
-    data->frameNumber = source_frame.frameNumber;
-    data->numOfItems = source_frame.numOfItems;
+    data->frame_number = source_frame.frame_number;
+    data->num_of_items = source_frame.num_of_items;
     QHash<const StickData*, StickData*> live_to_data;
-    for (StickFigure *figure : source_frame.stickFigures) {
+    for (StickFigure *figure : source_frame.stick_figures) {
         StickFigureData *figure_data = ExtractStickFigureData(*figure);
-        data->stickFigures.append(figure_data);
-        for (int i = 0; i < figure->stickList.count(); i++)
-            live_to_data.insert(figure->stickList[i], figure_data->stickList[i]);
-        if (figure == source_frame.currentStickFigure)
-            data->currentStickFigure = figure_data;
+        data->stick_figures.append(figure_data);
+        for (int i = 0; i < figure->stick_list.count(); i++)
+            live_to_data.insert(figure->stick_list[i], figure_data->stick_list[i]);
+        if (figure == source_frame.current_stick_figure)
+            data->current_stick_figure = figure_data;
     }
-    for (StickData *ordered_stick : source_frame.totalSticks) {
+    for (StickData *ordered_stick : source_frame.total_sticks) {
         StickData *mapped = live_to_data.value(ordered_stick, nullptr);
-        if (mapped) // una voce stantia in totalSticks non deve propagarsi allo snapshot
-            data->totalSticks.append(mapped);
+        if (mapped) // una voce stantia in total_sticks non deve propagarsi allo snapshot
+            data->total_sticks.append(mapped);
     }
     return data;
 }
@@ -187,46 +187,46 @@ FrameData *ExtractFrameData(const Frame &source_frame)
  * @details Rebuilds a live frame's content from data, replicating what the legacy
  * operator>> did per configuration: one live figure per data figure (created directly,
  * NOT via addStickFigure — no list-widget or selection side effects, moveToFrame()
- * rebuilds those for the displayed frame), totalSticks rebuilt from each stick's order
+ * rebuilds those for the displayed frame), total_sticks rebuilt from each stick's order
  * with the legacy out-of-range guard, current selection restored from the data record
  * with the legacy bounds checks.
  */
 void PopulateLiveFrame(Frame *target_frame, const FrameData &source_data,
                        bool attach_to_scene, bool update_icons)
 {
-    target_frame->numOfItems = source_data.numOfItems;
-    target_frame->frameNumber = source_data.frameNumber;
-    target_frame->totalSticks.clear();
-    for (StickFigureData *figure_data : source_data.stickFigures) {
+    target_frame->num_of_items = source_data.num_of_items;
+    target_frame->frame_number = source_data.frame_number;
+    target_frame->total_sticks.clear();
+    for (StickFigureData *figure_data : source_data.stick_figures) {
         QListWidgetItem *added_item = new QListWidgetItem();
         StickFigure *figure = new StickFigure(added_item);
-        target_frame->stickFigures.append(figure);
-        figure->baseZ = target_frame->stickFigures.count();
+        target_frame->stick_figures.append(figure);
+        figure->base_z = target_frame->stick_figures.count();
         figure->scene = target_frame->scene;
-        target_frame->currentStickFigure = figure;
+        target_frame->current_stick_figure = figure;
         PopulateLiveStickFigure(figure, *figure_data, attach_to_scene, update_icons);
         added_item->setData(Qt::DisplayRole, figure->name);
-        for (StickData *s : figure->stickList)
-            target_frame->totalSticks.append(s);
+        for (StickData *s : figure->stick_list)
+            target_frame->total_sticks.append(s);
     }
-    for (StickFigure *figure : target_frame->stickFigures) {
-        for (StickData *s : figure->stickList) {
+    for (StickFigure *figure : target_frame->stick_figures) {
+        for (StickData *s : figure->stick_list) {
             // s->order presuppone di formare una permutazione perfetta 0..count-1: se per qualche
             // motivo non lo è (es. mai passato da updateFrameOrder()), senza questo controllo si
-            // scrive fuori dai limiti di totalSticks (corruzione dell'heap, crash non immediato)
-            if (s->order >= 0 && s->order < target_frame->totalSticks.count())
-                target_frame->totalSticks[s->order] = s;
+            // scrive fuori dai limiti di total_sticks (corruzione dell'heap, crash non immediato)
+            if (s->order >= 0 && s->order < target_frame->total_sticks.count())
+                target_frame->total_sticks[s->order] = s;
         }
     }
     // ripristina la selezione corrente mappando i puntatori del record dati sugli indici
     // delle figure vive appena create (il target parte senza figure, quindi 1:1)
-    target_frame->currentStickFigure = nullptr;
-    int figure_index = source_data.stickFigures.indexOf(source_data.currentStickFigure);
-    if (source_data.currentStickFigure && figure_index >= 0 && figure_index < target_frame->stickFigures.length()) {
-        int stick_index = source_data.currentStickFigure->stickList.indexOf(source_data.currentStickFigure->currentStick);
-        if (stick_index >= 0 && stick_index < target_frame->stickFigures[figure_index]->stickList.length()) {
-            target_frame->currentStickFigure = target_frame->stickFigures[figure_index];
-            target_frame->currentStickFigure->currentStick = target_frame->currentStickFigure->stickList[stick_index];
+    target_frame->current_stick_figure = nullptr;
+    int figure_index = source_data.stick_figures.indexOf(source_data.current_stick_figure);
+    if (source_data.current_stick_figure && figure_index >= 0 && figure_index < target_frame->stick_figures.length()) {
+        int stick_index = source_data.current_stick_figure->stick_list.indexOf(source_data.current_stick_figure->current_stick);
+        if (stick_index >= 0 && stick_index < target_frame->stick_figures[figure_index]->stick_list.length()) {
+            target_frame->current_stick_figure = target_frame->stick_figures[figure_index];
+            target_frame->current_stick_figure->current_stick = target_frame->current_stick_figure->stick_list[stick_index];
         }
     }
 }
@@ -235,8 +235,8 @@ void PopulateLiveFrame(Frame *target_frame, const FrameData &source_data,
  * @details Wrapper kept for the whole-animation file save path (Animation's
  * operator<< streams every frame through here). Byte layout unchanged.
  */
-QDataStream & operator<< (QDataStream& stream, const Frame& myFrame){
-    FrameData *data = ExtractFrameData(myFrame);
+QDataStream & operator<< (QDataStream& stream, const Frame& my_frame){
+    FrameData *data = ExtractFrameData(my_frame);
     stream << *data;
     delete data;
     return stream;
@@ -247,24 +247,24 @@ QDataStream & operator<< (QDataStream& stream, const Frame& myFrame){
  * and icons unrendered (the historical loadingAnimationFlag behavior) because
  * moveToFrame() attaches and refreshes the frame that actually gets displayed.
  */
-QDataStream & operator>> (QDataStream& stream, Frame& myFrame){
+QDataStream & operator>> (QDataStream& stream, Frame& my_frame){
     FrameData data;
     stream >> data;
-    PopulateLiveFrame(&myFrame, data, false, false);
+    PopulateLiveFrame(&my_frame, data, false, false);
     return stream;
 }
 float Frame::minMaxZ(int option){
-    if(totalSticks.isEmpty())
+    if(total_sticks.isEmpty())
         return 0;
-    float peak = totalSticks[0]->Z;
-    for(StickData*s:totalSticks){
+    float peak = total_sticks[0]->z;
+    for(StickData*s:total_sticks){
         if(option){
-            if(s->Z>peak)
-                peak = s->Z;
+            if(s->z>peak)
+                peak = s->z;
         }
         else{
-            if(s->Z<peak)
-                peak = s->Z;
+            if(s->z<peak)
+                peak = s->z;
         }
     }
     return peak;
@@ -272,9 +272,9 @@ float Frame::minMaxZ(int option){
 void Frame::stickfigureToBottom(StickFigure* S){
     S->updateZ(minMaxZ(0));
     int min = -1;
-    for(int j = totalSticks.length()-1;j>min;j--){
-        if(S->stickList.contains(totalSticks[j])){
-            totalSticks.move(j,0);
+    for(int j = total_sticks.length()-1;j>min;j--){
+        if(S->stick_list.contains(total_sticks[j])){
+            total_sticks.move(j,0);
             min++;
             j++;
         }
@@ -283,10 +283,10 @@ void Frame::stickfigureToBottom(StickFigure* S){
 }
 void Frame::stickfigureToTop(StickFigure* S){
     S->updateZ(minMaxZ(1));
-    int max = totalSticks.length()-1;
+    int max = total_sticks.length()-1;
     for(int j = 0; j<max;j++){
-        if(S->stickList.contains(totalSticks[j])){
-            totalSticks.move(totalSticks.indexOf(totalSticks[j]),max);
+        if(S->stick_list.contains(total_sticks[j])){
+            total_sticks.move(total_sticks.indexOf(total_sticks[j]),max);
             j--;
             max--;
         }
@@ -300,33 +300,33 @@ void Frame::stickfigureAboveBelow(StickFigure* toMove, StickFigure *previous, in
     int peakIdx = 0;
     QList<StickData*> sticksToMove;
     if(mode == 1){
-        for(int j = totalSticks.length()-1; j >-1 ;j--){
-            if(previous->stickList.contains(totalSticks[j])){
+        for(int j = total_sticks.length()-1; j >-1 ;j--){
+            if(previous->stick_list.contains(total_sticks[j])){
                 peakIdx = j; // il più alto che deve superare toMove
                 break;
             }
         }
-        for(StickData*s:toMove->stickList){
-            if(totalSticks.indexOf(s)<peakIdx)
+        for(StickData*s:toMove->stick_list){
+            if(total_sticks.indexOf(s)<peakIdx)
                 sticksToMove.append(s);
         }
         for(StickData*s:sticksToMove){
-            totalSticks.move(totalSticks.indexOf(s),peakIdx);
+            total_sticks.move(total_sticks.indexOf(s),peakIdx);
         }
     }
     else{
-        for(int j = 0; j<totalSticks.length();j++){
-            if(previous->stickList.contains(totalSticks[j])){
+        for(int j = 0; j<total_sticks.length();j++){
+            if(previous->stick_list.contains(total_sticks[j])){
                 peakIdx = j; // il piu basso, sotto al quale si deve abbassare il toMove
                 break;
             }
         }
-        for(StickData*s:toMove->stickList){
-            if(totalSticks.indexOf(s)>peakIdx)
+        for(StickData*s:toMove->stick_list){
+            if(total_sticks.indexOf(s)>peakIdx)
                 sticksToMove.prepend(s);
         }
         for(StickData*s:sticksToMove){
-            totalSticks.move(totalSticks.indexOf(s),peakIdx);
+            total_sticks.move(total_sticks.indexOf(s),peakIdx);
         }
     }
 
@@ -341,37 +341,37 @@ void Frame::updateIcon()
 {
     //crea una scena fittizia, falla bianca e delle stesse dimensioni di quella principale
     QGraphicsScene icoScene;
-    iconImg->fill(Qt::white);
+    icon_img->fill(Qt::white);
     icoScene.setBackgroundBrush(QBrush(QColor(Qt::white)));
     icoScene.setSceneRect(scene->sceneRect());
     QList<StickData*> renderClones;
-    for(StickFigure *S:stickFigures)
+    for(StickFigure *S:stick_figures)
     {
-        for(StickData* s: S->stickList){
+        for(StickData* s: S->stick_list){
             StickData* clone = s->Clone();
             renderClones.append(clone);
             icoScene.addItem(new StickGraphicsItem(clone));
         }
     }
     // crea un painter che disegni sull'immagine
-    QPainter painter(iconImg);
+    QPainter painter(icon_img);
     // renderizza dalla scena sull'immagine mediante il painter
     icoScene.render(&painter);
     // disegna il numero del frame direttamente sull'iconea (fascia scura semi-trasparente in basso,
     // testo bianco sopra): affidarsi all'etichetta nativa della QListWidgetItem in IconMode non
     // mostrava il numero in modo affidabile, quindi lo "cuociamo" nell'immagine stessa
-    QRectF numberBand(0, iconImg->height()-14, iconImg->width(), 14);
+    QRectF numberBand(0, icon_img->height()-14, icon_img->width(), 14);
     painter.fillRect(numberBand, QColor(0,0,0,160));
     painter.setPen(Qt::white);
     QFont numberFont = painter.font();
     numberFont.setPointSize(8);
     painter.setFont(numberFont);
-    painter.drawText(numberBand, Qt::AlignCenter, QString::number(frameNumber));
+    painter.drawText(numberBand, Qt::AlignCenter, QString::number(frame_number));
     // imposta l'iconea
     delete frameIcon;
-    frameIcon = new QIcon(*iconImg);
-    linkedItem->setIcon(*frameIcon);
-    linkedItem->setData(Qt::DisplayRole, QString()); // il numero è già nell'iconea: evita di mostrarlo due volte
+    frameIcon = new QIcon(*icon_img);
+    linked_item->setIcon(*frameIcon);
+    linked_item->setData(Qt::DisplayRole, QString()); // il numero è già nell'iconea: evita di mostrarlo due volte
 
     painter.end();
     icoScene.clear();
@@ -388,8 +388,8 @@ void Frame::updateRender(){
  * function to duplicate.
  */
 void Frame::clearFrame(){
-    qDeleteAll(stickFigures);
-    stickFigures.clear();
+    qDeleteAll(stick_figures);
+    stick_figures.clear();
 
 }
 
@@ -400,18 +400,18 @@ void Frame::normalizeDepth()
 }
 void Frame::cleanTotalSticks(void){
     QList<StickData*> temp;
-    for(StickFigure* S:stickFigures){
-        for(StickData *s:S->stickList){
-            if(!totalSticks.contains(s)){
-                totalSticks.insert(s->order,s);
+    for(StickFigure* S:stick_figures){
+        for(StickData *s:S->stick_list){
+            if(!total_sticks.contains(s)){
+                total_sticks.insert(s->order,s);
                 temp.append(s);
 
             }
         }
     }
-    for(StickData*s:totalSticks){
+    for(StickData*s:total_sticks){
         if(!temp.contains(s)){
-            totalSticks.removeAll(s);
+            total_sticks.removeAll(s);
         }
     }
 }

@@ -31,25 +31,25 @@ void AdvancedTab::on_imgHOffsetSpinbox_valueChanged(int arg1)
 void AdvancedTab::on_rectWidthSlider_valueChanged(int value)
 {
     ui->rectWidthSpinbox->setValue(value);
-    if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
+    if(V->my_animation->CurrentFrame()->CurrentStick()==nullptr)
         return;
     if(rectWSliderFlag == false){
         rectWSliderFlag = true;
 
         V->storeUndo();
     }
-    V->myAnimation->CurrentFrame()->CurrentStick()->imgWScale = value;
-    V->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
+    V->my_animation->CurrentFrame()->CurrentStick()->img_w_scale = value;
+    V->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
 
 }
 
 void AdvancedTab::on_rectWidthSpinbox_valueChanged(int arg1)
 {
     ui->rectWidthSlider->setValue(arg1);
-    if(V->myAnimation->CurrentFrame()->CurrentStick()==nullptr)
+    if(V->my_animation->CurrentFrame()->CurrentStick()==nullptr)
         return;
-    V->myAnimation->CurrentFrame()->CurrentStick()->imgWScale = arg1;
-    V->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
+    V->my_animation->CurrentFrame()->CurrentStick()->img_w_scale = arg1;
+    V->my_animation->CurrentFrame()->CurrentStickFigure()->refresh();
     ui->rectWidthSlider->setValue(arg1);
 }
 

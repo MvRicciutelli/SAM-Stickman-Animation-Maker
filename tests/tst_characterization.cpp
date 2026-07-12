@@ -26,8 +26,8 @@ class TestCharacterization : public QObject
 
     MyView *view = nullptr;
 
-    Frame *CurrentFrame() { return view->myAnimation->currentFrame; }
-    StickFigure *CurrentStickFigure() { return CurrentFrame()->currentStickFigure; }
+    Frame *CurrentFrame() { return view->my_animation->current_frame; }
+    StickFigure *CurrentStickFigure() { return CurrentFrame()->current_stick_figure; }
 
     // replicates Widget::addStick() (widget.cpp:421)
     StickFigure *AddStick(const QString &name = QString())
@@ -40,8 +40,8 @@ class TestCharacterization : public QObject
     {
         view->storeUndo(CMD_ADDFRAME);
         int pos = 0;
-        if (view->myAnimation->frameList.count() >= 1)
-            pos = CurrentFrame()->frameNumber + 1;
+        if (view->my_animation->frame_list.count() >= 1)
+            pos = CurrentFrame()->frame_number + 1;
         Frame *added_frame = view->setUpFrame(pos);
         view->moveToFrame(added_frame);
         AddStick();
@@ -55,19 +55,19 @@ class TestCharacterization : public QObject
         StickFigure *figure = CurrentStickFigure();
         view->storeUndo();
         figure->startDrawing(&from, view->myPen, view->myBrush);
-        StickData *drawn = figure->currentStick;
+        StickData *drawn = figure->current_stick;
         FramePresenter::AttachView(drawn, scene);
         drawn->view->selected = true;
-        drawn->hardTop = hard_top_check->isChecked();
-        drawn->hardBottom = hard_bottom_check->isChecked();
-        drawn->Pen = view->myPen;
+        drawn->hard_top = hard_top_check->isChecked();
+        drawn->hard_bottom = hard_bottom_check->isChecked();
+        drawn->pen = view->myPen;
         figure->endDrawing(&to);
         scene->addItem(drawn->view->stickHandle[0]);
         scene->addItem(drawn->view->stickHandle[1]);
         CurrentFrame()->updateIcon();
-        view->myAnimation->updateTab(drawn->stickType);
-        CurrentFrame()->totalSticks.append(drawn);
-        view->myAnimation->updateSelection(drawn);
+        view->my_animation->updateTab(drawn->stick_type);
+        CurrentFrame()->total_sticks.append(drawn);
+        view->my_animation->updateSelection(drawn);
         return drawn;
     }
 
@@ -120,7 +120,7 @@ private slots:
         view = new MyView;
         V = view;
         view->setScene(scene);
-        view->myAnimation->scene = scene;
+        view->my_animation->scene = scene;
 
         advanced_img_tab = new QWidget;
         advanced_line_tab = new AdvancedLineWidget;
@@ -140,21 +140,21 @@ private slots:
         onion_offset = QPointF(-W / 10.0, -H / 10.0);
 
         AddFrame();
-        CurrentFrame()->currentStickFigure = CurrentFrame()->stickFigures[0];
+        CurrentFrame()->current_stick_figure = CurrentFrame()->stick_figures[0];
     }
 
     void StickLineRoundTrip()
     {
         StickData source;
-        source.myLine = QLineF(1, 2, 3, 4);
-        source.Z = 5.5;
-        source.stickType = StickData::LINE;
+        source.my_line = QLineF(1, 2, 3, 4);
+        source.z = 5.5;
+        source.stick_type = StickData::LINE;
         source.stepchild = true;
-        source.parentIdx = 7;
+        source.parent_idx = 7;
         source.order = 3;
-        source.Pen = QPen(Qt::red);
-        source.Pen.setWidth(9);
-        source.Brush = QBrush(Qt::blue);
+        source.pen = QPen(Qt::red);
+        source.pen.setWidth(9);
+        source.brush = QBrush(Qt::blue);
 
         QByteArray bytes;
         {
@@ -166,30 +166,30 @@ private slots:
             QDataStream in(&bytes, QIODevice::ReadOnly);
             in >> loaded;
         }
-        QCOMPARE(loaded.myLine, source.myLine);
-        QCOMPARE(loaded.Z, source.Z);
+        QCOMPARE(loaded.my_line, source.my_line);
+        QCOMPARE(loaded.z, source.z);
         QCOMPARE(loaded.version, source.version);
-        QCOMPARE(loaded.stickType, source.stickType);
+        QCOMPARE(loaded.stick_type, source.stick_type);
         QCOMPARE(loaded.stepchild, source.stepchild);
-        QCOMPARE(loaded.parentIdx, source.parentIdx);
+        QCOMPARE(loaded.parent_idx, source.parent_idx);
         QCOMPARE(loaded.order, source.order);
-        QCOMPARE(loaded.Pen, source.Pen);
-        QCOMPARE(loaded.Brush, source.Brush);
+        QCOMPARE(loaded.pen, source.pen);
+        QCOMPARE(loaded.brush, source.brush);
     }
 
     void StickCircleRoundTrip()
     {
         StickData source;
-        source.myLine = QLineF(10, 20, 30, 40);
-        source.Z = 1;
-        source.stickType = StickData::CIRCLE;
-        source.imgAngle = 33.5f;
-        source.imgAngleOffset = 42; // regression: used to reset on every save/load/clone
-        source.imgHScale = 1.5f;
-        source.imgWScale = 0.5f;
-        source.imgOffset = QPointF(3, 4);
-        source.hardTop = true;
-        source.hardBottom = true;
+        source.my_line = QLineF(10, 20, 30, 40);
+        source.z = 1;
+        source.stick_type = StickData::CIRCLE;
+        source.img_angle = 33.5f;
+        source.img_angle_offset = 42; // regression: used to reset on every save/load/clone
+        source.img_h_scale = 1.5f;
+        source.img_w_scale = 0.5f;
+        source.img_offset = QPointF(3, 4);
+        source.hard_top = true;
+        source.hard_bottom = true;
 
         QByteArray bytes;
         {
@@ -201,33 +201,33 @@ private slots:
             QDataStream in(&bytes, QIODevice::ReadOnly);
             in >> loaded;
         }
-        QCOMPARE(loaded.stickType, source.stickType);
-        QCOMPARE(loaded.imgAngle, source.imgAngle);
-        QCOMPARE(loaded.imgAngleOffset, source.imgAngleOffset);
-        QCOMPARE(loaded.imgHScale, source.imgHScale);
-        QCOMPARE(loaded.imgWScale, source.imgWScale);
-        QCOMPARE(loaded.imgOffset, source.imgOffset);
-        QCOMPARE(loaded.hardTop, source.hardTop);
-        QCOMPARE(loaded.hardBottom, source.hardBottom);
+        QCOMPARE(loaded.stick_type, source.stick_type);
+        QCOMPARE(loaded.img_angle, source.img_angle);
+        QCOMPARE(loaded.img_angle_offset, source.img_angle_offset);
+        QCOMPARE(loaded.img_h_scale, source.img_h_scale);
+        QCOMPARE(loaded.img_w_scale, source.img_w_scale);
+        QCOMPARE(loaded.img_offset, source.img_offset);
+        QCOMPARE(loaded.hard_top, source.hard_top);
+        QCOMPARE(loaded.hard_bottom, source.hard_bottom);
     }
 
-    // regression (found during Phase 1a): the stickImg index must be written as a 4-byte
+    // regression (found during Phase 1a): the stick_img index must be written as a 4-byte
     // int — Qt6's QList::indexOf returns qsizetype, and streaming it uncast wrote 8 bytes
     // while operator>> reads 4, desyncing every IMAGE-stick save
     void StickImageRoundTrip()
     {
         StickData source;
-        source.stickType = StickData::IMAGE;
-        source.myLine = QLineF(0, 0, 0, 50);
-        source.Z = 2;
+        source.stick_type = StickData::IMAGE;
+        source.my_line = QLineF(0, 0, 0, 50);
+        source.z = 2;
         QImage *first_image = new QImage(8, 8, QImage::Format_ARGB32);
         first_image->fill(Qt::red);
         QImage *second_image = new QImage(8, 8, QImage::Format_ARGB32);
         second_image->fill(Qt::blue);
-        source.stickImgList << first_image << second_image;
-        source.imgNameList << "red" << "blue";
-        source.stickImg = second_image;
-        source.imgAngleOffset = 15;
+        source.stick_img_list << first_image << second_image;
+        source.img_name_list << "red" << "blue";
+        source.stick_img = second_image;
+        source.img_angle_offset = 15;
 
         QByteArray bytes;
         {
@@ -239,12 +239,12 @@ private slots:
             QDataStream in(&bytes, QIODevice::ReadOnly);
             in >> loaded;
         }
-        QCOMPARE(loaded.stickImgList.count(), 2);
-        QCOMPARE(loaded.imgNameList, source.imgNameList);
-        QCOMPARE(loaded.stickImg, loaded.stickImgList[1]); // displayed-image index survives
-        QCOMPARE(*loaded.stickImgList[0], *first_image);
-        QCOMPARE(*loaded.stickImgList[1], *second_image);
-        QCOMPARE(loaded.imgAngleOffset, source.imgAngleOffset);
+        QCOMPARE(loaded.stick_img_list.count(), 2);
+        QCOMPARE(loaded.img_name_list, source.img_name_list);
+        QCOMPARE(loaded.stick_img, loaded.stick_img_list[1]); // displayed-image index survives
+        QCOMPARE(*loaded.stick_img_list[0], *first_image);
+        QCOMPARE(*loaded.stick_img_list[1], *second_image);
+        QCOMPARE(loaded.img_angle_offset, source.img_angle_offset);
         // no manual cleanup: ~StickData frees the images, ~stick only the handles
     }
 
@@ -254,20 +254,20 @@ private slots:
         StickFigureData source;
         source.name = "figura";
         StickData *master = new StickData();
-        master->myLine = QLineF(0, 0, 0, 100);
-        source.stickList << master;
-        source.masterStick = master;
+        master->my_line = QLineF(0, 0, 0, 100);
+        source.stick_list << master;
+        source.master_stick = master;
         StickData *child = new StickData();
-        child->myLine = QLineF(0, 100, 50, 100);
+        child->my_line = QLineF(0, 100, 50, 100);
         child->parent = master;
         master->children << child;
-        source.stickList << child;
+        source.stick_list << child;
         StickData *step_child = new StickData();
-        step_child->myLine = QLineF(0, 0, -50, 0);
+        step_child->my_line = QLineF(0, 0, -50, 0);
         step_child->parent = master;
         step_child->stepchild = true;
         master->children << step_child;
-        source.stickList << step_child;
+        source.stick_list << step_child;
 
         QByteArray bytes;
         {
@@ -280,18 +280,18 @@ private slots:
             in >> loaded;
         }
 
-        QCOMPARE(loaded.stickList.count(), 3);
+        QCOMPARE(loaded.stick_list.count(), 3);
         QCOMPARE(loaded.name, source.name);
-        QCOMPARE(loaded.masterStick, loaded.stickList[0]);
-        QVERIFY(loaded.stickList[0]->parent == nullptr);
-        QCOMPARE(loaded.stickList[1]->parent, loaded.stickList[0]);
-        QCOMPARE(loaded.stickList[2]->parent, loaded.stickList[0]);
-        QVERIFY(loaded.stickList[2]->stepchild);
-        QVERIFY(!loaded.stickList[1]->stepchild);
-        QVERIFY(loaded.stickList[0]->children.contains(loaded.stickList[1]));
-        QVERIFY(loaded.stickList[0]->children.contains(loaded.stickList[2]));
+        QCOMPARE(loaded.master_stick, loaded.stick_list[0]);
+        QVERIFY(loaded.stick_list[0]->parent == nullptr);
+        QCOMPARE(loaded.stick_list[1]->parent, loaded.stick_list[0]);
+        QCOMPARE(loaded.stick_list[2]->parent, loaded.stick_list[0]);
+        QVERIFY(loaded.stick_list[2]->stepchild);
+        QVERIFY(!loaded.stick_list[1]->stepchild);
+        QVERIFY(loaded.stick_list[0]->children.contains(loaded.stick_list[1]));
+        QVERIFY(loaded.stick_list[0]->children.contains(loaded.stick_list[2]));
         for (int i = 0; i < 3; i++)
-            QCOMPARE(loaded.stickList[i]->myLine, source.stickList[i]->myLine);
+            QCOMPARE(loaded.stick_list[i]->my_line, source.stick_list[i]->my_line);
         // the destructors free the sticks — no scratch-cleanup choreography left
     }
 
@@ -299,25 +299,25 @@ private slots:
     {
         StickFigureData source;
         StickData *master = new StickData();
-        master->myLine = QLineF(0, 0, 0, 100);
-        source.stickList << master;
-        source.masterStick = master;
+        master->my_line = QLineF(0, 0, 0, 100);
+        source.stick_list << master;
+        source.master_stick = master;
         StickData *child = new StickData();
-        child->myLine = QLineF(0, 100, 50, 100);
+        child->my_line = QLineF(0, 100, 50, 100);
         child->parent = master;
         master->children << child;
-        source.stickList << child;
+        source.stick_list << child;
 
         StickFigureData *copy = source.Clone();
-        QCOMPARE(copy->stickList.count(), 2);
-        QVERIFY(copy->stickList[0] != source.stickList[0]);
-        QCOMPARE(copy->masterStick, copy->stickList[0]);
-        QCOMPARE(copy->stickList[1]->parent, copy->stickList[0]);
-        QVERIFY(copy->stickList[0]->children.contains(copy->stickList[1]));
+        QCOMPARE(copy->stick_list.count(), 2);
+        QVERIFY(copy->stick_list[0] != source.stick_list[0]);
+        QCOMPARE(copy->master_stick, copy->stick_list[0]);
+        QCOMPARE(copy->stick_list[1]->parent, copy->stick_list[0]);
+        QVERIFY(copy->stick_list[0]->children.contains(copy->stick_list[1]));
 
-        QLineF original_line = source.stickList[0]->myLine;
-        copy->stickList[0]->myLine.translate(5, 5);
-        QCOMPARE(source.stickList[0]->myLine, original_line);
+        QLineF original_line = source.stick_list[0]->my_line;
+        copy->stick_list[0]->my_line.translate(5, 5);
+        QCOMPARE(source.stick_list[0]->my_line, original_line);
         delete copy;
     }
 
@@ -328,99 +328,99 @@ private slots:
     {
         StickFigureData source;
         StickData *imgStick = new StickData();
-        imgStick->stickType = StickData::IMAGE;
-        imgStick->myLine = QLineF(0, 0, 0, 50);
+        imgStick->stick_type = StickData::IMAGE;
+        imgStick->my_line = QLineF(0, 0, 0, 50);
         QImage *img = new QImage(4, 4, QImage::Format_ARGB32);
         img->fill(Qt::red);
-        imgStick->stickImgList << img;
-        imgStick->stickImg = img;
-        source.stickList << imgStick;
-        source.masterStick = imgStick;
+        imgStick->stick_img_list << img;
+        imgStick->stick_img = img;
+        source.stick_list << imgStick;
+        source.master_stick = imgStick;
 
         StickFigureData *copy = source.Clone();
-        QCOMPARE(copy->stickList.count(), 1);
-        QCOMPARE(copy->stickList[0]->stickImgList.count(), 1);
-        QVERIFY(copy->stickList[0]->stickImg != source.stickList[0]->stickImg); // deep copy, not a shared pointer
-        QCOMPARE(*copy->stickList[0]->stickImg, *source.stickList[0]->stickImg); // same pixels
+        QCOMPARE(copy->stick_list.count(), 1);
+        QCOMPARE(copy->stick_list[0]->stick_img_list.count(), 1);
+        QVERIFY(copy->stick_list[0]->stick_img != source.stick_list[0]->stick_img); // deep copy, not a shared pointer
+        QCOMPARE(*copy->stick_list[0]->stick_img, *source.stick_list[0]->stick_img); // same pixels
 
         // mutating the clone's image must not affect the source's
-        copy->stickList[0]->stickImg->fill(Qt::blue);
-        QCOMPARE(source.stickList[0]->stickImg->pixelColor(0, 0), QColor(Qt::red));
+        copy->stick_list[0]->stick_img->fill(Qt::blue);
+        QCOMPARE(source.stick_list[0]->stick_img->pixelColor(0, 0), QColor(Qt::red));
 
         delete copy;
     }
 
-    // Phase 6: FrameData::Clone() remaps totalSticks and currentStickFigure onto the
+    // Phase 6: FrameData::Clone() remaps total_sticks and current_stick_figure onto the
     // cloned figures by index — this is easy to get wrong (stale pointers into the
     // source) and had no direct pure-data test before
     void FrameDataCloneRemapsReferences()
     {
         FrameData source;
-        source.frameNumber = 3;
-        source.numOfItems = 2;
+        source.frame_number = 3;
+        source.num_of_items = 2;
 
         StickFigureData *figureA = new StickFigureData();
         StickData *stickA = new StickData();
-        stickA->myLine = QLineF(0, 0, 0, 50);
-        figureA->stickList << stickA;
-        figureA->masterStick = stickA;
-        figureA->currentStick = stickA;
-        source.stickFigures << figureA;
+        stickA->my_line = QLineF(0, 0, 0, 50);
+        figureA->stick_list << stickA;
+        figureA->master_stick = stickA;
+        figureA->current_stick = stickA;
+        source.stick_figures << figureA;
 
         StickFigureData *figureB = new StickFigureData();
         StickData *stickB = new StickData();
-        stickB->myLine = QLineF(0, 50, 0, 100);
-        figureB->stickList << stickB;
-        figureB->masterStick = stickB;
-        source.stickFigures << figureB;
+        stickB->my_line = QLineF(0, 50, 0, 100);
+        figureB->stick_list << stickB;
+        figureB->master_stick = stickB;
+        source.stick_figures << figureB;
 
         // deliberately out of figure order, to prove the remap is index-based, not positional
-        source.totalSticks << stickB << stickA;
-        source.currentStickFigure = figureA;
+        source.total_sticks << stickB << stickA;
+        source.current_stick_figure = figureA;
 
         FrameData *copy = source.Clone();
-        QCOMPARE(copy->stickFigures.count(), 2);
-        QVERIFY(copy->stickFigures[0] != figureA);
-        QCOMPARE(copy->totalSticks.count(), 2);
-        QCOMPARE(copy->totalSticks[0], copy->stickFigures[1]->stickList[0]); // was stickB
-        QCOMPARE(copy->totalSticks[1], copy->stickFigures[0]->stickList[0]); // was stickA
-        QCOMPARE(copy->currentStickFigure, copy->stickFigures[0]);
+        QCOMPARE(copy->stick_figures.count(), 2);
+        QVERIFY(copy->stick_figures[0] != figureA);
+        QCOMPARE(copy->total_sticks.count(), 2);
+        QCOMPARE(copy->total_sticks[0], copy->stick_figures[1]->stick_list[0]); // was stickB
+        QCOMPARE(copy->total_sticks[1], copy->stick_figures[0]->stick_list[0]); // was stickA
+        QCOMPARE(copy->current_stick_figure, copy->stick_figures[0]);
 
-        QLineF original_line = stickA->myLine;
-        copy->stickFigures[0]->stickList[0]->myLine.translate(10, 10);
-        QCOMPARE(stickA->myLine, original_line);
+        QLineF original_line = stickA->my_line;
+        copy->stick_figures[0]->stick_list[0]->my_line.translate(10, 10);
+        QCOMPARE(stickA->my_line, original_line);
 
         delete copy;
     }
 
-    // Phase 6: FrameData's operator>> rebuilds totalSticks from each stick's `order`
+    // Phase 6: FrameData's operator>> rebuilds total_sticks from each stick's `order`
     // field, not from insertion/figure order (see framedata.cpp) — this is the one
     // reordering behavior FrameSnapshotRoundTrip (which uses sequential orders via a
     // live frame) never actually exercises
     void FrameDataRoundTrip()
     {
         FrameData source;
-        source.frameNumber = 5;
-        source.numOfItems = 2;
+        source.frame_number = 5;
+        source.num_of_items = 2;
 
         StickFigureData *figureA = new StickFigureData();
         StickData *stickA = new StickData();
-        stickA->myLine = QLineF(0, 0, 0, 50);
+        stickA->my_line = QLineF(0, 0, 0, 50);
         stickA->order = 1; // second in z-order despite being the first figure added
-        figureA->stickList << stickA;
-        figureA->masterStick = stickA;
-        figureA->currentStick = stickA;
-        source.stickFigures << figureA;
+        figureA->stick_list << stickA;
+        figureA->master_stick = stickA;
+        figureA->current_stick = stickA;
+        source.stick_figures << figureA;
 
         StickFigureData *figureB = new StickFigureData();
         StickData *stickB = new StickData();
-        stickB->myLine = QLineF(0, 50, 0, 100);
+        stickB->my_line = QLineF(0, 50, 0, 100);
         stickB->order = 0; // first in z-order despite being the second figure added
-        figureB->stickList << stickB;
-        figureB->masterStick = stickB;
-        source.stickFigures << figureB;
+        figureB->stick_list << stickB;
+        figureB->master_stick = stickB;
+        source.stick_figures << figureB;
 
-        source.currentStickFigure = figureA;
+        source.current_stick_figure = figureA;
 
         QByteArray bytes;
         {
@@ -433,14 +433,14 @@ private slots:
             in >> loaded;
         }
 
-        QCOMPARE(loaded.stickFigures.count(), 2);
-        QCOMPARE(loaded.frameNumber, source.frameNumber);
-        QCOMPARE(loaded.numOfItems, source.numOfItems);
-        QCOMPARE(loaded.totalSticks.count(), 2);
-        QCOMPARE(loaded.totalSticks[0]->myLine, stickB->myLine); // order 0
-        QCOMPARE(loaded.totalSticks[1]->myLine, stickA->myLine); // order 1
-        QVERIFY(loaded.currentStickFigure != nullptr);
-        QCOMPARE(loaded.currentStickFigure->currentStick->myLine, stickA->myLine);
+        QCOMPARE(loaded.stick_figures.count(), 2);
+        QCOMPARE(loaded.frame_number, source.frame_number);
+        QCOMPARE(loaded.num_of_items, source.num_of_items);
+        QCOMPARE(loaded.total_sticks.count(), 2);
+        QCOMPARE(loaded.total_sticks[0]->my_line, stickB->my_line); // order 0
+        QCOMPARE(loaded.total_sticks[1]->my_line, stickA->my_line); // order 1
+        QVERIFY(loaded.current_stick_figure != nullptr);
+        QCOMPARE(loaded.current_stick_figure->current_stick->my_line, stickA->my_line);
     }
 
     void CopyPasteStickFigure()
@@ -449,38 +449,38 @@ private slots:
         DrawStick(QPointF(100, 100), QPointF(100, 200));
         DrawStick(QPointF(100, 200), QPointF(150, 250));
         StickFigure *source = CurrentStickFigure();
-        QCOMPARE(source->stickList.count(), 2);
+        QCOMPARE(source->stick_list.count(), 2);
 
         // replicates Widget::on_copyStickFigureBtn_clicked() (widget.cpp)
         delete view->copyStickFigureBuffer;
         view->copyStickFigureBuffer = ExtractStickFigureData(*source);
 
         StickFigureData *buffered = view->copyStickFigureBuffer;
-        QCOMPARE(buffered->stickList.count(), 2);
-        QCOMPARE(buffered->stickList[0]->myLine, source->stickList[0]->myLine);
-        QCOMPARE(buffered->stickList[1]->myLine, source->stickList[1]->myLine);
-        QCOMPARE(buffered->stickList[1]->parent, buffered->stickList[0]);
-        QCOMPARE(buffered->masterStick, buffered->stickList[0]);
+        QCOMPARE(buffered->stick_list.count(), 2);
+        QCOMPARE(buffered->stick_list[0]->my_line, source->stick_list[0]->my_line);
+        QCOMPARE(buffered->stick_list[1]->my_line, source->stick_list[1]->my_line);
+        QCOMPARE(buffered->stick_list[1]->parent, buffered->stick_list[0]);
+        QCOMPARE(buffered->master_stick, buffered->stick_list[0]);
 
         // deep copy: mutating the buffer leaves the source untouched
-        QLineF source_line = source->stickList[0]->myLine;
-        buffered->stickList[0]->myLine.translate(5, 5);
-        QCOMPARE(source->stickList[0]->myLine, source_line);
-        buffered->stickList[0]->myLine.translate(-5, -5);
+        QLineF source_line = source->stick_list[0]->my_line;
+        buffered->stick_list[0]->my_line.translate(5, 5);
+        QCOMPARE(source->stick_list[0]->my_line, source_line);
+        buffered->stick_list[0]->my_line.translate(-5, -5);
 
         // replicates Widget::on_pasteStickFigureBtn_clicked() (widget.cpp)
         view->storeUndo(CMD_SIMPLE);
         StickFigure *pasted = AddStick();
         PopulateLiveStickFigure(pasted, *buffered, true, true);
         pasted->refresh(0);
-        for (StickData *s : pasted->stickList)
-            CurrentFrame()->totalSticks.append(s);
+        for (StickData *s : pasted->stick_list)
+            CurrentFrame()->total_sticks.append(s);
         view->addHandles(pasted);
 
-        QCOMPARE(pasted->stickList.count(), 2);
-        QCOMPARE(pasted->stickList[1]->parent, pasted->stickList[0]);
+        QCOMPARE(pasted->stick_list.count(), 2);
+        QCOMPARE(pasted->stick_list[1]->parent, pasted->stick_list[0]);
         // pasted sticks really live on the scene (attach_to_scene = true)
-        QCOMPARE(pasted->stickList[0]->view->scene(), scene);
+        QCOMPARE(pasted->stick_list[0]->view->scene(), scene);
     }
 
     // the img_list_widget cleanup moved from ~stick to explicit calls at the live-delete
@@ -491,7 +491,7 @@ private slots:
         AddFrame();
         StickData *drawn = DrawStick(QPointF(500, 100), QPointF(500, 200));
         // upgrade to IMAGE like drawCmd's DRAWIMG branch (myview.cpp:486)
-        drawn->stickType = StickData::IMAGE;
+        drawn->stick_type = StickData::IMAGE;
         QImage *image = new QImage(8, 8, QImage::Format_ARGB32);
         image->fill(Qt::green);
         drawn->view->addImage(image, "img");
@@ -503,11 +503,11 @@ private slots:
 
         // live deletion via the delete-key flow (myview.cpp:394)
         StickFigure *figure = CurrentStickFigure();
-        int idx = figure->stickList.indexOf(drawn);
-        CurrentFrame()->totalSticks.removeAll(drawn);
+        int idx = figure->stick_list.indexOf(drawn);
+        CurrentFrame()->total_sticks.removeAll(drawn);
         figure->deleteStick(idx);
-        figure->currentStick = nullptr; // the key handler moves selection to the parent (none here)
-        QCOMPARE(figure->stickList.count(), 0);
+        figure->current_stick = nullptr; // the key handler moves selection to the parent (none here)
+        QCOMPARE(figure->stick_list.count(), 0);
         QCOMPARE(img_list_widget->count(), 0);
     }
 
@@ -522,16 +522,16 @@ private slots:
         view->updateFrameOrder(live_frame); // storeUndo() does this before snapshotting
 
         FrameData *snapshot = ExtractFrameData(*live_frame);
-        QCOMPARE(snapshot->stickFigures.count(), live_frame->stickFigures.count());
-        QCOMPARE(snapshot->frameNumber, live_frame->frameNumber);
-        QCOMPARE(snapshot->numOfItems, live_frame->numOfItems);
-        QCOMPARE(snapshot->totalSticks.count(), live_frame->totalSticks.count());
-        for (int i = 0; i < live_frame->stickFigures.count(); i++) {
-            StickFigure *live_figure = live_frame->stickFigures[i];
-            StickFigureData *snapshot_figure = snapshot->stickFigures[i];
-            QCOMPARE(snapshot_figure->stickList.count(), live_figure->stickList.count());
-            for (int j = 0; j < live_figure->stickList.count(); j++)
-                QCOMPARE(snapshot_figure->stickList[j]->myLine, live_figure->stickList[j]->myLine);
+        QCOMPARE(snapshot->stick_figures.count(), live_frame->stick_figures.count());
+        QCOMPARE(snapshot->frame_number, live_frame->frame_number);
+        QCOMPARE(snapshot->num_of_items, live_frame->num_of_items);
+        QCOMPARE(snapshot->total_sticks.count(), live_frame->total_sticks.count());
+        for (int i = 0; i < live_frame->stick_figures.count(); i++) {
+            StickFigure *live_figure = live_frame->stick_figures[i];
+            StickFigureData *snapshot_figure = snapshot->stick_figures[i];
+            QCOMPARE(snapshot_figure->stick_list.count(), live_figure->stick_list.count());
+            for (int j = 0; j < live_figure->stick_list.count(); j++)
+                QCOMPARE(snapshot_figure->stick_list[j]->my_line, live_figure->stick_list[j]->my_line);
         }
 
         // byte round-trip: same layout as the pre-refactor shared operators
@@ -545,13 +545,13 @@ private slots:
             QDataStream in(&bytes, QIODevice::ReadOnly);
             in >> loaded;
         }
-        QCOMPARE(loaded.stickFigures.count(), snapshot->stickFigures.count());
-        QCOMPARE(loaded.frameNumber, snapshot->frameNumber);
-        QCOMPARE(loaded.numOfItems, snapshot->numOfItems);
-        QCOMPARE(loaded.totalSticks.count(), snapshot->totalSticks.count());
-        for (int j = 0; j < snapshot->totalSticks.count(); j++)
-            QCOMPARE(loaded.totalSticks[j]->order, snapshot->totalSticks[j]->order);
-        QVERIFY(loaded.currentStickFigure != nullptr);
+        QCOMPARE(loaded.stick_figures.count(), snapshot->stick_figures.count());
+        QCOMPARE(loaded.frame_number, snapshot->frame_number);
+        QCOMPARE(loaded.num_of_items, snapshot->num_of_items);
+        QCOMPARE(loaded.total_sticks.count(), snapshot->total_sticks.count());
+        for (int j = 0; j < snapshot->total_sticks.count(); j++)
+            QCOMPARE(loaded.total_sticks[j]->order, snapshot->total_sticks[j]->order);
+        QVERIFY(loaded.current_stick_figure != nullptr);
 
         delete snapshot; // pure data: plain delete, no scratch choreography
     }
@@ -560,36 +560,36 @@ private slots:
     {
         AddFrame();
         DrawStick(QPointF(100, 100), QPointF(100, 200));
-        int figure_index = CurrentFrame()->stickFigures.indexOf(CurrentStickFigure());
-        QLineF original_line = CurrentStickFigure()->stickList[0]->myLine;
+        int figure_index = CurrentFrame()->stick_figures.indexOf(CurrentStickFigure());
+        QLineF original_line = CurrentStickFigure()->stick_list[0]->my_line;
 
         // a "simple" edit: storeUndo(CMD_SIMPLE) + direct model mutation
         view->storeUndo(CMD_SIMPLE);
         CurrentStickFigure()->traslate(10, 20);
-        QLineF moved_line = CurrentStickFigure()->stickList[0]->myLine;
+        QLineF moved_line = CurrentStickFigure()->stick_list[0]->my_line;
         QVERIFY(moved_line != original_line);
 
         view->undo_stack.undo();
-        QCOMPARE(CurrentFrame()->stickFigures[figure_index]->stickList[0]->myLine, original_line);
+        QCOMPARE(CurrentFrame()->stick_figures[figure_index]->stick_list[0]->my_line, original_line);
 
         view->undo_stack.redo();
-        QCOMPARE(CurrentFrame()->stickFigures[figure_index]->stickList[0]->myLine, moved_line);
+        QCOMPARE(CurrentFrame()->stick_figures[figure_index]->stick_list[0]->my_line, moved_line);
     }
 
     void UndoAddFrame()
     {
-        int frames_before = view->myAnimation->frameList.count();
-        int current_number_before = CurrentFrame()->frameNumber;
+        int frames_before = view->my_animation->frame_list.count();
+        int current_number_before = CurrentFrame()->frame_number;
 
         AddFrame();
-        QCOMPARE(view->myAnimation->frameList.count(), frames_before + 1);
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before + 1);
 
         view->undo_stack.undo();
-        QCOMPARE(view->myAnimation->frameList.count(), frames_before);
-        QCOMPARE(CurrentFrame()->frameNumber, current_number_before);
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before);
+        QCOMPARE(CurrentFrame()->frame_number, current_number_before);
 
         view->undo_stack.redo();
-        QCOMPARE(view->myAnimation->frameList.count(), frames_before + 1);
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before + 1);
     }
 
     // isolates the CMD_ADDFRAME+undo path specifically: RestoreFrameSnapshot() calls
@@ -603,20 +603,20 @@ private slots:
         AddFrame();
         StickFigure *figure = CurrentStickFigure();
         StickData *img_stick = new StickData();
-        img_stick->myLine = QLineF(700, 100, 700, 200);
+        img_stick->my_line = QLineF(700, 100, 700, 200);
         // attacca la view MENTRE il tipo è ancora LINE (default): il costruttore di stick
-        // chiama updateBr(0) subito, che per un IMAGE deferenzierebbe stickImg prima che
+        // chiama updateBr(0) subito, che per un IMAGE deferenzierebbe stick_img prima che
         // addImage() lo assegni — stesso ordine di MyView::drawCmd() (myview.cpp)
         StickGraphicsItem *img_stick_view = FramePresenter::AttachView(img_stick, scene);
-        img_stick_view->myStickFigure = figure;
-        img_stick->stickType = StickData::IMAGE;
+        img_stick_view->my_stick_figure = figure;
+        img_stick->stick_type = StickData::IMAGE;
         QImage *image = new QImage(8, 8, QImage::Format_ARGB32);
         image->fill(Qt::blue);
         img_stick_view->addImage(image, "leak-check"); // also registers an entry in img_list_widget
-        figure->stickList.append(img_stick);
-        figure->masterStick = img_stick;
-        figure->currentStick = img_stick;
-        CurrentFrame()->totalSticks.append(img_stick);
+        figure->stick_list.append(img_stick);
+        figure->master_stick = img_stick;
+        figure->current_stick = img_stick;
+        CurrentFrame()->total_sticks.append(img_stick);
         QCOMPARE(img_list_widget->count(), 1);
 
         view->undo_stack.undo(); // CMD_ADDFRAME+undo: deletes the frame img_stick lives in
@@ -627,39 +627,39 @@ private slots:
     {
         AddFrame();
         DrawStick(QPointF(50, 50), QPointF(50, 150));
-        int frames_before = view->myAnimation->frameList.count();
-        int sticks_before = CurrentFrame()->totalSticks.count();
-        int deleted_number = CurrentFrame()->frameNumber;
+        int frames_before = view->my_animation->frame_list.count();
+        int sticks_before = CurrentFrame()->total_sticks.count();
+        int deleted_number = CurrentFrame()->frame_number;
 
         // replicates Widget::on_deleteFrameBtn_clicked() (widget.cpp:559)
         view->storeUndo(CMD_DELETEFRAME);
         view->deleteFrame(CurrentFrame());
         view->moveToFrame(CurrentFrame());
-        QCOMPARE(view->myAnimation->frameList.count(), frames_before - 1);
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before - 1);
 
         view->undo_stack.undo();
-        QCOMPARE(view->myAnimation->frameList.count(), frames_before);
-        QCOMPARE(CurrentFrame()->frameNumber, deleted_number);
-        QCOMPARE(CurrentFrame()->totalSticks.count(), sticks_before);
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before);
+        QCOMPARE(CurrentFrame()->frame_number, deleted_number);
+        QCOMPARE(CurrentFrame()->total_sticks.count(), sticks_before);
 
         view->undo_stack.redo();
-        QCOMPARE(view->myAnimation->frameList.count(), frames_before - 1);
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before - 1);
     }
 
     void UndoMoveToFrame()
     {
         AddFrame();
-        int origin_number = CurrentFrame()->frameNumber;
-        Frame *other_frame = view->myAnimation->frameList[0];
+        int origin_number = CurrentFrame()->frame_number;
+        Frame *other_frame = view->my_animation->frame_list[0];
         QVERIFY(other_frame != CurrentFrame());
 
         // replicates Widget::on_frameListWidget_itemClicked() (widget.cpp:568)
         view->storeUndo(CMD_MOVETOFRAME);
         view->moveToFrame(other_frame);
-        QCOMPARE(CurrentFrame()->frameNumber, 0);
+        QCOMPARE(CurrentFrame()->frame_number, 0);
 
         view->undo_stack.undo();
-        QCOMPARE(CurrentFrame()->frameNumber, origin_number);
+        QCOMPARE(CurrentFrame()->frame_number, origin_number);
     }
 
     void ChopAndWeld()
@@ -667,30 +667,30 @@ private slots:
         AddFrame();
         StickFigure *figure = CurrentStickFigure();
         StickData *drawn = DrawStick(QPointF(100, 100), QPointF(100, 200));
-        QCOMPARE(figure->stickList.count(), 1);
+        QCOMPARE(figure->stick_list.count(), 1);
 
         // replicates Widget::on_splitStick_clicked() (widget.cpp:1198)
         view->storeUndo();
         view->removeHandles(figure);
-        StickData *added = figure->chop(figure->currentStick);
+        StickData *added = figure->chop(figure->current_stick);
         view->addHandles(figure);
-        CurrentFrame()->totalSticks.append(added);
+        CurrentFrame()->total_sticks.append(added);
 
-        QCOMPARE(figure->stickList.count(), 2);
-        QCOMPARE(drawn->myLine.p2(), QPointF(100, 150));
-        QCOMPARE(added->myLine.p1(), QPointF(100, 150));
-        QCOMPARE(added->myLine.p2(), QPointF(100, 200));
+        QCOMPARE(figure->stick_list.count(), 2);
+        QCOMPARE(drawn->my_line.p2(), QPointF(100, 150));
+        QCOMPARE(added->my_line.p1(), QPointF(100, 150));
+        QCOMPARE(added->my_line.p2(), QPointF(100, 200));
         QCOMPARE(added->parent, drawn);
 
         // replicates Widget::on_joinStick_clicked() (widget.cpp:1186), welding from the master
-        figure->currentStick = drawn;
+        figure->current_stick = drawn;
         view->storeUndo();
         QList<StickData *> welded = figure->weld(drawn);
         for (StickData *s : welded)
-            CurrentFrame()->totalSticks.removeAll(s);
+            CurrentFrame()->total_sticks.removeAll(s);
 
-        QCOMPARE(figure->stickList.count(), 1);
-        QCOMPARE(drawn->myLine.p2(), QPointF(100, 200));
+        QCOMPARE(figure->stick_list.count(), 1);
+        QCOMPARE(drawn->my_line.p2(), QPointF(100, 200));
     }
 
     void MergeTwoStickFigures()
@@ -707,25 +707,25 @@ private slots:
         mergeStickFigures(main_figure, main_stick, to_join);
         view->addHandles(main_figure);
 
-        QCOMPARE(main_figure->stickList.count(), 3); // original + invisible linker + clone
-        StickData *linker = main_figure->stickList[1];
-        StickData *joined_clone = main_figure->stickList[2];
+        QCOMPARE(main_figure->stick_list.count(), 3); // original + invisible linker + clone
+        StickData *linker = main_figure->stick_list[1];
+        StickData *joined_clone = main_figure->stick_list[2];
         QCOMPARE(linker->parent, main_stick);
-        QCOMPARE(linker->Pen.style(), Qt::NoPen);
+        QCOMPARE(linker->pen.style(), Qt::NoPen);
         QCOMPARE(joined_clone->parent, linker);
-        QCOMPARE(joined_clone->myLine, join_master->myLine);
-        QCOMPARE(main_figure->masterStick, main_stick);
+        QCOMPARE(joined_clone->my_line, join_master->my_line);
+        QCOMPARE(main_figure->master_stick, main_stick);
         QVERIFY(main_stick->children.contains(linker));
         QVERIFY(main_stick->children.contains(joined_clone));
 
         // the JOIN flow then deletes the merged-in layer via deleteStickFigure()
         my_stick_figure_widget_list->clearSelection();
-        to_join->linkedItem->setSelected(true);
+        to_join->linked_item->setSelected(true);
         view->deleteStickFigure();
-        for (StickData *s : CurrentStickFigure()->stickList)
-            if (!CurrentFrame()->totalSticks.contains(s))
-                CurrentFrame()->totalSticks.append(s);
-        QCOMPARE(CurrentFrame()->stickFigures.count(), 1);
+        for (StickData *s : CurrentStickFigure()->stick_list)
+            if (!CurrentFrame()->total_sticks.contains(s))
+                CurrentFrame()->total_sticks.append(s);
+        QCOMPARE(CurrentFrame()->stick_figures.count(), 1);
         QCOMPARE(CurrentStickFigure(), main_figure);
     }
 
@@ -736,20 +736,20 @@ private slots:
         StickData *master_stick = DrawStick(QPointF(100, 100), QPointF(100, 200));
         StickData *child_stick = DrawStick(QPointF(100, 200), QPointF(150, 250));
         QCOMPARE(child_stick->parent, master_stick);
-        QCOMPARE(CurrentStickFigure()->currentStick, child_stick);
-        int figures_before = CurrentFrame()->stickFigures.count();
+        QCOMPARE(CurrentStickFigure()->current_stick, child_stick);
+        int figures_before = CurrentFrame()->stick_figures.count();
 
         view->splitStickFigure(); // replicates Widget::on_splitBtn_clicked() (widget.cpp:1180)
 
-        QCOMPARE(CurrentFrame()->stickFigures.count(), figures_before + 1);
+        QCOMPARE(CurrentFrame()->stick_figures.count(), figures_before + 1);
         StickFigure *branch = CurrentStickFigure();
         QVERIFY(branch != figure);
         QCOMPARE(branch->name, figure->name + "_split");
-        QCOMPARE(branch->stickList.count(), 1);
-        QCOMPARE(figure->stickList.count(), 1);
-        QCOMPARE(branch->masterStick, branch->stickList[0]);
-        QCOMPARE(branch->stickList[0]->myLine, QLineF(100, 200, 150, 250));
-        QCOMPARE(figure->stickList[0], master_stick);
+        QCOMPARE(branch->stick_list.count(), 1);
+        QCOMPARE(figure->stick_list.count(), 1);
+        QCOMPARE(branch->master_stick, branch->stick_list[0]);
+        QCOMPARE(branch->stick_list[0]->my_line, QLineF(100, 200, 150, 250));
+        QCOMPARE(figure->stick_list[0], master_stick);
     }
 
     void SetMasterOnDirectChain()
@@ -758,20 +758,20 @@ private slots:
         StickFigure *figure = CurrentStickFigure();
         StickData *old_master = DrawStick(QPointF(200, 100), QPointF(200, 200));
         StickData *new_master = DrawStick(QPointF(200, 200), QPointF(200, 300));
-        QCOMPARE(figure->masterStick, old_master);
-        QCOMPARE(figure->currentStick, new_master);
+        QCOMPARE(figure->master_stick, old_master);
+        QCOMPARE(figure->current_stick, new_master);
 
         // replicates Widget::on_setMasterNodeBtn_clicked() (widget.cpp:1213)
         view->storeUndo();
         figure->setMaster(new_master);
 
-        QCOMPARE(figure->masterStick, new_master);
+        QCOMPARE(figure->master_stick, new_master);
         QVERIFY(new_master->parent == nullptr);
         QCOMPARE(old_master->parent, new_master);
         // the parent chain between old and new master is inverted (p1/p2 swapped)
-        QCOMPARE(old_master->myLine, QLineF(200, 200, 200, 100));
+        QCOMPARE(old_master->my_line, QLineF(200, 200, 200, 100));
         // the new master keeps its own direction
-        QCOMPARE(new_master->myLine, QLineF(200, 200, 200, 300));
+        QCOMPARE(new_master->my_line, QLineF(200, 200, 200, 300));
         QVERIFY(new_master->children.contains(old_master));
     }
 
@@ -779,38 +779,38 @@ private slots:
     {
         AddFrame();
         DrawStick(QPointF(300, 100), QPointF(300, 200));
-        QLineF drawn_line = CurrentStickFigure()->stickList[0]->myLine;
+        QLineF drawn_line = CurrentStickFigure()->stick_list[0]->my_line;
 
         QList<int> figures_per_frame;
         QList<int> sticks_per_frame;
-        for (Frame *f : view->myAnimation->frameList) {
-            figures_per_frame << f->stickFigures.count();
+        for (Frame *f : view->my_animation->frame_list) {
+            figures_per_frame << f->stick_figures.count();
             int sticks = 0;
-            for (StickFigure *s : f->stickFigures)
-                sticks += s->stickList.count();
+            for (StickFigure *s : f->stick_figures)
+                sticks += s->stick_list.count();
             sticks_per_frame << sticks;
         }
-        int frame_count = view->myAnimation->frameList.count();
+        int frame_count = view->my_animation->frame_list.count();
 
         QString path = QDir::temp().filePath("marionetta_phase0_test.mAnim");
-        view->myAnimation->saveAnimation(path);
+        view->my_animation->saveAnimation(path);
 
         // replicates the load flow in mymainwindow.cpp: clear undo, load, land on frame 0
         view->clearUndo();
-        view->myAnimation->loadAnimation(path);
-        QCOMPARE(view->myAnimation->frameList.count(), frame_count);
-        view->moveToFrame(view->myAnimation->frameList[0]);
+        view->my_animation->loadAnimation(path);
+        QCOMPARE(view->my_animation->frame_list.count(), frame_count);
+        view->moveToFrame(view->my_animation->frame_list[0]);
 
         for (int i = 0; i < frame_count; i++) {
-            Frame *f = view->myAnimation->frameList[i];
-            QCOMPARE(f->stickFigures.count(), figures_per_frame[i]);
+            Frame *f = view->my_animation->frame_list[i];
+            QCOMPARE(f->stick_figures.count(), figures_per_frame[i]);
             int sticks = 0;
-            for (StickFigure *s : f->stickFigures)
-                sticks += s->stickList.count();
+            for (StickFigure *s : f->stick_figures)
+                sticks += s->stick_list.count();
             QCOMPARE(sticks, sticks_per_frame[i]);
         }
-        Frame *last_frame = view->myAnimation->frameList[frame_count - 1];
-        QCOMPARE(last_frame->stickFigures.last()->stickList[0]->myLine, drawn_line);
+        Frame *last_frame = view->my_animation->frame_list[frame_count - 1];
+        QCOMPARE(last_frame->stick_figures.last()->stick_list[0]->my_line, drawn_line);
 
         QFile::remove(path);
     }
@@ -824,7 +824,7 @@ private slots:
 
         // replicates the add-to-library flow (myview.cpp:1386)
         QVERIFY(view->addStickFigureToLibrary() != nullptr);
-        QCOMPARE(stickLibraryBuffer->stickFigures.count(), 1);
+        QCOMPARE(stickLibraryBuffer->stick_figures.count(), 1);
         QCOMPARE(my_current_library_widget->count(), 1);
 
         // save + reload the library file: this is the path where a missing placeholder int
@@ -833,11 +833,11 @@ private slots:
         view->saveLibrary(path);
         view->loadLibrary(path);
 
-        QCOMPARE(stickLibraryBuffer->stickFigures.count(), 1);
-        StickFigureData *reloaded = stickLibraryBuffer->stickFigures[0];
+        QCOMPARE(stickLibraryBuffer->stick_figures.count(), 1);
+        StickFigureData *reloaded = stickLibraryBuffer->stick_figures[0];
         QCOMPARE(reloaded->name, QString("libfig"));
-        QCOMPARE(reloaded->stickList.count(), 1);
-        QCOMPARE(reloaded->stickList[0]->myLine, source->stickList[0]->myLine);
+        QCOMPARE(reloaded->stick_list.count(), 1);
+        QCOMPARE(reloaded->stick_list[0]->my_line, source->stick_list[0]->my_line);
         QCOMPARE(my_current_library_widget->count(), 1);
 
         // the widget entry carries the data record (what the add-to-scene handler casts)
@@ -858,24 +858,24 @@ private slots:
     {
         MyView *throwaway_view = new MyView();
         throwaway_view->setScene(scene);
-        throwaway_view->myAnimation->scene = scene;
+        throwaway_view->my_animation->scene = scene;
         Frame *throwaway_frame = throwaway_view->setUpFrame(0);
         throwaway_view->moveToFrame(throwaway_frame);
         StickFigure *figure = throwaway_frame->addStickFigure(my_stick_figure_widget_list);
 
         StickData *img_stick = new StickData();
-        img_stick->myLine = QLineF(50, 50, 50, 150);
+        img_stick->my_line = QLineF(50, 50, 50, 150);
         // vedi UndoAddFrameFreesImageStickListWidgetEntries: attacca la view prima di
-        // passare a IMAGE, altrimenti updateBr(0) nel costruttore deferenzia stickImg==nullptr
+        // passare a IMAGE, altrimenti updateBr(0) nel costruttore deferenzia stick_img==nullptr
         StickGraphicsItem *img_stick_view = FramePresenter::AttachView(img_stick, scene);
-        img_stick_view->myStickFigure = figure;
-        img_stick->stickType = StickData::IMAGE;
+        img_stick_view->my_stick_figure = figure;
+        img_stick->stick_type = StickData::IMAGE;
         QImage *image = new QImage(8, 8, QImage::Format_ARGB32);
         image->fill(Qt::green);
         img_stick_view->addImage(image, "shutdown-check");
-        figure->stickList.append(img_stick);
-        figure->masterStick = img_stick;
-        figure->currentStick = img_stick;
+        figure->stick_list.append(img_stick);
+        figure->master_stick = img_stick;
+        figure->current_stick = img_stick;
         QCOMPARE(img_list_widget->count(), 1);
 
         delete throwaway_view; // same cascade as Widget::~Widget()'s `delete view`
@@ -896,17 +896,17 @@ private slots:
         AddFrame();
         view->resize(800, 600);
         view->setTool(DRAW);
-        int sticks_before = CurrentStickFigure()->stickList.count();
+        int sticks_before = CurrentStickFigure()->stick_list.count();
 
         QPoint p1 = view->mapFromScene(QPointF(100, 100));
         QPoint p2 = view->mapFromScene(QPointF(100, 200));
         QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, p1);
         QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, p2);
 
-        QCOMPARE(CurrentStickFigure()->stickList.count(), sticks_before + 1);
-        StickData *drawn = CurrentStickFigure()->stickList.last();
+        QCOMPARE(CurrentStickFigure()->stick_list.count(), sticks_before + 1);
+        StickData *drawn = CurrentStickFigure()->stick_list.last();
         QVERIFY(drawn->view && scene->items().contains(drawn->view));
-        QCOMPARE(drawn->stickType, (int)StickData::LINE);
+        QCOMPARE(drawn->stick_type, (int)StickData::LINE);
 
         view->setTool(NOTOOL);
     }
@@ -921,8 +921,8 @@ private slots:
         AddFrame();
         view->resize(800, 600);
         DrawStick(QPointF(400, 100), QPointF(400, 200));
-        int figure_index = CurrentFrame()->stickFigures.indexOf(CurrentStickFigure());
-        QLineF original_line = CurrentStickFigure()->stickList[0]->myLine;
+        int figure_index = CurrentFrame()->stick_figures.indexOf(CurrentStickFigure());
+        QLineF original_line = CurrentStickFigure()->stick_list[0]->my_line;
 
         view->setTool(NOTOOL);
         QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier,
@@ -934,14 +934,14 @@ private slots:
         QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier,
                              view->mapFromScene(QPointF(450, 175)));
 
-        QLineF dragged_line = CurrentFrame()->stickFigures[figure_index]->stickList[0]->myLine;
+        QLineF dragged_line = CurrentFrame()->stick_figures[figure_index]->stick_list[0]->my_line;
         QVERIFY(dragged_line != original_line);
 
         view->undo_stack.undo();
-        QCOMPARE(CurrentFrame()->stickFigures[figure_index]->stickList[0]->myLine, original_line);
+        QCOMPARE(CurrentFrame()->stick_figures[figure_index]->stick_list[0]->my_line, original_line);
 
         view->undo_stack.redo();
-        QCOMPARE(CurrentFrame()->stickFigures[figure_index]->stickList[0]->myLine, dragged_line);
+        QCOMPARE(CurrentFrame()->stick_figures[figure_index]->stick_list[0]->my_line, dragged_line);
 
         view->setTool(NOTOOL);
     }

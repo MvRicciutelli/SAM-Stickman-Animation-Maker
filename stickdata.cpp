@@ -9,15 +9,15 @@ StickData::StickData()
 }
 
 /**
- * @details Image ownership rule: a StickData owns the QImage copies in stickImgList
- * (stickImg only points into that list). Freeing them here — unconditionally — replaces
+ * @details Image ownership rule: a StickData owns the QImage copies in stick_img_list
+ * (stick_img only points into that list). Freeing them here — unconditionally — replaces
  * the flag-guarded cleanup the legacy stick destructor needed, because a pure data
  * object has no widget or scene to protect.
  */
 StickData::~StickData()
 {
-    qDeleteAll(stickImgList);
-    stickImgList.clear();
+    qDeleteAll(stick_img_list);
+    stick_img_list.clear();
 }
 
 /**
@@ -25,38 +25,38 @@ StickData::~StickData()
  * (serialize to a QBuffer, deserialize into the target). It copies exactly the field
  * set the stream operators handle, so both paths stay interchangeable while call sites
  * migrate. Images are duplicated so the copy never shares pixel buffers with the
- * source; stickImg is remapped onto the copied list entry.
+ * source; stick_img is remapped onto the copied list entry.
  */
 void StickData::CopyFrom(const StickData &source)
 {
     version = source.version;
-    stickType = source.stickType;
-    Z = source.Z;
+    stick_type = source.stick_type;
+    z = source.z;
     stepchild = source.stepchild;
-    myLine = source.myLine;
-    parentIdx = source.parentIdx;
-    Pen = source.Pen;
-    Brush = source.Brush;
+    my_line = source.my_line;
+    parent_idx = source.parent_idx;
+    pen = source.pen;
+    brush = source.brush;
     order = source.order;
-    imgAngle = source.imgAngle;
-    imgWScale = source.imgWScale;
-    imgHScale = source.imgHScale;
-    imgAngleOffset = source.imgAngleOffset;
-    imgOffset = source.imgOffset;
-    hardTop = source.hardTop;
-    hardBottom = source.hardBottom;
+    img_angle = source.img_angle;
+    img_w_scale = source.img_w_scale;
+    img_h_scale = source.img_h_scale;
+    img_angle_offset = source.img_angle_offset;
+    img_offset = source.img_offset;
+    hard_top = source.hard_top;
+    hard_bottom = source.hard_bottom;
 
     // difesa in profondità come in operator>>: oggi il target è sempre appena costruito,
     // ma un riuso futuro non deve far trapelare le immagini precedenti
-    qDeleteAll(stickImgList);
-    stickImgList.clear();
-    imgNameList = source.imgNameList;
-    stickImg = nullptr;
-    for (QImage *image : source.stickImgList) {
+    qDeleteAll(stick_img_list);
+    stick_img_list.clear();
+    img_name_list = source.img_name_list;
+    stick_img = nullptr;
+    for (QImage *image : source.stick_img_list) {
         QImage *copy = new QImage(*image);
-        stickImgList.append(copy);
-        if (image == source.stickImg)
-            stickImg = copy;
+        stick_img_list.append(copy);
+        if (image == source.stick_img)
+            stick_img = copy;
     }
 }
 
@@ -80,35 +80,35 @@ StickData *StickData::Clone() const
  */
 QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
 {
-    stream << stick_data.Z;
+    stream << stick_data.z;
     stream << stick_data.version;
-    stream << stick_data.stickType;
+    stream << stick_data.stick_type;
     stream << stick_data.stepchild;
-    stream << stick_data.myLine;
-    stream << stick_data.parentIdx;
-    stream << stick_data.Pen;
-    stream << stick_data.Brush;
+    stream << stick_data.my_line;
+    stream << stick_data.parent_idx;
+    stream << stick_data.pen;
+    stream << stick_data.brush;
     stream << stick_data.order;
-    if ((stick_data.stickType == StickData::CIRCLE) || (stick_data.stickType == StickData::IMAGE) || (stick_data.stickType == StickData::RECT) || (stick_data.stickType == StickData::TRAPEZOID) || (stick_data.stickType == StickData::TAPER)) {
-        if (stick_data.stickType == StickData::IMAGE) {
-            QSize imgSize = stick_data.stickImg->size();
+    if ((stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::IMAGE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER)) {
+        if (stick_data.stick_type == StickData::IMAGE) {
+            QSize imgSize = stick_data.stick_img->size();
             stream << imgSize;
         }
-        stream << stick_data.imgAngle;
-        stream << stick_data.imgAngleOffset; // mancava: si azzerava a ogni save/load/clone (vedi paint(): imgAngle+imgAngleOffset)
-        stream << stick_data.imgHScale;
-        stream << stick_data.imgWScale;
-        stream << stick_data.imgOffset;
-        stream << stick_data.hardTop;
-        stream << stick_data.hardBottom;
+        stream << stick_data.img_angle;
+        stream << stick_data.img_angle_offset; // mancava: si azzerava a ogni save/load/clone (vedi paint(): img_angle+img_angle_offset)
+        stream << stick_data.img_h_scale;
+        stream << stick_data.img_w_scale;
+        stream << stick_data.img_offset;
+        stream << stick_data.hard_top;
+        stream << stick_data.hard_bottom;
 
-        if (stick_data.stickType == StickData::IMAGE) {
-            stream << (int)stick_data.stickImgList.length();
-            stream << (int)stick_data.stickImgList.indexOf(stick_data.stickImg);
+        if (stick_data.stick_type == StickData::IMAGE) {
+            stream << (int)stick_data.stick_img_list.length();
+            stream << (int)stick_data.stick_img_list.indexOf(stick_data.stick_img);
             int j = 0;
-            for (QImage *i : stick_data.stickImgList) {
+            for (QImage *i : stick_data.stick_img_list) {
                 stream << *i;
-                stream << stick_data.imgNameList[j];
+                stream << stick_data.img_name_list[j];
                 j++;
             }
         }
@@ -125,28 +125,28 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
  */
 QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
 {
-    stream >> stick_data.Z;
+    stream >> stick_data.z;
     stream >> stick_data.version;
-    stream >> stick_data.stickType;
+    stream >> stick_data.stick_type;
     stream >> stick_data.stepchild;
-    stream >> stick_data.myLine;
-    stream >> stick_data.parentIdx;
-    stream >> stick_data.Pen;
-    stream >> stick_data.Brush;
+    stream >> stick_data.my_line;
+    stream >> stick_data.parent_idx;
+    stream >> stick_data.pen;
+    stream >> stick_data.brush;
     stream >> stick_data.order;
-    if ((stick_data.stickType == StickData::IMAGE) || (stick_data.stickType == StickData::CIRCLE) || (stick_data.stickType == StickData::RECT) || (stick_data.stickType == StickData::TRAPEZOID) || (stick_data.stickType == StickData::TAPER)) {
+    if ((stick_data.stick_type == StickData::IMAGE) || (stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER)) {
         QSize mysize;
-        if (stick_data.stickType == StickData::IMAGE) {
+        if (stick_data.stick_type == StickData::IMAGE) {
             stream >> mysize;
         }
-        stream >> stick_data.imgAngle;
-        stream >> stick_data.imgAngleOffset;
-        stream >> stick_data.imgHScale;
-        stream >> stick_data.imgWScale;
-        stream >> stick_data.imgOffset;
-        stream >> stick_data.hardTop;
-        stream >> stick_data.hardBottom;
-        if (stick_data.stickType == StickData::IMAGE) {
+        stream >> stick_data.img_angle;
+        stream >> stick_data.img_angle_offset;
+        stream >> stick_data.img_h_scale;
+        stream >> stick_data.img_w_scale;
+        stream >> stick_data.img_offset;
+        stream >> stick_data.hard_top;
+        stream >> stick_data.hard_bottom;
+        if (stick_data.stick_type == StickData::IMAGE) {
             int numOfImgs;
             int stickImgIdx;
             stream >> numOfImgs;
@@ -155,11 +155,11 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
                 QImage *img = new QImage(mysize, QImage::Format_ARGB32);
                 stream >> *img;
                 QString name;
-                stick_data.stickImgList.append(img);
+                stick_data.stick_img_list.append(img);
                 stream >> name;
-                stick_data.imgNameList.append(name);
+                stick_data.img_name_list.append(name);
             }
-            stick_data.stickImg = stick_data.stickImgList[stickImgIdx];
+            stick_data.stick_img = stick_data.stick_img_list[stickImgIdx];
         }
     }
     return stream;
