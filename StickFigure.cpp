@@ -597,8 +597,8 @@ void StickFigure::LoadStickFigure(QString name)
 
 }
 // rotates the whole stickfigure
-extern bool startStickFigureRotation;
-void StickFigure::RotateStickFigure(QPointF *coord, QList<StickGraphicsItem*> sticks, bool completeRotation){
+extern bool start_stick_figure_rotation;
+void StickFigure::RotateStickFigure(QPointF *coord, QList<StickGraphicsItem*> sticks, bool complete_rotation){
     // traslation-only
     if(current_stick == master_stick
             &&QLineF(*coord,master_stick->my_line.p1()).length()<QLineF(*coord,master_stick->my_line.p2()).length()){
@@ -609,14 +609,14 @@ void StickFigure::RotateStickFigure(QPointF *coord, QList<StickGraphicsItem*> st
     static float startingAngle = 0;
     //step 1 calcola l'angolo fra la posizione del mouse e il master node dello stickfigure
     QLineF connect;
-    if(completeRotation)
+    if(complete_rotation)
         connect = QLineF(master_stick->my_line.p1(),*coord); //crea la linea connettendo i punti
     else
         connect = QLineF(current_stick->my_line.p1(),*coord); //crea la linea connettendo i punti
     float angle = connect.angle(); //dicci l'angolo
     // se la rotazione è appena iniziata sbbass ail flag e registra lo starting angle in modo che il primo valore inviato sia 0
-    if(startStickFigureRotation){
-        startStickFigureRotation = false;
+    if(start_stick_figure_rotation){
+        start_stick_figure_rotation = false;
         startingAngle = angle;
     }
     // sottrai l'angolo di inizio, la prima iterazione da sempre 0 ovviamente
@@ -631,11 +631,11 @@ extern bool start_stick_figure_scale;
 void StickFigure::Scale(QPointF *coord){
     float scale = 0;
     static float startingDist = 0;
-    static QPointF startingPoint;
+    static QPointF starting_point;
     if(start_stick_figure_scale){
 
-        startingPoint = *coord;
-        startingDist = QLineF(startingPoint,master_stick->my_line.p1()).length();
+        starting_point = *coord;
+        startingDist = QLineF(starting_point,master_stick->my_line.p1()).length();
         if(startingDist<=1)
             return;
         start_stick_figure_scale = false;
@@ -657,78 +657,78 @@ void StickFigure::Traslate(qreal dx, qreal dy){
             s->view->Refresh(1);
     }
 }
-void MergeStickFigures(StickFigure* mainStickFigure, StickData* mainStick,StickFigure* toJoin){
+void MergeStickFigures(StickFigure* main_stick_figure, StickData* main_stick,StickFigure* to_join){
     QList<StickData*> matchIndexes;
     // first add an invisible branch that links the two
     StickData* linker = new StickData();
-    linker->my_line = QLineF(mainStick->my_line.p2(),toJoin->master_stick->my_line.p1());
+    linker->my_line = QLineF(main_stick->my_line.p2(),to_join->master_stick->my_line.p1());
 
-    mainStickFigure->stick_list.append(linker);
-    linker->parent = mainStick;
+    main_stick_figure->stick_list.append(linker);
+    linker->parent = main_stick;
 
     linker->stick_type = StickData::LINE;
     linker->pen= Qt::NoPen;
-    FramePresenter::AttachView(linker,mainStickFigure->scene);
-    if(mainStick->stepchild)
+    FramePresenter::AttachView(linker,main_stick_figure->scene);
+    if(main_stick->stepchild)
         linker->stepchild = true;
 
-    for(StickData* s: toJoin->stick_list){
+    for(StickData* s: to_join->stick_list){
         StickData* toAdd = s->Clone();
-        mainStickFigure->stick_list.append(toAdd);
+        main_stick_figure->stick_list.append(toAdd);
         toAdd->stepchild = false;
         matchIndexes.append(toAdd);
-        StickGraphicsItem *toAddView = FramePresenter::AttachView(toAdd,mainStickFigure->scene);
+        StickGraphicsItem *toAddView = FramePresenter::AttachView(toAdd,main_stick_figure->scene);
 
         toAddView->Refresh(0);
     }
     int i = 0;
-    for(StickData* s: toJoin->stick_list){
+    for(StickData* s: to_join->stick_list){
 
         StickData* toAdd = matchIndexes[i];
-        if(mainStick->stepchild)
+        if(main_stick->stepchild)
             toAdd->stepchild = true;
-        if(s == toJoin->master_stick){
+        if(s == to_join->master_stick){
             toAdd->parent = linker;
 
         }
-        else if(s->stepchild && s->parent==toJoin->master_stick)
+        else if(s->stepchild && s->parent==to_join->master_stick)
         {
 
             toAdd->parent = linker;
         }
         else{
-            toAdd->parent = matchIndexes[toJoin->stick_list.indexOf(s->parent)];
+            toAdd->parent = matchIndexes[to_join->stick_list.indexOf(s->parent)];
         }
         for(StickData* c: s->children){
 
-                toAdd->children.append(matchIndexes[toJoin->stick_list.indexOf(c)]);
+                toAdd->children.append(matchIndexes[to_join->stick_list.indexOf(c)]);
         }
         i++;
     }
-    linker->children.append(matchIndexes[toJoin->stick_list.indexOf(toJoin->master_stick)]->children);
-    linker->children.append(matchIndexes[toJoin->stick_list.indexOf(toJoin->master_stick)]);
+    linker->children.append(matchIndexes[to_join->stick_list.indexOf(to_join->master_stick)]->children);
+    linker->children.append(matchIndexes[to_join->stick_list.indexOf(to_join->master_stick)]);
 
     StickData * recursive;
-    recursive = mainStick;
+    recursive = main_stick;
     while(1){
         if(recursive == nullptr)
             break;
-        recursive->children.append(matchIndexes[toJoin->stick_list.indexOf(toJoin->master_stick)]->children);
-        recursive->children.append(matchIndexes[toJoin->stick_list.indexOf(toJoin->master_stick)]);
+        recursive->children.append(matchIndexes[to_join->stick_list.indexOf(to_join->master_stick)]->children);
+        recursive->children.append(matchIndexes[to_join->stick_list.indexOf(to_join->master_stick)]);
         recursive->children.append(linker);
         recursive = recursive->parent;
     }
     QList<StickData*> stepChildToRemove;
-    for(StickData* child:toJoin->master_stick->children){
+    for(StickData* child:to_join->master_stick->children){
         // solo i figli DIRETTI del vecchio master vengono davvero riparentati a linker (vedi sopra
         // "s->stepchild && s->parent->IsMaster()"): un nipote stepchild più in profondità mantiene il
         // suo parent originale, quindi resta un discendente legittimo del master clonato e non va tolto
-        if(child->stepchild && child->parent == toJoin->master_stick)
-            stepChildToRemove.append(matchIndexes[toJoin->stick_list.indexOf(child)]);
+        if(child->stepchild && child->parent == to_join->master_stick)
+            stepChildToRemove.append(matchIndexes[to_join->stick_list.indexOf(child)]);
 
     }
     for(StickData* child:stepChildToRemove){
-         matchIndexes[toJoin->stick_list.indexOf(toJoin->master_stick)]->children.removeAll(child);
+         matchIndexes[to_join->stick_list.indexOf(to_join->master_stick)]->children.removeAll(child);
     }
 
 }
@@ -745,7 +745,7 @@ void MergeStickFigures(StickFigure* mainStickFigure, StickData* mainStick,StickF
 //      Gerarchia sugli stick degli zii, che originano dalla catena genitoriale ma non ne fanno parte
 //      Gerarchia sugli stick dei fratelli, che originano nello stesso punto del prossimo master
 //      Figli del prossimo master che cambieranno il loro status da stepchild a non stepchild
-void StickFigure::SetStepChildAsMaster(StickData* toMaster){
+void StickFigure::SetStepChildAsMaster(StickData* to_master){
     QList<StickData*> zii;
     QList<StickData*> catenaGenitori;
     QList<StickData*> fratelli;
@@ -753,18 +753,18 @@ void StickFigure::SetStepChildAsMaster(StickData* toMaster){
     QList<StickData*> oldDirectChain;
     QList<StickData*> newDirectChain;
     StickData* oldMaster = master_stick;
-    StickData* oldParent = toMaster->parent;
+    StickData* oldParent = to_master->parent;
     QPointF p1Buf;
     QPointF p2Buf;
 
     // determina la catena genitoriale del nuovo masterstick
-    newDirectChain = toMaster->children;
+    newDirectChain = to_master->children;
     for(StickData* s: stick_list){
         // se condivide lo stesso genitore, non è lo stesso stick da fare master e condivideva lo stesso status (stepchild o non stepchild) è fratello
-        if(s->parent == toMaster->parent && s!=toMaster && s->stepchild == toMaster->stepchild){
+        if(s->parent == to_master->parent && s!=to_master && s->stepchild == to_master->stepchild){
                 fratelli.append(s);
         }// se invece  contiene fra i suoi figli il nuovo master è nella catena genitoriale che dovrà essere invertita
-        if(s->children.contains(toMaster)){
+        if(s->children.contains(to_master)){
             catenaGenitori.append(s);
         }
         if(s->stepchild){
@@ -777,7 +777,7 @@ void StickFigure::SetStepChildAsMaster(StickData* toMaster){
     // gli zii, sono gli stick che emergono dalla vecchia catena genitoriale (figli di uno di essi)
     for(StickData* s: stick_list){
         if(catenaGenitori.contains(s->parent) && // il genitore di questo stick appartiene alla catena genitoriale vecchia
-                s!=toMaster && // non deve essere lo stick che renderemo amster
+                s!=to_master && // non deve essere lo stick che renderemo amster
                  oldStepChild.contains(s) && // deve condividere lo stesso status di stepchild dello stick da rendere master
                 !fratelli.contains(s)&& // non deve essere già stato messo nella lista dei fratelli
                 !catenaGenitori.contains(s)){ // non deve far parte della catena genitoriale, deve essere un figlio di essa
@@ -786,15 +786,15 @@ void StickFigure::SetStepChildAsMaster(StickData* toMaster){
     }
     // forma le catene dei fratelli, ovvero la gerarchia rimane la stessa, importala nel nuovo master
     for(StickData* s:fratelli){
-        s->parent = toMaster;
-        toMaster->children.append(s);
-        toMaster->children.append(s->children);
+        s->parent = to_master;
+        to_master->children.append(s);
+        to_master->children.append(s->children);
     }
     // inverti i genitori, prima mettili in una lista ordinata,
     // dove l'ultimo item sarà il vecchio genitore dello stick da e master
     // e il primo item sarà il vecchio master
     QList<StickData*> chainToInvert;
-    StickData* recursive = toMaster->parent;
+    StickData* recursive = to_master->parent;
     for(StickData*s:catenaGenitori){
        Q_UNUSED(s);
        chainToInvert.insert(0,recursive);
@@ -807,8 +807,8 @@ void StickFigure::SetStepChildAsMaster(StickData* toMaster){
        s->parent = chainToInvert[chainToInvert.indexOf(s)+1]; // quello che era prima era il figlio diretto diviene il nuovo genitore
     }
     // il genitore del genitore del nuovo master, sarà il nuovo master stesso
-    toMaster->parent->parent = toMaster;
-    toMaster->parent = nullptr; // il nuovo master non ha genitori
+    to_master->parent->parent = to_master;
+    to_master->parent = nullptr; // il nuovo master non ha genitori
     // pulisci la gerarchia dellacatena dei genitori da invertire
     for(StickData* s: catenaGenitori){
         s->children.clear();
@@ -856,7 +856,7 @@ void StickFigure::SetStepChildAsMaster(StickData* toMaster){
     oldMaster->children.clear();
     oldMaster->children = oldDirectChain;
     // importa il vecchio albero genialogico diretto fra i figli del nuovo master
-    toMaster->children.append(oldMaster->children);
+    to_master->children.append(oldMaster->children);
 
     // aggiungi alla catena degli zii al ramo catena genitori invertita
     // ma ora che la catena è invertita, il genitore dello zio sarà quello che prima era il "nonno"
@@ -872,7 +872,7 @@ void StickFigure::SetStepChildAsMaster(StickData* toMaster){
     }
     // tutto è stepchild fuorchè i figli diretti del nuovo master
     for(StickData*s:stick_list){
-        if(s==toMaster || newDirectChain.contains(s)){
+        if(s==to_master || newDirectChain.contains(s)){
             s->stepchild = false;
         }
         else{
@@ -880,7 +880,7 @@ void StickFigure::SetStepChildAsMaster(StickData* toMaster){
         }
     }
     //riassegna il ruolo del master
-    master_stick = toMaster;
+    master_stick = to_master;
 
     Refresh(0);
 }
@@ -890,7 +890,7 @@ void StickFigure::SetStepChildAsMaster(StickData* toMaster){
 // appartenenti alla catena che collega il nuovo master col vecchio, la cui direzione va invertita
 // stick che nascevano nella catena sopracitata ma che generavano gerarchie parallele
 // stick che prima erano stepchild, la cui gerarchia verrà unita con la catena genitoriale una volta invertita
-void StickFigure::SetDirectChainAsMaster(StickData* toMaster){
+void StickFigure::SetDirectChainAsMaster(StickData* to_master){
     QList<StickData*> zii;
     QList<StickData*> catenaGenitori;
     QList<StickData*> fratelli;
@@ -899,12 +899,12 @@ void StickFigure::SetDirectChainAsMaster(StickData* toMaster){
     QPointF p2Buf;
     for(StickData* s: stick_list){
         // la catena genitoriale sono quegli stick che collegano il prossimo master al vecchio master (incluso)
-        if(s->children.contains(toMaster)){
+        if(s->children.contains(to_master)){
             catenaGenitori.append(s);
         }
         // i fratelli sono gli stick che condividono la paternità col prossimo master
-        else if(s->parent == toMaster->parent && s!=toMaster){
-            if(!(s->parent == oldMaster && s->stepchild != toMaster->stepchild))
+        else if(s->parent == to_master->parent && s!=to_master){
+            if(!(s->parent == oldMaster && s->stepchild != to_master->stepchild))
                 fratelli.append(s);
         }
     }
@@ -917,7 +917,7 @@ void StickFigure::SetDirectChainAsMaster(StickData* toMaster){
     // gli zii, sono stick che derivano dalla catena genitoriale prima calcolata ma non ne fanno parte, non devono essere stepchild
     for(StickData* s: stick_list){
         if(catenaGenitori.contains(s->parent) &&
-                s!=toMaster &&
+                s!=to_master &&
                 !catenaGenitori.contains(s) &&
                 !fratelli.contains(s)&&
                 !(oldStepChild.contains(s))){
@@ -925,12 +925,12 @@ void StickFigure::SetDirectChainAsMaster(StickData* toMaster){
         }
     }
     // aggiorna lo status
-    toMaster->stepchild = false;
+    to_master->stepchild = false;
 
     // la catena genitoriale va invertita, incluso il vecchio master si scambiano p1 con p2
     // e il primo figlio di ciascuno stick diventa il genitore di quello che prima era suo genitore
     QList<StickData*> catenaDaInvertire;
-    StickData* iterator = toMaster->parent;
+    StickData* iterator = to_master->parent;
     for(StickData*s: catenaGenitori) {
         Q_UNUSED(s);
         catenaDaInvertire.insert(0,iterator);
@@ -953,14 +953,14 @@ void StickFigure::SetDirectChainAsMaster(StickData* toMaster){
         // pulisci i figli dello stick, la catena va ricostruita
         s->children.clear(); // attenzione il master così si perde anch gli stepchild che non vengono ricostruiti al for successivo
     }
-    toMaster->parent->parent = toMaster;
+    to_master->parent->parent = to_master;
     for(StickData*s:catenaDaInvertire){
        if(catenaDaInvertire.indexOf(s)+1==catenaDaInvertire.length())
            break; // fermati al master
        s->parent = catenaDaInvertire[catenaDaInvertire.indexOf(s)+1]; // quello che era prima era il figlio diretto diviene il nuovo genitore
     }
 
-    toMaster->parent = nullptr;
+    to_master->parent = nullptr;
     // ricostruisci le liste dei figli ora che la catena è stata invertita
     for(StickData*s: catenaGenitori) {
         StickData * recursive = s->parent;
@@ -990,10 +990,10 @@ void StickFigure::SetDirectChainAsMaster(StickData* toMaster){
                 c->stepchild = true;
 
             }
-            toMaster->children.append(s->children);
+            to_master->children.append(s->children);
         }
-        toMaster->children.append(s);
-        s->parent = toMaster;
+        to_master->children.append(s);
+        s->parent = to_master;
 
     }
     // gli zii ereditano la gerarchia, ma il loro pdre diviene quello che prima era il padre del padre per via dell'inversione
@@ -1027,27 +1027,27 @@ void StickFigure::SetDirectChainAsMaster(StickData* toMaster){
             recursive = recursive->parent;
         }
     }
-    toMaster->stepchild = false;
-    master_stick = toMaster;
+    to_master->stepchild = false;
+    master_stick = to_master;
     Refresh(0);
 }
 // questo algoritmo serve a cambiare l'estremità in cui vi è il punto di origine di un master con un estremo libero
 //  - lo stick master non cambia, ma p1 e p2 si scambiano tra loro
 //  - quelli che prima erano stepchild diventano catena diretta
 //  - altrimenti se vi era soloc atena diretta, origine verso l'esterno, spostaimo l'origine verso l'interno e tutto diventa stecphildren
-void StickFigure::InvertMaster(StickData* toMaster){
+void StickFigure::InvertMaster(StickData* to_master){
     QPointF p2Buf;
 
     // inverti p1 con p2 per cambiare la direzione
-    p2Buf = toMaster->my_line.p2();
-    toMaster->my_line.setP2(toMaster->my_line.p1());
-    toMaster->my_line.setP1(p2Buf);
-    if(toMaster->stick_type == StickData::RECT ||toMaster->stick_type == StickData::CIRCLE|| toMaster->stick_type == StickData::TAPER || toMaster->stick_type == StickData::TRAPEZOID)
-      {  toMaster->img_angle = toMaster->img_angle-180;
-         if(toMaster->stick_type != StickData::CIRCLE && toMaster->stick_type != StickData::IMAGE ){
-             float buf = toMaster->img_h_scale;
-             toMaster->img_h_scale = toMaster->img_w_scale;
-             toMaster->img_w_scale= buf;
+    p2Buf = to_master->my_line.p2();
+    to_master->my_line.setP2(to_master->my_line.p1());
+    to_master->my_line.setP1(p2Buf);
+    if(to_master->stick_type == StickData::RECT ||to_master->stick_type == StickData::CIRCLE|| to_master->stick_type == StickData::TAPER || to_master->stick_type == StickData::TRAPEZOID)
+      {  to_master->img_angle = to_master->img_angle-180;
+         if(to_master->stick_type != StickData::CIRCLE && to_master->stick_type != StickData::IMAGE ){
+             float buf = to_master->img_h_scale;
+             to_master->img_h_scale = to_master->img_w_scale;
+             to_master->img_w_scale= buf;
          }
 
     }
@@ -1073,11 +1073,11 @@ void StickFigure::InvertMaster(StickData* toMaster){
         for(StickData*s: stick_list){
             s->stepchild = true;
         }
-        toMaster->stepchild = false;
+        to_master->stepchild = false;
     }
     // aggiorna lo status di master..ma non serve neanche
-    master_stick = toMaster;
-    toMaster->stepchild = false;
+    master_stick = to_master;
+    to_master->stepchild = false;
     Refresh(0);
 }
 // questo algoritmo semplificato rende master uno stick che correntemente è
@@ -1086,7 +1086,7 @@ void StickFigure::InvertMaster(StickData* toMaster){
 //  - i fratelli del master vecchio acquisiscono come genitore il nuovo master e perdono lo status di stepchild
 //  - il nuovo master acquisice stato di master, perde quello di stepchild,, il genitore diventa il nullptr
 //      inoltre si invertono p1 e p2
-void StickFigure::StepDownMaster(StickData* toMaster){
+void StickFigure::StepDownMaster(StickData* to_master){
     StickData* oldMaster = master_stick;
 
     for(StickData*s: stick_list){
@@ -1098,60 +1098,60 @@ void StickFigure::StepDownMaster(StickData* toMaster){
     // e perdono lo status id stepchild (anche i loro figli)
     for(StickData* s: stick_list){
         if(s->parent == oldMaster){
-            if(s->stepchild && s!=toMaster){
+            if(s->stepchild && s!=to_master){
                 s->stepchild = false;
                 for(StickData* c:s->children){
                     c->stepchild = false;
                 }
-                s->parent = toMaster;
+                s->parent = to_master;
             }
         }
     }
-    oldMaster->parent = toMaster;
+    oldMaster->parent = to_master;
     // inverti la direzione del nuovo master
-    QPointF p2Buf = toMaster->my_line.p2();
-    toMaster->my_line.setP2(toMaster->my_line.p1());
-    toMaster->my_line.setP1(p2Buf);
-    if(toMaster->stick_type == StickData::RECT ||toMaster->stick_type == StickData::CIRCLE||toMaster->stick_type == StickData::TAPER || toMaster->stick_type == StickData::TRAPEZOID)
-        if(toMaster->stick_type != StickData::CIRCLE && toMaster->stick_type != StickData::IMAGE ){
-            float buf = toMaster->img_h_scale;
-            toMaster->img_h_scale = toMaster->img_w_scale;
-            toMaster->img_w_scale= buf;
+    QPointF p2Buf = to_master->my_line.p2();
+    to_master->my_line.setP2(to_master->my_line.p1());
+    to_master->my_line.setP1(p2Buf);
+    if(to_master->stick_type == StickData::RECT ||to_master->stick_type == StickData::CIRCLE||to_master->stick_type == StickData::TAPER || to_master->stick_type == StickData::TRAPEZOID)
+        if(to_master->stick_type != StickData::CIRCLE && to_master->stick_type != StickData::IMAGE ){
+            float buf = to_master->img_h_scale;
+            to_master->img_h_scale = to_master->img_w_scale;
+            to_master->img_w_scale= buf;
         }
     // il nuovo master ha come children tutti gli stick tranne se stesso
-    toMaster->children.clear();
+    to_master->children.clear();
     for(StickData* s: stick_list)
-        toMaster->children.append(s);
-    toMaster->children.removeAll(toMaster);
+        to_master->children.append(s);
+    to_master->children.removeAll(to_master);
 
-    master_stick = toMaster;
-    toMaster->stepchild = false;
-    toMaster->parent = nullptr;
+    master_stick = to_master;
+    to_master->stepchild = false;
+    to_master->parent = nullptr;
 
     Refresh(0);
 }
 // sets new endpoint of the stick and traslates all its children
-void StickFigure::Elongate(QPointF newEndPoint, StickData* myStick){
-    if(!stick_list.contains(myStick))
+void StickFigure::Elongate(QPointF new_end_point, StickData* my_stick){
+    if(!stick_list.contains(my_stick))
         return;
-    float dx = newEndPoint.x()-myStick->my_line.p2().x();
-    float dy = newEndPoint.y()-myStick->my_line.p2().y();
-    myStick->my_line.setP2(newEndPoint);
-    for(StickData*s: myStick->children){
-        if(!(myStick==master_stick && s->stepchild)){
+    float dx = new_end_point.x()-my_stick->my_line.p2().x();
+    float dy = new_end_point.y()-my_stick->my_line.p2().y();
+    my_stick->my_line.setP2(new_end_point);
+    for(StickData*s: my_stick->children){
+        if(!(my_stick==master_stick && s->stepchild)){
             s->my_line.translate(dx,dy);
 
         }
     }
-    if(myStick->stick_type == StickData::IMAGE || myStick->stick_type  == StickData::RECT
-            || myStick->stick_type  == StickData::TRAPEZOID || myStick->stick_type  == StickData::TAPER){
-        myStick->img_angle= -atan2(myStick->my_line.dx(),myStick->my_line.dy())*180/M_PI;
+    if(my_stick->stick_type == StickData::IMAGE || my_stick->stick_type  == StickData::RECT
+            || my_stick->stick_type  == StickData::TRAPEZOID || my_stick->stick_type  == StickData::TAPER){
+        my_stick->img_angle= -atan2(my_stick->my_line.dx(),my_stick->my_line.dy())*180/M_PI;
     }
     Refresh(0);
 
 }
 // seleziona quale algoritmo usare a seconda dello stick che deve diventare master
-void StickFigure::SetMaster(StickData* toMaster){
+void StickFigure::SetMaster(StickData* to_master){
     QList<StickData*> figli;
     QList<StickData*> figliastri;
     if(master_stick->view){
@@ -1167,19 +1167,19 @@ void StickFigure::SetMaster(StickData* toMaster){
             figli.append(s);
     }
     // se siamo nella condizione di avere un estremo senza appendici e lo stick è già master, effettua una inversione
-    if( toMaster == master_stick && (figli.isEmpty() || figliastri.isEmpty())){
-        InvertMaster(toMaster);
+    if( to_master == master_stick && (figli.isEmpty() || figliastri.isEmpty())){
+        InvertMaster(to_master);
     }
     // se lo stick era uno stepchild che nasce direttamente dall'origine, allora sposta tutta la gerarchia un passo verso il basso
-    else if(figliastri.contains(toMaster)){
-        StepDownMaster(toMaster);
+    else if(figliastri.contains(to_master)){
+        StepDownMaster(to_master);
     }
-    else if(toMaster == master_stick)
+    else if(to_master == master_stick)
         return;
-    else if(toMaster->stepchild) // master scelto fa parte dei non stepchild
-        SetStepChildAsMaster(toMaster);
+    else if(to_master->stepchild) // master scelto fa parte dei non stepchild
+        SetStepChildAsMaster(to_master);
     else
-        SetDirectChainAsMaster(toMaster); // masterscelto fa parte dei vecchi stepchild
+        SetDirectChainAsMaster(to_master); // masterscelto fa parte dei vecchi stepchild
     if(master_stick->view){
         master_stick->view->stick_handle[0]->setBrush(QBrush(Qt::green));
         master_stick->view->stick_handle[0]->setZValue(101);

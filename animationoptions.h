@@ -16,13 +16,13 @@ class AnimationOptions : public QWidget
     Q_OBJECT
 
 public:
-    explicit AnimationOptions(QWidget *parent = nullptr, int W =800, int H = 600, int FPS = 24,int handles = 10, int autoSaveInput = 50);
+    explicit AnimationOptions(QWidget *parent = nullptr, int W =800, int H = 600, int FPS = 24,int handles = 10, int auto_save_input = 50);
     ~AnimationOptions();
     int width = 1;
     int height = 1;
     int fps = 24;
-    int autoSaveInterval = 50;
-    int handleSize = 10;
+    int auto_save_interval = 50;
+    int handle_size = 10;
 private slots:
     void on_okBtn_clicked();
 
@@ -39,7 +39,7 @@ private slots:
 private:
     Ui::AnimationOptions *ui;
 signals:
-    void DialogOut(int optionVal);
+    void DialogOut(int option_val);
 };
 
 #endif // ANIMATIONOPTIONS_H

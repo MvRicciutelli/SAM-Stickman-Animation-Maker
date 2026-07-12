@@ -46,19 +46,19 @@ public:
     void LoadStickFigure(QString name);
     void Refresh(int mode = 0);
 
-    void RotateStickFigure(QPointF *coord, QList<StickGraphicsItem*>sticks, bool completeRotation);
+    void RotateStickFigure(QPointF *coord, QList<StickGraphicsItem*>sticks, bool complete_rotation);
     void Scale(QPointF *coord);
     void Traslate(qreal dx, qreal dy);
 
     QList<StickData*> Weld(StickData *master);
     StickData* Chop(StickData *origin);
-    void SetMaster(StickData *toMaster);
-    void SetDirectChainAsMaster(StickData *toMaster);
-    void SetStepChildAsMaster(StickData *toMaster);
-    void InvertMaster(StickData *toMaster);
-    void StepDownMaster(StickData *toMaster);
+    void SetMaster(StickData *to_master);
+    void SetDirectChainAsMaster(StickData *to_master);
+    void SetStepChildAsMaster(StickData *to_master);
+    void InvertMaster(StickData *to_master);
+    void StepDownMaster(StickData *to_master);
     void UpdateBoundingRects();
-    void Elongate(QPointF newEndPoint, StickData *myStick);
+    void Elongate(QPointF new_end_point, StickData *my_stick);
     float MaxZ();
     float MinZ();
     float MeasureDistanceFromLine(QPointF p, QLineF l);
@@ -112,7 +112,7 @@ StickFigureData *ExtractStickFigureData(const StickFigure &source_figure);
 void PopulateLiveStickFigure(StickFigure *target_figure, const StickFigureData &source_data,
                              bool attach_to_scene, bool update_icon);
 
-void MergeStickFigures(StickFigure* mainStickFigure, StickData* mainStick,StickFigure* toJoin);
+void MergeStickFigures(StickFigure* main_stick_figure, StickData* main_stick,StickFigure* to_join);
 void SplitStickFigures(StickFigure* split, StickData* origin,StickFigure* branch);
 /**
  * @brief Deep-copies a stick's persistent data (plain field copy since Phase 1a).

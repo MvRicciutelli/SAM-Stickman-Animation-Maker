@@ -13,44 +13,44 @@
 #include "framepresenter.h"
 
 
-bool    isRightPressed = false;
-bool    isMiddlePressed = false;
-bool    isPressed = false;
-extern float zoomLvl;
+bool    is_right_pressed = false;
+bool    is_middle_pressed = false;
+bool    is_pressed = false;
+extern float zoom_lvl;
 QPointF startingCoord; //mouse click coordinateBuffer
 QPointF coord; //current mouse pos
 float   rotationBuffer; //selected item Rotation buffer
-float   lengthBuffer;
-float zoomLvlBuf;
-FrameData* stickLibraryBuffer; ///< libreria corrente: solo dati da Phase 2b
+float   length_buffer;
+float zoom_lvl_buf;
+FrameData* stick_library_buffer; ///< libreria corrente: solo dati da Phase 2b
 extern QSpinBox * onion_skin_sb;
-bool startStickFigureRotation = false;
+bool start_stick_figure_rotation = false;
 bool start_stick_figure_scale = false;
-bool translateScene = false;
-bool rotateScene = false;
-bool scaleScene = false;
-StickFigure* joinToStickFigure;
-StickFigure* splitToStickFigure;;
-StickData* joinToStick;
-StickData* splitToStick;
+bool translate_scene = false;
+bool rotate_scene = false;
+bool scale_scene = false;
+StickFigure* join_to_stick_figure;
+StickFigure* split_to_stick_figure;;
+StickData* join_to_stick;
+StickData* split_to_stick;
 extern QString image_name_buffer;
 extern int W;
 extern int H;
 extern QGraphicsRectItem* my_rect;
 extern QGraphicsRectItem* limit_rect;
-extern bool playBack ;
-extern bool loadFile;
+extern bool play_back ;
+extern bool load_file;
 extern QPointF onion_offset;
 extern QImage * image_draw_buffer ;
 extern QString animation_path;
-extern int autoSaveInterval;
-extern int opCount;
+extern int auto_save_interval;
+extern int op_count;
 
 #define MAXUNDO 50 ///< cap on undo_stack depth, enforced via QUndoStack::setUndoLimit()
 
 MyView::MyView(QWidget *parent) : QGraphicsView(parent)
 {
-    onionRender = false;
+    onion_render = false;
     my_animation = new Animation();
     my_animation->scene = scene();
     setMouseTracking(true);
@@ -58,14 +58,14 @@ MyView::MyView(QWidget *parent) : QGraphicsView(parent)
     my_brush.setStyle(Qt::SolidPattern);
     my_brush.setColor(Qt::gray);
     my_pen.setCapStyle(Qt::RoundCap);
-    stickLibraryBuffer = new FrameData();
+    stick_library_buffer = new FrameData();
     undo_stack.setUndoLimit(MAXUNDO);
     // autosave triggering moved here from StoreUndo() (Phase 4): indexChanged fires
     // on every push/undo/redo, which is a more correct autosave trigger than the old
     // "only on a fresh edit" behavior (undo/redo are edits too, worth autosaving)
     connect(&undo_stack, &QUndoStack::indexChanged, this, [this](int){
-        opCount++;
-        if(QFile::exists(animation_path) && opCount % autoSaveInterval == 0){
+        op_count++;
+        if(QFile::exists(animation_path) && op_count % auto_save_interval == 0){
             emit AutoSaveTrigger();
         }
     });
@@ -211,33 +211,33 @@ void MyView::MoveStickFigureZ(int increment, int mode)
     }
 */
 }
-void MyView::MapMyCoords(QPointF& myCoord, QPointF startingPoint){
-    coord = mapToScene(startingPoint.x(),startingPoint.y());
-    if(myCoord.x()<-my_rect->rect().width()/10)
-        myCoord.setX(-my_rect->rect().width()/10);
-    if(myCoord.y()<-my_rect->rect().height()/10)
-        myCoord.setY(-my_rect->rect().height()/10);
-    if(myCoord.y()>my_rect->rect().height()+my_rect->rect().height()/10)
-        myCoord.setY(my_rect->rect().height()+my_rect->rect().height()/10);
-    if(myCoord.x()>my_rect->rect().width()+my_rect->rect().width()/10)
-        myCoord.setX(my_rect->rect().width()+my_rect->rect().width()/10);
+void MyView::MapMyCoords(QPointF& my_coord, QPointF starting_point){
+    coord = mapToScene(starting_point.x(),starting_point.y());
+    if(my_coord.x()<-my_rect->rect().width()/10)
+        my_coord.setX(-my_rect->rect().width()/10);
+    if(my_coord.y()<-my_rect->rect().height()/10)
+        my_coord.setY(-my_rect->rect().height()/10);
+    if(my_coord.y()>my_rect->rect().height()+my_rect->rect().height()/10)
+        my_coord.setY(my_rect->rect().height()+my_rect->rect().height()/10);
+    if(my_coord.x()>my_rect->rect().width()+my_rect->rect().width()/10)
+        my_coord.setX(my_rect->rect().width()+my_rect->rect().width()/10);
 }
 void MyView::mousePressEvent(QMouseEvent *event)
 {
     if(event->button()==Qt::LeftButton){
-        isPressed = true;
+        is_pressed = true;
     }
     else if(event->button()==Qt::RightButton){
-        isRightPressed = true;
+        is_right_pressed = true;
     }else if(event->button()==Qt::MiddleButton){
-        isMiddlePressed = true;
+        is_middle_pressed = true;
     }
     // converti le coordinate del mouse in coordinate di scena
     MapMyCoords(coord,event->pos());
 
 
     startingCoord   = coord; //buffer per il dragghing del mouse premuto
-    if(!isRightPressed && !isMiddlePressed){
+    if(!is_right_pressed && !is_middle_pressed){
     switch(tool)
     {
             case CLAMP:
@@ -245,7 +245,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
             {
                 StoreUndo();
                 ArrowSelection();
-                startStickFigureRotation = true;
+                start_stick_figure_rotation = true;
                 for(StickData*s:my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
                     if(s->view) s->view->angle_buffer2 = s->my_line.angle();
                 }
@@ -268,7 +268,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
             case(ROTATE):
             {
                 StoreUndo();
-                startStickFigureRotation = true;
+                start_stick_figure_rotation = true;
                 for(StickData*s:my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
                     if(s->view) s->view->angle_buffer2 = s->my_line.angle();
                 }
@@ -327,15 +327,15 @@ void MyView::mousePressEvent(QMouseEvent *event)
                 if(my_animation->CurrentFrame()->CurrentStickFigure()!= nullptr){
                     //check layer is not empty
                     if(my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.count()>0){
-                        joinToStickFigure = my_animation->CurrentFrame()->CurrentStickFigure();
-                        joinToStick = joinToStickFigure->current_stick;
+                        join_to_stick_figure = my_animation->CurrentFrame()->CurrentStickFigure();
+                        join_to_stick = join_to_stick_figure->current_stick;
                         StoreUndo();
                         ArrowSelection();
 
-                        if(my_animation->CurrentFrame()->CurrentStickFigure()!=joinToStickFigure && my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.count()>0){
-                            RemoveHandles(joinToStickFigure);
-                            MergeStickFigures(joinToStickFigure,joinToStick,my_animation->CurrentFrame()->CurrentStickFigure());
-                            AddHandles(joinToStickFigure);
+                        if(my_animation->CurrentFrame()->CurrentStickFigure()!=join_to_stick_figure && my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.count()>0){
+                            RemoveHandles(join_to_stick_figure);
+                            MergeStickFigures(join_to_stick_figure,join_to_stick,my_animation->CurrentFrame()->CurrentStickFigure());
+                            AddHandles(join_to_stick_figure);
                             DeleteStickFigure();
                             for(StickData*s:my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
                                 if(!my_animation->CurrentFrame()->total_sticks.contains(s))
@@ -356,7 +356,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
                 StoreUndo();
                 ArrowSelection();
                 if(my_animation->CurrentFrame()->CurrentStick()==nullptr) break; // niente da selezionare (nessuno stick nel frame)
-                lengthBuffer = my_animation->CurrentFrame()->CurrentStick()->my_line.length();
+                length_buffer = my_animation->CurrentFrame()->CurrentStick()->my_line.length();
                 break;
             }
             case(MANIPULATE):
@@ -364,7 +364,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
                 StoreUndo();
                 ArrowSelection();
                 if(my_animation->CurrentFrame()->CurrentStick()==nullptr) break; // niente da selezionare (nessuno stick nel frame)
-                lengthBuffer = my_animation->CurrentFrame()->CurrentStick()->my_line.length();
+                length_buffer = my_animation->CurrentFrame()->CurrentStick()->my_line.length();
 
                 break;
             }
@@ -640,7 +640,7 @@ void MyView::wheelEvent(QWheelEvent *event)
 void MyView::mouseReleaseEvent(QMouseEvent *event)
 {
     if(event->button()==Qt::LeftButton){
-        isPressed = false;
+        is_pressed = false;
         if(my_animation->current_frame->stick_figures.count()>0)
         {
             if(my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.count()>0
@@ -663,11 +663,11 @@ void MyView::mouseReleaseEvent(QMouseEvent *event)
             }
         }
     }else if(event->button()==Qt::RightButton){
-        isRightPressed = false;
+        is_right_pressed = false;
         setTransformationAnchor(QGraphicsView::AnchorViewCenter);
     }else if(event->button()==Qt::MiddleButton){
-        isMiddlePressed = false;
-        //zoomLvl = zoomLvlBuf/zoomLvl;
+        is_middle_pressed = false;
+        //zoom_lvl = zoom_lvl_buf/zoom_lvl;
         setTransformationAnchor(QGraphicsView::AnchorViewCenter);
     }
 
@@ -686,7 +686,7 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         case CLAMP:
         case NOTOOL:
         {
-            if(isPressed)
+            if(is_pressed)
             {
                 if(scene()->selectedItems().count() == 1)
                 {
@@ -748,7 +748,7 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         {
             if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr && my_animation->CurrentFrame()->CurrentStick()!=nullptr)
             {
-                if(isPressed){
+                if(is_pressed){
                     if(my_animation->CurrentFrame()->CurrentStick()->view)
                         my_animation->CurrentFrame()->CurrentStick()->view->Manipulate(&coord);
                     elongate_spinbox->setValue(my_animation->CurrentFrame()->CurrentStick()->my_line.length());
@@ -760,7 +760,7 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         {
             if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr)
             {
-                if(isPressed){
+                if(is_pressed){
                     QList<StickGraphicsItem*> views;
                     for(StickData* s: my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
                         if(s->view) views.append(s->view);
@@ -772,14 +772,14 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         }
         case(SCALE):
         {
-            if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr && isPressed){
+            if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr && is_pressed){
                my_animation->CurrentFrame()->CurrentStickFigure()->Scale(&coord);
             }
             break;
         }
         case(MOVESCENE):
         {
-            if(isPressed && !my_animation->current_frame->stick_figures.isEmpty()){
+            if(is_pressed && !my_animation->current_frame->stick_figures.isEmpty()){
                 int dx = -startingCoord.x()+coord.x();
                 int dy = -startingCoord.y()+coord.y();
                 startingCoord = coord;
@@ -794,7 +794,7 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         }
         case(ROTATESCENE):
         {
-            if(isPressed && !my_animation->current_frame->stick_figures.isEmpty()){
+            if(is_pressed && !my_animation->current_frame->stick_figures.isEmpty()){
                 QPointF center(W/2,H/2); // centro del sistema
                 QLineF mouseToCenterNow(coord,center); // linea che connette il centro al mouse
                 QLineF mouseToCenterStart(startingCoord,center); // linea che connette il centro alla posizione del mouse precedente
@@ -835,15 +835,15 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         {
 
 
-            if(isPressed && !my_animation->current_frame->stick_figures.isEmpty()){
-                float scaleAmount = 1;
+            if(is_pressed && !my_animation->current_frame->stick_figures.isEmpty()){
+                float scale_amount = 1;
                 float dist = 0;
                 QPointF center(W/2,H/2);
                 float startDist = QLineF(startingCoord,center).length();
                 if(startDist<1) // evita una divisione per zero (o quasi) se si preme esattamente sul centro
                     break;
                 dist = QLineF(coord,center).length();
-                scaleAmount = dist/startDist;
+                scale_amount = dist/startDist;
                 for(StickFigure * S:my_animation->current_frame->stick_figures){
                     //check it is not an empty layer
                         if( S->stick_list.count()>0 && S->master_stick){
@@ -857,11 +857,11 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                         QLineF actualDistFromCenter(S->master_stick->my_line.p1(),center);
                         QLineF originalDistFromCenter(S->origin_pos_buffer,center);
                         // quindi fai la differenza fra il valore di distaza originale (max) e la distanza attuale modificata dal fattore di scala per dx e dy
-                        dx = -originalDistFromCenter.dx()*scaleAmount+actualDistFromCenter.dx();
-                        dy = -originalDistFromCenter.dy()*scaleAmount+actualDistFromCenter.dy();
+                        dx = -originalDistFromCenter.dx()*scale_amount+actualDistFromCenter.dx();
+                        dy = -originalDistFromCenter.dy()*scale_amount+actualDistFromCenter.dy();
                         S->Traslate(dx,dy);
                         for(StickData* s:S->stick_list){
-                            if(s->view) s->view->Scale(scaleAmount);
+                            if(s->view) s->view->Scale(scale_amount);
 
                         }
                     }
@@ -875,50 +875,50 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                 break;
             if(my_animation->CurrentFrame()->CurrentStick() == nullptr)
                 break;
-            if(isPressed){
-                QLineF newEndPoint(my_animation->CurrentFrame()->CurrentStick()->my_line.p1(),coord);
-                lengthBuffer = newEndPoint.length();
+            if(is_pressed){
+                QLineF new_end_point(my_animation->CurrentFrame()->CurrentStick()->my_line.p1(),coord);
+                length_buffer = new_end_point.length();
                 my_animation->CurrentFrame()->CurrentStickFigure()->Elongate(coord,my_animation->CurrentFrame()->CurrentStick());
-                elongate_spinbox->setValue(lengthBuffer);
+                elongate_spinbox->setValue(length_buffer);
             }
             break;
         }
 
     }
-    if(isRightPressed){
+    if(is_right_pressed){
         setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
         QLineF travel(prevCoord,coord);
         translate(travel.dx(),travel.dy());
-    }else if(isMiddlePressed){
+    }else if(is_middle_pressed){
 
         //calcola lo scostamento dal centro all'inizio della pressione e quella attuale
         float distFromCenter0 = QLineF(prevCoord,QPointF(W/2,H/2)).length();
         float distFromCenter1 = QLineF(coord,QPointF(W/2,H/2)).length();
 
-        zoomLvlBuf = zoomLvl+(distFromCenter1-distFromCenter0)/(0.5*sqrtf(W*W+H*H)); // zoombuf è incrementato dal valore precedente di un valore sempre minore di 1
+        zoom_lvl_buf = zoom_lvl+(distFromCenter1-distFromCenter0)/(0.5*sqrtf(W*W+H*H)); // zoombuf è incrementato dal valore precedente di un valore sempre minore di 1
 
-        scale(zoomLvlBuf/zoomLvl,zoomLvlBuf/zoomLvl); // la divisione serve a riportare allo zoom 0, lo zoom applicato è zombuf
-        zoomLvl = zoomLvlBuf;
+        scale(zoom_lvl_buf/zoom_lvl,zoom_lvl_buf/zoom_lvl); // la divisione serve a riportare allo zoom 0, lo zoom applicato è zombuf
+        zoom_lvl = zoom_lvl_buf;
     }
     prevCoord = coord;
     QGraphicsView::mouseMoveEvent(event);
 }
 //funzione usata per riscalare interamente il frame quando si riscala l'animazione intera
-void MyView::ScaleFrame(Frame* F, float scaleAmount, QRectF R){
+void MyView::ScaleFrame(Frame* F, float scale_amount, QRectF R){
     QPointF center(R.width()/2,R.height()/2);
     if(F->stick_figures.isEmpty())
         return;
     for(StickFigure * S:F->stick_figures){
         if(!S->stick_list.isEmpty()){
             QLineF actualDistFromCenter(S->master_stick->my_line.p1(),center);
-            float dx =-(scaleAmount-1)*actualDistFromCenter.dx();
-            float dy =-(scaleAmount-1)*actualDistFromCenter.dy();
+            float dx =-(scale_amount-1)*actualDistFromCenter.dx();
+            float dy =-(scale_amount-1)*actualDistFromCenter.dy();
             S->Traslate(dx,dy);
             for(StickData* s:S->stick_list){
                 if(s->view){
                     s->view->scale_buffer = s->my_line.length();
                     s->view->width_buffer = s->pen.widthF();
-                    s->view->Scale(scaleAmount);
+                    s->view->Scale(scale_amount);
                 }
             }
         }
@@ -992,7 +992,7 @@ void MyView::MoveToFrame(Frame* frame){
         S->linked_item = addedItem;
         my_stick_figure_widget_list->addItem(S->linked_item);
         // aggiungi alla scena
-        if(!playBack){
+        if(!play_back){
             S->UpdateBoundingRects();
             S->UpdateIcon();
             AddHandles(S);
@@ -1017,14 +1017,14 @@ void MyView::MoveToFrame(Frame* frame){
         ArrowSelection();
     }
 
-    if(!playBack)
+    if(!play_back)
     {
         UpdateOnionSkins();//aggiorna gli onion skins
     }
     num = currentScene->items();
     //scene()->update(myR);
     // se non siamo in modalità playback aggiorna le selezioni nelle widgetlists e delle iconee
-    if(playBack == false){
+    if(play_back == false){
         my_animation->current_frame->linked_item->setSelected(true);
         my_frame_widget_list->setCurrentItem(my_animation->current_frame->linked_item);
         // niente guardia su stick_figures.isEmpty(): UpdateIcon() gestisce già correttamente un
@@ -1060,10 +1060,10 @@ void MyView::UpdateOnionSkins(){
     if(onion_skin_sb->value()==0 || my_animation->current_frame->frame_number == 0)
         return;
     // imposta la flag per routine speciali
-    onionRender = true;
+    onion_render = true;
     QGraphicsScene renderScene; // scena fittizia su cui renderizzare gli onionskins
     // immagine fittizia su cui registrare gli onion skins
-    QImage renderImg =  QImage(scene()->sceneRect().width(),scene()->sceneRect().height(),QImage::Format_ARGB32);
+    QImage render_img =  QImage(scene()->sceneRect().width(),scene()->sceneRect().height(),QImage::Format_ARGB32);
 
     renderScene.setSceneRect(scene()->sceneRect());
     // dallo spinbox trai il valore del numero di onionskins servono
@@ -1086,14 +1086,14 @@ void MyView::UpdateOnionSkins(){
             renderClones.append(clone);
             renderScene.addItem(new StickGraphicsItem(clone));
         }
-        QPainter painter(&renderImg);
-        renderImg.fill(Qt::transparent);
+        QPainter painter(&render_img);
+        render_img.fill(Qt::transparent);
         painter.setBackground(QBrush(QColor(Qt::transparent)));
         renderScene.render(&painter);
         // più è vecchio l'onion skin più è trasparente, più è vicino al frame corrente più è opaco
         opacityVal += 0.5/skinNum;
         // trasferisci la scena renderizzata
-        QGraphicsPixmapItem* item = new QGraphicsPixmapItem(QPixmap::fromImage((renderImg)));
+        QGraphicsPixmapItem* item = new QGraphicsPixmapItem(QPixmap::fromImage((render_img)));
         item->setOffset(onion_offset);
         item->setOpacity(opacityVal);
         item->setZValue(0);
@@ -1105,7 +1105,7 @@ void MyView::UpdateOnionSkins(){
 
     }
 
-    onionRender = false;
+    onion_render = false;
 }
 /**
  * @brief Single QUndoCommand shape covering every undoable edit (REFACTOR_PLAN.md
@@ -1309,13 +1309,13 @@ static QIcon RenderLibraryIcon(const StickFigureData &figure_data){
  * the "library" behavior inside the shared operators is gone; FrameData's operator<<
  * has exactly one behavior.
  */
-void MyView::SaveLibrary(QString fileName){
-    QFile file(fileName);
+void MyView::SaveLibrary(QString file_name){
+    QFile file(file_name);
     if(!file.open(QIODevice::WriteOnly)){
         return;
     }
     QDataStream out(&file);
-    out << *stickLibraryBuffer;
+    out << *stick_library_buffer;
     file.close();
 }
 /**
@@ -1324,29 +1324,29 @@ void MyView::SaveLibrary(QString fileName){
  */
 void MyView::ClearCurrentLib(){
     my_current_library_widget->clear();
-    delete stickLibraryBuffer;
-    stickLibraryBuffer = new FrameData();
+    delete stick_library_buffer;
+    stick_library_buffer = new FrameData();
 }
 /**
  * @details Reads the library file into the data buffer, then builds the list-widget
  * entries: each item stores its StickFigureData pointer and an icon rendered from the
  * data. mode!=0 keeps the widget untouched (legacy semantics, currently unused).
  */
-void MyView::LoadLibrary(QString fileName, int mode){
-    QFile file(fileName);
+void MyView::LoadLibrary(QString file_name, int mode){
+    QFile file(file_name);
     if(!file.open(QIODevice::ReadOnly)){
         return;
     }
     QDataStream in(&file);
     my_current_library_widget->clear();
-    delete stickLibraryBuffer;
-    stickLibraryBuffer = new FrameData();
-    in >> *stickLibraryBuffer;
+    delete stick_library_buffer;
+    stick_library_buffer = new FrameData();
+    in >> *stick_library_buffer;
     file.close();
     if(mode)
         return;
     // aggiungi tutti gli stickfigure della libreria alla lista del widget
-    for(StickFigureData *figure_data:stickLibraryBuffer->stick_figures){
+    for(StickFigureData *figure_data:stick_library_buffer->stick_figures){
         QListWidgetItem * addedItem = new QListWidgetItem();
         addedItem->setData(Qt::UserRole,QVariant::fromValue(figure_data));
         addedItem->setData(Qt::DisplayRole,figure_data->name);
@@ -1363,7 +1363,7 @@ StickFigure* MyView::AddStickFigureToLibrary(){
     if(my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.count()>0)
     {
         StickFigureData *figure_data = ExtractStickFigureData(*my_animation->CurrentFrame()->CurrentStickFigure());
-        stickLibraryBuffer->stick_figures.append(figure_data);
+        stick_library_buffer->stick_figures.append(figure_data);
         QListWidgetItem * addedItem = new QListWidgetItem();
         addedItem->setData(Qt::UserRole,QVariant::fromValue(figure_data));
         addedItem->setData(Qt::DisplayRole,figure_data->name);
@@ -1390,10 +1390,10 @@ void MyView::RemoveFromLibrary(){
     if(idx<0 || idx>=my_current_library_widget->count()) // niente selezionato: senza questo, takeItem(-1) torna nullptr e va in crash sotto
         return;
     QListWidgetItem *itemToRemove = my_current_library_widget->takeItem(idx);
-    StickFigureData* toRemove = qvariant_cast<StickFigureData*>(itemToRemove->data(Qt::UserRole));
+    StickFigureData* to_remove = qvariant_cast<StickFigureData*>(itemToRemove->data(Qt::UserRole));
     delete itemToRemove;
-    stickLibraryBuffer->stick_figures.removeAll(toRemove);
-    delete toRemove;
+    stick_library_buffer->stick_figures.removeAll(to_remove);
+    delete to_remove;
 }
 void MyView::SetGraphics(bool all, int attribute){
     StoreUndo(CMD_SIMPLE);
@@ -1443,23 +1443,23 @@ void MyView::SplitStickFigure(){
         return;
     }
     StoreUndo();
-    splitToStickFigure = my_animation->CurrentFrame()->CurrentStickFigure();
-    RemoveHandles(splitToStickFigure);
-    splitToStick = splitToStickFigure->current_stick;
+    split_to_stick_figure = my_animation->CurrentFrame()->CurrentStickFigure();
+    RemoveHandles(split_to_stick_figure);
+    split_to_stick = split_to_stick_figure->current_stick;
     QList<StickData*> oldStickList = my_animation->CurrentFrame()->CurrentStickFigure()->stick_list;
 
-    StickFigure * branch = my_animation->current_frame->AddStickFigure(my_stick_figure_widget_list, splitToStickFigure->name+"_split");
-    SplitStickFigures(splitToStickFigure,splitToStick,branch);
-    splitToStickFigure->Refresh(0);
+    StickFigure * branch = my_animation->current_frame->AddStickFigure(my_stick_figure_widget_list, split_to_stick_figure->name+"_split");
+    SplitStickFigures(split_to_stick_figure,split_to_stick,branch);
+    split_to_stick_figure->Refresh(0);
     // update the total list
-    QList<StickData*> survivorList = splitToStickFigure->stick_list;
+    QList<StickData*> survivorList = split_to_stick_figure->stick_list;
     for(StickData*s:oldStickList){
         if(!survivorList.contains(s)){
             my_animation->CurrentFrame()->total_sticks.removeAll(s);
         }
     }
     my_animation->CurrentFrame()->total_sticks.append(branch->stick_list);
-    AddHandles(splitToStickFigure);
+    AddHandles(split_to_stick_figure);
     AddHandles(branch);
     //
     branch->Refresh(0);
@@ -1515,13 +1515,13 @@ void MyView::SizeChange(int option){
 }
 void MyView::PreparePreview(){
 
-    playBack = true;
+    play_back = true;
     for(Frame* f :my_animation->frame_list){
         QGraphicsScene renderScene; //scena fittizia
-        QImage *renderImg = new QImage(W,H,QImage::Format_ARGB32); //immagine temporanea
+        QImage *render_img = new QImage(W,H,QImage::Format_ARGB32); //immagine temporanea
 
 
-        QPainter painter(renderImg); // painter che esegue il drawing sull immagine
+        QPainter painter(render_img); // painter che esegue il drawing sull immagine
         renderScene.setSceneRect(my_rect->rect());
         // questi stick sono VIVI: clona i dati prima di wrapparli, altrimenti il costruttore
         // di stick ruberebbe il back-pointer data->view alla view reale sullo schermo
@@ -1535,27 +1535,27 @@ void MyView::PreparePreview(){
             }
         }
         //disegna sull' immagine e salvala
-        renderImg->fill(Qt::white);
+        render_img->fill(Qt::white);
         painter.setBackground(QBrush(QColor(Qt::white)));
         renderScene.render(&painter);
         painter.end();
-        QGraphicsPixmapItem* item = new QGraphicsPixmapItem(QPixmap::fromImage(*(renderImg)));
+        QGraphicsPixmapItem* item = new QGraphicsPixmapItem(QPixmap::fromImage(*(render_img)));
         preview_list.append(item);
-        delete renderImg;
+        delete render_img;
         renderScene.clear(); // distruggi le view di rendering PRIMA di liberare i dati clonati
         qDeleteAll(renderClones);
         //...add all other video frames here
     }
-    playBack = false;
+    play_back = false;
 }
 void MyView::DisplayPreview(int idx){
     // rimuovi il pixmap del frame precedente: altrimenti si accumula uno per frame per tutta
     // la riproduzione, invece di essere ripulito solo (tutto insieme) quando la riproduzione finisce
     if(idx>0)
         scene()->removeItem(preview_list[idx-1]);
-    QGraphicsPixmapItem* renderImg = preview_list[idx];
+    QGraphicsPixmapItem* render_img = preview_list[idx];
 
     //item->setOffset(onion_offset);
-    scene()->addItem(renderImg);
+    scene()->addItem(render_img);
     //item->setZValue(0);
 }

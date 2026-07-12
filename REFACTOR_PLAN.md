@@ -528,12 +528,66 @@ handlers are hundreds of lines with many local variables still in
 variable in every function body is a much larger, lower-value tail that
 can be a later pass if wanted, not a blocker on calling Phase 7 "done."
 
-**Not yet started:** `Widget` (`widget.cpp`/`.h`) — the largest remaining
-file (52KB), with the most Qt-inheritance surface (`Widget : QWidget`) and
-therefore the highest remaining concentration of possible virtual-override
-and generic-name collisions. Same discipline applies — `.ui`-objectName
-collision check plus full call-site/receiver check for any short or
-generic method name before renaming it.
+**Seventh checkpoint / Phase 7 complete (2026-07-12, same day):** renamed
+`Widget`'s 7 hand-written methods (`AddStick`, `CreatePaths`,
+`DetectLibraries`, `CreateJson`, `ReadJson`, `WriteJson`,
+`TermsAndConditions` — its ~200 other methods are Designer auto-connect
+`on_..._...` slots, correctly left untouched) and its remaining fields
+(`myUi`→`my_ui`, `layerList`→`layer_list`). Then did a final exhaustive
+sweep across every `.h` and every `.cpp` file for stragglers missed by the
+per-class passes above, finding and fixing: `opCount`→`op_count`,
+`frameCopyBuffer`→`frame_copy_buffer`, `stickLibraryBuffer`→
+`stick_library_buffer`, `autoSaveInterval`(the `mymainwindow.cpp`/
+`widget.cpp` global, distinct from `AnimationOptions`'s own already-correct
+member of the same name)→`auto_save_interval`, `loadFile`→`load_file`,
+`onionRender`→`onion_render`, `AnimationOptions::handleSize`→
+`handle_size` (matches the already-renamed global of the same underlying
+concept; always accessed via `->`, so no ambiguity), plus ~20 more
+`myview.cpp`/`widget.cpp`/`mymainwindow.cpp`/`animation.cpp` globals
+(`playBack`, `busyPlay`, `isPressed`/`isRightPressed`/`isMiddlePressed`,
+`zoomLvlBuf`, `startStickFigureRotation`, `translateScene`/`rotateScene`/
+`scaleScene`, `joinToStick(Figure)`/`splitToStick(Figure)`, `myWidget`,
+`renderFlag`, `myOptions`, `clearingAnimation`, `changeTypeFlag`, and a few
+more). This last sweep is the clearest evidence that a per-class rename
+pass, however careful, will still miss file-scope globals declared
+inline in the `.cpp` that owns a UI handler rather than in that class's
+own header — **the final step of any future rename-sweep phase should
+always be a codebase-wide regex sweep for the bare pattern
+`[a-z]+[A-Z]`, not just a per-header review**, since headers converge much
+faster than `.cpp`-file-local globals do.
+
+Two real Qt-collision near-misses caught by this final sweep (both from
+renaming a parameter/local named after a real Qt method, not a receiver
+ambiguity like the earlier `scale`/`rotate` cases): renaming the bare word
+`currentRow` blanket-broke 14 real `QListWidget::currentRow()` calls, and
+renaming `fileName` blanket-broke 5 real `QFileInfo`/`QDirIterator::
+fileName()` calls — both caught immediately by grepping for
+`newname(` after the rename (not by the compiler, since `currentRow`/
+`current_row` and `fileName`/`file_name` are just different valid
+identifiers to the compiler with no ambiguity to flag) and fixed by
+reverting the specific call sites back to the Qt name. **Lesson: for any
+name being renamed that is a common, short, or generic word (`row`,
+`name`, `scale`, `size`, `count`...), grep `oldname(` and `newname(`
+across the whole repo immediately after the rename, every time — don't
+rely on the build to catch a same-named-but-unrelated Qt method call,
+because it usually won't.**
+
+Final verification: full rebuild + full `tst_characterization` run
+(27/27 pass) after every fix in this checkpoint. `CLAUDE.md` fully
+updated — every stale old-name reference in "Data model," "The flag-guard
+system," "Command flow," and "Serialization" replaced with the current
+name, and the "Conventions" section now states the naming rule as
+realized fact (with the Qt-collision lesson folded in) rather than an
+aspiration.
+
+**Scope note (stands as the final word on Phase 7's boundary):** this
+phase renamed every class, every member field, every member function, and
+every file-scope global to the convention. It did **not** rename local
+variables and parameters buried inside long function bodies (e.g. most of
+`myview.cpp`'s mouse-event handlers, `widget.cpp`'s per-button slot
+bodies) — those remain a mix of styles. That tail is real but low-value
+and much larger in surface area than everything above combined; treat it
+as an optional future pass, not unfinished Phase 7 work.
 
 **Context:** phases 1–6 write all *new* code in `snake_case`
 variables / `UpperPascalCase` functions and classes per the "Naming
@@ -583,7 +637,7 @@ Qt-imposed exceptions, which remain exactly as Qt requires. `CLAUDE.md`'s
 conventions section is updated to state the (now-realized) naming rule
 instead of describing it as an aspiration.
 
-- [ ] Phase 7 complete
+- [x] Phase 7 complete
 
 ---
 

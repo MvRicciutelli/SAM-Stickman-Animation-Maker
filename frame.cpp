@@ -21,9 +21,9 @@ Frame::~Frame(){
     }
     delete icon_img;
     delete frame_icon;
-    //delete renderImg;
+    //delete render_img;
 }
-// da Phase 2b questa funzione viene chiamata solo dai percorsi UI vivi (Widget::addStick
+// da Phase 2b questa funzione viene chiamata solo dai percorsi UI vivi (Widget::AddStick
 // e i paste): la deserializzazione non passa più di qui (vedi PopulateLiveFrame), quindi
 // le guardie su libFlag/copyFlag/loadingAnimationFlag sono cadute con i rispettivi flag
 StickFigure* Frame::AddStickFigure(QListWidget * my_list_widget, QString name)
@@ -82,12 +82,12 @@ StickFigure* Frame::AddStickFigure(QListWidget * my_list_widget, QString name)
 }
 // Frame::AddStickFigureToLibrary è stato eliminato (Phase 2b): la libreria contiene
 // StickFigureData e viene gestita interamente da MyView::AddStickFigureToLibrary
-StickFigure* Frame::RemoveStickFigure(StickFigure* toRemove)
+StickFigure* Frame::RemoveStickFigure(StickFigure* to_remove)
 {
     if(stick_figures.count() > 0)
     {
-        stick_figures.removeAll(toRemove);
-        delete toRemove;
+        stick_figures.removeAll(to_remove);
+        delete to_remove;
         if(!stick_figures.isEmpty())
             current_stick_figure = stick_figures[0];
         else
@@ -294,19 +294,19 @@ void Frame::StickfigureToTop(StickFigure* S){
 
 }
 
-void Frame::StickfigureAboveBelow(StickFigure* toMove, StickFigure *previous, int mode){
+void Frame::StickfigureAboveBelow(StickFigure* to_move, StickFigure *previous, int mode){
 
-    mode == 1?toMove->UpdateZ(previous->MaxZ()): toMove->UpdateZ(previous->MinZ());
+    mode == 1?to_move->UpdateZ(previous->MaxZ()): to_move->UpdateZ(previous->MinZ());
     int peakIdx = 0;
     QList<StickData*> sticksToMove;
     if(mode == 1){
         for(int j = total_sticks.length()-1; j >-1 ;j--){
             if(previous->stick_list.contains(total_sticks[j])){
-                peakIdx = j; // il più alto che deve superare toMove
+                peakIdx = j; // il più alto che deve superare to_move
                 break;
             }
         }
-        for(StickData*s:toMove->stick_list){
+        for(StickData*s:to_move->stick_list){
             if(total_sticks.indexOf(s)<peakIdx)
                 sticksToMove.append(s);
         }
@@ -317,11 +317,11 @@ void Frame::StickfigureAboveBelow(StickFigure* toMove, StickFigure *previous, in
     else{
         for(int j = 0; j<total_sticks.length();j++){
             if(previous->stick_list.contains(total_sticks[j])){
-                peakIdx = j; // il piu basso, sotto al quale si deve abbassare il toMove
+                peakIdx = j; // il piu basso, sotto al quale si deve abbassare il to_move
                 break;
             }
         }
-        for(StickData*s:toMove->stick_list){
+        for(StickData*s:to_move->stick_list){
             if(total_sticks.indexOf(s)>peakIdx)
                 sticksToMove.prepend(s);
         }

@@ -1,9 +1,9 @@
 #include "sleeper.h"
 #include "sleeper.h"
 #include "imageexport.h"
-extern bool playBack;
-extern void SceneRemover(QGraphicsScene *sceneToClear);
-extern  bool busyPlay;
+extern bool play_back;
+extern void SceneRemover(QGraphicsScene *scene_to_clear);
+extern  bool busy_play;
 extern MySleeper *play;
 bool pausePressed;
 int intervalTime = 0;
@@ -16,7 +16,7 @@ MySleeper::MySleeper(MyView * V, int time)
     previewGenerator = new ImageExport(this,"",PREVIEW); // è un thread
     // connetti il segnale del thread di fine elaborazione allo slot che partire la riproduzione
     QObject::connect(previewGenerator,&ImageExport::ImageExportFinished,this,&MySleeper::StartPlaying);
-    playBack = true;
+    play_back = true;
     SceneRemover(v->scene());
     previewGenerator->start(); // fai partire il thread
 
@@ -44,7 +44,7 @@ Q_SLOT void MySleeper::Connected()
 
    }
    else{
-       playBack = false;
+       play_back = false;
        timer.stop();
        //v->scene()->clear();
        int i = 0;
@@ -55,8 +55,8 @@ Q_SLOT void MySleeper::Connected()
        }
        v->preview_list.clear();
        v->MoveToFrame(v->my_animation->frame_list[counter-1]);
-       busyPlay = false;
-       // evita che 'play' resti pendente dopo l'auto-distruzione (oggi busyPlay già impedisce
+       busy_play = false;
+       // evita che 'play' resti pendente dopo l'auto-distruzione (oggi busy_play già impedisce
        // che venga riletto prima del prossimo click su Play, ma così è sicuro anche in futuro)
        play = nullptr;
        delete this;

@@ -25,7 +25,7 @@ public:
     void ExportUsingFFMPEG();
     void ExportAvi();
 public slots:
-    void GetAnimationParams(int optionVal);
+    void GetAnimationParams(int option_val);
     void StartFFMPEGRender(QStringList options);
     void AutoSave();
     void UpdatePresent(QString ver);

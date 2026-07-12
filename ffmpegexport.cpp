@@ -67,27 +67,27 @@ void FfmpegExport::on_exportVideoBtn_clicked()
 
 void FfmpegExport::on_selectFolderBtn_clicked()
 {
-    QString fileName = "";
+    QString file_name = "";
     if(ui->mp4RadioBtn->isChecked()){
-       fileName = QFileDialog::getSaveFileName(this,tr("Export animation as an mp4 h264 video"),
+       file_name = QFileDialog::getSaveFileName(this,tr("Export animation as an mp4 h264 video"),
                            "C:/", "Mp4 video (*.mp4)");
     }
     else if(ui->vmwRadioBtn->isChecked()){
-       fileName = QFileDialog::getSaveFileName(this,tr("Export animation as windows media video"),
+       file_name = QFileDialog::getSaveFileName(this,tr("Export animation as windows media video"),
                            "C:/", "Windows media video (*.wmv)");
     }
     else if(ui->aviRadioButton->isChecked()){
-       fileName = QFileDialog::getSaveFileName(this,tr("Export animation as a avi mpeg4-4 video"),
+       file_name = QFileDialog::getSaveFileName(this,tr("Export animation as a avi mpeg4-4 video"),
                            "C:/", "avi video (*.avi)");
     }
     else if(ui->gifRadioBtn->isChecked()){
-       fileName = QFileDialog::getSaveFileName(this,tr("Export animation as a gif"),
+       file_name = QFileDialog::getSaveFileName(this,tr("Export animation as a gif"),
                            "C:/", "gif  (*.gif)");
     }
-    if(fileName.length()>0){
-        ui->folderLabel->setText(fileName);
+    if(file_name.length()>0){
+        ui->folderLabel->setText(file_name);
         ui->exportVideoBtn->setEnabled(true);
-        outputFile = fileName;
+        outputFile = file_name;
     }
 
 }

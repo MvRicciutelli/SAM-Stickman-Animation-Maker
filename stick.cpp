@@ -3,12 +3,12 @@
 #include <QVector>
 #include <QListWidget>
 #include <StickFigure.h>
-bool onionRender = false;
+bool onion_render = false;
 extern QGraphicsRectItem* my_rect;
 extern QPixmap * image_draw_buffer ;
 extern QListWidget* img_list_widget;
-extern bool renderFlag;
-extern bool playBack;
+extern bool render_flag;
+extern bool play_back;
 extern int handle_size;
 /**
  * @details Since Phase 2c: wraps an existing StickData (non-owning) and wires the
@@ -68,7 +68,7 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
     Q_UNUSED(widget);
     QPointF p(data->my_line.p1().x(),data->my_line.p1().y());
     this->setZValue(data->z);
-    if(!onionRender)
+    if(!onion_render)
         painter->setPen(data->pen);
     else{
         QPen onionSkinPen(data->pen);
@@ -82,7 +82,7 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         // il punto p1 deve essere sempre il topleft corner
         QImage scaled = CalcImg();
         // in caso di onion rendering converti l'immagine in grayscale
-        if(onionRender){
+        if(onion_render){
             scaled.convertToFormat(QImage::Format_Grayscale8);
         }
         p = QPointF(data->my_line.p1().x(),data->my_line.p1().y());
@@ -495,14 +495,14 @@ void StickGraphicsItem::Scale(float scale_factor){
         }
     }
 }
-void StickGraphicsItem::AddImage(QImage* imgToAdd, QString name){
-    data->stick_img_list.append(imgToAdd);
-    data->stick_img = imgToAdd;
+void StickGraphicsItem::AddImage(QImage* img_to_add, QString name){
+    data->stick_img_list.append(img_to_add);
+    data->stick_img = img_to_add;
     QListWidgetItem * addedItem = new QListWidgetItem();
-    QVariant newData(QVariant::fromValue(imgToAdd));
+    QVariant newData(QVariant::fromValue(img_to_add));
     addedItem->setData(Qt::UserRole,newData);
     addedItem->setData(Qt::DisplayRole,name);
-    addedItem->setIcon(QIcon(QPixmap::fromImage(*imgToAdd)));
+    addedItem->setIcon(QIcon(QPixmap::fromImage(*img_to_add)));
     data->img_name_list.append(name);
     img_list_widget->addItem(addedItem);
     PopulateImageListWidget();
@@ -510,14 +510,14 @@ void StickGraphicsItem::AddImage(QImage* imgToAdd, QString name){
 void StickGraphicsItem::RemoveImgFromList(int idx){
     if(data->stick_type == StickData::IMAGE){
         if(data->stick_img_list.length()>1){
-            QImage* toRemove = data->stick_img_list[idx];
+            QImage* to_remove = data->stick_img_list[idx];
             data->stick_img_list.removeAt(idx);
             data->img_name_list.removeAt(idx);
             QListWidgetItem * itemToRemove = img_list_widget->takeItem(idx);
-            if(toRemove== data->stick_img)
+            if(to_remove== data->stick_img)
                 data->stick_img = data->stick_img_list[0];
             delete itemToRemove;
-            delete toRemove;
+            delete to_remove;
 
             PopulateImageListWidget();
         }
@@ -542,11 +542,11 @@ void StickGraphicsItem::PopulateImageListWidget(){
         }
     }
 }
-void SceneRemover(QGraphicsScene *sceneToClear){
-    QList<QGraphicsItem*> thingsOnScene = sceneToClear->items( Qt::AscendingOrder);
+void SceneRemover(QGraphicsScene *scene_to_clear){
+    QList<QGraphicsItem*> thingsOnScene = scene_to_clear->items( Qt::AscendingOrder);
     for(QGraphicsItem* i: thingsOnScene){
         if(i != my_rect)
-            sceneToClear->removeItem(i);
+            scene_to_clear->removeItem(i);
     }
 }
 

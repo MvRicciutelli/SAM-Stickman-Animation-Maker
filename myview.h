@@ -100,9 +100,9 @@ public:
     void StoreUndo(int command = CMD_SIMPLE);
     void DeleteFrame(Frame *frame);
     Frame *SetUpFrame(int pos);
-    void MapMyCoords(QPointF &myCoord, QPointF startingPoint);
+    void MapMyCoords(QPointF &my_coord, QPointF starting_point);
     void ClearUndo();
-    void LoadLibrary(QString fileName, int mode = 0);
+    void LoadLibrary(QString file_name, int mode = 0);
     StickFigure *AddStickFigureToLibrary();
     QList<QGraphicsPixmapItem*> preview_list;
     void RemoveFromLibrary();
@@ -110,7 +110,7 @@ public:
     void SplitStickFigure();
     void ClearCurrentLib();
     void SizeChange(int option);
-    void ScaleFrame(Frame *F, float scaleAmount, QRectF R);
+    void ScaleFrame(Frame *F, float scale_amount, QRectF R);
     void PreparePreview();
     void DisplayPreview(int idx);
     void ArrowSelection();
@@ -119,7 +119,7 @@ public:
     void AddHandles(StickFigure*S);
     void RemoveHandles(StickFigure*S);
 public slots:
-    void SaveLibrary(QString fileName);
+    void SaveLibrary(QString file_name);
 signals:
     void  AutoSaveTrigger();
 

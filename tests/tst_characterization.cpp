@@ -18,7 +18,7 @@ extern QPointF onion_offset;
 extern MyView *V;
 extern int W;
 extern int H;
-extern FrameData *stickLibraryBuffer;
+extern FrameData *stick_library_buffer;
 
 class TestCharacterization : public QObject
 {
@@ -29,7 +29,7 @@ class TestCharacterization : public QObject
     Frame *CurrentFrame() { return view->my_animation->current_frame; }
     StickFigure *CurrentStickFigure() { return CurrentFrame()->current_stick_figure; }
 
-    // replicates Widget::addStick() (widget.cpp:421)
+    // replicates Widget::AddStick() (widget.cpp:421)
     StickFigure *AddStick(const QString &name = QString())
     {
         return CurrentFrame()->AddStickFigure(my_stick_figure_widget_list, name);
@@ -824,7 +824,7 @@ private slots:
 
         // replicates the add-to-library flow (myview.cpp:1386)
         QVERIFY(view->AddStickFigureToLibrary() != nullptr);
-        QCOMPARE(stickLibraryBuffer->stick_figures.count(), 1);
+        QCOMPARE(stick_library_buffer->stick_figures.count(), 1);
         QCOMPARE(my_current_library_widget->count(), 1);
 
         // save + reload the library file: this is the path where a missing placeholder int
@@ -833,8 +833,8 @@ private slots:
         view->SaveLibrary(path);
         view->LoadLibrary(path);
 
-        QCOMPARE(stickLibraryBuffer->stick_figures.count(), 1);
-        StickFigureData *reloaded = stickLibraryBuffer->stick_figures[0];
+        QCOMPARE(stick_library_buffer->stick_figures.count(), 1);
+        StickFigureData *reloaded = stick_library_buffer->stick_figures[0];
         QCOMPARE(reloaded->name, QString("libfig"));
         QCOMPARE(reloaded->stick_list.count(), 1);
         QCOMPARE(reloaded->stick_list[0]->my_line, source->stick_list[0]->my_line);

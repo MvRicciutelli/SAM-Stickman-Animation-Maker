@@ -16,10 +16,10 @@ extern QGraphicsRectItem *my_rect;
 extern QGraphicsRectItem *limit_rect;
 extern QGraphicsScene* scene;
 
-bool clearingAnimation = false;
-bool changeTypeFlag = false;
+bool clearing_animation = false;
+bool change_type_flag = false;
 namespace Ui { class Widget; }
-extern Ui::Widget *myUi;
+extern Ui::Widget *my_ui;
 
 Animation::Animation()
 {
@@ -31,7 +31,7 @@ Frame *Animation::AddFrame(QListWidgetItem* item, int pos)
 
     frame_buffer = new Frame();
     frame_buffer->scene = scene;
-    //frame_buffer->renderImg = new QImage(scene->sceneRect().width(),scene->sceneRect().height(),QImage::Format_ARGB32);
+    //frame_buffer->render_img = new QImage(scene->sceneRect().width(),scene->sceneRect().height(),QImage::Format_ARGB32);
 
     if(frame_list.isEmpty())
     {
@@ -56,11 +56,11 @@ Frame *Animation::DeleteFrame(Frame *frame){
         delete frame->linked_item;
         delete frame;
         //delete my_rect;
-        /*if(!clearingAnimation)
+        /*if(!clearing_animation)
             scene->clear(); // risky*/
         SceneRemover(scene);
         //my_rect = new QGraphicsRectItem(0,0,W,H); // RENEW IT
-        if(!frame_list.isEmpty() && !clearingAnimation){
+        if(!frame_list.isEmpty() && !clearing_animation){
             if(frameNum>=frame_list.count())
             {
                 current_frame = frame_list[frame_list.count()-1];
@@ -331,8 +331,8 @@ QDataStream &operator>>(QDataStream& stream,Animation& my_animation){
     }
     return stream;
 }
-void Animation::SaveAnimation(QString fileName){
-    QFile file(fileName);
+void Animation::SaveAnimation(QString file_name){
+    QFile file(file_name);
     if(!file.open(QIODevice::WriteOnly))
     {
         return;
@@ -359,7 +359,7 @@ void Animation::LoadAnimation(QString name)
 
 }
 void Animation::ClearAnimation(){
-    clearingAnimation = true;
+    clearing_animation = true;
     QList <Frame*> clonedList = frame_list;
     for(Frame* f: clonedList){
 
@@ -369,6 +369,6 @@ void Animation::ClearAnimation(){
     //my_frame_widget_list->takeItem(my_frame_widget_list->row(f->linked_item));
     SceneRemover(scene);
     //scene->clear();
-    clearingAnimation = false;
+    clearing_animation = false;
 
 }

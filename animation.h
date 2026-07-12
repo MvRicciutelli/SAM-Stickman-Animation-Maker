@@ -27,7 +27,7 @@ public:
     QGraphicsScene * scene;
     Frame *DeleteFrame(Frame* frame);
     Frame *SetupFrame(int pos);
-    void SaveAnimation(QString fileName);
+    void SaveAnimation(QString file_name);
     void LoadAnimation(QString name);
     void ClearAnimation();
     void UpdateSliders();

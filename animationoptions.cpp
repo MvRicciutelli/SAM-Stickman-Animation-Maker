@@ -4,7 +4,7 @@
 #include <QMessageBox>
 
 float AR = 1.0;
-AnimationOptions::AnimationOptions(QWidget *parent, int W, int H, int FPS,int handles, int autoSaveInput) :
+AnimationOptions::AnimationOptions(QWidget *parent, int W, int H, int FPS,int handles, int auto_save_input) :
     QWidget(parent),
     ui(new Ui::AnimationOptions)
 {
@@ -13,7 +13,7 @@ AnimationOptions::AnimationOptions(QWidget *parent, int W, int H, int FPS,int ha
     ui->heightSpinbox->setValue(H);
     ui->fpsSpinbox->setValue(FPS);
     ui->handlesSizeSpinBox->setValue(handles);
-    ui->autoSaveSpinbox->setValue(autoSaveInterval);
+    ui->autoSaveSpinbox->setValue(auto_save_interval);
     AR = (float)W/(float)H;
 }
 
@@ -24,26 +24,26 @@ AnimationOptions::~AnimationOptions()
 
 void AnimationOptions::on_okBtn_clicked()
 {
-    int optionVal;
+    int option_val;
     width               = ui->widthSpinbox->value();
     height              = ui->heightSpinbox->value();
     fps                 = ui->fpsSpinbox->value();
-    autoSaveInterval    = ui->autoSaveSpinbox->value();
-    handleSize          = ui->handlesSizeSpinBox->value();
+    auto_save_interval    = ui->autoSaveSpinbox->value();
+    handle_size          = ui->handlesSizeSpinBox->value();
 
     if(ui->repositionBtn->isChecked())
-        optionVal = REPO;
+        option_val = REPO;
     else if(ui->rescaleAndRepositionBtn->isChecked())
-        optionVal = REPOSCALE;
+        option_val = REPOSCALE;
     else if(ui->noneBtn->isChecked())
-        optionVal = NOREPO;
+        option_val = NOREPO;
     int ret  = QMessageBox::warning(this, tr("My Application"),
                                     tr("This will rescale the animation, this action cannot be undone.\n"
                                        "Do you want to proceed?"),
                                     QMessageBox::Yes | QMessageBox::No
                                     );
     if(ret == QMessageBox::Yes)
-        emit DialogOut(optionVal);
+        emit DialogOut(option_val);
 
 }
 

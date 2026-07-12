@@ -17,15 +17,15 @@ public:
     ~Widget();
     MyView *view;
 
-    StickFigure* addStick();
+    StickFigure* AddStick();
     void AddFrame();
     Frame *SetUpFrame(int pos);
-    void createPaths();
-    void detectLibraries();
-    void createJson(QString path);
-    void readJson(QString path);
-    void writeJson();
-    void termsAndConditions();
+    void CreatePaths();
+    void DetectLibraries();
+    void CreateJson(QString path);
+    void ReadJson(QString path);
+    void WriteJson();
+    void TermsAndConditions();
 private slots:
     void on_drawBtn_clicked();
 
@@ -91,7 +91,7 @@ private slots:
 
     void on_refreshLibrariesBtn_clicked();
 
-    void on_libraryList_currentRowChanged(int currentRow);
+    void on_libraryList_currentRowChanged(int current_row);
 
 
     void on_removeFromLibraryBtn_clicked();

@@ -13,21 +13,21 @@ extern QDir program_folder;
 extern int W;
 extern int H;
 extern int FPS;
-extern int autoSaveInterval;
+extern int auto_save_interval;
 extern QGraphicsRectItem *my_rect;
-extern Widget *myWidget;
+extern Widget *my_widget;
 extern QString FFMPEGPath;
 extern QDir temp_render_folder;
 extern QDir my_animations_folder;
 extern QDir my_stick_figures_folder;
 extern QDir my_video_export_folder;
 extern int handle_size;
-int opCount = 0;
-bool renderFlag = false;
+int op_count = 0;
+bool render_flag = false;
 QDir render_folder;
 QString animation_path = "";
-AnimationOptions* myOptions = nullptr;
-bool loadFile = false;
+AnimationOptions* my_options = nullptr;
+bool load_file = false;
 ImageExport *exporter = nullptr;
 QString avi_export_folder;
 QStringList ffmpeg_options;
@@ -50,22 +50,22 @@ MyMainWindow::~MyMainWindow()
 
 void MyMainWindow::on_actionsave_triggered()
 {
-    QString fileName = QFileDialog::getSaveFileName(this,tr("Save StickFigure"),
+    QString file_name = QFileDialog::getSaveFileName(this,tr("Save StickFigure"),
                        my_stick_figures_folder.path(), "Stickfigure (*.stck)");
-    if(fileName.length()>1 && view->my_animation->CurrentFrame()->CurrentStickFigure()){
-        view->my_animation->CurrentFrame()->CurrentStickFigure()->SaveStickFigure(fileName);
+    if(file_name.length()>1 && view->my_animation->CurrentFrame()->CurrentStickFigure()){
+        view->my_animation->CurrentFrame()->CurrentStickFigure()->SaveStickFigure(file_name);
     }
 }
 
 void MyMainWindow::on_actionload_triggered()
 {
 
-    QString fileName = QFileDialog::getOpenFileName(this,tr("Load StickFigure"),
+    QString file_name = QFileDialog::getOpenFileName(this,tr("Load StickFigure"),
                        my_stick_figures_folder.path(), "Stickfigure (*.stck)");
-    if(QFile::exists(fileName)){
+    if(QFile::exists(file_name)){
         view->StoreUndo();
-        central_w->addStick();
-        view->my_animation->CurrentFrame()->CurrentStickFigure()->LoadStickFigure(fileName);
+        central_w->AddStick();
+        view->my_animation->CurrentFrame()->CurrentStickFigure()->LoadStickFigure(file_name);
         for(StickData*s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
             view->my_animation->CurrentFrame()->total_sticks.append(s);
         }
@@ -75,35 +75,35 @@ void MyMainWindow::on_actionload_triggered()
 
 void MyMainWindow::on_actionsave_animation_triggered()
 {
-    QString fileName = QFileDialog::getSaveFileName(this,tr("Save Animation"),
+    QString file_name = QFileDialog::getSaveFileName(this,tr("Save Animation"),
                        my_animations_folder.path(), "Marionetta Animation (*.mAnim)");
-    // animation_path va scritto solo qui dentro: se l'utente annulla la dialog, fileName e'
+    // animation_path va scritto solo qui dentro: se l'utente annulla la dialog, file_name e'
     // vuoto e non deve invalidare il path del file gia' aperto (rompe autosave e "Save")
-    if(fileName.length()>1){
-        animation_path = fileName;
-        view->my_animation->SaveAnimation(fileName);
-        opCount = 0;
+    if(file_name.length()>1){
+        animation_path = file_name;
+        view->my_animation->SaveAnimation(file_name);
+        op_count = 0;
     }
 }
 
 void MyMainWindow::on_actionload_animation_triggered()
 {
-    QString fileName = QFileDialog::getOpenFileName(this,tr("Load Animation"),
+    QString file_name = QFileDialog::getOpenFileName(this,tr("Load Animation"),
                        my_animations_folder.path(), "Marionetta Animation (*.mAnim)");
     // ClearUndo/animation_path vanno toccati solo se l'utente conferma un file valido: annullare
     // la dialog non deve cancellare la cronologia undo o il path dell'animazione corrente
-    if(QFile::exists(fileName)){
+    if(QFile::exists(file_name)){
         view->ClearUndo();
-        animation_path = fileName;
-        loadFile = true;
-        view->my_animation->LoadAnimation(fileName);
+        animation_path = file_name;
+        load_file = true;
+        view->my_animation->LoadAnimation(file_name);
         // Animation::operator>> gia' applica W/H/my_rect dal file caricato; se il file e'
         // corrotto puo' interrompersi lasciando frame_list vuota, quindi va controllata qui
         if(!view->my_animation->frame_list.isEmpty()){
             view->MoveToFrame(view->my_animation->frame_list[0]);
         }
-        loadFile = false;
-        opCount = 0;
+        load_file = false;
+        op_count = 0;
     }
 }
 
@@ -137,14 +137,14 @@ void MyMainWindow::on_actionexport_as_AVI_file_triggered()
 }
 void MyMainWindow::ExportAvi(){
     // generate folder for renderings
-    QString fileName = avi_export_folder;
+    QString file_name = avi_export_folder;
     QString imgPath = program_folder.path()+"/render";
     // apri il programma avi2Image, passagli i parametri per iniziale la conversione da immagini a file video
     // 1 in folder, 2 outfolder, 3 fps, 4 larghezza, 5 altezza, n immagini
     QProcess *p = new QProcess(this);
     QStringList paramList;
     paramList<<render_folder.path()
-                    <<fileName
+                    <<file_name
                     <<"24"
                     <<QString::number(W)
                     <<QString::number(H)
@@ -183,7 +183,7 @@ void MyMainWindow::on_actionsave_animation_current_triggered()
 {
     if(QFile::exists(animation_path)){
         view->my_animation->SaveAnimation(animation_path);
-        opCount = 0;
+        op_count = 0;
     }
     else{
         on_actionsave_animation_triggered();
@@ -206,37 +206,37 @@ void MyMainWindow::on_actionNew_Blank_Animation_triggered()
         view->ClearUndo();
         animation_path.clear();
         view->my_animation->ClearAnimation();
-        myWidget->AddFrame();
-        opCount = 0;
+        my_widget->AddFrame();
+        op_count = 0;
     }
 }
-void MyMainWindow::GetAnimationParams(int optionVal){
-    FPS = myOptions->fps;
-    W   = myOptions->width;
-    H   = myOptions->height;
-    handle_size = myOptions->handleSize;
-    view->SizeChange(optionVal);
-    myWidget->writeJson();
-    autoSaveInterval = myOptions->autoSaveInterval;
+void MyMainWindow::GetAnimationParams(int option_val){
+    FPS = my_options->fps;
+    W   = my_options->width;
+    H   = my_options->height;
+    handle_size = my_options->handle_size;
+    view->SizeChange(option_val);
+    my_widget->WriteJson();
+    auto_save_interval = my_options->auto_save_interval;
     // deleteLater invece di delete: questo slot viene chiamato dal click handler del bottone
     // OK dello stesso dialogo, quindi cancellarlo subito distruggerebbe l'oggetto mentre il suo
     // stack di chiamata è ancora attivo
-    myOptions->deleteLater();
+    my_options->deleteLater();
 }
 void MyMainWindow::on_actionAnimation_Options_triggered()
 {
     // se è già aperto, portalo in primo piano invece di aprirne un altro (perderesti il puntatore al precedente)
-    if(myOptions){
-        myOptions->raise();
-        myOptions->activateWindow();
+    if(my_options){
+        my_options->raise();
+        my_options->activateWindow();
         return;
     }
-    myOptions = new AnimationOptions(nullptr,W,H,FPS,handle_size,autoSaveInterval);
+    my_options = new AnimationOptions(nullptr,W,H,FPS,handle_size,auto_save_interval);
     // senza questo, chiudere la finestra senza premere OK la nasconde soltanto: non viene mai distrutta
-    myOptions->setAttribute(Qt::WA_DeleteOnClose);
-    myOptions->show();
-    QObject::connect(myOptions, &AnimationOptions::DialogOut,this, &MyMainWindow::GetAnimationParams);
-    QObject::connect(myOptions, &QObject::destroyed, this, [this](){ myOptions = nullptr; });
+    my_options->setAttribute(Qt::WA_DeleteOnClose);
+    my_options->show();
+    QObject::connect(my_options, &AnimationOptions::DialogOut,this, &MyMainWindow::GetAnimationParams);
+    QObject::connect(my_options, &QObject::destroyed, this, [this](){ my_options = nullptr; });
 }
 
 void MyMainWindow::on_actionExport_video_using_FFMPEG_triggered()
@@ -246,12 +246,12 @@ void MyMainWindow::on_actionExport_video_using_FFMPEG_triggered()
     }
     else{
         QMessageBox::about(this,"FFMPEG Location","Please locate where ffmpeg executable is located on your system");
-        QString fileName = QFileDialog::getOpenFileName(this,tr("find FFMPEG executable file"),
+        QString file_name = QFileDialog::getOpenFileName(this,tr("find FFMPEG executable file"),
                            my_video_export_folder.path(), "ffmpeg(*.exe)");
-        if(QFile::exists(fileName)){
-                if(QFileInfo(QFile(fileName)).fileName()=="ffmpeg.exe"){
-                    FFMPEGPath = fileName;
-                    myWidget->writeJson();
+        if(QFile::exists(file_name)){
+                if(QFileInfo(QFile(file_name)).fileName()=="ffmpeg.exe"){
+                    FFMPEGPath = file_name;
+                    my_widget->WriteJson();
                     ExportUsingFFMPEG();
                 }
         }
@@ -322,10 +322,10 @@ void MyMainWindow::ImageRenderOver(int option){
 void MyMainWindow::on_actionExport_as_image_sequence_triggered()
 {
 
-    QString fileName = QFileDialog::getSaveFileName(this,tr("Save animation as a sequence of images"),
+    QString file_name = QFileDialog::getSaveFileName(this,tr("Save animation as a sequence of images"),
                        "C:/", "PNG Image (*.png)");
-    if(fileName.length()>0)
-        ExportImageSequence(fileName,NONE);
+    if(file_name.length()>0)
+        ExportImageSequence(file_name,NONE);
 }
 void MyMainWindow::DoConnections(){
         QObject::connect(view, &MyView::AutoSaveTrigger,this, &MyMainWindow::AutoSave);
@@ -337,7 +337,7 @@ void MyMainWindow::closeEvent(QCloseEvent *event)
     if(exporter && exporter->isRunning()){
         exporter->wait();
     }
-    if(opCount>0){
+    if(op_count>0){
         QMessageBox::StandardButton reply;
         reply = QMessageBox::question(this, "Save", "There is unsaved progress in your work, do you want to save your changes?",
             QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
@@ -383,7 +383,7 @@ void MyMainWindow::on_actionTerms_and_Conditions_triggered()
 {
     //QMessageBox::information(this, " conditions",license);
     license_info_begin:
-    myWidget->termsAndConditions();
+    my_widget->TermsAndConditions();
     if(terms_accepted == 0){
         QMessageBox* confirm =  new QMessageBox(QMessageBox::Question, "Warning",
         " are you sure? (the program will be closed). \r\n" ,

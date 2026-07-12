@@ -17,13 +17,13 @@ ImageExport::ImageExport(QObject *parent, QString path, int option)
     exportPath = path;
     renderOption = option;
 }
-extern bool renderFlag;
+extern bool render_flag;
 void ImageExport::Render(int option)
 {
     for(Frame* f :V->my_animation->frame_list){
         QGraphicsScene renderScene; //scena fittizia
-        QImage *renderImg = new QImage(W,H,QImage::Format_ARGB32); //immagine temporanea
-        QPainter painter(renderImg); // painter che esegue il drawing sull immagine
+        QImage *render_img = new QImage(W,H,QImage::Format_ARGB32); //immagine temporanea
+        QPainter painter(render_img); // painter che esegue il drawing sull immagine
         painter.setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
         renderScene.setSceneRect(my_rect->rect());
         // questi stick sono VIVI: clona i dati prima di wrapparli, altrimenti il costruttore
@@ -37,14 +37,14 @@ void ImageExport::Render(int option)
         }
 
         //disegna sull' immagine e salvala
-        renderImg->fill(Qt::white);
+        render_img->fill(Qt::white);
         painter.setBackground(QBrush(QColor(Qt::white)));
         renderScene.render(&painter);
         QString itemPath = exportPath;
         itemPath.insert(exportPath.lastIndexOf("."),"_"+QString::number(f->frame_number));
-        renderImg->save(itemPath);
+        render_img->save(itemPath);
         painter.end();
-        delete renderImg;
+        delete render_img;
         renderScene.clear(); // distruggi le view di rendering PRIMA di liberare i dati clonati
         qDeleteAll(renderClones);
         //...add all other video frames here
@@ -58,9 +58,9 @@ void ImageExport::Render(int option)
 void ImageExport::run()
 {
     if(renderOption != PREVIEW){
-        renderFlag = true;
+        render_flag = true;
         Render(renderOption);
-        renderFlag = false;
+        render_flag = false;
     }else{
         V->PreparePreview();
 

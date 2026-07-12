@@ -31,11 +31,11 @@ public:
     StickData*& CurrentStick() { return current_stick_figure->current_stick; }
     StickData *SelectStick(QPointF point);
     StickData *SelectStick(StickFigure* S, StickData* s= nullptr);
-    StickFigure* RemoveStickFigure(StickFigure* toRemove);
+    StickFigure* RemoveStickFigure(StickFigure* to_remove);
     QIcon* frame_icon;
     int num_of_items = 0;
     QPixmap * icon_img;
-    //QImage * renderImg;
+    //QImage * render_img;
     QGraphicsScene * scene;
     int frame_number = 0;
     QListWidgetItem * linked_item;
@@ -49,7 +49,7 @@ public:
     void StickfigureToBottom(StickFigure *S);
     void StickfigureToTop(StickFigure *S);
     float MinMaxZ(int option);
-    void StickfigureAboveBelow(StickFigure *toMove, StickFigure *previous, int mode);
+    void StickfigureAboveBelow(StickFigure *to_move, StickFigure *previous, int mode);
     void CleanTotalSticks();
 };
 Q_DECLARE_METATYPE(Frame*);

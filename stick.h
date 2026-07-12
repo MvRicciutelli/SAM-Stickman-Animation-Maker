@@ -13,7 +13,7 @@
 #define MAXDEPTH 99.9f  ///< upper clamp for the user-editable depth (Z) of a stick
 #define MINDEPTH -99.9f ///< lower clamp for the user-editable depth (Z) of a stick
 
-extern bool onionRender;
+extern bool onion_render;
 extern QLabel *dbg_lbl;
 class StickFigure;
 
@@ -166,10 +166,10 @@ public:
 
     /**
      * @brief Appends an image variant to an IMAGE stick and shows it in the list widget.
-     * @param imgToAdd image to take ownership of.
+     * @param img_to_add image to take ownership of.
      * @param name display name for the list widget.
      */
-    void AddImage(QImage *imgToAdd, QString name);
+    void AddImage(QImage *img_to_add, QString name);
 
     /**
      * @brief Rebuilds the image list widget from this stick's image variants.
@@ -206,9 +206,9 @@ private:
 
 /**
  * @brief Removes every item except the canvas frame (my_rect) from a scene.
- * @param sceneToClear scene to empty without deleting the items.
+ * @param scene_to_clear scene to empty without deleting the items.
  */
-void SceneRemover(QGraphicsScene *sceneToClear);
+void SceneRemover(QGraphicsScene *scene_to_clear);
 
 /**
  * @brief Computes where an IMAGE stick's picture sits relative to its segment.

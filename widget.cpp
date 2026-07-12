@@ -58,9 +58,9 @@ QString license = "The software package Marionetta is distributed as a free of c
 int terms_accepted = 0;
 QString image_name_buffer;
 QGraphicsScene *scene;
-Ui::Widget *myUi;
+Ui::Widget *my_ui;
 MyView* V;
-QList <StickFigure*> layerList;
+QList <StickFigure*> layer_list;
 QTextEdit * stick_figure_name_text;
 QGraphicsRectItem *my_rect;
 QGraphicsRectItem *limit_rect;
@@ -114,14 +114,14 @@ AdvancedCircleWidget *advanced_circle_tab;
 AdvancedTaperWidget * advanced_taper_tab;
 QSlider*  circle_squash_slider;
 QSpinBox * circle_squash_spinbox;
-FrameData * frameCopyBuffer = nullptr; ///< buffer copia-frame: solo dati da Phase 2b
+FrameData * frame_copy_buffer = nullptr; ///< buffer copia-frame: solo dati da Phase 2b
 
 //----------------------
 int W                   = DEFAULTWIDTH;
 int H                   = DEFAULTHEIGHT;
 int FPS                 = DEFAULTFPS;
 int handle_size          = DEFAULTHANDLES;
-int autoSaveInterval    = DEFAULTAUTOSAVE;
+int auto_save_interval    = DEFAULTAUTOSAVE;
 struct{
     bool sliderHOffset  = false;
     bool sliderVOffset  = false;
@@ -129,9 +129,9 @@ struct{
     bool sliderHScale   = false;
     bool sliderRot      = false;
 }sliderFlags;
-bool playBack               = false;
-float zoomLvl               = 1;
-bool  firstTimeOpened       = false;
+bool play_back               = false;
+float zoom_lvl               = 1;
+bool  first_time_opened       = false;
 QImage * image_draw_buffer;
 QString FFMPEGPath = "";
 Widget::Widget(QWidget *parent)
@@ -139,7 +139,7 @@ Widget::Widget(QWidget *parent)
     , ui(new Ui::Widget)
 {
     ui->setupUi(this);
-    myUi = ui;
+    my_ui = ui;
     //crea la scena virtuale
     advanced_img_tab = ui->advancedTab;
     advanced_line_tab = new AdvancedLineWidget();
@@ -176,8 +176,8 @@ Widget::Widget(QWidget *parent)
     img_list_widget = ui->imgListWidget;
     advanced_rect_tab = new AdvancedTab();
    // dbg_lbl = ui->debugLabel;
-    createPaths();
-    detectLibraries();
+    CreatePaths();
+    DetectLibraries();
     // aggiorna il colore del segnacolore
     QColor color(Qt::black);
     if(color.isValid()) {
@@ -212,13 +212,13 @@ Widget::Widget(QWidget *parent)
     }
     QString jsonConfigPath = program_folder.path()+"/config.json";
     if(!QFile::exists(jsonConfigPath)){
-        createJson(jsonConfigPath);
+        CreateJson(jsonConfigPath);
     }
     else{
-        readJson(jsonConfigPath);
+        ReadJson(jsonConfigPath);
     }
     if(terms_accepted == 0){
-        termsAndConditions();
+        TermsAndConditions();
     }
     if(terms_accepted == 0){
         exit(EXIT_FAILURE);
@@ -247,13 +247,13 @@ Widget::Widget(QWidget *parent)
     //check if default library exists
 
     my_library_list_widget->clear();
-    detectLibraries();
+    DetectLibraries();
     my_library_list_widget->setCurrentRow(0);
-    frameCopyBuffer = new FrameData();
+    frame_copy_buffer = new FrameData();
 }
 
 //leggi il file json, se tutti i campi sono validi,leggilo, senno creane uno nuovo
-void Widget::readJson(QString path ){
+void Widget::ReadJson(QString path ){
 
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly | QIODevice::Text))
@@ -271,21 +271,21 @@ void Widget::readJson(QString path ){
        )
     {
         file.remove();
-        createJson(path);
+        CreateJson(path);
     }
 
     W           = recordObject.value(QString("Width")).toInt();
     H           = recordObject.value(QString("Height")).toInt();
     FPS         = recordObject.value(QString("Fps")).toInt();
-    firstTimeOpened     = recordObject.value(QString("First time opened")).toInt();
+    first_time_opened     = recordObject.value(QString("First time opened")).toInt();
     FFMPEGPath          = recordObject.value("FFMPEG path").toString();
-    autoSaveInterval    = recordObject.value(QString("Autosave operation interval")).toInt();
+    auto_save_interval    = recordObject.value(QString("Autosave operation interval")).toInt();
     handle_size          = recordObject.value(QString("Handles size")).toInt();
     terms_accepted       = recordObject.value(QString("Terms Accepted")).toInt();
     file.close();
 
 }
-void Widget::termsAndConditions(){
+void Widget::TermsAndConditions(){
     QMessageBox* myBox =  new QMessageBox(QMessageBox::Question, "Terms And Conditions",
 license+" Click on the \"Yes\" button if you accept the above terms, click on the \"No\" button if you don't agree (the program will be closed). \r\n\
                                   ",
@@ -299,14 +299,14 @@ license+" Click on the \"Yes\" button if you accept the above terms, click on th
         terms_accepted = 0;
     }
     delete myBox;
-    writeJson();
+    WriteJson();
 }
-void Widget::writeJson( ){
+void Widget::WriteJson( ){
     QString path = program_folder.path()+"/config.json";
-    createJson(path);
+    CreateJson(path);
 }
-extern int opCount;
-void Widget::createJson(QString path ){
+extern int op_count;
+void Widget::CreateJson(QString path ){
     QJsonObject recordObject;
     recordObject.insert("First time opened", QJsonValue::fromVariant(true));
     recordObject.insert("Width", QJsonValue::fromVariant(W));
@@ -314,7 +314,7 @@ void Widget::createJson(QString path ){
     recordObject.insert("Fps", QJsonValue::fromVariant(FPS));
     recordObject.insert("FFMPEG Located", QJsonValue::fromVariant(false));
     recordObject.insert("FFMPEG path", QJsonValue::fromVariant(FFMPEGPath));
-    recordObject.insert("Autosave operation interval", QJsonValue::fromVariant(autoSaveInterval));
+    recordObject.insert("Autosave operation interval", QJsonValue::fromVariant(auto_save_interval));
     recordObject.insert("Handles size", QJsonValue::fromVariant(handle_size));
     recordObject.insert("Terms Accepted", QJsonValue::fromVariant((int)terms_accepted));
     QJsonDocument doc(recordObject);
@@ -324,7 +324,7 @@ void Widget::createJson(QString path ){
     file.write(doc.toJson());
     file.close();
 }
-void Widget::createPaths(){
+void Widget::CreatePaths(){
     QString  path = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     program_folder = QDir(path+"/MarionettaPlus");
     if(program_folder.exists()){
@@ -361,7 +361,7 @@ void Widget::createPaths(){
         my_video_export_folder.mkpath(path+"/MarionettaPlus/myExportedVideos");
     }
 }
-void Widget::detectLibraries(){
+void Widget::DetectLibraries(){
     QDirIterator dirIt(lib_folder.path(),QDir::AllEntries);
     while (dirIt.hasNext()) {
         dirIt.next();
@@ -414,10 +414,10 @@ void Widget::on_cursor_clicked()
 void Widget::on_addStickBtn_clicked()
 {
     view->StoreUndo();
-    addStick();
+    AddStick();
 }
 
-StickFigure* Widget::addStick(){
+StickFigure* Widget::AddStick(){
     StickFigure * added = view->my_animation->CurrentFrame()->AddStickFigure(ui->stickLayerView, stick_figure_name_text->toPlainText());
     stick_figure_name_text->clear();
     return added;
@@ -495,7 +495,7 @@ void Widget::AddFrame(void)
     view->MoveToFrame(addedFrame);
 
     auto num = scene->items();
-    addStick();
+    AddStick();
     num = scene->items();
     //view->my_animation->StoreUndo();
 }
@@ -560,11 +560,11 @@ void Widget::on_stickLayerView_itemDoubleClicked(QListWidgetItem *item)
     StickFigure* S = qvariant_cast<StickFigure*>(retrievedData);
     S->name = text;
 }
-bool busyPlay = false;
+bool busy_play = false;
 MySleeper *play;
 void Widget::on_PlayButton_clicked()
 {
-    if(busyPlay == false){
+    if(busy_play == false){
         //parti dal frame 0, scegli il framerate
         view->MoveToFrame(view->my_animation->frame_list[0]);
         int fps = fps_spin_box->value();
@@ -577,7 +577,7 @@ void Widget::on_PlayButton_clicked()
         int delay = 1000/fps;
         if(delay>5)
             delay = delay/2;
-        busyPlay = true;
+        busy_play = true;
         play = new MySleeper(view,delay);
         onion_skin_sb->setValue(onions);
     }else{
@@ -589,36 +589,36 @@ void Widget::on_PlayButton_clicked()
 
 void Widget::on_zoomInBtn_clicked()
 {
-    view->scale(1/zoomLvl,1/zoomLvl);
-    zoomLvl*=2;
-    view->scale(zoomLvl,zoomLvl);
+    view->scale(1/zoom_lvl,1/zoom_lvl);
+    zoom_lvl*=2;
+    view->scale(zoom_lvl,zoom_lvl);
     view->MoveToFrame(view->my_animation->CurrentFrame());
 }
 
 void Widget::on_zoomOutBtn_clicked()
 {
 
-    view->scale(1/zoomLvl,1/zoomLvl);
-    zoomLvl/=2;
-    view->scale(zoomLvl,zoomLvl);
+    view->scale(1/zoom_lvl,1/zoom_lvl);
+    zoom_lvl/=2;
+    view->scale(zoom_lvl,zoom_lvl);
     view->MoveToFrame(view->my_animation->CurrentFrame());
 }
 
 void Widget::on_resetZoomBtn_clicked()
 {
-    view->scale(1/zoomLvl,1/zoomLvl);
-    zoomLvl = 1.0;
+    view->scale(1/zoom_lvl,1/zoom_lvl);
+    zoom_lvl = 1.0;
     view->MoveToFrame(view->my_animation->CurrentFrame());
 }
 
 void Widget::on_drawImageBtn_clicked()
 {
-    QString fileName = QFileDialog::getOpenFileName(this,tr("Load Image"),
+    QString file_name = QFileDialog::getOpenFileName(this,tr("Load Image"),
                        "C:/", tr("Images (*.png *.bmp *.jpg)"));
-    if(QFile::exists(fileName)){
+    if(QFile::exists(file_name)){
         //image_draw_buffer = new QImage("C:/Users/riccim3/Pictures/immagine.jpg" );
-        image_draw_buffer = new QImage(fileName );
-        image_name_buffer = QFileInfo(QFile(fileName)).fileName();
+        image_draw_buffer = new QImage(file_name );
+        image_name_buffer = QFileInfo(QFile(file_name)).fileName();
         view->SetTool(DRAWIMG);
     }
 
@@ -626,14 +626,14 @@ void Widget::on_drawImageBtn_clicked()
 void Widget::on_addImgBtn_clicked()
 {
     StickData* cs = view->my_animation->CurrentFrame()->CurrentStick();
-    QString fileName = QFileDialog::getOpenFileName(this,tr("Load Image"),
+    QString file_name = QFileDialog::getOpenFileName(this,tr("Load Image"),
                        "C:/", tr("Images (*.png *.bmp *.jpg)"));
-    if(fileName.length()>0 && cs->view){
+    if(file_name.length()>0 && cs->view){
         //image_draw_buffer = new QImage("C:/Users/riccim3/Pictures/immagine.jpg" );
-        QImage* myImg = new QImage(fileName);
+        QImage* myImg = new QImage(file_name);
         view->StoreUndo();
         cs->view->AddImage(myImg,
-                                                                                    QFileInfo(QFile(fileName)).fileName());
+                                                                                    QFileInfo(QFile(file_name)).fileName());
     }
 }
 
@@ -694,12 +694,12 @@ void Widget::on_imgRotationSlider_sliderReleased()
 
 void Widget::on_saveLibraryBtn_clicked()
 {
-    QString fileName = QFileDialog::getSaveFileName(this,tr("save marionetta library"),
+    QString file_name = QFileDialog::getSaveFileName(this,tr("save marionetta library"),
                        lib_folder.path(),"Marionetta Library(*.marlib)");
-    if(fileName.length()>0){
-        view->SaveLibrary(fileName);
+    if(file_name.length()>0){
+        view->SaveLibrary(file_name);
         my_library_list_widget->clear();
-        detectLibraries();
+        DetectLibraries();
     }
 }
 
@@ -712,29 +712,29 @@ void Widget::on_addItemToLibBtn_clicked()
 
 void Widget::on_loadLibraryBtn_clicked()
 {
-    QString fileName = QFileDialog::getOpenFileName(this,tr("load marionetta library"),
+    QString file_name = QFileDialog::getOpenFileName(this,tr("load marionetta library"),
                        lib_folder.path(),"Marionetta Library(*.marlib)");
-    if(QFile::exists(fileName)){
-        view->LoadLibrary(fileName);
+    if(QFile::exists(file_name)){
+        view->LoadLibrary(file_name);
     }
 }
 
 void Widget::on_refreshLibrariesBtn_clicked()
 {
     my_library_list_widget->clear();
-    detectLibraries();
+    DetectLibraries();
 }
 
-void Widget::on_libraryList_currentRowChanged(int currentRow)
+void Widget::on_libraryList_currentRowChanged(int current_row)
 {
-    QString fileName = "";
+    QString file_name = "";
     int idx = my_library_list_widget->currentRow();
     if(idx>=0 && idx<my_library_list_widget->count()){
         QVariant buffer;
         buffer = my_library_list_widget->item(idx)->data(Qt::UserRole);
-        fileName = qvariant_cast<QString>(buffer);
-        if(QFile::exists(fileName)){
-            view->LoadLibrary(fileName,0);
+        file_name = qvariant_cast<QString>(buffer);
+        if(QFile::exists(file_name)){
+            view->LoadLibrary(file_name,0);
         }
     }
 
@@ -749,12 +749,12 @@ void Widget::on_addItemFromLibraryToSceneBtn_clicked()
 {
     // get selected item
     int idx = my_current_library_widget->currentRow();
-    // niente selezionato: controllato PRIMA di addStick(), altrimenti un click a vuoto aggiungeva
+    // niente selezionato: controllato PRIMA di AddStick(), altrimenti un click a vuoto aggiungeva
     // comunque un layer vuoto indesiderato oltre a rischiare item(-1)->isSelected() in crash
     if(idx<0 || idx>=my_current_library_widget->count() || !my_current_library_widget->item(idx)->isSelected()){
         return;
     }
-    StickFigure * added = addStick();
+    StickFigure * added = AddStick();
     QListWidgetItem *itemToAdd = my_current_library_widget->item(idx);
     // estrai il dato utente salvato in esso: da Phase 2b la libreria contiene record dati
     QVariant  retrievedData = (itemToAdd->data(Qt::UserRole));
@@ -770,23 +770,23 @@ void Widget::on_addItemFromLibraryToSceneBtn_clicked()
     added->Refresh();
     //added->Refresh();
     //scene->update();
-    //view->my_animation->CurrentFrame()->CurrentStickFigure()->LoadStickFigure(fileName)
+    //view->my_animation->CurrentFrame()->CurrentStickFigure()->LoadStickFigure(file_name)
 }
 
 void Widget::on_saveCurrentLibraryBtn_clicked()
 {
-    QString fileName = "";
+    QString file_name = "";
     int idx = my_library_list_widget->currentRow();
     if(idx>=0 && idx<my_library_list_widget->count()){
         QVariant buffer;
         QListWidgetItem *item;
         item = my_library_list_widget->item(idx);
         buffer = item->data(Qt::UserRole);
-        fileName = qvariant_cast<QString>(buffer);
-        if(QFile::exists(fileName)){
-            view->SaveLibrary(fileName);
+        file_name = qvariant_cast<QString>(buffer);
+        if(QFile::exists(file_name)){
+            view->SaveLibrary(file_name);
             my_library_list_widget->clear();
-            detectLibraries();
+            DetectLibraries();
         }
     }
 }
@@ -1109,7 +1109,7 @@ void Widget::on_pasteStickFigureBtn_clicked()
 {
    if(view->copy_stick_figure_buffer != nullptr){
        view->StoreUndo(CMD_SIMPLE);
-       StickFigure* added =addStick();
+       StickFigure* added =AddStick();
        PopulateLiveStickFigure(added,*view->copy_stick_figure_buffer,true,true);
        added->Refresh(0);
        for(StickData*s:added->stick_list){
@@ -1193,18 +1193,18 @@ void Widget::on_setMasterNodeBtn_clicked()
 void Widget::on_createNewLibraryBtn_clicked()
 {
     on_saveCurrentLibraryBtn_clicked();
-    QString fileName = QFileDialog::getSaveFileName(this,tr("create a new marionetta library"),
+    QString file_name = QFileDialog::getSaveFileName(this,tr("create a new marionetta library"),
                        lib_folder.path(),"Marionetta Library(*.marlib)");
-    if(fileName.length()>0){
+    if(file_name.length()>0){
         view->ClearCurrentLib();
-        view->SaveLibrary(fileName);
+        view->SaveLibrary(file_name);
         my_library_list_widget->clear();
-        detectLibraries();
+        DetectLibraries();
     }
-    if(QFile::exists(fileName)){
-        view->LoadLibrary(fileName);
+    if(QFile::exists(file_name)){
+        view->LoadLibrary(file_name);
 
-        QListWidgetItem *added = my_library_list_widget->findItems(QFileInfo(fileName).fileName(),Qt::MatchExactly)[0];
+        QListWidgetItem *added = my_library_list_widget->findItems(QFileInfo(file_name).fileName(),Qt::MatchExactly)[0];
         int row = my_library_list_widget->row(added);
         my_library_list_widget->setCurrentRow(row);
     }
@@ -1492,13 +1492,13 @@ void Widget::on_moveStickDown_clicked()
 
 void Widget::on_deleteLibrary_clicked()
 {
-    QString fileName = "";
+    QString file_name = "";
     int idx = my_library_list_widget->currentRow();
     if(idx>=0 && idx<my_library_list_widget->count()){
         QVariant buffer;
         buffer = my_library_list_widget->item(idx)->data(Qt::UserRole);
-        fileName = qvariant_cast<QString>(buffer);
-        if(QFile::exists(fileName)){
+        file_name = qvariant_cast<QString>(buffer);
+        if(QFile::exists(file_name)){
             // check if user wants to delete a file
             int ret  = QMessageBox::warning(this, tr("delete File"),
                                             tr("This will delete the file associated to the library .\n"
@@ -1506,7 +1506,7 @@ void Widget::on_deleteLibrary_clicked()
                                             QMessageBox::Yes | QMessageBox::No
                                             );
             if(ret == QMessageBox::Yes){
-                QFile file (fileName);
+                QFile file (file_name);
                 file.remove();
                 file.close();
                 goto removeLibraryGoto;
@@ -1530,8 +1530,8 @@ void Widget::on_deleteLibrary_clicked()
 void Widget::on_cpyFrame_clicked()
 {
     // il buffer è puro dato (Phase 2b): estrazione diretta, niente stream né flag
-    delete frameCopyBuffer;
-    frameCopyBuffer = ExtractFrameData(*view->my_animation->CurrentFrame());
+    delete frame_copy_buffer;
+    frame_copy_buffer = ExtractFrameData(*view->my_animation->CurrentFrame());
 }
 
 void Widget::on_pasteFrame_clicked()
@@ -1539,16 +1539,16 @@ void Widget::on_pasteFrame_clicked()
 
     view->StoreUndo();
     // add a new stickfigure per every stickfigure in the copy buffer
-    for(StickFigureData*S:frameCopyBuffer->stick_figures){
-        StickFigure *added = addStick();
+    for(StickFigureData*S:frame_copy_buffer->stick_figures){
+        StickFigure *added = AddStick();
         PopulateLiveStickFigure(added,*S,true,true);
         for(StickData*s:added->stick_list){
             view->my_animation->CurrentFrame()->total_sticks.append(s);
         }
         view->AddHandles(added); // mancava: senza questo i manici degli stick incollati non comparivano
         added->linked_item->setData(Qt::DisplayRole,added->name);
-        added->UpdateIcon(); // mancava: l'icona del layer incollato restava quella vuota di addStick()
-        if(frameCopyBuffer->stick_figures.last() == S){
+        added->UpdateIcon(); // mancava: l'icona del layer incollato restava quella vuota di AddStick()
+        if(frame_copy_buffer->stick_figures.last() == S){
             view->my_animation->UpdateSelection(added);
             my_stick_figure_widget_list->setCurrentRow(my_stick_figure_widget_list->row(added->linked_item));
         }

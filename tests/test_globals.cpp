@@ -17,17 +17,17 @@ MyView *V = nullptr;
 int W = 720;
 int H = 480;
 int handle_size = 10;
-int autoSaveInterval = 50;
-bool playBack = false;
-float zoomLvl = 1;
+int auto_save_interval = 50;
+bool play_back = false;
+float zoom_lvl = 1;
 QImage *image_draw_buffer = nullptr;
 QString image_name_buffer;
 
 // --- owned by mymainwindow.cpp in the app ---
-int opCount = 0;
-bool renderFlag = false;
+int op_count = 0;
+bool render_flag = false;
 QString animation_path = "";
-bool loadFile = false;
+bool load_file = false;
 
 // --- uiItems.h externs (owned by widget.cpp in the app) ---
 QSpinBox *fps_spin_box = nullptr;
