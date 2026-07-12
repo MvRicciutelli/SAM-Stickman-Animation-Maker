@@ -7,7 +7,7 @@
 #include <QPainter>
 #include <QFont>
 #include "uiItems.h"
-extern QListWidget * myStickFigureWidgetList;
+extern QListWidget * my_stick_figure_widget_list;
 Frame::Frame()
 {
     frameIcon       = new QIcon();
@@ -32,7 +32,7 @@ StickFigure* Frame::addStickFigure(QListWidget * myListWidget, QString name)
     if(name.count()== 0){
         int intName = 0;
         if(!stickFigures.isEmpty()){
-            intName = myStickFigureWidgetList->currentRow()+1;
+            intName = my_stick_figure_widget_list->currentRow()+1;
         }
 
         myName.asprintf("%d",intName);
@@ -384,7 +384,7 @@ void Frame::updateRender(){
 /**
  * @details Since Phase 4 removed undoFlag, this is a plain qDeleteAll: ~StickFigure()
  * is now the single, unconditional owner of stick cleanup (scene removal,
- * imgListWidget entries, the sticks themselves), so there is nothing left for this
+ * img_list_widget entries, the sticks themselves), so there is nothing left for this
  * function to duplicate.
  */
 void Frame::clearFrame(){

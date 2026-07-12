@@ -4,12 +4,12 @@
 #include <QListWidget>
 #include <StickFigure.h>
 bool onionRender = false;
-extern QGraphicsRectItem* myRect;
-extern QPixmap * imageDrawBuffer ;
-extern QListWidget* imgListWidget;
+extern QGraphicsRectItem* my_rect;
+extern QPixmap * image_draw_buffer ;
+extern QListWidget* img_list_widget;
 extern bool renderFlag;
 extern bool playBack;
-extern int HANDLESIZE;
+extern int handle_size;
 /**
  * @details Since Phase 2c: wraps an existing StickData (non-owning) and wires the
  * back-pointer (`stick_data->view = this`) so tree-walk code holding a `StickData*`
@@ -57,7 +57,7 @@ void StickGraphicsItem::RemoveImagesFromListWidget(){
     for(QImage*i:data->stickImgList)
     {
         Q_UNUSED(i);
-        QListWidgetItem * item= imgListWidget->takeItem(j);
+        QListWidgetItem * item= img_list_widget->takeItem(j);
         delete  item;
         j++;
     }
@@ -161,15 +161,15 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         painter->drawLine(data->myLine.x1(),data->myLine.y1(),data->myLine.x2(),data->myLine.y2());
     }
 
-    stickHandle[0]->setRect(data->myLine.p1().x()-HANDLESIZE/2,data->myLine.p1().y()-HANDLESIZE/2,HANDLESIZE,HANDLESIZE);
-    stickHandle[1]->setRect(data->myLine.p2().x()-HANDLESIZE/2,data->myLine.p2().y()-HANDLESIZE/2,HANDLESIZE,HANDLESIZE);
+    stickHandle[0]->setRect(data->myLine.p1().x()-handle_size/2,data->myLine.p1().y()-handle_size/2,handle_size,handle_size);
+    stickHandle[1]->setRect(data->myLine.p2().x()-handle_size/2,data->myLine.p2().y()-handle_size/2,handle_size,handle_size);
     if(this->selected){
         QColor c(Qt::yellow);
         c.setAlphaF(0.75);
         painter->setPen(QPen(c,8));
 
-        painter->drawEllipse(data->myLine.p2().x()-HANDLESIZE*0.4,data->myLine.p2().y()-HANDLESIZE*0.4,HANDLESIZE*0.8,HANDLESIZE*0.8);
-        painter->drawEllipse(data->myLine.p1().x()-HANDLESIZE*0.4,data->myLine.p1().y()-HANDLESIZE*0.4,HANDLESIZE*0.8,HANDLESIZE*0.8);
+        painter->drawEllipse(data->myLine.p2().x()-handle_size*0.4,data->myLine.p2().y()-handle_size*0.4,handle_size*0.8,handle_size*0.8);
+        painter->drawEllipse(data->myLine.p1().x()-handle_size*0.4,data->myLine.p1().y()-handle_size*0.4,handle_size*0.8,handle_size*0.8);
         painter->drawLine(data->myLine.x1(),data->myLine.y1(),data->myLine.x2(),data->myLine.y2());
 
     }
@@ -261,9 +261,9 @@ QRectF StickGraphicsItem::updateBr(int mode)
 
     // 1 Assicurati che a seconda della direzione della linea, il rettangolo abbia come P1 il punto più in alto a sx
     //      e come P2 il punto più in basso a destra
-    newBr.setX(newBr.x()-data->Pen.width()-HANDLESIZE);newBr.setY(newBr.y()-data->Pen.width()-HANDLESIZE); // TODO padding proporzionale alla dimensione della Penna
-    newBr.setWidth(newBr.width()+data->Pen.width()+HANDLESIZE);
-    newBr.setHeight(newBr.height()+data->Pen.width()+HANDLESIZE);
+    newBr.setX(newBr.x()-data->Pen.width()-handle_size);newBr.setY(newBr.y()-data->Pen.width()-handle_size); // TODO padding proporzionale alla dimensione della Penna
+    newBr.setWidth(newBr.width()+data->Pen.width()+handle_size);
+    newBr.setHeight(newBr.height()+data->Pen.width()+handle_size);
     this->br.getCoords(&oldP1x,&oldP1y,&oldP2x,&oldP2y);
     // Se stiamo muovendo l'oggetto, teniamo conto anche del precedente bounding rect, e li fondiamo
     // per creare un bounding rect che contenga sia quello nuovo che quello vecchio così da non generare ghosting
@@ -504,7 +504,7 @@ void StickGraphicsItem::addImage(QImage* imgToAdd, QString name){
     addedItem->setData(Qt::DisplayRole,name);
     addedItem->setIcon(QIcon(QPixmap::fromImage(*imgToAdd)));
     data->imgNameList.append(name);
-    imgListWidget->addItem(addedItem);
+    img_list_widget->addItem(addedItem);
     populateImageListWidget();
 }
 void StickGraphicsItem::removeImgFromList(int idx){
@@ -513,7 +513,7 @@ void StickGraphicsItem::removeImgFromList(int idx){
             QImage* toRemove = data->stickImgList[idx];
             data->stickImgList.removeAt(idx);
             data->imgNameList.removeAt(idx);
-            QListWidgetItem * itemToRemove = imgListWidget->takeItem(idx);
+            QListWidgetItem * itemToRemove = img_list_widget->takeItem(idx);
             if(toRemove== data->stickImg)
                 data->stickImg = data->stickImgList[0];
             delete itemToRemove;
@@ -528,7 +528,7 @@ void StickGraphicsItem::removeImgFromList(int idx){
 void StickGraphicsItem::populateImageListWidget(){
 
     if(data->stickType == StickData::IMAGE){
-        imgListWidget->clear();
+        img_list_widget->clear();
         int j = 0;
         for(QImage* img:data->stickImgList)
         {
@@ -537,7 +537,7 @@ void StickGraphicsItem::populateImageListWidget(){
             addedItem->setData(Qt::UserRole,newData);
             addedItem->setData(Qt::DisplayRole,data->imgNameList[j]);
             addedItem->setIcon(QIcon(QPixmap::fromImage(*img)));
-            imgListWidget->addItem(addedItem);
+            img_list_widget->addItem(addedItem);
             j++;
         }
     }
@@ -545,7 +545,7 @@ void StickGraphicsItem::populateImageListWidget(){
 void sceneRemover(QGraphicsScene *sceneToClear){
     QList<QGraphicsItem*> thingsOnScene = sceneToClear->items( Qt::AscendingOrder);
     for(QGraphicsItem* i: thingsOnScene){
-        if(i != myRect)
+        if(i != my_rect)
             sceneToClear->removeItem(i);
     }
 }

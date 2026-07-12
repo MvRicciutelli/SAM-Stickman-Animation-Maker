@@ -12,9 +12,9 @@
 #include "framepresenter.h"
 
 extern QGraphicsScene *scene;
-extern QGraphicsRectItem *myRect;
-extern QGraphicsRectItem *limitRect;
-extern QPointF onionOffset;
+extern QGraphicsRectItem *my_rect;
+extern QGraphicsRectItem *limit_rect;
+extern QPointF onion_offset;
 extern MyView *V;
 extern int W;
 extern int H;
@@ -32,7 +32,7 @@ class TestCharacterization : public QObject
     // replicates Widget::addStick() (widget.cpp:421)
     StickFigure *AddStick(const QString &name = QString())
     {
-        return CurrentFrame()->addStickFigure(myStickFigureWidgetList, name);
+        return CurrentFrame()->addStickFigure(my_stick_figure_widget_list, name);
     }
 
     // replicates Widget::addFrame() (widget.cpp:487)
@@ -58,8 +58,8 @@ class TestCharacterization : public QObject
         StickData *drawn = figure->currentStick;
         FramePresenter::AttachView(drawn, scene);
         drawn->view->selected = true;
-        drawn->hardTop = hardTopCheck->isChecked();
-        drawn->hardBottom = hardBottomCheck->isChecked();
+        drawn->hardTop = hard_top_check->isChecked();
+        drawn->hardBottom = hard_bottom_check->isChecked();
         drawn->Pen = view->myPen;
         figure->endDrawing(&to);
         scene->addItem(drawn->view->stickHandle[0]);
@@ -76,45 +76,45 @@ private slots:
     {
         // mirrors the parts of Widget::Widget() (widget.cpp:143) the model layer depends on,
         // without the file I/O, the config dialogs and the library autoload
-        myStickFigureWidgetList = new QListWidget;
-        myFrameWidgetList = new QListWidget;
-        myLibraryListWidget = new QListWidget;
-        myCurrentLibraryWidget = new QListWidget;
-        imgListWidget = new QListWidget;
-        onionSkinSB = new QSpinBox;   // value 0 -> updateOnionSkins() is a no-op
-        fpsSpinBox = new QSpinBox;
-        imgRotationSlider = new QSlider;
-        imgHOffsetSlider = new QSlider;
-        imgVOffsetSlider = new QSlider;
-        imgWidthSlider = new QSlider;
-        imgHeightSlider = new QSlider;
-        imgHOffsetSpinbox = new QSpinBox;
-        imgVOffsetSpinbox = new QSpinBox;
-        imgWidthSpinbox = new QSpinBox;
-        imgHeightSpinbox = new QSpinBox;
-        imgRotationSpinbox = new QSpinBox;
-        penOpacitySpinbox = new QSpinBox;
-        brushOpacitySpinbox = new QSpinBox;
-        lineEditThicknessWidthSpinbox = new QSpinBox;
-        stickFigureScaleSpinbox = new QSpinBox;
-        stickFigureRotationSpinbox = new QSpinBox;
-        circleSquashSpinbox = new QSpinBox;
-        elongateSpinbox = new QDoubleSpinBox;
-        elongateSpinbox->setRange(0, W);
-        depthSpinbox = new QDoubleSpinBox;
-        penOpacitySlider = new QSlider;
-        brushOpacitySlider = new QSlider;
-        depthSlider = new QSlider;
-        taperWSlider = new QSlider;
-        taperHSlider = new QSlider;
-        advancedRectSlider = new QSlider;
-        editLineThicknessSlider = new QSlider;
-        editLineThicknessSlider->setRange(0, 100);
-        circleSquashSlider = new QSlider;
-        circleSquashSlider->setRange(-100, 100);
-        hardTopCheck = new QCheckBox;
-        hardBottomCheck = new QCheckBox;
-        dbgLbl = new QLabel;
+        my_stick_figure_widget_list = new QListWidget;
+        my_frame_widget_list = new QListWidget;
+        my_library_list_widget = new QListWidget;
+        my_current_library_widget = new QListWidget;
+        img_list_widget = new QListWidget;
+        onion_skin_sb = new QSpinBox;   // value 0 -> updateOnionSkins() is a no-op
+        fps_spin_box = new QSpinBox;
+        img_rotation_slider = new QSlider;
+        img_h_offset_slider = new QSlider;
+        img_v_offset_slider = new QSlider;
+        img_width_slider = new QSlider;
+        img_height_slider = new QSlider;
+        img_h_offset_spinbox = new QSpinBox;
+        img_v_offset_spinbox = new QSpinBox;
+        img_width_spinbox = new QSpinBox;
+        img_height_spinbox = new QSpinBox;
+        img_rotation_spinbox = new QSpinBox;
+        pen_opacity_spinbox = new QSpinBox;
+        brush_opacity_spinbox = new QSpinBox;
+        line_edit_thickness_width_spinbox = new QSpinBox;
+        stick_figure_scale_spinbox = new QSpinBox;
+        stick_figure_rotation_spinbox = new QSpinBox;
+        circle_squash_spinbox = new QSpinBox;
+        elongate_spinbox = new QDoubleSpinBox;
+        elongate_spinbox->setRange(0, W);
+        depth_spinbox = new QDoubleSpinBox;
+        pen_opacity_slider = new QSlider;
+        brush_opacity_slider = new QSlider;
+        depth_slider = new QSlider;
+        taper_w_slider = new QSlider;
+        taper_h_slider = new QSlider;
+        advanced_rect_slider = new QSlider;
+        edit_line_thickness_slider = new QSlider;
+        edit_line_thickness_slider->setRange(0, 100);
+        circle_squash_slider = new QSlider;
+        circle_squash_slider->setRange(-100, 100);
+        hard_top_check = new QCheckBox;
+        hard_bottom_check = new QCheckBox;
+        dbg_lbl = new QLabel;
 
         scene = new QGraphicsScene;
         view = new MyView;
@@ -122,22 +122,22 @@ private slots:
         view->setScene(scene);
         view->myAnimation->scene = scene;
 
-        advancedImgTab = new QWidget;
-        advancedLineTab = new advancedLineWidget;
-        advancedCircleTab = new advancedCircleWidget;
-        advancedTaperTab = new advancedTaperWidget;
+        advanced_img_tab = new QWidget;
+        advanced_line_tab = new AdvancedLineWidget;
+        advanced_circle_tab = new AdvancedCircleWidget;
+        advanced_taper_tab = new AdvancedTaperWidget;
         advanced_rect_tab = new AdvancedTab;
-        myTabWidget = new QTabWidget;
-        myTabWidget->addTab(new QWidget, "tools");
-        myTabWidget->addTab(new QWidget, "placeholder"); // updateTab() swaps index 1
+        my_tab_widget = new QTabWidget;
+        my_tab_widget->addTab(new QWidget, "tools");
+        my_tab_widget->addTab(new QWidget, "placeholder"); // updateTab() swaps index 1
 
-        myRect = new QGraphicsRectItem(0, 0, W, H);
-        myRect->setZValue(-100);
-        myRect->setPen(Qt::NoPen);
-        scene->addItem(myRect);
-        limitRect = new QGraphicsRectItem(-W / 10.0, -H / 10.0, W * 1.1, H * 1.1);
-        scene->setSceneRect(limitRect->rect());
-        onionOffset = QPointF(-W / 10.0, -H / 10.0);
+        my_rect = new QGraphicsRectItem(0, 0, W, H);
+        my_rect->setZValue(-100);
+        my_rect->setPen(Qt::NoPen);
+        scene->addItem(my_rect);
+        limit_rect = new QGraphicsRectItem(-W / 10.0, -H / 10.0, W * 1.1, H * 1.1);
+        scene->setSceneRect(limit_rect->rect());
+        onion_offset = QPointF(-W / 10.0, -H / 10.0);
 
         AddFrame();
         CurrentFrame()->currentStickFigure = CurrentFrame()->stickFigures[0];
@@ -483,7 +483,7 @@ private slots:
         QCOMPARE(pasted->stickList[0]->view->scene(), scene);
     }
 
-    // the imgListWidget cleanup moved from ~stick to explicit calls at the live-delete
+    // the img_list_widget cleanup moved from ~stick to explicit calls at the live-delete
     // sites (Phase 1b): deleting the on-screen IMAGE stick empties its widget rows,
     // while scratch snapshots (undo buffer) never touch them
     void DeleteImageStickClearsImageListWidget()
@@ -495,11 +495,11 @@ private slots:
         QImage *image = new QImage(8, 8, QImage::Format_ARGB32);
         image->fill(Qt::green);
         drawn->view->addImage(image, "img");
-        QCOMPARE(imgListWidget->count(), 1);
+        QCOMPARE(img_list_widget->count(), 1);
 
         // snapshotting the frame into the undo buffer (scratch path) must not touch the widget
         view->storeUndo(CMD_SIMPLE);
-        QCOMPARE(imgListWidget->count(), 1);
+        QCOMPARE(img_list_widget->count(), 1);
 
         // live deletion via the delete-key flow (myview.cpp:394)
         StickFigure *figure = CurrentStickFigure();
@@ -508,7 +508,7 @@ private slots:
         figure->deleteStick(idx);
         figure->currentStick = nullptr; // the key handler moves selection to the parent (none here)
         QCOMPARE(figure->stickList.count(), 0);
-        QCOMPARE(imgListWidget->count(), 0);
+        QCOMPARE(img_list_widget->count(), 0);
     }
 
     // the exact snapshot storeUndo() takes since Phase 2b (plain data extraction),
@@ -612,15 +612,15 @@ private slots:
         img_stick->stickType = StickData::IMAGE;
         QImage *image = new QImage(8, 8, QImage::Format_ARGB32);
         image->fill(Qt::blue);
-        img_stick_view->addImage(image, "leak-check"); // also registers an entry in imgListWidget
+        img_stick_view->addImage(image, "leak-check"); // also registers an entry in img_list_widget
         figure->stickList.append(img_stick);
         figure->masterStick = img_stick;
         figure->currentStick = img_stick;
         CurrentFrame()->totalSticks.append(img_stick);
-        QCOMPARE(imgListWidget->count(), 1);
+        QCOMPARE(img_list_widget->count(), 1);
 
         view->undo_stack.undo(); // CMD_ADDFRAME+undo: deletes the frame img_stick lives in
-        QCOMPARE(imgListWidget->count(), 0);
+        QCOMPARE(img_list_widget->count(), 0);
     }
 
     void UndoDeleteFrame()
@@ -719,7 +719,7 @@ private slots:
         QVERIFY(main_stick->children.contains(joined_clone));
 
         // the JOIN flow then deletes the merged-in layer via deleteStickFigure()
-        myStickFigureWidgetList->clearSelection();
+        my_stick_figure_widget_list->clearSelection();
         to_join->linkedItem->setSelected(true);
         view->deleteStickFigure();
         for (StickData *s : CurrentStickFigure()->stickList)
@@ -825,7 +825,7 @@ private slots:
         // replicates the add-to-library flow (myview.cpp:1386)
         QVERIFY(view->addStickFigureToLibrary() != nullptr);
         QCOMPARE(stickLibraryBuffer->stickFigures.count(), 1);
-        QCOMPARE(myCurrentLibraryWidget->count(), 1);
+        QCOMPARE(my_current_library_widget->count(), 1);
 
         // save + reload the library file: this is the path where a missing placeholder int
         // used to desync the whole byte stream (see Frame's operator<< libFlag comment)
@@ -838,11 +838,11 @@ private slots:
         QCOMPARE(reloaded->name, QString("libfig"));
         QCOMPARE(reloaded->stickList.count(), 1);
         QCOMPARE(reloaded->stickList[0]->myLine, source->stickList[0]->myLine);
-        QCOMPARE(myCurrentLibraryWidget->count(), 1);
+        QCOMPARE(my_current_library_widget->count(), 1);
 
         // the widget entry carries the data record (what the add-to-scene handler casts)
         StickFigureData *from_item = qvariant_cast<StickFigureData*>(
-            myCurrentLibraryWidget->item(0)->data(Qt::UserRole));
+            my_current_library_widget->item(0)->data(Qt::UserRole));
         QCOMPARE(from_item, reloaded);
 
         QFile::remove(path);
@@ -853,7 +853,7 @@ private slots:
     // on a throwaway MyView instance — proves removing undoFlag's guard from
     // ~StickFigure() didn't turn app shutdown into a crash: scene->removeItem() and
     // RemoveImagesFromListWidget() now run unconditionally, and this is where they'd
-    // fault if `scene`/`imgListWidget` weren't still valid at that point.
+    // fault if `scene`/`img_list_widget` weren't still valid at that point.
     void ViewDestructorHandlesImageStickWithoutCrash()
     {
         MyView *throwaway_view = new MyView();
@@ -861,7 +861,7 @@ private slots:
         throwaway_view->myAnimation->scene = scene;
         Frame *throwaway_frame = throwaway_view->setUpFrame(0);
         throwaway_view->moveToFrame(throwaway_frame);
-        StickFigure *figure = throwaway_frame->addStickFigure(myStickFigureWidgetList);
+        StickFigure *figure = throwaway_frame->addStickFigure(my_stick_figure_widget_list);
 
         StickData *img_stick = new StickData();
         img_stick->myLine = QLineF(50, 50, 50, 150);
@@ -876,10 +876,10 @@ private slots:
         figure->stickList.append(img_stick);
         figure->masterStick = img_stick;
         figure->currentStick = img_stick;
-        QCOMPARE(imgListWidget->count(), 1);
+        QCOMPARE(img_list_widget->count(), 1);
 
         delete throwaway_view; // same cascade as Widget::~Widget()'s `delete view`
-        QCOMPARE(imgListWidget->count(), 0);
+        QCOMPARE(img_list_widget->count(), 0);
     }
 
     // Prep A for REFACTOR_PLAN.md Phase 2c: synthetic QTest mouse events driven through the

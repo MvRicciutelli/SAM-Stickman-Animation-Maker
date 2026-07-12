@@ -11,9 +11,9 @@
 
 extern int W;
 extern int H;
-extern QPointF onionOffset;
-extern QGraphicsRectItem *myRect;
-extern QGraphicsRectItem *limitRect;
+extern QPointF onion_offset;
+extern QGraphicsRectItem *my_rect;
+extern QGraphicsRectItem *limit_rect;
 extern QGraphicsScene* scene;
 
 bool clearingAnimation = false;
@@ -49,17 +49,17 @@ Frame *Animation::deleteFrame(Frame *frame){
             for(StickFigure * S:frame->stickFigures){
                 // toglilo dalla lista prima di cancellarlo, altrimenti resta un
                 // puntatore pendente che viene cancellato di nuovo al prossimo clear()
-                myStickFigureWidgetList->takeItem(myStickFigureWidgetList->row(S->linkedItem));
+                my_stick_figure_widget_list->takeItem(my_stick_figure_widget_list->row(S->linkedItem));
                 delete S->linkedItem;
             }
         }
         delete frame->linkedItem;
         delete frame;
-        //delete myRect;
+        //delete my_rect;
         /*if(!clearingAnimation)
             scene->clear(); // risky*/
         sceneRemover(scene);
-        //myRect = new QGraphicsRectItem(0,0,W,H); // RENEW IT
+        //my_rect = new QGraphicsRectItem(0,0,W,H); // RENEW IT
         if(!frameList.isEmpty() && !clearingAnimation){
             if(frameNum>=frameList.count())
             {
@@ -135,31 +135,31 @@ void Animation::updateSelection(QPointF point)
 
 }
 void Animation::updateTab(int t){
-    int idx = myTabWidget->currentIndex();
-    myTabWidget->removeTab(1);
+    int idx = my_tab_widget->currentIndex();
+    my_tab_widget->removeTab(1);
     if(t == StickData::IMAGE){
-        myTabWidget->insertTab(1,advancedImgTab,"Image Editing");
+        my_tab_widget->insertTab(1,advanced_img_tab,"Image Editing");
     }
     else if(t == StickData::RECT){
-        myTabWidget->insertTab(1,advanced_rect_tab,"Rect Editing");
+        my_tab_widget->insertTab(1,advanced_rect_tab,"Rect Editing");
     }
     else if(t == StickData::LINE){
-        myTabWidget->insertTab(1,advancedLineTab,"Line Editing");
+        my_tab_widget->insertTab(1,advanced_line_tab,"Line Editing");
     }
     else if(t == StickData::CIRCLE){
-        myTabWidget->insertTab(1,advancedCircleTab,"Circle Editing");
+        my_tab_widget->insertTab(1,advanced_circle_tab,"Circle Editing");
     }
     else if(t == StickData::TAPER){
-        myTabWidget->insertTab(1,advancedTaperTab,"Taper Editing");
-        hardTopCheck->show();
-        hardBottomCheck->show();
+        my_tab_widget->insertTab(1,advanced_taper_tab,"Taper Editing");
+        hard_top_check->show();
+        hard_bottom_check->show();
     }
     else if(t == StickData::TRAPEZOID){
-        myTabWidget->insertTab(1,advancedTaperTab,"Trapezoid Editing");
-        hardTopCheck->hide();
-        hardBottomCheck->hide();
+        my_tab_widget->insertTab(1,advanced_taper_tab,"Trapezoid Editing");
+        hard_top_check->hide();
+        hard_bottom_check->hide();
     }
-    myTabWidget->setCurrentIndex(idx);
+    my_tab_widget->setCurrentIndex(idx);
 }
 void Animation::updateSelection(StickData* s)
 {
@@ -221,42 +221,42 @@ void Animation::updateSliders(){
     if(cs->stickType == StickData::IMAGE){
         //aggiorna gli slider di modifica alla scala e all'offset
         if(cs->imgWScale>=1){
-            imgWidthSlider->setValue(10*(cs->imgWScale-1));
+            img_width_slider->setValue(10*(cs->imgWScale-1));
         }
         else{
-            imgWidthSlider->setValue(-10*(1/(cs->imgWScale)-1));
+            img_width_slider->setValue(-10*(1/(cs->imgWScale)-1));
         }
         if(cs->imgHScale>=1){
-            imgHeightSlider->setValue(10*(cs->imgHScale-1));
+            img_height_slider->setValue(10*(cs->imgHScale-1));
         }
         else{
-            imgHeightSlider->setValue(-10*(1/(cs->imgHScale)-1));
+            img_height_slider->setValue(-10*(1/(cs->imgHScale)-1));
 
         }
-        imgVOffsetSlider->setValue(cs->imgOffset.y());
-        imgHOffsetSlider->setValue(cs->imgOffset.x());
-        imgRotationSlider->setValue(cs->imgAngleOffset);
+        img_v_offset_slider->setValue(cs->imgOffset.y());
+        img_h_offset_slider->setValue(cs->imgOffset.x());
+        img_rotation_slider->setValue(cs->imgAngleOffset);
     }
     else if(cs->stickType == StickData::RECT){
-        advancedRectSlider->setValue(cs->imgWScale);
+        advanced_rect_slider->setValue(cs->imgWScale);
     }
     else if(cs->stickType == StickData::CIRCLE){
         if(cs->imgWScale<1){
-            circleSquashSlider->setValue(-(1-cs->imgWScale)*100);
+            circle_squash_slider->setValue(-(1-cs->imgWScale)*100);
         }
         else{
-            circleSquashSlider->setValue((cs->imgWScale-1)*20);
+            circle_squash_slider->setValue((cs->imgWScale-1)*20);
         }
     }
     else if(cs->stickType == StickData::TAPER||cs->stickType == StickData::TRAPEZOID){
-        taperWSlider->setValue(cs->imgWScale);
-        taperHSlider->setValue(cs->imgHScale);
-        hardTopCheck->setChecked(cs->hardTop);
-        hardBottomCheck->setChecked(cs->hardBottom);
+        taper_w_slider->setValue(cs->imgWScale);
+        taper_h_slider->setValue(cs->imgHScale);
+        hard_top_check->setChecked(cs->hardTop);
+        hard_bottom_check->setChecked(cs->hardBottom);
 
     }
-    editLineThicknessSlider->setValue(cs->Pen.width());
-    elongateSpinbox->setValue(  currentFrame->CurrentStick()->myLine.length());
+    edit_line_thickness_slider->setValue(cs->Pen.width());
+    elongate_spinbox->setValue(  currentFrame->CurrentStick()->myLine.length());
 }
 Frame* Animation::setupFrame(int pos){
     QString name;
@@ -271,7 +271,7 @@ Frame* Animation::setupFrame(int pos){
             f->linkedItem->setData(Qt::DisplayRole,QString::number(f->frameNumber));
         }
     }
-    myFrameWidgetList->insertItem(pos,addedItem);
+    my_frame_widget_list->insertItem(pos,addedItem);
     Frame * addedFrame = addFrame(addedItem, pos);
     addedFrame->frameNumber = pos;
     addedFrame->linkedItem = addedItem;
@@ -303,17 +303,17 @@ QDataStream &operator>>(QDataStream& stream,Animation& myAnimation){
     stream>>myAnimation.width;
     stream>>myAnimation.height;
     // applica subito le dimensioni appena lette: prima non veniva fatto, quindi caricare un file con
-    // una canvas di dimensioni diverse da quella corrente lasciava myRect/limitRect/onionOffset legati
+    // una canvas di dimensioni diverse da quella corrente lasciava my_rect/limit_rect/onion_offset legati
     // alla vecchia canvas (nessuno li ricalcolava finché l'utente non ridimensionava manualmente)
     W = myAnimation.width;
     H = myAnimation.height;
-    myRect->setRect(0,0,W,H);
+    my_rect->setRect(0,0,W,H);
     sceneRemover(scene);
-    limitRect->setRect(-myRect->rect().width()/10, -myRect->rect().height()/10, myRect->rect().width()*1.1, myRect->rect().height()*1.1);
+    limit_rect->setRect(-my_rect->rect().width()/10, -my_rect->rect().height()/10, my_rect->rect().width()*1.1, my_rect->rect().height()*1.1);
 
-    scene->addItem(myRect);
-    scene->setSceneRect(limitRect->rect());
-    onionOffset = QPointF(-myRect->rect().width()/10,-myRect->rect().height()/10);
+    scene->addItem(my_rect);
+    scene->setSceneRect(limit_rect->rect());
+    onion_offset = QPointF(-my_rect->rect().width()/10,-my_rect->rect().height()/10);
     // un file valido non ha comunque un numero enorme di frame: senza questo controllo, un file
     // troncato o corrotto (es. un int con qualche bit invertito) farebbe partire un ciclo che
     // alloca centinaia di migliaia di Frame/QListWidgetItem prima di accorgersi che i dati non ci sono
@@ -365,8 +365,8 @@ void Animation::clearAnimation(){
 
         deleteFrame(f);
     }
-    myFrameWidgetList->clear();
-    //myFrameWidgetList->takeItem(myFrameWidgetList->row(f->linkedItem));
+    my_frame_widget_list->clear();
+    //my_frame_widget_list->takeItem(my_frame_widget_list->row(f->linkedItem));
     sceneRemover(scene);
     //scene->clear();
     clearingAnimation = false;

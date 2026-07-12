@@ -8,8 +8,8 @@ extern int H;
 extern int FPS;
 QString outputFile = "";
 extern QString FFMPEGPath;
-extern QDir programFolder;
-extern QDir renderFolder;
+extern QDir program_folder;
+extern QDir render_folder;
 FfmpegExport::FfmpegExport(QWidget *parent) :
     QWidget(parent),
     ui(new Ui::FfmpegExport)
@@ -32,17 +32,17 @@ FfmpegExport::~FfmpegExport()
 void FfmpegExport::on_exportVideoBtn_clicked()
 {
     // Prima salviamo tutit i frame come immagini, poi chiamiamo ffmpeg.exe per convertirle in video
-    QString imagePath = programFolder.path()+"/render";
-    renderFolder = QDir(imagePath);
+    QString imagePath = program_folder.path()+"/render";
+    render_folder = QDir(imagePath);
     QString imgName = imagePath+"/img";
-    if(renderFolder.exists()){
+    if(render_folder.exists()){
         qDebug("folder located");
     }
     else{
         qDebug("folder created");
-        renderFolder.mkpath(imagePath);
+        render_folder.mkpath(imagePath);
     }
-    renderFolder.setPath(imagePath);
+    render_folder.setPath(imagePath);
 
     QStringList paramList;
     paramList<<

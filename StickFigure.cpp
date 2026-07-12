@@ -6,7 +6,7 @@
 #include <QFile>
 #include <QVector2D>
 // StickFigure work in the one active scene
-extern QGraphicsRectItem* myRect;
+extern QGraphicsRectItem* my_rect;
 /**
  * @details Unconditional since Phase 4's undoFlag removal: every StickFigure that
  * exists is guaranteed live (scratch/buffer figures are StickFigureData since Phase
@@ -627,18 +627,18 @@ void StickFigure::rotateStickFigure(QPointF *coord, QList<StickGraphicsItem*> st
     }
 
 }
-extern bool startStickFigureScale;
+extern bool start_stick_figure_scale;
 void StickFigure::scale(QPointF *coord){
     float scale = 0;
     static float startingDist = 0;
     static QPointF startingPoint;
-    if(startStickFigureScale){
+    if(start_stick_figure_scale){
 
         startingPoint = *coord;
         startingDist = QLineF(startingPoint,masterStick->myLine.p1()).length();
         if(startingDist<=1)
             return;
-        startStickFigureScale = false;
+        start_stick_figure_scale = false;
     }
     //step 1 calcola la distanza tra la coordinata iniziale e quella corrente, se si allontana dal master stick ingrandisci, senno rimpicicolisci
     QLineF connect(masterStick->myLine.p1(),*coord); //crea la linea connettendo i punti

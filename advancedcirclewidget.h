@@ -4,22 +4,22 @@
 #include <QWidget>
 
 namespace Ui {
-class advancedCircleWidget;
+class AdvancedCircleWidget;
 }
 
-class advancedCircleWidget : public QWidget
+class AdvancedCircleWidget : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit advancedCircleWidget(QWidget *parent = nullptr);
-    ~advancedCircleWidget();
+    explicit AdvancedCircleWidget(QWidget *parent = nullptr);
+    ~AdvancedCircleWidget();
 
 private slots:
     void on_circleSquashSlider_valueChanged(int value);
 
 private:
-    Ui::advancedCircleWidget *ui;
+    Ui::AdvancedCircleWidget *ui;
 };
 
 #endif // ADVANCEDCIRCLEWIDGET_H

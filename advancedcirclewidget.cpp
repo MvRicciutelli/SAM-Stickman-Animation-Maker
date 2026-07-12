@@ -3,23 +3,23 @@
 #include "uiItems.h"
 extern MyView *V;
 
-advancedCircleWidget::advancedCircleWidget(QWidget *parent) :
+AdvancedCircleWidget::AdvancedCircleWidget(QWidget *parent) :
     QWidget(parent),
-    ui(new Ui::advancedCircleWidget)
+    ui(new Ui::AdvancedCircleWidget)
 {
     ui->setupUi(this);
-    circleSquashSlider = ui->circleSquashSlider;
-    circleSquashSpinbox = ui->circleSquashSpinbox;
+    circle_squash_slider = ui->circleSquashSlider;
+    circle_squash_spinbox = ui->circleSquashSpinbox;
 }
 
-advancedCircleWidget::~advancedCircleWidget()
+AdvancedCircleWidget::~AdvancedCircleWidget()
 {
     delete ui;
 }
 
-void advancedCircleWidget::on_circleSquashSlider_valueChanged(int value)
+void AdvancedCircleWidget::on_circleSquashSlider_valueChanged(int value)
 {
-    circleSquashSpinbox->setValue(value);
+    circle_squash_spinbox->setValue(value);
     if(V->myAnimation->CurrentFrame()->CurrentStickFigure()!=nullptr){
         if(V->myAnimation->CurrentFrame()->CurrentStick()!=nullptr){
             if(V->myAnimation->CurrentFrame()->CurrentStick()->stickType== StickData::CIRCLE){

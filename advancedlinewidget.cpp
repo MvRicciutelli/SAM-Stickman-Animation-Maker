@@ -8,27 +8,27 @@ extern int W;
 extern int H;
 
 extern MyView *V;
-advancedLineWidget::advancedLineWidget(QWidget *parent) :
+AdvancedLineWidget::AdvancedLineWidget(QWidget *parent) :
     QWidget(parent),
-    ui(new Ui::advancedLineWidget)
+    ui(new Ui::AdvancedLineWidget)
 {
     ui->setupUi(this);
-    editLineThicknessSlider = ui->editLineThicknessSlider;
-    lineEditThicknessWidthSpinbox = ui->lineEditThicknessWidthSpinbox;
+    edit_line_thickness_slider = ui->editLineThicknessSlider;
+    line_edit_thickness_width_spinbox = ui->lineEditThicknessWidthSpinbox;
 }
 
-advancedLineWidget::~advancedLineWidget()
+AdvancedLineWidget::~AdvancedLineWidget()
 {
     delete ui;
 }
 
-void advancedLineWidget::on_editLineThicknessSlider_valueChanged(int value)
+void AdvancedLineWidget::on_editLineThicknessSlider_valueChanged(int value)
 {
     if(V->myAnimation->CurrentFrame()->CurrentStickFigure() != nullptr){
         if(V->myAnimation->CurrentFrame()->CurrentStick() != nullptr){
-            editLineThicknessSlider->setRange(0,0.5*sqrt(pow(W,2)+pow(H,2)));
-            lineEditThicknessWidthSpinbox->setRange(0,0.5*sqrt(pow(W,2)+pow(H,2)));
-            lineEditThicknessWidthSpinbox->setValue(value);
+            edit_line_thickness_slider->setRange(0,0.5*sqrt(pow(W,2)+pow(H,2)));
+            line_edit_thickness_width_spinbox->setRange(0,0.5*sqrt(pow(W,2)+pow(H,2)));
+            line_edit_thickness_width_spinbox->setValue(value);
             V->myAnimation->CurrentFrame()->CurrentStick()->Pen.setWidth(value);
             V->myPen.setWidth(value);
             if(V->myAnimation->CurrentFrame()->CurrentStick()->view)
@@ -37,7 +37,7 @@ void advancedLineWidget::on_editLineThicknessSlider_valueChanged(int value)
     }
 }
 
-void advancedLineWidget::on_lineEditThicknessWidthSpinbox_editingFinished()
+void AdvancedLineWidget::on_lineEditThicknessWidthSpinbox_editingFinished()
 {
-    editLineThicknessSlider->setValue(lineEditThicknessWidthSpinbox->value());
+    edit_line_thickness_slider->setValue(line_edit_thickness_width_spinbox->value());
 }

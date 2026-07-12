@@ -367,15 +367,41 @@ each class rename, explicitly grep for `ui->` + the old name before
 trusting a blanket substitution, since `.ui`-generated accessor names don't
 distinguish "the class" from "a same-named objectName."
 
-**Not yet started:** the large remaining surface — `uiItems.h`'s ~40
-global widget-pointer variables (`fpsSpinBox`, `onionSkinSB`, etc.,
-referenced hundreds of times across `widget.cpp`), and the member
-functions/variables inside `widget.cpp`, `myview.cpp`/`.h`,
-`StickFigure.cpp`, `frame.cpp`, `animation.cpp`, `stick.cpp`,
-`stickdata.cpp`, `stickfiguredata.cpp`, `framedata.cpp`,
-`framepresenter.cpp`, and the remaining `advanced*widget.cpp` classes
-(`advancedLineWidget`, `advancedCircleWidget`, `advancedTaperWidget`).
-Continue in the same file-by-file, build-verified manner.
+**Second checkpoint (2026-07-12, same day):** renamed the remaining three
+`advanced*widget` classes (`advancedLineWidget`→`AdvancedLineWidget`,
+`advancedCircleWidget`→`AdvancedCircleWidget`,
+`advancedTaperWidget`→`AdvancedTaperWidget`, all + `.ui`) — no
+Designer-objectName collisions this time, confirmed by grepping every
+`.ui` file for each name before touching anything (the lesson from the
+`advancedTab` mistake above, applied). Then renamed `uiItems.h`'s full set
+of ~40 global widget-pointer variables to `snake_case`
+(`fpsSpinBox`→`fps_spin_box`, `onionSkinSB`→`onion_skin_sb`,
+`myStickFigureWidgetList`→`my_stick_figure_widget_list`, etc.), plus a
+second batch of ~18 more globals in `widget.cpp`/`mymainwindow.cpp`
+(folders, buffers, `animationPath`→`animation_path`,
+`HANDLESIZE`→`handle_size`), plus the pervasive `myRect`→`my_rect` (81
+references across 10 files). Most of these ~40 widget-pointer variables
+turned out to be assigned directly from a same-named `.ui` accessor
+(`fps_spin_box = ui->fpsSpinBox;`) — exactly the `advancedTab` trap, but
+at scale. Handled safely with a negative-lookbehind rename
+(`perl -pi -e 's/(?<!->)\bOLD\b/NEW/g'`) that renames the bare global but
+never a `->`-prefixed accessor, verified by grepping every `.ui`
+`objectName` against the full variable list first. Verified after each
+batch with a real build + a full `tst_characterization` run: 27/27 pass
+throughout.
+
+**Not yet started:** member functions/variables *inside* the core classes
+— `Widget` (`widget.cpp`/`.h`), `MyView` (`myview.cpp`/`.h`),
+`StickFigure.cpp`, `frame.cpp`, `animation.cpp`, `stick.cpp`
+(`StickGraphicsItem`), `stickdata.cpp`, `stickfiguredata.cpp`,
+`framedata.cpp`, `framepresenter.cpp`. This is the largest and highest-risk
+remaining slice: these classes have hundreds of methods each, many
+interconnected via signals/slots, and — per the pattern found twice above
+— some non-slot method names may still collide with `.ui` accessor names
+in ways a blanket rename won't catch without the same collision-check
+discipline. Continue in the same file-by-file, collision-checked,
+build-verified manner; do the `.ui`-objectName collision grep *before*
+each class's method rename, not after.
 
 **Context:** phases 1–6 write all *new* code in `snake_case`
 variables / `UpperPascalCase` functions and classes per the "Naming

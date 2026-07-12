@@ -14,7 +14,7 @@
 #define MINDEPTH -99.9f ///< lower clamp for the user-editable depth (Z) of a stick
 
 extern bool onionRender;
-extern QLabel *dbgLbl;
+extern QLabel *dbg_lbl;
 class StickFigure;
 
 /**
@@ -205,7 +205,7 @@ private:
 };
 
 /**
- * @brief Removes every item except the canvas frame (myRect) from a scene.
+ * @brief Removes every item except the canvas frame (my_rect) from a scene.
  * @param sceneToClear scene to empty without deleting the items.
  */
 void sceneRemover(QGraphicsScene *sceneToClear);

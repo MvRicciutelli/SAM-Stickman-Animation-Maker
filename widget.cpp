@@ -55,72 +55,72 @@ QString license = "The software package Marionetta is distributed as a free of c
 -The user acknowledges Marionetta is released as-is, \r\n\
    and that the author does not assume any resposability on the usage of the software or on the content created using the software.\r\n\
 ";
-int termsAccepted = 0;
-QString imageNameBuffer;
+int terms_accepted = 0;
+QString image_name_buffer;
 QGraphicsScene *scene;
 Ui::Widget *myUi;
 MyView* V;
 QList <StickFigure*> layerList;
-QTextEdit * stickFigureNameText;
-QGraphicsRectItem *myRect;
-QGraphicsRectItem *limitRect;
-QPointF onionOffset;
-QDir programFolder;
-QDir libFolder;
-QDir tempRenderFolder;
-QDir myAnimationsFolder;
-QDir myStickFiguresFolder;
-QDir myVideoExportFolder;
+QTextEdit * stick_figure_name_text;
+QGraphicsRectItem *my_rect;
+QGraphicsRectItem *limit_rect;
+QPointF onion_offset;
+QDir program_folder;
+QDir lib_folder;
+QDir temp_render_folder;
+QDir my_animations_folder;
+QDir my_stick_figures_folder;
+QDir my_video_export_folder;
 // -----------------
-QSpinBox* fpsSpinBox;
-QSlider* imgRotationSlider;
-QSpinBox * onionSkinSB;
-QSpinBox * imgHOffsetSpinbox;
-QSpinBox * imgVOffsetSpinbox;
-QSpinBox * imgWidthSpinbox;
-QSpinBox * imgHeightSpinbox;
-QSpinBox * imgRotationSpinbox;
-QSpinBox * penOpacitySpinbox;
-QSpinBox * brushOpacitySpinbox;
-QSpinBox* lineEditThicknessWidthSpinbox;
-QDoubleSpinBox * elongateSpinbox;
-QSlider * penOpacitySlider;
-QSlider * brushOpacitySlider;
-QSlider * depthSlider;
-QSpinBox *stickFigureScaleSpinbox;
-QSpinBox *stickFigureRotationSpinbox;
-QDoubleSpinBox * depthSpinbox;
-QListWidget * myStickFigureWidgetList;
-QListWidget * myFrameWidgetList;
-QListWidget * myLibraryListWidget ;
-QListWidget * myCurrentLibraryWidget;
-QListWidget * imgListWidget;
-QLabel * dbgLbl;
-QSlider* imgHOffsetSlider;
-QSlider* imgVOffsetSlider;
-QSlider* imgWidthSlider;
-QSlider* imgHeightSlider;
-QSlider* taperWSlider;
-QSlider* advancedRectSlider;
-QSlider* editLineThicknessSlider;
-QSlider* taperHSlider;
-QCheckBox* hardTopCheck;
-QCheckBox* hardBottomCheck;
+QSpinBox* fps_spin_box;
+QSlider* img_rotation_slider;
+QSpinBox * onion_skin_sb;
+QSpinBox * img_h_offset_spinbox;
+QSpinBox * img_v_offset_spinbox;
+QSpinBox * img_width_spinbox;
+QSpinBox * img_height_spinbox;
+QSpinBox * img_rotation_spinbox;
+QSpinBox * pen_opacity_spinbox;
+QSpinBox * brush_opacity_spinbox;
+QSpinBox* line_edit_thickness_width_spinbox;
+QDoubleSpinBox * elongate_spinbox;
+QSlider * pen_opacity_slider;
+QSlider * brush_opacity_slider;
+QSlider * depth_slider;
+QSpinBox *stick_figure_scale_spinbox;
+QSpinBox *stick_figure_rotation_spinbox;
+QDoubleSpinBox * depth_spinbox;
+QListWidget * my_stick_figure_widget_list;
+QListWidget * my_frame_widget_list;
+QListWidget * my_library_list_widget ;
+QListWidget * my_current_library_widget;
+QListWidget * img_list_widget;
+QLabel * dbg_lbl;
+QSlider* img_h_offset_slider;
+QSlider* img_v_offset_slider;
+QSlider* img_width_slider;
+QSlider* img_height_slider;
+QSlider* taper_w_slider;
+QSlider* advanced_rect_slider;
+QSlider* edit_line_thickness_slider;
+QSlider* taper_h_slider;
+QCheckBox* hard_top_check;
+QCheckBox* hard_bottom_check;
 AdvancedTab* advanced_rect_tab;
-QTabWidget* myTabWidget;
-QWidget * advancedImgTab;
-advancedLineWidget *advancedLineTab;
-advancedCircleWidget *advancedCircleTab;
-advancedTaperWidget * advancedTaperTab;
-QSlider*  circleSquashSlider;
-QSpinBox * circleSquashSpinbox;
+QTabWidget* my_tab_widget;
+QWidget * advanced_img_tab;
+AdvancedLineWidget *advanced_line_tab;
+AdvancedCircleWidget *advanced_circle_tab;
+AdvancedTaperWidget * advanced_taper_tab;
+QSlider*  circle_squash_slider;
+QSpinBox * circle_squash_spinbox;
 FrameData * frameCopyBuffer = nullptr; ///< buffer copia-frame: solo dati da Phase 2b
 
 //----------------------
 int W                   = DEFAULTWIDTH;
 int H                   = DEFAULTHEIGHT;
 int FPS                 = DEFAULTFPS;
-int HANDLESIZE          = DEFAULTHANDLES;
+int handle_size          = DEFAULTHANDLES;
 int autoSaveInterval    = DEFAULTAUTOSAVE;
 struct{
     bool sliderHOffset  = false;
@@ -132,7 +132,7 @@ struct{
 bool playBack               = false;
 float zoomLvl               = 1;
 bool  firstTimeOpened       = false;
-QImage * imageDrawBuffer;
+QImage * image_draw_buffer;
 QString FFMPEGPath = "";
 Widget::Widget(QWidget *parent)
     : QWidget(parent)
@@ -141,41 +141,41 @@ Widget::Widget(QWidget *parent)
     ui->setupUi(this);
     myUi = ui;
     //crea la scena virtuale
-    advancedImgTab = ui->advancedTab;
-    advancedLineTab = new advancedLineWidget();
-    advancedCircleTab = new advancedCircleWidget();
-    advancedTaperTab = new advancedTaperWidget();
-    myTabWidget = ui->toolsTabWidget;
+    advanced_img_tab = ui->advancedTab;
+    advanced_line_tab = new AdvancedLineWidget();
+    advanced_circle_tab = new AdvancedCircleWidget();
+    advanced_taper_tab = new AdvancedTaperWidget();
+    my_tab_widget = ui->toolsTabWidget;
     ui->toolsTabWidget->setCurrentWidget(ui->drawingTab);
-    myStickFigureWidgetList = ui->stickLayerView;
-    myLibraryListWidget = ui->libraryList;
-    myCurrentLibraryWidget = ui->currentLibrary;
-    myFrameWidgetList = ui->frameListWidget;
-    onionSkinSB = ui->onionSkinSpinBox;
-    stickFigureNameText = ui->stickFigureNameText;
-    fpsSpinBox = ui->fpsSpinBox;
-    imgHOffsetSlider = ui->imgHOffsetSlider;
-    imgHOffsetSpinbox = ui->imgHOffsetSpinbox;
-    imgVOffsetSlider = ui->imgVOfsetSlider;
-    imgVOffsetSpinbox = ui->imgVOffsetSpinbox;
-    imgWidthSlider = ui->imgWSlider;
-    imgWidthSpinbox = ui->imgWidthSpinbox;
-    imgHeightSlider = ui->imgHSlider;
-    imgHeightSpinbox = ui->imgHeightSpinbox;
-    imgRotationSlider = ui->imgRotationSlider;
-    imgRotationSpinbox = ui->imgRotationSpinbox;
-    elongateSpinbox = ui->elongateSpinbox;
-    penOpacitySlider = ui->penOpacitySlider;
-    penOpacitySpinbox = ui->penOpacitySpinbox;
-    brushOpacitySlider = ui->fillOpacitySlider;
-    brushOpacitySpinbox = ui->fillOpacitySpinbox;
-    stickFigureScaleSpinbox = ui->stickFigureScaleSpinbox;
-    stickFigureRotationSpinbox = ui->stickFigureRotationSpinbox;
-    depthSpinbox = ui->depthSpinbox;
-    depthSlider = ui->depthSlider;
-    imgListWidget = ui->imgListWidget;
+    my_stick_figure_widget_list = ui->stickLayerView;
+    my_library_list_widget = ui->libraryList;
+    my_current_library_widget = ui->currentLibrary;
+    my_frame_widget_list = ui->frameListWidget;
+    onion_skin_sb = ui->onionSkinSpinBox;
+    stick_figure_name_text = ui->stickFigureNameText;
+    fps_spin_box = ui->fpsSpinBox;
+    img_h_offset_slider = ui->imgHOffsetSlider;
+    img_h_offset_spinbox = ui->imgHOffsetSpinbox;
+    img_v_offset_slider = ui->imgVOfsetSlider;
+    img_v_offset_spinbox = ui->imgVOffsetSpinbox;
+    img_width_slider = ui->imgWSlider;
+    img_width_spinbox = ui->imgWidthSpinbox;
+    img_height_slider = ui->imgHSlider;
+    img_height_spinbox = ui->imgHeightSpinbox;
+    img_rotation_slider = ui->imgRotationSlider;
+    img_rotation_spinbox = ui->imgRotationSpinbox;
+    elongate_spinbox = ui->elongateSpinbox;
+    pen_opacity_slider = ui->penOpacitySlider;
+    pen_opacity_spinbox = ui->penOpacitySpinbox;
+    brush_opacity_slider = ui->fillOpacitySlider;
+    brush_opacity_spinbox = ui->fillOpacitySpinbox;
+    stick_figure_scale_spinbox = ui->stickFigureScaleSpinbox;
+    stick_figure_rotation_spinbox = ui->stickFigureRotationSpinbox;
+    depth_spinbox = ui->depthSpinbox;
+    depth_slider = ui->depthSlider;
+    img_list_widget = ui->imgListWidget;
     advanced_rect_tab = new AdvancedTab();
-   // dbgLbl = ui->debugLabel;
+   // dbg_lbl = ui->debugLabel;
     createPaths();
     detectLibraries();
     // aggiorna il colore del segnacolore
@@ -204,51 +204,51 @@ Widget::Widget(QWidget *parent)
     //inserisci il pannello nella finestra
     ui->viewLayout->addWidget(view);
     //json read
-    if(!QFile::exists(libFolder.path()+"/defaultLib.marlib")){
-        view->saveLibrary(libFolder.path()+"/defaultLib.marlib");
+    if(!QFile::exists(lib_folder.path()+"/defaultLib.marlib")){
+        view->saveLibrary(lib_folder.path()+"/defaultLib.marlib");
     }
     else{
-        view->loadLibrary(libFolder.path()+"/defaultLib.marlib");
+        view->loadLibrary(lib_folder.path()+"/defaultLib.marlib");
     }
-    QString jsonConfigPath = programFolder.path()+"/config.json";
+    QString jsonConfigPath = program_folder.path()+"/config.json";
     if(!QFile::exists(jsonConfigPath)){
         createJson(jsonConfigPath);
     }
     else{
         readJson(jsonConfigPath);
     }
-    if(termsAccepted == 0){
+    if(terms_accepted == 0){
         termsAndConditions();
     }
-    if(termsAccepted == 0){
+    if(terms_accepted == 0){
         exit(EXIT_FAILURE);
     }
 
 
 
     //crea la cornice
-    myRect = new QGraphicsRectItem(0, 0, W, H);
-    myRect->setBrush(QBrush(QColor(Qt::white)));
-    limitRect = new QGraphicsRectItem(-myRect->rect().width()/10, -myRect->rect().height()/10, myRect->rect().width()*1.1, myRect->rect().height()*1.1);
-    limitRect->setBrush(QBrush(QColor(Qt::white)));
-    myRect->setZValue(-100);
-    myRect->setPen(Qt::NoPen);
-    scene->addItem(myRect);
-    scene->setSceneRect(limitRect->rect());
+    my_rect = new QGraphicsRectItem(0, 0, W, H);
+    my_rect->setBrush(QBrush(QColor(Qt::white)));
+    limit_rect = new QGraphicsRectItem(-my_rect->rect().width()/10, -my_rect->rect().height()/10, my_rect->rect().width()*1.1, my_rect->rect().height()*1.1);
+    limit_rect->setBrush(QBrush(QColor(Qt::white)));
+    my_rect->setZValue(-100);
+    my_rect->setPen(Qt::NoPen);
+    scene->addItem(my_rect);
+    scene->setSceneRect(limit_rect->rect());
     num = scene->items();
     // adjust image editing offset sliders according to max size of scene
-    imgVOffsetSlider->setRange(-myRect->rect().height(), myRect->rect().height());
-    imgVOffsetSpinbox->setRange(-myRect->rect().height(), myRect->rect().height());
-    imgHOffsetSlider->setRange(-myRect->rect().width(), myRect->rect().width());
-    imgHOffsetSpinbox->setRange(-myRect->rect().width(), myRect->rect().width());
-    elongateSpinbox->setRange(0,W);
+    img_v_offset_slider->setRange(-my_rect->rect().height(), my_rect->rect().height());
+    img_v_offset_spinbox->setRange(-my_rect->rect().height(), my_rect->rect().height());
+    img_h_offset_slider->setRange(-my_rect->rect().width(), my_rect->rect().width());
+    img_h_offset_spinbox->setRange(-my_rect->rect().width(), my_rect->rect().width());
+    elongate_spinbox->setRange(0,W);
     // set onion rendered image skin offset to be displayed properly on the scene
-    onionOffset = QPointF(-myRect->rect().width()/10,-myRect->rect().height()/10);
+    onion_offset = QPointF(-my_rect->rect().width()/10,-my_rect->rect().height()/10);
     //check if default library exists
 
-    myLibraryListWidget->clear();
+    my_library_list_widget->clear();
     detectLibraries();
-    myLibraryListWidget->setCurrentRow(0);
+    my_library_list_widget->setCurrentRow(0);
     frameCopyBuffer = new FrameData();
 }
 
@@ -280,8 +280,8 @@ void Widget::readJson(QString path ){
     firstTimeOpened     = recordObject.value(QString("First time opened")).toInt();
     FFMPEGPath          = recordObject.value("FFMPEG path").toString();
     autoSaveInterval    = recordObject.value(QString("Autosave operation interval")).toInt();
-    HANDLESIZE          = recordObject.value(QString("Handles size")).toInt();
-    termsAccepted       = recordObject.value(QString("Terms Accepted")).toInt();
+    handle_size          = recordObject.value(QString("Handles size")).toInt();
+    terms_accepted       = recordObject.value(QString("Terms Accepted")).toInt();
     file.close();
 
 }
@@ -293,16 +293,16 @@ license+" Click on the \"Yes\" button if you accept the above terms, click on th
 
     myBox->setWindowFlag(Qt::FramelessWindowHint);
     if (myBox->exec() == QMessageBox::Yes) {
-       termsAccepted = 1;       //cicciottaEasterEgg!!!!
+       terms_accepted = 1;       //cicciottaEasterEgg!!!!
        QMessageBox::information(this,"info"," you can review the terms accepted in the help menu",QMessageBox::Ok);
     } else {
-        termsAccepted = 0;
+        terms_accepted = 0;
     }
     delete myBox;
     writeJson();
 }
 void Widget::writeJson( ){
-    QString path = programFolder.path()+"/config.json";
+    QString path = program_folder.path()+"/config.json";
     createJson(path);
 }
 extern int opCount;
@@ -315,8 +315,8 @@ void Widget::createJson(QString path ){
     recordObject.insert("FFMPEG Located", QJsonValue::fromVariant(false));
     recordObject.insert("FFMPEG path", QJsonValue::fromVariant(FFMPEGPath));
     recordObject.insert("Autosave operation interval", QJsonValue::fromVariant(autoSaveInterval));
-    recordObject.insert("Handles size", QJsonValue::fromVariant(HANDLESIZE));
-    recordObject.insert("Terms Accepted", QJsonValue::fromVariant((int)termsAccepted));
+    recordObject.insert("Handles size", QJsonValue::fromVariant(handle_size));
+    recordObject.insert("Terms Accepted", QJsonValue::fromVariant((int)terms_accepted));
     QJsonDocument doc(recordObject);
     QFile file(path);
     if(!file.open(QIODevice::WriteOnly))
@@ -326,75 +326,75 @@ void Widget::createJson(QString path ){
 }
 void Widget::createPaths(){
     QString  path = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    programFolder = QDir(path+"/MarionettaPlus");
-    if(programFolder.exists()){
+    program_folder = QDir(path+"/MarionettaPlus");
+    if(program_folder.exists()){
         qDebug("folder located");
     }
     else{
         qDebug("folder created");
-        programFolder.mkpath(path+"/MarionettaPlus");
+        program_folder.mkpath(path+"/MarionettaPlus");
     }
-    libFolder = QDir(path+"/MarionettaPlus/Libraries");
-    if(!libFolder.exists()){
+    lib_folder = QDir(path+"/MarionettaPlus/Libraries");
+    if(!lib_folder.exists()){
         qDebug("library folder created");
-        libFolder.mkpath(path+"/MarionettaPlus/Libraries");
+        lib_folder.mkpath(path+"/MarionettaPlus/Libraries");
     }
-    tempRenderFolder = QDir(path+"/MarionettaPlus/temporaryRender");
-    if(!tempRenderFolder.exists()){
+    temp_render_folder = QDir(path+"/MarionettaPlus/temporaryRender");
+    if(!temp_render_folder.exists()){
         qDebug("temporary render folder created");
-        tempRenderFolder.mkpath(path+"/MarionettaPlus/temporaryRender");
+        temp_render_folder.mkpath(path+"/MarionettaPlus/temporaryRender");
     }
-    myAnimationsFolder = QDir(path+"/MarionettaPlus/myAnimations");
-    if(!myAnimationsFolder.exists()){
+    my_animations_folder = QDir(path+"/MarionettaPlus/myAnimations");
+    if(!my_animations_folder.exists()){
         qDebug("myAnimation folder created");
-        myAnimationsFolder.mkpath(path+"/MarionettaPlus/myAnimations");
+        my_animations_folder.mkpath(path+"/MarionettaPlus/myAnimations");
     }
-    myStickFiguresFolder = QDir(path+"/MarionettaPlus/myStickFigures");
-    if(!myStickFiguresFolder.exists()){
+    my_stick_figures_folder = QDir(path+"/MarionettaPlus/myStickFigures");
+    if(!my_stick_figures_folder.exists()){
         qDebug("Stickfigure folder created");
-        myStickFiguresFolder.mkpath(path+"/MarionettaPlus/myStickFigures");
+        my_stick_figures_folder.mkpath(path+"/MarionettaPlus/myStickFigures");
     }
 
-    myVideoExportFolder = QDir(path+"/MarionettaPlus/myExportedVideos");
-    if(!myVideoExportFolder.exists()){
+    my_video_export_folder = QDir(path+"/MarionettaPlus/myExportedVideos");
+    if(!my_video_export_folder.exists()){
         qDebug("Stickfigure folder created");
-        myVideoExportFolder.mkpath(path+"/MarionettaPlus/myExportedVideos");
+        my_video_export_folder.mkpath(path+"/MarionettaPlus/myExportedVideos");
     }
 }
 void Widget::detectLibraries(){
-    QDirIterator dirIt(libFolder.path(),QDir::AllEntries);
+    QDirIterator dirIt(lib_folder.path(),QDir::AllEntries);
     while (dirIt.hasNext()) {
         dirIt.next();
         if (QFileInfo(dirIt.filePath()).isFile()){
             if (QFileInfo(dirIt.filePath()).suffix() == "marlib"){
-                QListWidgetItem * item = new QListWidgetItem(myLibraryListWidget);
+                QListWidgetItem * item = new QListWidgetItem(my_library_list_widget);
                 QVariant newData(QVariant::fromValue(dirIt.filePath()));
                 item->setData(Qt::UserRole,newData);
                 item->setData(Qt::DisplayRole,dirIt.fileName());
-                myLibraryListWidget->addItem(item);
+                my_library_list_widget->addItem(item);
             }
         }
     }
 }
 /**
  * @details undoFlag (removed in Phase 4) used to be raised here before `delete view`.
- * It's no longer needed: `~StickFigure()`'s cleanup (scene removal, imgListWidget
+ * It's no longer needed: `~StickFigure()`'s cleanup (scene removal, img_list_widget
  * entries, the sticks themselves) is safe to run unconditionally now, and every
- * object it touches — `scene`, `imgListWidget` (owned by `ui`) — is still alive at
+ * object it touches — `scene`, `img_list_widget` (owned by `ui`) — is still alive at
  * this point, since `delete ui` runs after `delete view` below.
  */
 Widget::~Widget()
 {
     delete view;
-    // setParent(nullptr) prima della delete: se il tab è attualmente inserito in myTabWidget,
+    // setParent(nullptr) prima della delete: se il tab è attualmente inserito in my_tab_widget,
     // lo scollega evitando che venga cancellato due volte (una qui, una dalla cascata di Qt);
     // se non è mai stato selezionato in questa sessione non ha comunque un parent, quindi è un no-op sicuro
-    advancedLineTab->setParent(nullptr);
-    delete advancedLineTab;
-    advancedCircleTab->setParent(nullptr);
-    delete advancedCircleTab;
-    advancedTaperTab->setParent(nullptr);
-    delete advancedTaperTab;
+    advanced_line_tab->setParent(nullptr);
+    delete advanced_line_tab;
+    advanced_circle_tab->setParent(nullptr);
+    delete advanced_circle_tab;
+    advanced_taper_tab->setParent(nullptr);
+    delete advanced_taper_tab;
     advanced_rect_tab->setParent(nullptr);
     delete advanced_rect_tab;
     delete ui;
@@ -418,8 +418,8 @@ void Widget::on_addStickBtn_clicked()
 }
 
 StickFigure* Widget::addStick(){
-    StickFigure * added = view->myAnimation->CurrentFrame()->addStickFigure(ui->stickLayerView, stickFigureNameText->toPlainText());
-    stickFigureNameText->clear();
+    StickFigure * added = view->myAnimation->CurrentFrame()->addStickFigure(ui->stickLayerView, stick_figure_name_text->toPlainText());
+    stick_figure_name_text->clear();
     return added;
 }
 void Widget::on_thicknessSpinBox_valueChanged(int arg1)
@@ -554,7 +554,7 @@ void Widget::on_frameListWidget_itemClicked(QListWidgetItem *item)
 void Widget::on_stickLayerView_itemDoubleClicked(QListWidgetItem *item)
 {
     QString text = QInputDialog::getText(this,"rename layer","text");
-    QListWidgetItem *myItem = myStickFigureWidgetList->item((myStickFigureWidgetList->currentRow()));
+    QListWidgetItem *myItem = my_stick_figure_widget_list->item((my_stick_figure_widget_list->currentRow()));
     myItem->setData(Qt::DisplayRole, text);
     QVariant  retrievedData = (item->data(Qt::UserRole));
     StickFigure* S = qvariant_cast<StickFigure*>(retrievedData);
@@ -567,10 +567,10 @@ void Widget::on_PlayButton_clicked()
     if(busyPlay == false){
         //parti dal frame 0, scegli il framerate
         view->moveToFrame(view->myAnimation->frameList[0]);
-        int fps = fpsSpinBox->value();
-        int onions = onionSkinSB->value();
+        int fps = fps_spin_box->value();
+        int onions = onion_skin_sb->value();
         // non voglio onionskins in questa modalità
-        onionSkinSB->setValue(0);
+        onion_skin_sb->setValue(0);
         view->moveToFrame(view->myAnimation->frameList[0]);
 
         // calcola il delay da usare nel timer di passaggio da un frame al segunte
@@ -579,7 +579,7 @@ void Widget::on_PlayButton_clicked()
             delay = delay/2;
         busyPlay = true;
         play = new MySleeper(view,delay);
-        onionSkinSB->setValue(onions);
+        onion_skin_sb->setValue(onions);
     }else{
         play->Stop();
     }
@@ -616,9 +616,9 @@ void Widget::on_drawImageBtn_clicked()
     QString fileName = QFileDialog::getOpenFileName(this,tr("Load Image"),
                        "C:/", tr("Images (*.png *.bmp *.jpg)"));
     if(QFile::exists(fileName)){
-        //imageDrawBuffer = new QImage("C:/Users/riccim3/Pictures/immagine.jpg" );
-        imageDrawBuffer = new QImage(fileName );
-        imageNameBuffer = QFileInfo(QFile(fileName)).fileName();
+        //image_draw_buffer = new QImage("C:/Users/riccim3/Pictures/immagine.jpg" );
+        image_draw_buffer = new QImage(fileName );
+        image_name_buffer = QFileInfo(QFile(fileName)).fileName();
         view->setTool(DRAWIMG);
     }
 
@@ -629,7 +629,7 @@ void Widget::on_addImgBtn_clicked()
     QString fileName = QFileDialog::getOpenFileName(this,tr("Load Image"),
                        "C:/", tr("Images (*.png *.bmp *.jpg)"));
     if(fileName.length()>0 && cs->view){
-        //imageDrawBuffer = new QImage("C:/Users/riccim3/Pictures/immagine.jpg" );
+        //image_draw_buffer = new QImage("C:/Users/riccim3/Pictures/immagine.jpg" );
         QImage* myImg = new QImage(fileName);
         view->storeUndo();
         cs->view->addImage(myImg,
@@ -644,7 +644,7 @@ void Widget::on_removeImgBtn_clicked()
     if(view->myAnimation->CurrentFrame()->CurrentStick() != nullptr){
         if(view->myAnimation->CurrentFrame()->CurrentStick()->stickType == StickData::IMAGE && view->myAnimation->CurrentFrame()->CurrentStick()->stickImgList.length()>1
                 && view->myAnimation->CurrentFrame()->CurrentStick()->view){
-            int idx = imgListWidget->currentRow(); // indice immagine correntmente selezionata
+            int idx = img_list_widget->currentRow(); // indice immagine correntmente selezionata
             view->storeUndo();
             view->myAnimation->CurrentFrame()->CurrentStick()->view->removeImgFromList(idx);
             view->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh(0);
@@ -655,7 +655,7 @@ void Widget::on_removeImgBtn_clicked()
 // imposta l'immagine contenuta nello stick dalla lista delle immagini
 void Widget::on_setImgBtn_clicked()
 {
-    int idx = imgListWidget->currentRow(); // indice immagine correntmente selezionata
+    int idx = img_list_widget->currentRow(); // indice immagine correntmente selezionata
     if(view->myAnimation->CurrentFrame()->CurrentStick() != nullptr){
         if(view->myAnimation->CurrentFrame()->CurrentStick()->stickType == StickData::IMAGE){
             view->storeUndo();
@@ -695,10 +695,10 @@ void Widget::on_imgRotationSlider_sliderReleased()
 void Widget::on_saveLibraryBtn_clicked()
 {
     QString fileName = QFileDialog::getSaveFileName(this,tr("save marionetta library"),
-                       libFolder.path(),"Marionetta Library(*.marlib)");
+                       lib_folder.path(),"Marionetta Library(*.marlib)");
     if(fileName.length()>0){
         view->saveLibrary(fileName);
-        myLibraryListWidget->clear();
+        my_library_list_widget->clear();
         detectLibraries();
     }
 }
@@ -713,7 +713,7 @@ void Widget::on_addItemToLibBtn_clicked()
 void Widget::on_loadLibraryBtn_clicked()
 {
     QString fileName = QFileDialog::getOpenFileName(this,tr("load marionetta library"),
-                       libFolder.path(),"Marionetta Library(*.marlib)");
+                       lib_folder.path(),"Marionetta Library(*.marlib)");
     if(QFile::exists(fileName)){
         view->loadLibrary(fileName);
     }
@@ -721,17 +721,17 @@ void Widget::on_loadLibraryBtn_clicked()
 
 void Widget::on_refreshLibrariesBtn_clicked()
 {
-    myLibraryListWidget->clear();
+    my_library_list_widget->clear();
     detectLibraries();
 }
 
 void Widget::on_libraryList_currentRowChanged(int currentRow)
 {
     QString fileName = "";
-    int idx = myLibraryListWidget->currentRow();
-    if(idx>=0 && idx<myLibraryListWidget->count()){
+    int idx = my_library_list_widget->currentRow();
+    if(idx>=0 && idx<my_library_list_widget->count()){
         QVariant buffer;
-        buffer = myLibraryListWidget->item(idx)->data(Qt::UserRole);
+        buffer = my_library_list_widget->item(idx)->data(Qt::UserRole);
         fileName = qvariant_cast<QString>(buffer);
         if(QFile::exists(fileName)){
             view->loadLibrary(fileName,0);
@@ -748,14 +748,14 @@ void Widget::on_removeFromLibraryBtn_clicked()
 void Widget::on_addItemFromLibraryToSceneBtn_clicked()
 {
     // get selected item
-    int idx = myCurrentLibraryWidget->currentRow();
+    int idx = my_current_library_widget->currentRow();
     // niente selezionato: controllato PRIMA di addStick(), altrimenti un click a vuoto aggiungeva
     // comunque un layer vuoto indesiderato oltre a rischiare item(-1)->isSelected() in crash
-    if(idx<0 || idx>=myCurrentLibraryWidget->count() || !myCurrentLibraryWidget->item(idx)->isSelected()){
+    if(idx<0 || idx>=my_current_library_widget->count() || !my_current_library_widget->item(idx)->isSelected()){
         return;
     }
     StickFigure * added = addStick();
-    QListWidgetItem *itemToAdd = myCurrentLibraryWidget->item(idx);
+    QListWidgetItem *itemToAdd = my_current_library_widget->item(idx);
     // estrai il dato utente salvato in esso: da Phase 2b la libreria contiene record dati
     QVariant  retrievedData = (itemToAdd->data(Qt::UserRole));
     StickFigureData* toAdd = qvariant_cast<StickFigureData*>(retrievedData);
@@ -766,7 +766,7 @@ void Widget::on_addItemFromLibraryToSceneBtn_clicked()
     view->addHandles(added);
     added->linkedItem->setData(Qt::DisplayRole,added->name);
     view->myAnimation->updateSelection(added);
-    myStickFigureWidgetList->setCurrentRow(myStickFigureWidgetList->row(added->linkedItem));
+    my_stick_figure_widget_list->setCurrentRow(my_stick_figure_widget_list->row(added->linkedItem));
     added->refresh();
     //added->refresh();
     //scene->update();
@@ -776,16 +776,16 @@ void Widget::on_addItemFromLibraryToSceneBtn_clicked()
 void Widget::on_saveCurrentLibraryBtn_clicked()
 {
     QString fileName = "";
-    int idx = myLibraryListWidget->currentRow();
-    if(idx>=0 && idx<myLibraryListWidget->count()){
+    int idx = my_library_list_widget->currentRow();
+    if(idx>=0 && idx<my_library_list_widget->count()){
         QVariant buffer;
         QListWidgetItem *item;
-        item = myLibraryListWidget->item(idx);
+        item = my_library_list_widget->item(idx);
         buffer = item->data(Qt::UserRole);
         fileName = qvariant_cast<QString>(buffer);
         if(QFile::exists(fileName)){
             view->saveLibrary(fileName);
-            myLibraryListWidget->clear();
+            my_library_list_widget->clear();
             detectLibraries();
         }
     }
@@ -803,8 +803,8 @@ void Widget::on_imgHOffsetSlider_valueChanged(int value)
                 sliderFlags.sliderHOffset = true;
             }
             float val = 0;
-            val = (float)imgHOffsetSlider->value();
-            imgHOffsetSpinbox->setValue(imgHOffsetSlider->value());
+            val = (float)img_h_offset_slider->value();
+            img_h_offset_spinbox->setValue(img_h_offset_slider->value());
             cs->imgOffset.setX(val);
              view->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
         }
@@ -824,8 +824,8 @@ void Widget::on_imgVOfsetSlider_valueChanged(int value)
                 view->storeUndo(CMD_SIMPLE);
                 sliderFlags.sliderVOffset = true;
             }
-            imgVOffsetSpinbox->setValue(imgVOffsetSlider->value());
-            val = (float)imgVOffsetSlider->value();
+            img_v_offset_spinbox->setValue(img_v_offset_slider->value());
+            val = (float)img_v_offset_slider->value();
             cs->imgOffset.setY(val);
              view->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
         }
@@ -844,8 +844,8 @@ void Widget::on_imgWSlider_valueChanged(int value)
                 view->storeUndo(CMD_SIMPLE);
                 sliderFlags.sliderWScale = true;
             }
-            imgWidthSlider->value()>0?scale = (float)imgWidthSlider->value()/10+1:scale = 1/((float)(-imgWidthSlider->value())/10+1);
-            imgWidthSpinbox->setValue(imgWidthSlider->value());
+            img_width_slider->value()>0?scale = (float)img_width_slider->value()/10+1:scale = 1/((float)(-img_width_slider->value())/10+1);
+            img_width_spinbox->setValue(img_width_slider->value());
             cs->imgWScale = scale;
             view->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
         }
@@ -864,8 +864,8 @@ void Widget::on_imgHSlider_valueChanged(int value)
                 view->storeUndo(CMD_SIMPLE);
                 sliderFlags.sliderHScale = true;
             }
-            imgHeightSlider->value()>0?scale = (float)imgHeightSlider->value()/10+1 : scale = 1/((float)(-imgHeightSlider->value())/10+1);
-            imgHeightSpinbox->setValue(imgHeightSlider->value());
+            img_height_slider->value()>0?scale = (float)img_height_slider->value()/10+1 : scale = 1/((float)(-img_height_slider->value())/10+1);
+            img_height_spinbox->setValue(img_height_slider->value());
             cs->imgHScale = scale;
              view->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
         }
@@ -884,8 +884,8 @@ void Widget::on_imgRotationSlider_valueChanged(int value)
                 sliderFlags.sliderRot = true;
             }
             float val = 0;
-            val =imgRotationSlider->value();
-            imgRotationSpinbox->setValue(val);
+            val =img_rotation_slider->value();
+            img_rotation_spinbox->setValue(val);
             cs->imgAngleOffset = val;
              view->myAnimation->CurrentFrame()->CurrentStickFigure()->refresh();
         }
@@ -894,27 +894,27 @@ void Widget::on_imgRotationSlider_valueChanged(int value)
 
 void Widget::on_imgHOffsetSpinbox_valueChanged(int arg1)
 {
-    imgHOffsetSlider->setValue(imgHOffsetSpinbox->value());
+    img_h_offset_slider->setValue(img_h_offset_spinbox->value());
 }
 
 void Widget::on_imgVOffsetSpinbox_valueChanged(int arg1)
 {
-    imgVOffsetSlider->setValue(imgVOffsetSpinbox->value());
+    img_v_offset_slider->setValue(img_v_offset_spinbox->value());
 }
 
 void Widget::on_imgWidthSpinbox_valueChanged(int arg1)
 {
-    imgWidthSlider->setValue(imgWidthSpinbox->value());
+    img_width_slider->setValue(img_width_spinbox->value());
 }
 
 void Widget::on_imgHeightSpinbox_valueChanged(int arg1)
 {
-    imgHeightSlider->setValue(imgHeightSpinbox->value());
+    img_height_slider->setValue(img_height_spinbox->value());
 }
 
 void Widget::on_imgRotationSpinbox_valueChanged(int arg1)
 {
-    imgRotationSlider->setValue(imgRotationSpinbox->value());
+    img_rotation_slider->setValue(img_rotation_spinbox->value());
 }
 void Widget::on_chooseColorBtn_clicked()
 {
@@ -949,7 +949,7 @@ void Widget::on_setPenThicknessAllBtn_clicked()
 void Widget::on_selectBrushColorBtn_clicked()
 {
     QColor color = QColorDialog::getColor(Qt::yellow, this );
-    color.setAlphaF((float)brushOpacitySlider->value()/100);
+    color.setAlphaF((float)brush_opacity_slider->value()/100);
     view->myBrush.setColor(color);
     // aggiorna il colore del segnacolore
     if(color.isValid()) {
@@ -979,27 +979,27 @@ void Widget::on_manipulateBtn_clicked()
 void Widget::on_penOpacitySlider_valueChanged(int value)
 {
     QColor c = view->myPen.color();
-    c.setAlphaF((float)penOpacitySlider->value()/100);
+    c.setAlphaF((float)pen_opacity_slider->value()/100);
     view->myPen.setColor(c);
-    penOpacitySpinbox->setValue(penOpacitySlider->value());
+    pen_opacity_spinbox->setValue(pen_opacity_slider->value());
 }
 
 void Widget::on_fillOpacitySlider_valueChanged(int value)
 {
     QColor c = view->myBrush.color();
-    c.setAlphaF((float)brushOpacitySlider->value()/100);
+    c.setAlphaF((float)brush_opacity_slider->value()/100);
     view->myBrush.setColor(c);
-    brushOpacitySpinbox->setValue(brushOpacitySlider->value());
+    brush_opacity_spinbox->setValue(brush_opacity_slider->value());
 }
 
 void Widget::on_penOpacitySpinbox_valueChanged(int arg1)
 {
-    penOpacitySlider->setValue(penOpacitySpinbox->value());
+    pen_opacity_slider->setValue(pen_opacity_spinbox->value());
 }
 
 void Widget::on_fillOpacitySpinbox_valueChanged(int arg1)
 {
-    brushOpacitySlider->setValue(brushOpacitySpinbox->value());
+    brush_opacity_slider->setValue(brush_opacity_spinbox->value());
 }
 
 
@@ -1013,7 +1013,7 @@ void Widget::on_scaleStickFigureBtn_clicked()
     view->setTool(SCALE);
 }
 
-extern bool startStickFigureScale;
+extern bool start_stick_figure_scale;
 
 
 void Widget::on_stickFigureScaleSpinbox_editingFinished()
@@ -1028,12 +1028,12 @@ void Widget::on_stickFigureScaleSpinbox_editingFinished()
     if(view->myAnimation->CurrentFrame()->CurrentStickFigure() != nullptr){
         for(StickData* s:view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
             if(s->view)
-                s->view->scale((float)stickFigureScaleSpinbox->value()/100);
+                s->view->scale((float)stick_figure_scale_spinbox->value()/100);
 
         }
 
     }
-    stickFigureScaleSpinbox->setValue(100);
+    stick_figure_scale_spinbox->setValue(100);
 }
 
 void Widget::on_stickFigureRotationSpinbox_editingFinished()
@@ -1043,13 +1043,13 @@ void Widget::on_stickFigureRotationSpinbox_editingFinished()
         for(StickData* s:view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
             if(s->view){
                 s->view->angleBuffer2 = s->myLine.angle();
-                s->view->rotate(stickFigureRotationSpinbox->value());
+                s->view->rotate(stick_figure_rotation_spinbox->value());
                 s->view->angleBuffer2 = s->myLine.angle();
             }
         }
 
     }
-    stickFigureRotationSpinbox->setValue(0);
+    stick_figure_rotation_spinbox->setValue(0);
 }
 
 void Widget::on_moveSceneBtn_clicked()
@@ -1194,19 +1194,19 @@ void Widget::on_createNewLibraryBtn_clicked()
 {
     on_saveCurrentLibraryBtn_clicked();
     QString fileName = QFileDialog::getSaveFileName(this,tr("create a new marionetta library"),
-                       libFolder.path(),"Marionetta Library(*.marlib)");
+                       lib_folder.path(),"Marionetta Library(*.marlib)");
     if(fileName.length()>0){
         view->clearCurrentLib();
         view->saveLibrary(fileName);
-        myLibraryListWidget->clear();
+        my_library_list_widget->clear();
         detectLibraries();
     }
     if(QFile::exists(fileName)){
         view->loadLibrary(fileName);
 
-        QListWidgetItem *added = myLibraryListWidget->findItems(QFileInfo(fileName).fileName(),Qt::MatchExactly)[0];
-        int row = myLibraryListWidget->row(added);
-        myLibraryListWidget->setCurrentRow(row);
+        QListWidgetItem *added = my_library_list_widget->findItems(QFileInfo(fileName).fileName(),Qt::MatchExactly)[0];
+        int row = my_library_list_widget->row(added);
+        my_library_list_widget->setCurrentRow(row);
     }
 
 }
@@ -1215,7 +1215,7 @@ void Widget::on_setAllDepthBtn_clicked()
 {
     if(!view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.isEmpty()){
         view->storeUndo(CMD_SIMPLE);
-        float val = depthSpinbox->value();
+        float val = depth_spinbox->value();
         for(StickData* s:view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList){
             s->Z = val;
             if(s->view)
@@ -1235,7 +1235,7 @@ void Widget::on_setDepthBtn_clicked()
     if(!view->myAnimation->CurrentFrame()->CurrentStickFigure()->stickList.isEmpty()
             && view->myAnimation->CurrentFrame()->CurrentStick()){
         view->storeUndo(CMD_SIMPLE);
-        float val = depthSpinbox->value();
+        float val = depth_spinbox->value();
         view->myAnimation->CurrentFrame()->CurrentStick()->Z = val;
         if(view->myAnimation->CurrentFrame()->CurrentStick()->view)
             view->myAnimation->CurrentFrame()->CurrentStick()->view->setZValue(val); // mancava: senza setZValue() il riordino non si vedeva a schermo
@@ -1248,13 +1248,13 @@ void Widget::on_setDepthBtn_clicked()
 
 void Widget::on_depthSpinbox_valueChanged(double arg1)
 {
-    depthSlider->setValue(arg1*100);
+    depth_slider->setValue(arg1*100);
 }
 
 void Widget::on_depthSlider_valueChanged(int value)
 {
     float val = (float)value;
-    depthSpinbox->setValue(val/100);
+    depth_spinbox->setValue(val/100);
 }
 
 void Widget::on_drawRectBtn_clicked()
@@ -1268,7 +1268,7 @@ void Widget::on_pushButton_clicked()
     yo = !yo;
     if(yo){
     ui->toolsTabWidget->removeTab(1);
-    ui->toolsTabWidget->insertTab(1,advancedImgTab,"rectangle");
+    ui->toolsTabWidget->insertTab(1,advanced_img_tab,"rectangle");
     }
     else{
         ui->toolsTabWidget->removeTab(1);
@@ -1358,7 +1358,7 @@ void Widget::on_elongateSpinbox_editingFinished()
 {
     if(view->myAnimation->CurrentFrame()->CurrentStickFigure()!= nullptr && view->myAnimation->CurrentFrame()->CurrentStick() !=nullptr){
         QLineF lineBuf = view->myAnimation->CurrentFrame()->CurrentStick()->myLine;
-        lineBuf.setLength(elongateSpinbox->value());
+        lineBuf.setLength(elongate_spinbox->value());
         QPointF coord= lineBuf.p2();
 
         view->myAnimation->CurrentFrame()->CurrentStickFigure()->elongate(coord,view->myAnimation->CurrentFrame()->CurrentStick());
@@ -1493,10 +1493,10 @@ void Widget::on_moveStickDown_clicked()
 void Widget::on_deleteLibrary_clicked()
 {
     QString fileName = "";
-    int idx = myLibraryListWidget->currentRow();
-    if(idx>=0 && idx<myLibraryListWidget->count()){
+    int idx = my_library_list_widget->currentRow();
+    if(idx>=0 && idx<my_library_list_widget->count()){
         QVariant buffer;
-        buffer = myLibraryListWidget->item(idx)->data(Qt::UserRole);
+        buffer = my_library_list_widget->item(idx)->data(Qt::UserRole);
         fileName = qvariant_cast<QString>(buffer);
         if(QFile::exists(fileName)){
             // check if user wants to delete a file
@@ -1515,13 +1515,13 @@ void Widget::on_deleteLibrary_clicked()
         }else{
             removeLibraryGoto:
 
-            myLibraryListWidget->clearSelection();
-            QListWidgetItem *item = myLibraryListWidget->takeItem(idx);
+            my_library_list_widget->clearSelection();
+            QListWidgetItem *item = my_library_list_widget->takeItem(idx);
             delete  item;
-            if(myLibraryListWidget->count()>0){
-                myLibraryListWidget->setCurrentRow(0);
+            if(my_library_list_widget->count()>0){
+                my_library_list_widget->setCurrentRow(0);
             }else{
-                myCurrentLibraryWidget->clear();
+                my_current_library_widget->clear();
             }
 
         }
@@ -1550,7 +1550,7 @@ void Widget::on_pasteFrame_clicked()
         added->updateIcon(); // mancava: l'icona del layer incollato restava quella vuota di addStick()
         if(frameCopyBuffer->stickFigures.last() == S){
             view->myAnimation->updateSelection(added);
-            myStickFigureWidgetList->setCurrentRow(myStickFigureWidgetList->row(added->linkedItem));
+            my_stick_figure_widget_list->setCurrentRow(my_stick_figure_widget_list->row(added->linkedItem));
         }
     }
     // move to new frame

@@ -5,7 +5,7 @@
 
 extern int W;
 extern int H;
-extern QGraphicsRectItem* myRect;
+extern QGraphicsRectItem* my_rect;
 QString exportPath;
 int renderOption = NONE;
 ImageExport::ImageExport(QObject *parent, QString path, int option)
@@ -25,7 +25,7 @@ void ImageExport::Render(int option)
         QImage *renderImg = new QImage(W,H,QImage::Format_ARGB32); //immagine temporanea
         QPainter painter(renderImg); // painter che esegue il drawing sull immagine
         painter.setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
-        renderScene.setSceneRect(myRect->rect());
+        renderScene.setSceneRect(my_rect->rect());
         // questi stick sono VIVI: clona i dati prima di wrapparli, altrimenti il costruttore
         // di stick ruberebbe il back-pointer data->view alla view reale sullo schermo
         QList<StickData*> renderClones;

@@ -4,16 +4,16 @@
 #include <QWidget>
 
 namespace Ui {
-class advancedTaperWidget;
+class AdvancedTaperWidget;
 }
 
-class advancedTaperWidget : public QWidget
+class AdvancedTaperWidget : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit advancedTaperWidget(QWidget *parent = nullptr);
-    ~advancedTaperWidget();
+    explicit AdvancedTaperWidget(QWidget *parent = nullptr);
+    ~AdvancedTaperWidget();
 
 private slots:
     void on_taperWidthSlider_valueChanged(int value);
@@ -33,7 +33,7 @@ private slots:
     void on_hardBottomTaperCheck_stateChanged(int arg1);
 
 private:
-    Ui::advancedTaperWidget *ui;
+    Ui::AdvancedTaperWidget *ui;
 };
 
 #endif // ADVANCEDTAPERWIDGET_H

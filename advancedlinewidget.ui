@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>advancedLineWidget</class>
- <widget class="QWidget" name="advancedLineWidget">
+ <class>AdvancedLineWidget</class>
+ <widget class="QWidget" name="AdvancedLineWidget">
   <property name="geometry">
    <rect>
     <x>0</x>

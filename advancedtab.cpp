@@ -15,7 +15,7 @@ AdvancedTab::AdvancedTab(QWidget *parent) :
     ui->setupUi(this);
     ui->rectWidthSlider->setRange(0,W);
     ui->rectWidthSpinbox->setRange(0,W);
-    advancedRectSlider = ui->rectWidthSlider;
+    advanced_rect_slider = ui->rectWidthSlider;
 }
 
 AdvancedTab::~AdvancedTab()

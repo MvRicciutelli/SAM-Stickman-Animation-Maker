@@ -4,16 +4,16 @@
 #include <QWidget>
 
 namespace Ui {
-class advancedLineWidget;
+class AdvancedLineWidget;
 }
 
-class advancedLineWidget : public QWidget
+class AdvancedLineWidget : public QWidget
 {
     Q_OBJECT
 
 public:
-    explicit advancedLineWidget(QWidget *parent = nullptr);
-    ~advancedLineWidget();
+    explicit AdvancedLineWidget(QWidget *parent = nullptr);
+    ~AdvancedLineWidget();
 
 private slots:
     void on_editLineThicknessSlider_valueChanged(int value);
@@ -21,7 +21,7 @@ private slots:
     void on_lineEditThicknessWidthSpinbox_editingFinished();
 
 private:
-    Ui::advancedLineWidget *ui;
+    Ui::AdvancedLineWidget *ui;
 };
 
 #endif // ADVANCEDLINEWIDGET_H

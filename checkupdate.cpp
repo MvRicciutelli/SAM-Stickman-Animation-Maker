@@ -5,7 +5,7 @@
 #define VERSION 0
 #define SUBVERSION 9
 #define R 0
-extern QDir programFolder;
+extern QDir program_folder;
 CheckUpdate::CheckUpdate()
 {
 
