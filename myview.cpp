@@ -560,6 +560,13 @@ void MyView::DrawCmd(QPointF* point, int mode)
             my_animation->CurrentFrame()->CurrentStickFigure()->EndDrawing(point);
             scene()->addItem(my_animation->CurrentFrame()->CurrentStick()->view->stick_handle[0]);
             scene()->addItem(my_animation->CurrentFrame()->CurrentStick()->view->stick_handle[1]);
+            // se questo è il primo stick della stickfigure (= il suo master), colora la maniglia
+            // di verde: StartDrawing() non può farlo da sé (non esiste ancora una view a quel punto,
+            // vedi il suo commento), quindi tocca a questa chiamata subito dopo AttachView()
+            if(my_animation->CurrentFrame()->CurrentStick() == my_animation->CurrentFrame()->CurrentStickFigure()->master_stick){
+                my_animation->CurrentFrame()->CurrentStick()->view->stick_handle[0]->setBrush(QBrush(Qt::green));
+                my_animation->CurrentFrame()->CurrentStick()->view->stick_handle[0]->setZValue(101);
+            }
             qDebug("Draw 2 = %f, %f",point->x(),point->y());
             my_animation->current_frame->UpdateIcon();
             my_animation->UpdateTab(my_animation->CurrentFrame()->CurrentStick()->stick_type);

@@ -957,6 +957,13 @@ private slots:
         StickData *drawn = CurrentStickFigure()->stick_list.last();
         QVERIFY(drawn->view && scene->items().contains(drawn->view));
         QCOMPARE(drawn->stick_type, (int)StickData::LINE);
+        // regression: a brand-new figure's first stick (= its master) used to keep the
+        // StickGraphicsItem constructor's default red handle brush forever, since
+        // DrawCmd() never painted it green the way StartDrawing()'s own doc comment
+        // says it should - only a later, unrelated AddHandles() call (SetMaster/merge/
+        // split/paste) happened to fix it up
+        QCOMPARE(drawn, CurrentStickFigure()->master_stick);
+        QCOMPARE(drawn->view->stick_handle[0]->brush().color(), QColor(Qt::green));
 
         view->SetTool(NOTOOL);
     }
