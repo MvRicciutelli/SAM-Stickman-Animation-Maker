@@ -10,25 +10,91 @@ namespace Ui {
 class MyMainWindow;
 }
 
+/**
+ * @brief The application's top-level window: holds the canvas and toolbar and owns the
+ *        File/Export menu.
+ *
+ * MyMainWindow is the shell around the editor. Its `view` is the MyView canvas (the
+ * document lives there, see myview.h) and `central_w` is the Widget with the toolbar
+ * and side panels (widget.h). This class itself only adds the menu-bar actions —
+ * save/load a single figure (*.stck) or a whole animation (*.mAnim), the New/Options
+ * commands, and the three video/image export paths — plus the autosave and
+ * close-with-unsaved-changes handling. The heavy lifting is delegated: model edits to
+ * `view`/`view->my_animation`, rendering to the ImageExport thread, encoding to the
+ * bundled image2Avi.exe or to ffmpeg.
+ */
 class MyMainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
+    /**
+     * @brief Sets up the UI and starts the background update check.
+     * @param parent parent widget (Qt ownership).
+     */
     explicit MyMainWindow(QWidget *parent = nullptr);
     ~MyMainWindow();
-    MyView *view;
-    Widget *central_w;
+    MyView *view;      ///< the animation canvas / document owner (myview.h)
+    Widget *central_w; ///< the toolbar + side panels (widget.h)
 
+    /**
+     * @brief Wires the signals this window listens to (view->AutoSaveTrigger → AutoSave).
+     *        Called once during startup, after `view` exists.
+     */
     void DoConnections();
+
+    /**
+     * @brief Renders every frame to a numbered image via a background ImageExport thread.
+     * @param path output path template for the image sequence.
+     * @param option NONE / AVI / FFMPEG — what ImageRenderOver() does once rendering ends.
+     *
+     * Refuses to start a second export while one is running. On completion
+     * ImageRenderOver() either stops (NONE) or forwards the frames to the AVI/ffmpeg path.
+     */
     void ExportImageSequence(QString path, int option);
+
+    /**
+     * @brief Opens the ffmpeg export options dialog (single instance) and, on accept,
+     *        runs the image sequence + ffmpeg pipeline via StartFFMPEGRender().
+     */
     void ExportUsingFFMPEG();
+
+    /**
+     * @brief Feeds the already-rendered image sequence to the bundled image2Avi.exe
+     *        helper to produce an .avi. Called from ImageRenderOver() for the AVI path.
+     */
     void ExportAvi();
 public slots:
+    /**
+     * @brief Applies the values from the Animation Options dialog (fps, W/H, handle size,
+     *        autosave interval) and resizes the scene via MyView::SizeChange().
+     * @param option_val reposition mode forwarded to SizeChange (REPO/REPOSCALE/NOREPO).
+     */
     void GetAnimationParams(int option_val);
+
+    /**
+     * @brief Kicks off the ffmpeg render: stores the chosen options, then exports the
+     *        image sequence that ImageRenderOver() will hand to ffmpeg.
+     * @param options ffmpeg command-line arguments from the export dialog.
+     */
     void StartFFMPEGRender(QStringList options);
+
+    /**
+     * @brief Autosave slot (bound to view->AutoSaveTrigger): saves to the current path.
+     */
     void AutoSave();
+
+    /**
+     * @brief Shows the "newer version available" notice (bound to CheckUpdate).
+     * @param ver the available version string.
+     */
     void UpdatePresent(QString ver);
+
+    /**
+     * @brief Called when the ImageExport thread finishes: frees it and dispatches to the
+     *        AVI/ffmpeg encoder or stops, per the option passed to ExportImageSequence().
+     * @param option NONE / AVI / FFMPEG.
+     */
     void ImageRenderOver(int option);
 private slots:
     void on_actionsave_triggered();

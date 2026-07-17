@@ -6,10 +6,15 @@
 extern qint32 W;
 extern qint32 H;
 extern int FPS;
-QString outputFile = "";
+QString output_file = ""; ///< chosen output video path; kept in sync with the selected format
 extern QString FFMPEGPath;
 extern QDir program_folder;
 extern QDir render_folder;
+/**
+ * @details Pre-fills the fps control from the current animation FPS and marks the dialog
+ * WA_DeleteOnClose so closing it via the window X actually destroys it (otherwise it is
+ * only hidden and the pointer in MyMainWindow leaks).
+ */
 FfmpegExport::FfmpegExport(QWidget *parent) :
     QWidget(parent),
     ui(new Ui::FfmpegExport)
@@ -29,42 +34,51 @@ FfmpegExport::~FfmpegExport()
 //https://walterebert.com/blog/creating-wmv-videos-with-ffmpeg/
 // https://hamelot.io/visualization/using-ffmpeg-to-convert-a-set-of-images-into-a-video/
 // https://trac.ffmpeg.org/wiki/Encode/MPEG-4
+/**
+ * @details Assembles the ffmpeg command line and emits it. First it (re)creates the
+ * scratch render folder MyMainWindow::StartFFMPEGRender() will fill with img_%d.png
+ * frames, then builds the common arguments (framerate, image2 muxer, size, input
+ * pattern) and appends codec flags for the checked format radio (wmv/mp4/avi; gif needs
+ * none). The result travels through ExportVideo() to MyMainWindow::StartFFMPEGRender().
+ */
 void FfmpegExport::on_exportVideoBtn_clicked()
 {
     // Prima salviamo tutit i frame come immagini, poi chiamiamo ffmpeg.exe per convertirle in video
-    QString imagePath = program_folder.path()+"/render";
-    render_folder = QDir(imagePath);
-    QString imgName = imagePath+"/img";
+    QString image_path = program_folder.path()+"/render";
+    render_folder = QDir(image_path);
+    QString img_name = image_path+"/img";
     if(render_folder.exists()){
         qDebug("folder located");
     }
     else{
         qDebug("folder created");
-        render_folder.mkpath(imagePath);
+        render_folder.mkpath(image_path);
     }
-    render_folder.setPath(imagePath);
+    render_folder.setPath(image_path);
 
-    QStringList paramList;
-    paramList<<
+    QStringList param_list;
+    param_list<<
                 "-r"<<QString::number(ui->fpsSpinbox->value())<< // framerate
                 "-f"<<"image2"<< // force format, image2 is the image muxer
                 "-s"<<QString::number(W)+"x"+QString::number(H)<< //size
-                "-i"<<imgName+"_%d.png"; //input location
+                "-i"<<img_name+"_%d.png"; //input location
     if(ui->vmwRadioBtn->isChecked())
-        paramList<<"-vcodec"<<"msmpeg4"<<"-qscale"<<"2"; //codec
+        param_list<<"-vcodec"<<"msmpeg4"<<"-qscale"<<"2"; //codec
     else if(ui->mp4RadioBtn->isChecked())
-        paramList<<"-vcodec"<<"libx264"; //codec
+        param_list<<"-vcodec"<<"libx264"; //codec
     else if(ui->aviRadioButton->isChecked())
-       paramList<< "-vcodec"<<"mpeg4"<<"-vtag"<<"xvid"; //codec
+       param_list<< "-vcodec"<<"mpeg4"<<"-vtag"<<"xvid"; //codec
     else if(ui->gifRadioBtn->isChecked())
        {}
-    paramList<<"-crf"<<"25"<<// quality
-                outputFile;
-    emit ExportVideo(paramList);
-    /*paramList<<"-i"<<"C:/Users/Argasio/Documents/GitHub/MarionettaPlus/MarionettaPlus/input.mp4"
-            <<"C:/Users/Argasio/Documents/GitHub/MarionettaPlus/MarionettaPlus/output.webm";*/
+    param_list<<"-crf"<<"25"<<// quality
+                output_file;
+    emit ExportVideo(param_list);
 }
 
+/**
+ * @details Asks for an output path with a file filter matching the checked format, then
+ * (if confirmed) shows it, enables Export and stores it in output_file.
+ */
 void FfmpegExport::on_selectFolderBtn_clicked()
 {
     QString file_name = "";
@@ -87,65 +101,58 @@ void FfmpegExport::on_selectFolderBtn_clicked()
     if(file_name.length()>0){
         ui->folderLabel->setText(file_name);
         ui->exportVideoBtn->setEnabled(true);
-        outputFile = file_name;
+        output_file = file_name;
     }
 
+}
+
+/**
+ * @details Truncates output_file back to (and including) the last '.', then appends the
+ * new extension, so "clip.mp4" -> "clip.avi". Does nothing if no file has been chosen
+ * yet, or if the name has no extension to replace.
+ */
+void FfmpegExport::ReplaceOutputExtension(const QString &extension)
+{
+    if(output_file.length()<=1)
+        return;
+    int dot = output_file.lastIndexOf(".");
+    if(dot == -1) // nessuna estensione da sostituire
+        return;
+    output_file.truncate(dot+1); // tieni tutto fino al punto incluso
+    output_file.append(extension);
 }
 
 void FfmpegExport::on_aviRadioButton_clicked()
 {
-    if(outputFile.length()>1){
-        int extBegin = outputFile.lastIndexOf(".")+1;
-        if(extBegin == -1)
-            return;
-        int lastChar = outputFile.length()-1;
-        outputFile.remove(extBegin,extBegin-lastChar);
-        outputFile.append("avi");
-    }
+    ReplaceOutputExtension("avi");
 }
 
 void FfmpegExport::on_mp4RadioBtn_clicked()
 {
-    if(outputFile.length()>1){
-        int extBegin = outputFile.lastIndexOf(".")+1;
-        if(extBegin == -1)
-            return;
-        int lastChar = outputFile.length()-1;
-        outputFile.remove(extBegin,extBegin-lastChar);
-        outputFile.append("mp4");
-    }
+    ReplaceOutputExtension("mp4");
 }
 
 void FfmpegExport::on_vmwRadioBtn_clicked()
 {
-    if(outputFile.length()>1){
-        int extBegin = outputFile.lastIndexOf(".")+1;
-        if(extBegin == -1)
-            return;
-        int lastChar = outputFile.length()-1;
-        outputFile.remove(extBegin,extBegin-lastChar);
-        outputFile.append("wmv");
-    }
-}
-
-void EmptyDirectory(QString path){
-    QDir dir(path);
-    dir.setNameFilters(QStringList() << "*.*");
-    dir.setFilter(QDir::Files);
-    foreach(QString dirFile, dir.entryList())
-    {
-        dir.remove(dirFile);
-    }
+    ReplaceOutputExtension("wmv");
 }
 
 void FfmpegExport::on_gifRadioBtn_clicked()
 {
-    if(outputFile.length()>1){
-        int extBegin = outputFile.lastIndexOf(".")+1;
-        if(extBegin == -1)
-            return;
-        int lastChar = outputFile.length()-1;
-        outputFile.remove(extBegin,extBegin-lastChar);
-        outputFile.append("gif");
+    ReplaceOutputExtension("gif");
+}
+
+/**
+ * @details Non-recursive wipe: lists the plain files in `path` and removes them one by
+ * one, leaving any subdirectories in place. Called to clear the scratch render folder
+ * before writing a fresh image sequence.
+ */
+void EmptyDirectory(QString path){
+    QDir dir(path);
+    dir.setNameFilters(QStringList() << "*.*");
+    dir.setFilter(QDir::Files);
+    foreach(QString dir_file, dir.entryList())
+    {
+        dir.remove(dir_file);
     }
 }

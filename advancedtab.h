@@ -7,6 +7,16 @@ namespace Ui {
 class AdvancedTab;
 }
 
+/**
+ * @brief Side-panel tab for the extra parameters of shaped sticks (currently the
+ *        rectangle/image width).
+ *
+ * Part of the tool panels in widget.h. Its rect-width slider is published to the global
+ * `advanced_rect_slider` (uiItems.h) so MyView::DrawCmd() can read it when creating a
+ * RECT stick; its slots push edits onto the current stick's `img_w_scale` (via the
+ * global canvas `V`) and refresh it. The slider drag is wrapped in a single undo step
+ * — see the slider-flag note in the .cpp.
+ */
 class AdvancedTab : public QWidget
 {
     Q_OBJECT

@@ -8,23 +8,93 @@ QT_BEGIN_NAMESPACE
 namespace Ui { class Widget; }
 QT_END_NAMESPACE
 
+/**
+ * @brief The toolbar/side-panel shell around the canvas: owns every drawing tool,
+ *        layer/frame list, library panel and per-stick property control, and the
+ *        `MyView` canvas itself.
+ *
+ * Widget is almost entirely a wall of `on_<objectName>_<signalName>` Designer
+ * auto-connect slots (one per button/slider/spinbox in widget.ui) that translate a UI
+ * action into a call on `view`/`view->my_animation` — the actual editing logic lives in
+ * MyView/Animation/Frame/StickFigure, not here. Only a handful of hand-written methods
+ * (config/paths/library setup, frame/stickfigure creation) don't follow that pattern.
+ */
 class Widget : public QWidget
 {
     Q_OBJECT
 
 public:
+    /**
+     * @brief Builds the UI, wires the canvas into it, and loads/creates the config,
+     *        default library and terms-acceptance state.
+     * @param parent parent widget (Qt ownership).
+     *
+     * Exits the process if the user declines the terms-and-conditions prompt on a
+     * first run (see TermsAndConditions()).
+     */
     Widget(QWidget *parent = nullptr);
     ~Widget();
-    MyView *view;
+    MyView *view; ///< the animation canvas (myview.h); owns the document being edited
 
+    /**
+     * @brief Adds a new, empty stickfigure layer to the current frame.
+     * @return the newly created figure (becomes the frame's current stickfigure).
+     */
     StickFigure* AddStick();
+
+    /**
+     * @brief Inserts a new frame right after the current one, makes it current, and
+     *        gives it one empty stickfigure layer to start from.
+     */
     void AddFrame();
+
+    /**
+     * @brief Thin forwarder to MyView::SetUpFrame() — creates the Frame/list-widget-item
+     *        pair at the given position without making it current or adding any content.
+     * @param pos position in Animation::frame_list for the new frame.
+     * @return the newly created frame.
+     */
     Frame *SetUpFrame(int pos);
+
+    /**
+     * @brief Ensures the per-user MarionettaPlus folders (documents root, libraries,
+     *        temp render, animations, stick figures, video export) exist, creating any
+     *        that are missing.
+     */
     void CreatePaths();
+
+    /**
+     * @brief Rebuilds the library list widget from every *.marlib file found in the
+     *        libraries folder.
+     */
     void DetectLibraries();
+
+    /**
+     * @brief Writes the current canvas size/fps/handle size/autosave interval/FFmpeg
+     *        path/terms-accepted state to config.json at the given path.
+     * @param path destination file path.
+     */
     void CreateJson(QString path);
+
+    /**
+     * @brief Loads settings from config.json at the given path into the corresponding
+     *        globals; if any expected key is missing (e.g. an older config format), the
+     *        file is discarded and recreated via CreateJson() instead.
+     * @param path source file path.
+     */
     void ReadJson(QString path);
+
+    /**
+     * @brief Convenience wrapper: re-writes config.json at its standard location with
+     *        the current settings (CreateJson()).
+     */
     void WriteJson();
+
+    /**
+     * @brief Shows the terms-and-conditions dialog; declining sets `terms_accepted = 0`
+     *        (the constructor then exits the process) rather than closing just this
+     *        dialog.
+     */
     void TermsAndConditions();
 private slots:
     void on_drawBtn_clicked();

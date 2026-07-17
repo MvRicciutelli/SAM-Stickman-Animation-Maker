@@ -5,9 +5,13 @@
 extern qint32 W;
 extern qint32 H;
 extern MyView *V;
-bool rectWSliderFlag = false;
+bool rect_w_slider_flag = false; ///< true while a slider drag is in progress, so only its FIRST step snapshots undo
 
-
+/**
+ * @details Ranges the rect-width slider/spinbox to the canvas width and publishes the
+ * slider to the global `advanced_rect_slider` so MyView::DrawCmd() can seed a new RECT
+ * stick's width from it.
+ */
 AdvancedTab::AdvancedTab(QWidget *parent) :
     QWidget(parent),
     ui(new Ui::AdvancedTab)
@@ -25,16 +29,22 @@ AdvancedTab::~AdvancedTab()
 
 void AdvancedTab::on_imgHOffsetSpinbox_valueChanged(int arg1)
 {
-
+    Q_UNUSED(arg1);
 }
 
+/**
+ * @details Slider drag: mirrors the value into the spinbox and sets the current stick's
+ * img_w_scale, then refreshes the figure. Undo is snapshotted only on the drag's FIRST
+ * step (guarded by rect_w_slider_flag, reset in on_rectWidthSlider_sliderReleased()),
+ * so a whole drag is one undoable edit rather than one per intermediate value.
+ */
 void AdvancedTab::on_rectWidthSlider_valueChanged(int value)
 {
     ui->rectWidthSpinbox->setValue(value);
     if(V->my_animation->CurrentFrame()->CurrentStick()==nullptr)
         return;
-    if(rectWSliderFlag == false){
-        rectWSliderFlag = true;
+    if(rect_w_slider_flag == false){
+        rect_w_slider_flag = true;
 
         V->StoreUndo();
     }
@@ -43,6 +53,10 @@ void AdvancedTab::on_rectWidthSlider_valueChanged(int value)
 
 }
 
+/**
+ * @details Spinbox edit: keeps the slider in step and applies the same img_w_scale
+ * change (no separate undo snapshot — the spinbox is a discrete edit, not a drag).
+ */
 void AdvancedTab::on_rectWidthSpinbox_valueChanged(int arg1)
 {
     ui->rectWidthSlider->setValue(arg1);
@@ -53,7 +67,10 @@ void AdvancedTab::on_rectWidthSpinbox_valueChanged(int arg1)
     ui->rectWidthSlider->setValue(arg1);
 }
 
+/**
+ * @details End of a slider drag: re-arms the undo guard so the next drag snapshots again.
+ */
 void AdvancedTab::on_rectWidthSlider_sliderReleased()
 {
-    rectWSliderFlag = false;
+    rect_w_slider_flag = false;
 }

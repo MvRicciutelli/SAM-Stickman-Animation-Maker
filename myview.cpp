@@ -1,4 +1,4 @@
-﻿#include "myview.h"
+#include "myview.h"
 #include <QtAlgorithms>
 #include <math.h>
 #include <QDebug>
@@ -17,9 +17,8 @@ bool    is_right_pressed = false;
 bool    is_middle_pressed = false;
 bool    is_pressed = false;
 extern float zoom_lvl;
-QPointF startingCoord; //mouse click coordinateBuffer
+QPointF starting_coord; //mouse click coordinateBuffer
 QPointF coord; //current mouse pos
-float   rotationBuffer; //selected item Rotation buffer
 float   length_buffer;
 float zoom_lvl_buf;
 FrameData* stick_library_buffer; ///< libreria corrente: solo dati da Phase 2b
@@ -48,6 +47,14 @@ extern int op_count;
 
 #define MAXUNDO 50 ///< cap on undo_stack depth, enforced via QUndoStack::setUndoLimit()
 
+/**
+ * @details Builds the empty document the rest of the app edits: a fresh Animation
+ * (whose scene is this view's scene), the default gray pen/brush new sticks inherit,
+ * and the undo machinery. The autosave hook lives on QUndoStack::indexChanged (fires
+ * on push AND on undo/redo, so undo/redo count as edits worth saving) and emits
+ * AutoSaveTrigger() every auto_save_interval operations — caught by
+ * MyMainWindow::AutoSave() (wired in MyMainWindow::DoConnections()).
+ */
 MyView::MyView(QWidget *parent) : QGraphicsView(parent)
 {
     onion_render = false;
@@ -71,6 +78,13 @@ MyView::MyView(QWidget *parent) : QGraphicsView(parent)
     });
 }
 
+/**
+ * @details Destruction order matters: handles first (they live on the scene and are
+ * read while a StickGraphicsItem is torn down), then every frame — this loop is the
+ * sole owner of the frames, since Animation has no destructor that frees them, so
+ * there is no double free. The library buffer is deleted here because it is created in
+ * the constructor; copy_stick_figure_buffer is the (possibly null) paste buffer.
+ */
 MyView::~MyView()
 {
     for (StickFigure* S : my_animation->CurrentFrame()->stick_figures)
@@ -83,8 +97,16 @@ MyView::~MyView()
     }
     delete my_animation;
     delete copy_stick_figure_buffer;
+    // creato nel costruttore, quindi liberato qui: senza questo la libreria corrente
+    // resta allocata fino alla fine del processo
+    delete stick_library_buffer;
 }
 
+/**
+ * @details ChangeTool() runs first so the tool being left cleans up (e.g. a half-drawn
+ * stick is cancelled) before `tool` flips to the new id. Called by the toolbar button
+ * slots in widget.cpp.
+ */
 void MyView::SetTool(int new_tool)
 {
     ChangeTool();
@@ -92,18 +114,26 @@ void MyView::SetTool(int new_tool)
     tool = new_tool;
 }
 
+/**
+ * @details Removes the currently selected figure layer from the frame, its list-widget
+ * row and the flattened total_sticks z-order list, then hands selection to a surviving
+ * layer (Animation::UpdateSelection()) — without that the list's currentRow could stay
+ * on Qt's default post-takeItem row and a following Move-Layer would move the wrong one.
+ * Refuses to remove the last layer. Also reached from keyPressEvent() (Delete on a
+ * master stick) and from the JOIN tool once two figures have been merged.
+ */
 void MyView::DeleteStickFigure()
 {
-    bool updateCurrentStickFigure =  false;
+    bool update_current_stick_figure =  false;
     if(my_stick_figure_widget_list->selectedItems().count() == 1 && my_animation->current_frame->stick_figures.count()>1)
     {
         //scegli lo stickfigure selzionato dalla lista grafica
         QListWidgetItem *current = my_stick_figure_widget_list->selectedItems()[0];
         // estrai il dato utente salvato in esso, puntatore ad uno stickfigure
-        QVariant  retrievedData = (current->data(Qt::UserRole));
+        QVariant  retrieved_data = (current->data(Qt::UserRole));
         //riconverti il dato
-        StickFigure* cs = qvariant_cast<StickFigure*>(retrievedData);
-        updateCurrentStickFigure = (cs == my_animation->CurrentFrame()->CurrentStickFigure());
+        StickFigure* cs = qvariant_cast<StickFigure*>(retrieved_data);
+        update_current_stick_figure = (cs == my_animation->CurrentFrame()->CurrentStickFigure());
 
         //distruggi l'oggetto della lista
         my_stick_figure_widget_list->takeItem(my_stick_figure_widget_list->row(current));
@@ -127,7 +157,7 @@ void MyView::DeleteStickFigure()
             my_stick_figure_widget_list->setCurrentRow(my_stick_figure_widget_list->row(ns->linked_item));
         }
         my_animation->current_frame->UpdateIcon();
-        if(updateCurrentStickFigure){
+        if(update_current_stick_figure){
              ArrowSelection();
         }
     }
@@ -137,31 +167,38 @@ void MyView::DeleteStickFigure()
 
 }
 //cambia l'ordine di profondità dello stickfigure selezionato
+/**
+ * @details Keeps two things in step: the model z-order (Frame::StickfigureToTop/
+ * ToBottom/AboveBelow(), which restack the sticks) and the layer list widget (the
+ * row is physically moved with takeItem()/insertItem()). Driven by the move-layer
+ * buttons in widget.cpp; `mode` picks top/bottom/one-step and `increment` gives the
+ * step direction for the one-step case.
+ */
 void MyView::MoveStickFigureZ(int increment, int mode)
 {
     if(my_stick_figure_widget_list->count() <= 1 )
         return;
-    int currentIndex = my_stick_figure_widget_list->currentRow();
-    if((currentIndex == 0 && increment<0)||(currentIndex == my_stick_figure_widget_list->count()-1 && increment>0))
+    int current_index = my_stick_figure_widget_list->currentRow();
+    if((current_index == 0 && increment<0)||(current_index == my_stick_figure_widget_list->count()-1 && increment>0))
         return;
     if(mode == MODE_TOP){
-        increment = my_stick_figure_widget_list->count()-1-currentIndex;
+        increment = my_stick_figure_widget_list->count()-1-current_index;
         if(increment == 0 )
             return;
     }
     else if(mode == MODE_BOTTOM){
-        increment = -currentIndex;
+        increment = -current_index;
         if(increment == 0)
             return;
     }
-    int newIdx = currentIndex+increment;
-    QListWidgetItem *stickFigureAtNewIdxItem = my_stick_figure_widget_list->item(newIdx);
+    int new_idx = current_index+increment;
+    QListWidgetItem *stick_figure_at_new_idx_item = my_stick_figure_widget_list->item(new_idx);
     // estrai il dato utente salvato in esso, puntatore ad uno stickfigure
-    QVariant  retrievedData = (stickFigureAtNewIdxItem->data(Qt::UserRole));
+    QVariant  retrieved_data = (stick_figure_at_new_idx_item->data(Qt::UserRole));
     //riconverti il dato
-    StickFigure* stickFigureAtNewIdx = qvariant_cast<StickFigure*>(retrievedData);
+    StickFigure* stick_figure_at_new_idx = qvariant_cast<StickFigure*>(retrieved_data);
 
-    if(newIdx<my_stick_figure_widget_list->count() && newIdx>=0 && newIdx != currentIndex){
+    if(new_idx<my_stick_figure_widget_list->count() && new_idx>=0 && new_idx != current_index){
         if(mode == MODE_TOP){
 
             my_animation->CurrentFrame()->StickfigureToTop(my_animation->CurrentFrame()->CurrentStickFigure());
@@ -172,45 +209,28 @@ void MyView::MoveStickFigureZ(int increment, int mode)
         }
         else if(increment>0){
 
-            my_animation->CurrentFrame()->StickfigureAboveBelow(my_animation->CurrentFrame()->CurrentStickFigure(),stickFigureAtNewIdx,1);
+            my_animation->CurrentFrame()->StickfigureAboveBelow(my_animation->CurrentFrame()->CurrentStickFigure(),stick_figure_at_new_idx,1);
         }
         else{
-            my_animation->CurrentFrame()->StickfigureAboveBelow(my_animation->CurrentFrame()->CurrentStickFigure(),stickFigureAtNewIdx,0);
+            my_animation->CurrentFrame()->StickfigureAboveBelow(my_animation->CurrentFrame()->CurrentStickFigure(),stick_figure_at_new_idx,0);
 
         }
         //sposta nella lista grafica il layer dello stickfigure
-        QListWidgetItem * item = my_stick_figure_widget_list->takeItem(currentIndex);
-        my_stick_figure_widget_list->insertItem(newIdx,item);
+        QListWidgetItem * item = my_stick_figure_widget_list->takeItem(current_index);
+        my_stick_figure_widget_list->insertItem(new_idx,item);
         item->setSelected(true);
-        my_stick_figure_widget_list->setCurrentRow(newIdx);
+        my_stick_figure_widget_list->setCurrentRow(new_idx);
 
         my_animation->current_frame->UpdateIcon();
         my_animation->CurrentFrame()->Refresh(0);
     }
-
-/*
-    if(my_stick_figure_widget_list->count()>0)
-    {
-        my_stick_figure_widget_list->clearSelection();
-        int currentIndex = my_stick_figure_widget_list->currentRow();
-        if(!(currentIndex+1 == my_stick_figure_widget_list->count() && increment>0)||
-                !(currentIndex == 0 && increment<0))
-        {
-            my_animation->CurrentFrame()->CurrentStickFigure()->base_z+=increment;
-            my_animation->CurrentFrame()->CurrentStickFigure()->UpdateZ(0.1);
-            if(!(increment>0 && currentIndex == my_stick_figure_widget_list->count()-1) && !(increment<0 && currentIndex == 0))
-            {
-                //sposta nella lista grafica il layer dello stickfigure
-                QListWidgetItem * item = my_stick_figure_widget_list->takeItem(currentIndex);
-                my_stick_figure_widget_list->insertItem(currentIndex+increment,item);
-                my_stick_figure_widget_list->setSelected(item,true);
-                my_stick_figure_widget_list->setCurrentRow(currentIndex+increment);
-            }
-            my_animation->current_frame->UpdateIcon();
-        }
-    }
-*/
 }
+/**
+ * @details Clamps an edit position to the canvas (my_rect) plus a 10% margin on each
+ * side, so a drag can't fling a stick arbitrarily far off the page. Every mouse handler
+ * runs the cursor through here first; it also refreshes the global `coord` used by
+ * ArrowSelection() and the tool handlers.
+ */
 void MyView::MapMyCoords(QPointF& my_coord, QPointF starting_point){
     coord = mapToScene(starting_point.x(),starting_point.y());
     if(my_coord.x()<-my_rect->rect().width()/10)
@@ -222,6 +242,15 @@ void MyView::MapMyCoords(QPointF& my_coord, QPointF starting_point){
     if(my_coord.x()>my_rect->rect().width()+my_rect->rect().width()/10)
         my_coord.setX(my_rect->rect().width()+my_rect->rect().width()/10);
 }
+/**
+ * @details Start of every gesture: records which button is down, maps the click to
+ * scene coordinates (into `coord`/`starting_coord`) and, for a left click, branches on
+ * the active `tool`. Most branches call StoreUndo() up front (the gesture may span many
+ * mouseMoveEvent() calls, so the snapshot is taken once at the start) and cache each
+ * stick's angle/length/scale in its view's *_buffer fields, the reference the drag
+ * deltas in mouseMoveEvent() are applied against. Right/middle buttons are left for
+ * pan/zoom, also handled in mouseMoveEvent().
+ */
 void MyView::mousePressEvent(QMouseEvent *event)
 {
     if(event->button()==Qt::LeftButton){
@@ -236,7 +265,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
     MapMyCoords(coord,event->pos());
 
 
-    startingCoord   = coord; //buffer per il dragghing del mouse premuto
+    starting_coord   = coord; //buffer per il dragghing del mouse premuto
     if(!is_right_pressed && !is_middle_pressed){
     switch(tool)
     {
@@ -258,11 +287,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
             case DRAWTAPER:
             case DRAWIMG:
             {
-                auto currentScene = scene();
-                auto num = currentScene->items();
                 DrawCmd(&coord,(int)tool);
-
-                num = currentScene->items();
                 break;
             }
             case(ROTATE):
@@ -373,6 +398,13 @@ void MyView::mousePressEvent(QMouseEvent *event)
     //QGraphicsView::mousePressEvent(event);
 }
 
+/**
+ * @details Two shortcuts. Delete/Cancel removes the selected stick: if it's the figure's
+ * master (and other layers exist) the whole figure goes via DeleteStickFigure(),
+ * otherwise just that stick via StickFigure::DeleteStick(), pruning the removed sticks
+ * from total_sticks and moving selection to the parent. Escape cancels a half-drawn
+ * stick (StickFigure::CancelDrawing()). Both are snapshotted with StoreUndo() first.
+ */
 void MyView::keyPressEvent(QKeyEvent *event)
 {
     switch(event->key())
@@ -392,21 +424,21 @@ void MyView::keyPressEvent(QKeyEvent *event)
                         my_animation->current_frame->stick_figures.count()>1)
                 {
                     //estrai dalla lista grafica l'elemento selezionato collegato allo stickfigure
-                    QListWidgetItem * associatedItem = my_animation->CurrentFrame()->CurrentStickFigure()->linked_item;
+                    QListWidgetItem * associated_item = my_animation->CurrentFrame()->CurrentStickFigure()->linked_item;
                     my_stick_figure_widget_list->clearSelection();
-                    associatedItem->setSelected(true);
+                    associated_item->setSelected(true);
                     //cancella lo stickfigure
                     DeleteStickFigure();
                 }
                 //altrimenti cancella il singolo stick e aggiorna l'iconea del livello
                 else if(my_stick_figure_widget_list->selectedItems().count()==1)
                 {
-                    StickData* nextCurrentStick = my_animation->CurrentFrame()->CurrentStick()->parent;
+                    StickData* next_current_stick = my_animation->CurrentFrame()->CurrentStick()->parent;
                     // questa lista serve per rimuovere dalla totalStick tutti gli stick cancellati
-                    QList<StickData*> oldStickList = my_animation->CurrentFrame()->CurrentStickFigure()->stick_list;
+                    QList<StickData*> old_stick_list = my_animation->CurrentFrame()->CurrentStickFigure()->stick_list;
                     my_animation->CurrentFrame()->CurrentStickFigure()->DeleteStick( idx);
                     QList<StickData*> survivors = my_animation->CurrentFrame()->CurrentStickFigure()->stick_list;
-                    for(StickData*s:oldStickList){
+                    for(StickData*s:old_stick_list){
                         if(!survivors.contains(s)){
                             my_animation->CurrentFrame()->total_sticks.removeAll(s);
                         }
@@ -414,7 +446,7 @@ void MyView::keyPressEvent(QKeyEvent *event)
                     my_animation->CurrentFrame()->num_of_items = my_animation->CurrentFrame()->total_sticks.length();
                     my_animation->CurrentFrame()->CurrentStickFigure()->UpdateIcon();
                     my_stick_figure_widget_list->selectedItems()[0]->setIcon(*my_animation->CurrentFrame()->CurrentStickFigure()->stick_figure_icon);
-                    my_animation->CurrentFrame()->CurrentStick() = nextCurrentStick;
+                    my_animation->CurrentFrame()->CurrentStick() = next_current_stick;
                 }
                 my_animation->current_frame->UpdateIcon();
                 // distruggi l'oggetto
@@ -442,6 +474,13 @@ void MyView::keyPressEvent(QKeyEvent *event)
 
     QGraphicsView::keyPressEvent(event);
 }
+/**
+ * @details Picking routine behind the NOTOOL/CLAMP/ELONGATE/MANIPULATE tools: asks the
+ * Animation which stick is under `coord` (Animation::UpdateSelection()), then mirrors
+ * that choice into the layer list widget and repopulates the image list from the picked
+ * stick's view. Bails out on an empty frame so the CurrentStickFigure()/CurrentStick()
+ * dereferences below are always safe.
+ */
 void MyView::ArrowSelection(){
     if(my_animation->CurrentFrame()->stick_figures.isEmpty())
         return;
@@ -456,9 +495,15 @@ void MyView::ArrowSelection(){
         my_animation->CurrentFrame()->CurrentStick()->view->PopulateImageListWidget();
     //dbg_lbl->setText(QString::number(my_animation->CurrentFrame()->CurrentStick()->order));
 }
-// il disegno di una linea conta 2 click
-// il primo determina lo starting point
-// il secondo l'end point
+/**
+ * @details Drawing a stick takes two clicks, tracked by the figure's draw_count.
+ * First click: StickFigure::StartDrawing() creates the StickData, FramePresenter::
+ * AttachView() gives it a live view on the scene, and `mode` sets the resulting shape
+ * (CIRCLE/RECT/TAPER/TRAPEZOID/IMAGE) plus its pen/slider parameters. Second click:
+ * StickFigure::EndDrawing() fixes the free end, the endpoint handles go on the scene and
+ * the stick is appended to the frame's total_sticks z-order list. In between,
+ * mouseMoveEvent() calls StickFigure::PreviewDrawing() so the free end follows the mouse.
+ */
 void MyView::DrawCmd(QPointF* point, int mode)
 {
     if(!my_animation->current_frame->stick_figures.isEmpty() && my_animation->CurrentFrame()->CurrentStickFigure() != nullptr)
@@ -532,6 +577,13 @@ void MyView::DrawCmd(QPointF* point, int mode)
 
 }
 //Esci dallo strumento che stai usando
+/**
+ * @details Runs when a tool is left (from SetTool()). Its real job is on the DRAW*
+ * tools: if a stick is half-drawn (draw_count==1) it is removed from the scene and
+ * StickFigure::CancelDrawing() throws it away, so switching tools mid-draw never leaves
+ * a dangling stick; leaving DRAWIMG also frees image_draw_buffer. Other tools have
+ * nothing to undo and fall through.
+ */
 void MyView::ChangeTool()
 {
     switch(tool)
@@ -605,6 +657,13 @@ void MyView::ChangeTool()
     }
 }
 
+/**
+ * @details The wheel steps the current-stick selection up/down the frame's z-order,
+ * skipping over sticks that belong to other figures (only stops on ones in the current
+ * figure's stick_list). Handy for reaching an overlapped stick without clicking it.
+ * Selection changes go through Frame::SelectStick(); Highlight(false) clears the old
+ * emphasis first.
+ */
 void MyView::wheelEvent(QWheelEvent *event)
 {
     if(my_animation->CurrentFrame()->CurrentStickFigure() !=nullptr){
@@ -637,6 +696,13 @@ void MyView::wheelEvent(QWheelEvent *event)
 
 
 // mouse rilasciato
+/**
+ * @details Ends a gesture. On left release it finalizes an interactive stick rotation
+ * (StickGraphicsItem::EndRotation()) and refreshes the figure icon/layer thumbnail; for
+ * the scene-wide tools (MOVESCENE/ROTATESCENE/SCALESCENE) it refreshes EVERY figure's
+ * icon, since those tools move the whole frame, not just the selected layer. Right/
+ * middle release restores the default transform anchor used by pan/zoom.
+ */
 void MyView::mouseReleaseEvent(QMouseEvent *event)
 {
     if(event->button()==Qt::LeftButton){
@@ -674,12 +740,18 @@ void MyView::mouseReleaseEvent(QMouseEvent *event)
     QGraphicsView::mouseReleaseEvent(event);
 }
 
-// Se il mouse viene mosso durante il disegno di una linea continua ad aggiornarne il disegno
-// Se viene mosso durante una pressione con stick selezionato, agisci sul relativo puntatore all'elemento linea
-// per ruotarla seguendo il mouse
+/**
+ * @details The body of every drag. Switches on the active `tool` and applies the motion
+ * to the model: rotate a stick/subtree (NOTOOL/CLAMP), preview the free end while drawing
+ * (DRAW*, StickFigure::PreviewDrawing()), manipulate/elongate/rotate/scale the current
+ * stick or figure, or transform the whole frame (MOVESCENE/ROTATESCENE/SCALESCENE). The
+ * scene-wide branches use `starting_coord` as the per-step reference and rotate/scale
+ * every figure about the canvas centre. Independently of the tool, a held right button
+ * pans and a held middle button zooms, using `prev_coord` as the previous position.
+ */
 void MyView::mouseMoveEvent(QMouseEvent *event)
 {
-    static QPointF prevCoord(0,0);
+    static QPointF prev_coord(0,0);
     MapMyCoords(coord, event->pos());
     switch(tool)
     {
@@ -702,20 +774,20 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                                 my_animation->CurrentFrame()->CurrentStick()->view->Rotate(&coord);
                         }
                         else{
-                            QList<StickGraphicsItem*> toRotate;
+                            QList<StickGraphicsItem*> to_rotate;
                             if(my_animation->CurrentFrame()->CurrentStick() == my_animation->CurrentFrame()->CurrentStickFigure()->master_stick){
                                 for(StickData*s:my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
                                     if(!s->stepchild && s->view){
-                                        toRotate.append(s->view);
+                                        to_rotate.append(s->view);
                                     }
                                 }
                             }else{
                                 for(StickData* s:my_animation->CurrentFrame()->CurrentStick()->children)
-                                    if(s->view) toRotate.append(s->view);
+                                    if(s->view) to_rotate.append(s->view);
                             }
                             if(my_animation->CurrentFrame()->CurrentStick()->view)
-                                toRotate.append(my_animation->CurrentFrame()->CurrentStick()->view);
-                            my_animation->CurrentFrame()->CurrentStickFigure()->RotateStickFigure(&coord,toRotate,false);
+                                to_rotate.append(my_animation->CurrentFrame()->CurrentStick()->view);
+                            my_animation->CurrentFrame()->CurrentStickFigure()->RotateStickFigure(&coord,to_rotate,false);
                         }
                             //
                     }
@@ -780,9 +852,9 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         case(MOVESCENE):
         {
             if(is_pressed && !my_animation->current_frame->stick_figures.isEmpty()){
-                int dx = -startingCoord.x()+coord.x();
-                int dy = -startingCoord.y()+coord.y();
-                startingCoord = coord;
+                int dx = -starting_coord.x()+coord.x();
+                int dy = -starting_coord.y()+coord.y();
+                starting_coord = coord;
                 for(StickFigure*S:my_animation->current_frame->stick_figures){
                     //check it is not an empty layer
                     if( S->stick_list.count()>0 && S->master_stick){
@@ -796,23 +868,23 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         {
             if(is_pressed && !my_animation->current_frame->stick_figures.isEmpty()){
                 QPointF center(W/2,H/2); // centro del sistema
-                QLineF mouseToCenterNow(coord,center); // linea che connette il centro al mouse
-                QLineF mouseToCenterStart(startingCoord,center); // linea che connette il centro alla posizione del mouse precedente
-                float startingAngle = mouseToCenterStart.angle(); // angolo assoluto del mouse prima rispetto al centro
+                QLineF mouse_to_center_now(coord,center); // linea che connette il centro al mouse
+                QLineF mouse_to_center_start(starting_coord,center); // linea che connette il centro alla posizione del mouse precedente
+                float starting_angle = mouse_to_center_start.angle(); // angolo assoluto del mouse prima rispetto al centro
 
-                float actualAngle = mouseToCenterNow.angle();// angolo assoluto del mouse ora rispetto al centro
-                float angle = actualAngle-startingAngle; // incremento in angolo rispetto a prima
+                float actual_angle = mouse_to_center_now.angle();// angolo assoluto del mouse ora rispetto al centro
+                float angle = actual_angle-starting_angle; // incremento in angolo rispetto a prima
                 // normalizza l'incremento: angle() torna un valore in [0,360), quindi attraversare lo
                 // 0/360 senza questo produce uno scatto di quasi un giro intero per un singolo frame
                 if(angle>180) angle -= 360;
                 else if(angle<-180) angle += 360;
-                startingCoord = coord; // le coordinate attuali vengono memorizzate per la prossima iterazione
+                starting_coord = coord; // le coordinate attuali vengono memorizzate per la prossima iterazione
                 for(StickFigure*S:my_animation->current_frame->stick_figures){
                     //check it is not an empty layer
                     if( S->stick_list.count()>0 && S->master_stick){
-                        QLineF connectCenter(center,S->master_stick->my_line.p1()); // linea che connette il master dello stick al centro
+                        QLineF connect_center(center,S->master_stick->my_line.p1()); // linea che connette il master dello stick al centro
 
-                        connectCenter.setAngle(connectCenter.angle()+angle); // ruotiamola dell'angolo di incremento
+                        connect_center.setAngle(connect_center.angle()+angle); // ruotiamola dell'angolo di incremento
                         // ruota ogni singolo stick
                         for(StickData *s:S->stick_list){
 
@@ -822,9 +894,9 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                             }
                         }
 
-                        QLineF Delta(S->origin_pos_buffer,connectCenter.p2()); // traslazione della punta della lineacentro-master ruotata
+                        QLineF delta(S->origin_pos_buffer,connect_center.p2()); // traslazione della punta della lineacentro-master ruotata
                         //trasla lo stickfigure dell'ammontare
-                        S->Traslate(Delta.dx(),Delta.dy());
+                        S->Traslate(delta.dx(),delta.dy());
                         S->origin_pos_buffer = S->master_stick->my_line.p1(); // agiorna il buffer di posizione dello stickfigure
                     }
                     }
@@ -839,11 +911,11 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                 float scale_amount = 1;
                 float dist = 0;
                 QPointF center(W/2,H/2);
-                float startDist = QLineF(startingCoord,center).length();
-                if(startDist<1) // evita una divisione per zero (o quasi) se si preme esattamente sul centro
+                float start_dist = QLineF(starting_coord,center).length();
+                if(start_dist<1) // evita una divisione per zero (o quasi) se si preme esattamente sul centro
                     break;
                 dist = QLineF(coord,center).length();
-                scale_amount = dist/startDist;
+                scale_amount = dist/start_dist;
                 for(StickFigure * S:my_animation->current_frame->stick_figures){
                     //check it is not an empty layer
                         if( S->stick_list.count()>0 && S->master_stick){
@@ -854,11 +926,11 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                         float dx = 0;
                         float dy = 0;
                         // il dx e dy deve essere una quantità tale da non far eccedere ad actual dist ilv alore  di originaldist
-                        QLineF actualDistFromCenter(S->master_stick->my_line.p1(),center);
-                        QLineF originalDistFromCenter(S->origin_pos_buffer,center);
+                        QLineF actual_dist_from_center(S->master_stick->my_line.p1(),center);
+                        QLineF original_dist_from_center(S->origin_pos_buffer,center);
                         // quindi fai la differenza fra il valore di distaza originale (max) e la distanza attuale modificata dal fattore di scala per dx e dy
-                        dx = -originalDistFromCenter.dx()*scale_amount+actualDistFromCenter.dx();
-                        dy = -originalDistFromCenter.dy()*scale_amount+actualDistFromCenter.dy();
+                        dx = -original_dist_from_center.dx()*scale_amount+actual_dist_from_center.dx();
+                        dy = -original_dist_from_center.dy()*scale_amount+actual_dist_from_center.dy();
                         S->Traslate(dx,dy);
                         for(StickData* s:S->stick_list){
                             if(s->view) s->view->Scale(scale_amount);
@@ -887,32 +959,40 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
     }
     if(is_right_pressed){
         setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
-        QLineF travel(prevCoord,coord);
+        QLineF travel(prev_coord,coord);
         translate(travel.dx(),travel.dy());
     }else if(is_middle_pressed){
 
         //calcola lo scostamento dal centro all'inizio della pressione e quella attuale
-        float distFromCenter0 = QLineF(prevCoord,QPointF(W/2,H/2)).length();
-        float distFromCenter1 = QLineF(coord,QPointF(W/2,H/2)).length();
+        float dist_from_center0 = QLineF(prev_coord,QPointF(W/2,H/2)).length();
+        float dist_from_center1 = QLineF(coord,QPointF(W/2,H/2)).length();
 
-        zoom_lvl_buf = zoom_lvl+(distFromCenter1-distFromCenter0)/(0.5*sqrtf(W*W+H*H)); // zoombuf è incrementato dal valore precedente di un valore sempre minore di 1
+        zoom_lvl_buf = zoom_lvl+(dist_from_center1-dist_from_center0)/(0.5*sqrtf(W*W+H*H)); // zoombuf è incrementato dal valore precedente di un valore sempre minore di 1
 
         scale(zoom_lvl_buf/zoom_lvl,zoom_lvl_buf/zoom_lvl); // la divisione serve a riportare allo zoom 0, lo zoom applicato è zombuf
         zoom_lvl = zoom_lvl_buf;
     }
-    prevCoord = coord;
+    prev_coord = coord;
     QGraphicsView::mouseMoveEvent(event);
 }
 //funzione usata per riscalare interamente il frame quando si riscala l'animazione intera
+/**
+ * @details Scales one frame's figures about the centre of R: each figure is translated
+ * so its master keeps its relative offset from the centre, then every stick is scaled
+ * by scale_amount (its scale_buffer/width_buffer are refreshed so the scale is applied
+ * from the current size). Used by SizeChange()'s REPOSCALE path when the canvas size
+ * changes. NOTE: the "Rescale animation" feature this feeds has a known width-only
+ * scale-factor bug (see CLAUDE.md "Known unresolved items").
+ */
 void MyView::ScaleFrame(Frame* F, float scale_amount, QRectF R){
     QPointF center(R.width()/2,R.height()/2);
     if(F->stick_figures.isEmpty())
         return;
     for(StickFigure * S:F->stick_figures){
         if(!S->stick_list.isEmpty()){
-            QLineF actualDistFromCenter(S->master_stick->my_line.p1(),center);
-            float dx =-(scale_amount-1)*actualDistFromCenter.dx();
-            float dy =-(scale_amount-1)*actualDistFromCenter.dy();
+            QLineF actual_dist_from_center(S->master_stick->my_line.p1(),center);
+            float dx =-(scale_amount-1)*actual_dist_from_center.dx();
+            float dy =-(scale_amount-1)*actual_dist_from_center.dy();
             S->Traslate(dx,dy);
             for(StickData* s:S->stick_list){
                 if(s->view){
@@ -925,22 +1005,28 @@ void MyView::ScaleFrame(Frame* F, float scale_amount, QRectF R){
 
     }
 }
+/**
+ * @details Thin pass-through to Animation::SetupFrame() (which also inserts the list
+ * row and shifts the following frame numbers). Kept as a member so the add-frame button
+ * in widget.cpp and RestoreFrameSnapshot() (undo of a delete / redo of an add) share
+ * one entry point.
+ */
 Frame* MyView::SetUpFrame(int pos){
-    //decidi il nome
-    //int intName = 0;
-    /*if(my_animation->frame_list.count()>=1){
-        intName = my_animation->current_frame->frame_number+1;
-
-    }*/
     return my_animation->SetupFrame(pos);
 }
+/**
+ * @details The view/list half of deleting a frame: takes its list row, calls
+ * Animation::DeleteFrame() for the model half, then renumbers every later frame's
+ * number and list label so the sequence stays contiguous. Used by the delete-frame
+ * button (widget.cpp) and by RestoreFrameSnapshot() (undo of an add / redo of a delete).
+ */
 void MyView::DeleteFrame(Frame* frame){
-    int frameNum = frame->frame_number;
+    int frame_num = frame->frame_number;
     my_frame_widget_list->takeItem(my_frame_widget_list->row(frame->linked_item));
     my_animation->DeleteFrame(frame);
     my_frame_widget_list->clearSelection();
     for(Frame *f: my_animation->frame_list){
-        if(f->frame_number>frameNum){
+        if(f->frame_number>frame_num){
             f->frame_number--;
             f->linked_item->setData(Qt::DisplayRole, QString::number(f->frame_number));
         }
@@ -948,16 +1034,24 @@ void MyView::DeleteFrame(Frame* frame){
     my_animation->current_frame->linked_item->setSelected(true);
 }
 // routine per passare da un frame ad un altro, svuota la scena, svuota le widget list, ripopola entrambi, aggiorna onion skins e selezioni
+/**
+ * @details The single frame-switch routine (frame list slot in widget.cpp, undo/redo
+ * via RestoreFrameSnapshot(), file load in mymainwindow.cpp and playback all reach it).
+ * It detaches the old frame's views/handles from the scene, clears the layer list, then
+ * for the new frame: gives every stick a live view — reattaching an existing one or
+ * building it with FramePresenter::AttachView() for a just-loaded frame that has none —
+ * rebuilds the layer list, restores selection and (outside playback) refreshes onion
+ * skins and the frame thumbnail.
+ */
 void MyView::MoveToFrame(Frame* frame){
     // rimuovi tutti gli stick dalla scena
-    auto currentScene = scene();
-    auto num = currentScene->items();
+    auto current_scene = scene();
     if(my_animation->frame_list.count()>=1){
         for(StickFigure *S:my_animation->current_frame->stick_figures){
             RemoveHandles(S);
             for(StickData * s: S->stick_list){
                if(s->view && scene()->items().contains(s->view)){
-                    currentScene->removeItem(s->view);
+                    current_scene->removeItem(s->view);
 
                }
             }
@@ -965,7 +1059,6 @@ void MyView::MoveToFrame(Frame* frame){
 
         }
     }
-    num = currentScene->items();
     // rimuovigli elementi dalla lista widget
     my_stick_figure_widget_list->clear();
 
@@ -976,20 +1069,20 @@ void MyView::MoveToFrame(Frame* frame){
     {
         StickData *s = frame->total_sticks[j];
         if(s->view)
-            currentScene->addItem(s->view);
+            current_scene->addItem(s->view);
         else
-            FramePresenter::AttachView(s, currentScene);
+            FramePresenter::AttachView(s, current_scene);
     }
 
     // aggiungi tutta gli stickfigure del nuovo frame alla lista del widget
     for(StickFigure *S:frame->stick_figures)
     {
-        QListWidgetItem * addedItem = new QListWidgetItem(my_stick_figure_widget_list);
-        QVariant newData(QVariant::fromValue(S));
-        addedItem->setData(Qt::UserRole,newData);
-        addedItem->setData(Qt::DisplayRole,S->name);
-        addedItem->setIcon(*S->stick_figure_icon);
-        S->linked_item = addedItem;
+        QListWidgetItem * added_item = new QListWidgetItem(my_stick_figure_widget_list);
+        QVariant new_data(QVariant::fromValue(S));
+        added_item->setData(Qt::UserRole,new_data);
+        added_item->setData(Qt::DisplayRole,S->name);
+        added_item->setIcon(*S->stick_figure_icon);
+        S->linked_item = added_item;
         my_stick_figure_widget_list->addItem(S->linked_item);
         // aggiungi alla scena
         if(!play_back){
@@ -998,7 +1091,7 @@ void MyView::MoveToFrame(Frame* frame){
             AddHandles(S);
         }
     }
-    currentScene->clearSelection();
+    current_scene->clearSelection();
     my_animation->current_frame = frame;
 
     // aggiorna il current frame, se si parte d auna situazione di inizio forza il primo stickfigure
@@ -1021,8 +1114,6 @@ void MyView::MoveToFrame(Frame* frame){
     {
         UpdateOnionSkins();//aggiorna gli onion skins
     }
-    num = currentScene->items();
-    //scene()->update(myR);
     // se non siamo in modalità playback aggiorna le selezioni nelle widgetlists e delle iconee
     if(play_back == false){
         my_animation->current_frame->linked_item->setSelected(true);
@@ -1033,23 +1124,20 @@ void MyView::MoveToFrame(Frame* frame){
         if(!my_animation->frame_list.isEmpty()){
             my_animation->current_frame->UpdateIcon();
         }
-        /*
-        if(my_rect == nullptr){
-            my_rect = new QGraphicsRectItem(0,0,W,H);
-            my_rect->setPen(Qt::NoPen);
-            my_rect->setZValue(-100);
-            if(!currentScene->items().contains(my_rect))
-            {
-                currentScene->addItem(my_rect);
-            }
-        }
-        */
-
     }
-    num = currentScene->items();
     my_animation->CurrentFrame()->Refresh(0);
 }
 // routine per calcolare gli onion skins, prima cancellali, ridisegnali su un immagine, e aggiungi l'immagine alla scena
+/**
+ * @details Rebuilds the faded "ghosts" of the frames before the current one. Old onion
+ * pixmaps are removed and freed, then the previous N frames (N = onion_skin_sb spinbox,
+ * capped at frame_number) are each rendered onto a pixmap whose opacity grows towards
+ * the current frame. Each ghost is drawn from Clone()d StickData wrapped in throwaway
+ * views on a private scene, and the render scene is cleared BEFORE the clones are freed
+ * so ~StickGraphicsItem() doesn't read a deleted data->view — same rule as
+ * StickFigure::UpdateIcon() (see CLAUDE.md "Data model"). `onion_render` marks this
+ * special path for code that must behave differently while rendering.
+ */
 void MyView::UpdateOnionSkins(){
     // svuota i buffer di immagine vecchi (presneti nella scena) immagazzinati nel ciclo for precedente
     for(QGraphicsPixmapItem* P:onion_skins){
@@ -1061,46 +1149,46 @@ void MyView::UpdateOnionSkins(){
         return;
     // imposta la flag per routine speciali
     onion_render = true;
-    QGraphicsScene renderScene; // scena fittizia su cui renderizzare gli onionskins
+    QGraphicsScene render_scene; // scena fittizia su cui renderizzare gli onionskins
     // immagine fittizia su cui registrare gli onion skins
     QImage render_img =  QImage(scene()->sceneRect().width(),scene()->sceneRect().height(),QImage::Format_ARGB32);
 
-    renderScene.setSceneRect(scene()->sceneRect());
+    render_scene.setSceneRect(scene()->sceneRect());
     // dallo spinbox trai il valore del numero di onionskins servono
-    int skinNum = onion_skin_sb->value();
-    float opacityVal = 0;
-    if(my_animation->current_frame->frame_number<skinNum)
+    int skin_num = onion_skin_sb->value();
+    float opacity_val = 0;
+    if(my_animation->current_frame->frame_number<skin_num)
     {
-        skinNum = my_animation->current_frame->frame_number;
+        skin_num = my_animation->current_frame->frame_number;
     }
     // disegna sulla scena fittizia gli stickfigures dei frame da onionskinnare che partono dal frame corrente- numero di skin calcolabili
-    for(int i = my_animation->current_frame->frame_number-skinNum; i<my_animation->current_frame->frame_number; i++){
+    for(int i = my_animation->current_frame->frame_number-skin_num; i<my_animation->current_frame->frame_number; i++){
         // todo anzichè copiare stickfigure per stickfigure, copiare l'intera scena
         // questi stick sono VIVI (hanno già una view sul frame i): clonarne i dati prima di
         // wrapparli evita che il costruttore di stick rubi il back-pointer data->view alla
         // view reale (vedi StickFigure::UpdateIcon per lo stesso pattern)
-        QList<StickData*> renderClones;
+        QList<StickData*> render_clones;
         for(StickData *s:my_animation->frame_list[i]->total_sticks)
         {
             StickData* clone = s->Clone();
-            renderClones.append(clone);
-            renderScene.addItem(new StickGraphicsItem(clone));
+            render_clones.append(clone);
+            render_scene.addItem(new StickGraphicsItem(clone));
         }
         QPainter painter(&render_img);
         render_img.fill(Qt::transparent);
         painter.setBackground(QBrush(QColor(Qt::transparent)));
-        renderScene.render(&painter);
+        render_scene.render(&painter);
         // più è vecchio l'onion skin più è trasparente, più è vicino al frame corrente più è opaco
-        opacityVal += 0.5/skinNum;
+        opacity_val += 0.5/skin_num;
         // trasferisci la scena renderizzata
         QGraphicsPixmapItem* item = new QGraphicsPixmapItem(QPixmap::fromImage((render_img)));
         item->setOffset(onion_offset);
-        item->setOpacity(opacityVal);
+        item->setOpacity(opacity_val);
         item->setZValue(0);
         onion_skins.append(item);
         scene()->addItem(item);
-        renderScene.clear(); // distruggi le view di rendering PRIMA di liberare i dati clonati
-        qDeleteAll(renderClones);
+        render_scene.clear(); // distruggi le view di rendering PRIMA di liberare i dati clonati
+        qDeleteAll(render_clones);
         painter.end();
 
     }
@@ -1194,10 +1282,10 @@ void MyView::RestoreFrameSnapshot(int command_tag, int mode, FrameData *snapshot
     else if((command_tag == CMD_DELETEFRAME && mode == MODE_UNDO)||
             (command_tag == CMD_ADDFRAME && mode == MODE_REDO)){
         // routine di aggiunta del frame
-        Frame* addedFrame = SetUpFrame(snapshot->frame_number);
-        PopulateLiveFrame(addedFrame,*snapshot,true,true);
+        Frame* added_frame = SetUpFrame(snapshot->frame_number);
+        PopulateLiveFrame(added_frame,*snapshot,true,true);
         // spostati sulla destinazione
-        MoveToFrame(addedFrame);
+        MoveToFrame(added_frame);
     }
     else{
         my_animation->current_frame->ClearFrame();
@@ -1222,7 +1310,13 @@ void MyView::StoreUndo(int command){
     UpdateFrameOrder(my_animation->CurrentFrame());
     undo_stack.push(new FrameUndoCommand(this, command));
 }
+/**
+ * @details Renumbers the z-order `order` field of every stick in the current frame to
+ * its list position and refreshes `num_of_items`. The `f` parameter is retained for
+ * call-site compatibility but the routine always operates on the current frame.
+ */
 void MyView::UpdateFrameOrder(Frame* f){
+    Q_UNUSED(f); // ritenuto per compatibilità con i call site; opera sempre sul frame corrente
     int j = 0;
     for(StickData*s:my_animation->CurrentFrame()->total_sticks)
     {
@@ -1230,24 +1324,14 @@ void MyView::UpdateFrameOrder(Frame* f){
         j++;
     }
     my_animation->CurrentFrame()->num_of_items = my_animation->CurrentFrame()->total_sticks.length();
-    /*
-    int j = 0;
-    QList<QGraphicsItem*> orderedList = f->scene->items(f->scene->itemsBoundingRect(),Qt::IntersectsItemBoundingRect,Qt::DescendingOrder,QTransform());
-    for(QGraphicsItem* item:orderedList){
-        if(item->type() != STKTYPE){
-            orderedList.removeAll(item);
-        }
-    }
-    for(QGraphicsItem* item:orderedList){
-        if(item->type() == STKTYPE){
-            static_cast<StickGraphicsItem*>(item)->order = orderedList.indexOf(item);
-            j++;
-        }
-    }
-    f->num_of_items = j;
-    */
 }
 
+/**
+ * @details Puts each stick's two endpoint handles (StickGraphicsItem::stick_handle[])
+ * on the scene, painting the master's origin handle green so the figure's root is easy
+ * to spot. Sticks without a live view are skipped. Paired with RemoveHandles(); called
+ * whenever a figure becomes editable on screen (MoveToFrame(), split/merge, load).
+ */
 void MyView::AddHandles(StickFigure *S)
 {
     for(StickData*s:S->stick_list){
@@ -1261,6 +1345,12 @@ void MyView::AddHandles(StickFigure *S)
     }
 }
 
+/**
+ * @details Takes a figure's endpoint handles off the scene WITHOUT deleting them (they
+ * belong to the StickGraphicsItem and are re-shown by AddHandles()). Called before a
+ * frame switch or a structural edit (MoveToFrame(), SplitStickFigure(), JOIN) so stale
+ * handles don't linger on the canvas.
+ */
 void MyView::RemoveHandles(StickFigure *S)
 {
 
@@ -1347,11 +1437,11 @@ void MyView::LoadLibrary(QString file_name, int mode){
         return;
     // aggiungi tutti gli stickfigure della libreria alla lista del widget
     for(StickFigureData *figure_data:stick_library_buffer->stick_figures){
-        QListWidgetItem * addedItem = new QListWidgetItem();
-        addedItem->setData(Qt::UserRole,QVariant::fromValue(figure_data));
-        addedItem->setData(Qt::DisplayRole,figure_data->name);
-        addedItem->setIcon(RenderLibraryIcon(*figure_data));
-        my_current_library_widget->addItem(addedItem);
+        QListWidgetItem * added_item = new QListWidgetItem();
+        added_item->setData(Qt::UserRole,QVariant::fromValue(figure_data));
+        added_item->setData(Qt::DisplayRole,figure_data->name);
+        added_item->setIcon(RenderLibraryIcon(*figure_data));
+        my_current_library_widget->addItem(added_item);
     }
 }
 /**
@@ -1364,15 +1454,15 @@ StickFigure* MyView::AddStickFigureToLibrary(){
     {
         StickFigureData *figure_data = ExtractStickFigureData(*my_animation->CurrentFrame()->CurrentStickFigure());
         stick_library_buffer->stick_figures.append(figure_data);
-        QListWidgetItem * addedItem = new QListWidgetItem();
-        addedItem->setData(Qt::UserRole,QVariant::fromValue(figure_data));
-        addedItem->setData(Qt::DisplayRole,figure_data->name);
-        addedItem->setIcon(RenderLibraryIcon(*figure_data));
-        int newIdx = my_current_library_widget->currentRow()+1;
-        my_current_library_widget->insertItem(newIdx,addedItem);
+        QListWidgetItem * added_item = new QListWidgetItem();
+        added_item->setData(Qt::UserRole,QVariant::fromValue(figure_data));
+        added_item->setData(Qt::DisplayRole,figure_data->name);
+        added_item->setIcon(RenderLibraryIcon(*figure_data));
+        int new_idx = my_current_library_widget->currentRow()+1;
+        my_current_library_widget->insertItem(new_idx,added_item);
         my_current_library_widget->clearSelection();
-        addedItem->setSelected(true);
-        my_current_library_widget->setCurrentRow(newIdx);
+        added_item->setSelected(true);
+        my_current_library_widget->setCurrentRow(new_idx);
         return my_animation->CurrentFrame()->CurrentStickFigure();
     }else
     {
@@ -1389,12 +1479,19 @@ void MyView::RemoveFromLibrary(){
     int idx = my_current_library_widget->currentRow();
     if(idx<0 || idx>=my_current_library_widget->count()) // niente selezionato: senza questo, takeItem(-1) torna nullptr e va in crash sotto
         return;
-    QListWidgetItem *itemToRemove = my_current_library_widget->takeItem(idx);
-    StickFigureData* to_remove = qvariant_cast<StickFigureData*>(itemToRemove->data(Qt::UserRole));
-    delete itemToRemove;
+    QListWidgetItem *item_to_remove = my_current_library_widget->takeItem(idx);
+    StickFigureData* to_remove = qvariant_cast<StickFigureData*>(item_to_remove->data(Qt::UserRole));
+    delete item_to_remove;
     stick_library_buffer->stick_figures.removeAll(to_remove);
     delete to_remove;
 }
+/**
+ * @details Copies one attribute (pen colour/width or brush colour, per `attribute`)
+ * from my_pen/my_brush — the values the colour/width controls in widget.cpp keep in
+ * sync — onto either the current stick (`all==false`) or every stick in the current
+ * figure (`all==true`), refreshing the touched views and the figure icon. Snapshotted
+ * with StoreUndo() first so a colour change is undoable.
+ */
 void MyView::SetGraphics(bool all, int attribute){
     StoreUndo(CMD_SIMPLE);
     if(!all){
@@ -1429,7 +1526,12 @@ void MyView::SetGraphics(bool all, int attribute){
     my_animation->CurrentFrame()->CurrentStickFigure()->UpdateIcon();
 }
 /**
- * @brief MyView::SplitStickFigure
+ * @details Breaks the current figure at the selected stick: that stick and its subtree
+ * are moved into a brand-new "_split" figure layer, the rest stays behind. Refuses to
+ * split at the master (a figure can't lose its root). The tree surgery is done by
+ * SplitStickFigures() (StickFigure.cpp); this method handles the surrounding view state
+ * — remove/re-add handles, move the split-off sticks between the two figures'
+ * total_sticks z-order entries, and select the new branch. Snapshotted with StoreUndo().
  */
 void MyView::SplitStickFigure(){
     if(my_animation->CurrentFrame()->CurrentStickFigure()== nullptr || my_animation->CurrentFrame()->CurrentStick() == nullptr)
@@ -1446,15 +1548,15 @@ void MyView::SplitStickFigure(){
     split_to_stick_figure = my_animation->CurrentFrame()->CurrentStickFigure();
     RemoveHandles(split_to_stick_figure);
     split_to_stick = split_to_stick_figure->current_stick;
-    QList<StickData*> oldStickList = my_animation->CurrentFrame()->CurrentStickFigure()->stick_list;
+    QList<StickData*> old_stick_list = my_animation->CurrentFrame()->CurrentStickFigure()->stick_list;
 
     StickFigure * branch = my_animation->current_frame->AddStickFigure(my_stick_figure_widget_list, split_to_stick_figure->name+"_split");
     SplitStickFigures(split_to_stick_figure,split_to_stick,branch);
     split_to_stick_figure->Refresh(0);
     // update the total list
-    QList<StickData*> survivorList = split_to_stick_figure->stick_list;
-    for(StickData*s:oldStickList){
-        if(!survivorList.contains(s)){
+    QList<StickData*> survivor_list = split_to_stick_figure->stick_list;
+    for(StickData*s:old_stick_list){
+        if(!survivor_list.contains(s)){
             my_animation->CurrentFrame()->total_sticks.removeAll(s);
         }
     }
@@ -1468,28 +1570,35 @@ void MyView::SplitStickFigure(){
     my_animation->CurrentFrame()->CurrentStickFigure()->UpdateIcon();
 
 }
+/**
+ * @details Applies a new canvas size to the scene: repaints the page rect (my_rect) and
+ * limit rect at the new W/H, recomputes the onion offset, then — depending on `option` —
+ * recentres every figure of every frame (REPO), recentres and rescales them (REPOSCALE,
+ * via ScaleFrame()), or leaves them where they are (NOREPO). Called from
+ * MyMainWindow::GetAnimationParams() after the options dialog changes the dimensions.
+ */
 void MyView::SizeChange(int option){
 
-    QRectF oldRect = my_rect->rect();
-    QPointF oldCenter = my_rect->rect().center();
+    QRectF old_rect = my_rect->rect();
+    QPointF old_center = my_rect->rect().center();
     float amount =  W/my_rect->rect().width();
     my_rect->setPen(Qt::NoPen);
     my_rect->setBrush(QBrush(QColor(Qt::white)));
     scene()->setBackgroundBrush(QBrush(QColor(Qt::white)));
     my_rect->setRect(0,0,W,H);
     onion_offset = QPointF(-my_rect->rect().width()/10,-my_rect->rect().height()/10);
-    QPointF newCenter = my_rect->rect().center();
+    QPointF new_center = my_rect->rect().center();
     limit_rect->setRect(-my_rect->rect().width()/10, -my_rect->rect().height()/10, my_rect->rect().width()*1.1, my_rect->rect().height()*1.1);
     scene()->setSceneRect(limit_rect->rect());
-    float dx = newCenter.x()-oldCenter.x();
-    float dy = newCenter.y()-oldCenter.y();
+    float dx = new_center.x()-old_center.x();
+    float dy = new_center.y()-old_center.y();
     switch(option)
     {
 
         case REPOSCALE:
         {
             for(Frame*F:my_animation->frame_list){
-                ScaleFrame(F,amount,oldRect);
+                ScaleFrame(F,amount,old_rect);
                 for(StickFigure* S: F->stick_figures){
                     S->Traslate(dx,dy);
                 }
@@ -1510,44 +1619,55 @@ void MyView::SizeChange(int option){
             break;
     }
 
-    //()->addItem(my_rect);
-   // scene()->update(0,0,1000,1000);
 }
+/**
+ * @details Flattens every frame to a single pixmap up front so playback can just swap
+ * images instead of rebuilding the scene each tick. Like the onion-skin/icon renderers
+ * it draws from Clone()d StickData wrapped in throwaway views, and clears the render
+ * scene BEFORE freeing the clones so no view outlives its data. Sets `play_back` so the
+ * rest of the app skips interactive-only work while previewing. DisplayPreview() then
+ * shows the frames one at a time.
+ */
 void MyView::PreparePreview(){
 
     play_back = true;
     for(Frame* f :my_animation->frame_list){
-        QGraphicsScene renderScene; //scena fittizia
+        QGraphicsScene render_scene; //scena fittizia
         QImage *render_img = new QImage(W,H,QImage::Format_ARGB32); //immagine temporanea
 
 
         QPainter painter(render_img); // painter che esegue il drawing sull immagine
-        renderScene.setSceneRect(my_rect->rect());
+        render_scene.setSceneRect(my_rect->rect());
         // questi stick sono VIVI: clona i dati prima di wrapparli, altrimenti il costruttore
         // di stick ruberebbe il back-pointer data->view alla view reale sullo schermo
-        QList<StickData*> renderClones;
+        QList<StickData*> render_clones;
         for(StickFigure *S:f->stick_figures)
         {
             for(StickData* s: S->stick_list){
                 StickData* clone = s->Clone();
-                renderClones.append(clone);
-                renderScene.addItem(new StickGraphicsItem(clone));
+                render_clones.append(clone);
+                render_scene.addItem(new StickGraphicsItem(clone));
             }
         }
         //disegna sull' immagine e salvala
         render_img->fill(Qt::white);
         painter.setBackground(QBrush(QColor(Qt::white)));
-        renderScene.render(&painter);
+        render_scene.render(&painter);
         painter.end();
         QGraphicsPixmapItem* item = new QGraphicsPixmapItem(QPixmap::fromImage(*(render_img)));
         preview_list.append(item);
         delete render_img;
-        renderScene.clear(); // distruggi le view di rendering PRIMA di liberare i dati clonati
-        qDeleteAll(renderClones);
+        render_scene.clear(); // distruggi le view di rendering PRIMA di liberare i dati clonati
+        qDeleteAll(render_clones);
         //...add all other video frames here
     }
     play_back = false;
 }
+/**
+ * @details Shows the pixmap PreparePreview() rendered for frame `idx`, removing the
+ * previous frame's pixmap first so they don't pile up on the scene during playback (the
+ * whole preview_list is freed together only when playback ends).
+ */
 void MyView::DisplayPreview(int idx){
     // rimuovi il pixmap del frame precedente: altrimenti si accumula uno per frame per tutta
     // la riproduzione, invece di essere ripulito solo (tutto insieme) quando la riproduzione finisce

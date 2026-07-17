@@ -7,6 +7,14 @@ namespace Ui {
 class AdvancedLineWidget;
 }
 
+/**
+ * @brief Side-panel tab that sets the pen thickness of the current line stick.
+ *
+ * One of the tool panels in widget.h. It publishes its slider/spinbox to the globals
+ * `edit_line_thickness_slider` / `line_edit_thickness_width_spinbox` (uiItems.h) and,
+ * on edit, sets both the current stick's pen width and the canvas's default pen
+ * (`V->my_pen`), so the next stick drawn inherits the chosen thickness.
+ */
 class AdvancedLineWidget : public QWidget
 {
     Q_OBJECT

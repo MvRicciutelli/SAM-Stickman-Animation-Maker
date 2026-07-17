@@ -134,6 +134,14 @@ float zoom_lvl               = 1;
 bool  first_time_opened       = false;
 QImage * image_draw_buffer;
 QString FFMPEGPath = "";
+/**
+ * @details Wires every global widget-pointer alias (uiItems.h) to its Designer-managed
+ * `ui->` counterpart, builds the canvas (`scene`/`view`) and the four advanced-property
+ * tabs, then loads (or creates, on first run) the default library and config.json. The
+ * terms-and-conditions prompt only appears if `terms_accepted` is still 0 in the loaded
+ * config; declining it exits the process outright rather than leaving a half-built
+ * window on screen.
+ */
 Widget::Widget(QWidget *parent)
     : QWidget(parent)
     , ui(new Ui::Widget)
@@ -252,7 +260,12 @@ Widget::Widget(QWidget *parent)
     frame_copy_buffer = new FrameData();
 }
 
-//leggi il file json, se tutti i campi sono validi,leggilo, senno creane uno nuovo
+/**
+ * @details Rebuilds `recordObject` from the file and, if every expected key is present,
+ * copies each value into its matching global. If any key is missing — an older or
+ * hand-edited config — the file is discarded and CreateJson() writes a fresh one with
+ * current defaults instead of leaving stale/missing settings in place.
+ */
 void Widget::ReadJson(QString path ){
 
     QFile file(path);
@@ -285,6 +298,14 @@ void Widget::ReadJson(QString path ){
     file.close();
 
 }
+/**
+ * @details Frameless, modal Yes/No box quoting the full license text. Accepting sets
+ * `terms_accepted = 1`; declining sets it back to 0 — the constructor checks this flag
+ * right after calling here and calls `exit(EXIT_FAILURE)` if it's still 0, so declining
+ * closes the whole application, not just this dialog. Either way the result is written
+ * back to config.json immediately (WriteJson()) so the prompt doesn't reappear on the
+ * next launch once accepted.
+ */
 void Widget::TermsAndConditions(){
     QMessageBox* myBox =  new QMessageBox(QMessageBox::Question, "Terms And Conditions",
 license+" Click on the \"Yes\" button if you accept the above terms, click on the \"No\" button if you don't agree (the program will be closed). \r\n\
@@ -301,11 +322,22 @@ license+" Click on the \"Yes\" button if you accept the above terms, click on th
     delete myBox;
     WriteJson();
 }
+/**
+ * @details Always targets the standard config.json path under `program_folder` — unlike
+ * CreateJson(), which takes an explicit path so ReadJson() can also use it to replace a
+ * malformed config found elsewhere-named during a read.
+ */
 void Widget::WriteJson( ){
     QString path = program_folder.path()+"/config.json";
     CreateJson(path);
 }
 extern int op_count;
+/**
+ * @details Snapshots every persisted setting (canvas size, fps, FFmpeg path, autosave
+ * interval, handle size, terms-accepted flag) into a fresh QJsonObject and overwrites
+ * the file at `path`. The sole writer of config.json; ReadJson() and TermsAndConditions()
+ * both funnel through here rather than building JSON themselves.
+ */
 void Widget::CreateJson(QString path ){
     QJsonObject recordObject;
     recordObject.insert("First time opened", QJsonValue::fromVariant(true));
@@ -324,6 +356,12 @@ void Widget::CreateJson(QString path ){
     file.write(doc.toJson());
     file.close();
 }
+/**
+ * @details Each of the six per-user folders (program root, libraries, temp render,
+ * animations, stick figures, video export) is created independently if missing — a
+ * fresh install has none of them yet, but a folder deleted by hand later should also be
+ * silently recreated rather than causing every subsequent file operation to fail.
+ */
 void Widget::CreatePaths(){
     QString  path = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     program_folder = QDir(path+"/MarionettaPlus");
@@ -361,6 +399,13 @@ void Widget::CreatePaths(){
         my_video_export_folder.mkpath(path+"/MarionettaPlus/myExportedVideos");
     }
 }
+/**
+ * @details Iterates every entry in the libraries folder and adds one list item per
+ * *.marlib file found, storing its full path as the item's user-role data (read back by
+ * on_libraryList_currentRowChanged() and friends). Called at startup and after any
+ * operation that adds/removes/renames a library file, since the list widget has no
+ * other way to notice filesystem changes made outside the app.
+ */
 void Widget::DetectLibraries(){
     QDirIterator dirIt(lib_folder.path(),QDir::AllEntries);
     while (dirIt.hasNext()) {
@@ -401,16 +446,19 @@ Widget::~Widget()
 }
 
 
+/// @details Switches to the freehand line tool (MyView::mousePressEvent() dispatches on it).
 void Widget::on_drawBtn_clicked()
 {
     view->SetTool(DRAW);
 }
 
+/// @details Switches back to plain selection/arrow mode (no active drawing/edit tool).
 void Widget::on_cursor_clicked()
 {
     view->SetTool(NOTOOL);
 }
 
+/// @details Snapshots undo, then delegates to AddStick() for the actual layer creation.
 void Widget::on_addStickBtn_clicked()
 {
     view->StoreUndo();
@@ -422,12 +470,18 @@ StickFigure* Widget::AddStick(){
     stick_figure_name_text->clear();
     return added;
 }
+/// @details Mirrors the new pen width onto the (read-only display) thickness slider.
 void Widget::on_thicknessSpinBox_valueChanged(int arg1)
 {
     view->my_pen.setWidth(arg1);
     ui->lineThicknessSlider->setValue(arg1);
 }
 
+/**
+ * @details Designer fires this both when the user clicks a different layer row and when
+ * a row is removed out from under the current selection (current == nullptr in that
+ * case, correctly ignored here since there is nothing to select).
+ */
 void Widget::on_stickLayerView_currentItemChanged(QListWidgetItem *current, QListWidgetItem *previous)
 {
     if(current != nullptr)
@@ -441,6 +495,7 @@ void Widget::on_stickLayerView_currentItemChanged(QListWidgetItem *current, QLis
 
 }
 
+/// @details Deletes the stickfigure layer currently selected in the layer list widget.
 void Widget::on_deleteStickFigureBtn_clicked()
 {
     view->DeleteStickFigure();
@@ -460,29 +515,39 @@ void Widget::on_moveLayerDownBtn_clicked()
     view->MoveStickFigureZ(1, MODE_DOWN);
 }
 
+/// @details Switches to the circle-drawing tool.
 void Widget::on_drawCircleBtn_clicked()
 {
     view->SetTool(DRAWCIRCLE);
 }
 
+/// @details Switches to the elongate tool (drag a stick's free end to lengthen/shorten it).
 void Widget::on_elongateBtn_clicked()
 {
     view->SetTool(ELONGATE);
 }
 
+/// @details Steps the undo stack back one command (QUndoStack::undo()).
 void Widget::on_undoBtn_clicked()
 {
     view->undo_stack.undo();
 }
 
+/// @details Re-applies the most recently undone command (QUndoStack::redo()).
 void Widget::on_redoBtn_clicked()
 {
     view->undo_stack.redo();
 }
+/// @details Delegates to AddFrame(); the undo snapshot is taken there, not here.
 void Widget::on_addFrameBtn_clicked()
 {
     AddFrame();
 }
+/**
+ * @details Inserts the new frame right after whichever frame is current (or at position
+ * 0 for the very first frame), moves to it, and gives it one empty stickfigure layer so
+ * the user always has something to draw into immediately.
+ */
 void Widget::AddFrame(void)
 {
     view->StoreUndo(CMD_ADDFRAME);
@@ -500,11 +565,17 @@ void Widget::AddFrame(void)
     //view->my_animation->StoreUndo();
 }
 
-// questa funzione crea il frame e gli oggetti lista appropriati
+/// @details Thin forwarder — see the header doc for MyView::SetUpFrame()'s actual work.
 Frame* Widget::SetUpFrame(int pos){
     return view->SetUpFrame(pos);
 
 }
+/**
+ * @details Extracts the current frame into a fresh FrameData snapshot, creates a new
+ * frame right after it, and repopulates that new frame from the snapshot
+ * (PopulateLiveFrame()) — i.e. a duplicate, not a reference: editing the copy never
+ * touches the original.
+ */
 void Widget::on_copyFrame_clicked()
 {
     view->StoreUndo(CMD_ADDFRAME);
@@ -528,11 +599,13 @@ void Widget::on_copyFrame_clicked()
 
 }
 
+/// @details Re-renders the onion-skin overlay for the new skin count.
 void Widget::on_onionSkinSpinBox_valueChanged(const QString &arg1)
 {
     view->UpdateOnionSkins();
 }
 
+/// @details Refuses to delete the last remaining frame — an animation always has at least one.
 void Widget::on_deleteFrameBtn_clicked()
 {
     if(view->my_animation->frame_list.count()>1){
@@ -542,6 +615,7 @@ void Widget::on_deleteFrameBtn_clicked()
     }
 }
 
+/// @details Switches the displayed frame to whichever row was clicked in the frame list.
 void Widget::on_frameListWidget_itemClicked(QListWidgetItem *item)
 {
     view->StoreUndo(CMD_MOVETOFRAME);
@@ -551,6 +625,7 @@ void Widget::on_frameListWidget_itemClicked(QListWidgetItem *item)
     view->MoveToFrame(cs);
 }
 
+/// @details Prompts for a new name and renames the double-clicked layer row.
 void Widget::on_stickLayerView_itemDoubleClicked(QListWidgetItem *item)
 {
     QString text = QInputDialog::getText(this,"rename layer","text");
@@ -562,6 +637,13 @@ void Widget::on_stickLayerView_itemDoubleClicked(QListWidgetItem *item)
 }
 bool busy_play = false;
 MySleeper *play;
+/**
+ * @details First click: jumps to frame 0, hides onion skins for the duration of
+ * playback, computes a per-frame delay from the fps spinbox, and starts a MySleeper
+ * (kept in the global `play`) which renders every frame once and then flips through
+ * them on its own timer. Second click (while `busy_play`): stops that MySleeper instead
+ * of starting a new one — this button is a toggle, not a one-shot action.
+ */
 void Widget::on_PlayButton_clicked()
 {
     if(busy_play == false){
@@ -587,6 +669,12 @@ void Widget::on_PlayButton_clicked()
 
 }
 
+/**
+ * @details `zoom_lvl` tracks the view's current absolute scale factor (QGraphicsView::
+ * scale() is relative to the current transform, not absolute), so each handler must
+ * first undo the old scale (`1/zoom_lvl`) before applying the new one. MoveToFrame()
+ * afterward re-centers the view on the current frame at the new zoom.
+ */
 void Widget::on_zoomInBtn_clicked()
 {
     view->scale(1/zoom_lvl,1/zoom_lvl);
@@ -595,6 +683,7 @@ void Widget::on_zoomInBtn_clicked()
     view->MoveToFrame(view->my_animation->CurrentFrame());
 }
 
+/// @details See on_zoomInBtn_clicked() for why the scale is un-applied before re-applying.
 void Widget::on_zoomOutBtn_clicked()
 {
 
@@ -604,6 +693,7 @@ void Widget::on_zoomOutBtn_clicked()
     view->MoveToFrame(view->my_animation->CurrentFrame());
 }
 
+/// @details Returns the canvas to 1:1 zoom.
 void Widget::on_resetZoomBtn_clicked()
 {
     view->scale(1/zoom_lvl,1/zoom_lvl);
@@ -611,6 +701,11 @@ void Widget::on_resetZoomBtn_clicked()
     view->MoveToFrame(view->my_animation->CurrentFrame());
 }
 
+/**
+ * @details Loads the chosen file into `image_draw_buffer` and switches to the
+ * image-drawing tool; MyView::DrawCmd() reads this buffer when the user actually places
+ * the image stick, so nothing is added to the scene until then.
+ */
 void Widget::on_drawImageBtn_clicked()
 {
     QString file_name = QFileDialog::getOpenFileName(this,tr("Load Image"),
@@ -623,6 +718,7 @@ void Widget::on_drawImageBtn_clicked()
     }
 
 }
+/// @details Appends another image variant to the current IMAGE stick's image list.
 void Widget::on_addImgBtn_clicked()
 {
     StickData* cs = view->my_animation->CurrentFrame()->CurrentStick();
@@ -637,6 +733,7 @@ void Widget::on_addImgBtn_clicked()
     }
 }
 
+/// @details Removes the image list's currently-selected variant; refuses to remove the last one, since an IMAGE stick must always have at least one variant.
 void Widget::on_removeImgBtn_clicked()
 {
     if(view->my_animation->CurrentFrame()->CurrentStickFigure()== nullptr)
@@ -652,7 +749,7 @@ void Widget::on_removeImgBtn_clicked()
     }
 }
 
-// imposta l'immagine contenuta nello stick dalla lista delle immagini
+/// @details Sets the stick's displayed image to whichever variant is selected in the image list.
 void Widget::on_setImgBtn_clicked()
 {
     int idx = img_list_widget->currentRow(); // indice immagine correntmente selezionata
@@ -665,26 +762,35 @@ void Widget::on_setImgBtn_clicked()
     }
 }
 
+/**
+ * @details Clears the "drag in progress" flag for this slider (see `sliderFlags`) so
+ * the next drag on it takes a fresh undo snapshot instead of continuing to coalesce
+ * into the one already on the stack.
+ */
 void Widget::on_imgHOffsetSlider_sliderReleased()
 {
     sliderFlags.sliderHOffset = false;
 }
 
+/// @details See on_imgHOffsetSlider_sliderReleased() — same coalescing-flag pattern, for the vertical offset slider.
 void Widget::on_imgVOfsetSlider_sliderReleased()
 {
     sliderFlags.sliderVOffset = false;
 }
 
+/// @details See on_imgHOffsetSlider_sliderReleased() — same coalescing-flag pattern, for the width-scale slider.
 void Widget::on_imgWSlider_sliderReleased()
 {
     sliderFlags.sliderWScale = false;
 }
 
+/// @details See on_imgHOffsetSlider_sliderReleased() — same coalescing-flag pattern, for the height-scale slider.
 void Widget::on_imgHSlider_sliderReleased()
 {
     sliderFlags.sliderHScale = false;
 }
 
+/// @details See on_imgHOffsetSlider_sliderReleased() — same coalescing-flag pattern, for the rotation slider.
 void Widget::on_imgRotationSlider_sliderReleased()
 {
     sliderFlags.sliderRot = false;
@@ -692,6 +798,7 @@ void Widget::on_imgRotationSlider_sliderReleased()
 
 
 
+/// @details Saves the current (in-memory, not yet on disk) library buffer as a new *.marlib file, then refreshes the library file list to include it.
 void Widget::on_saveLibraryBtn_clicked()
 {
     QString file_name = QFileDialog::getSaveFileName(this,tr("save marionetta library"),
@@ -705,11 +812,13 @@ void Widget::on_saveLibraryBtn_clicked()
 
 
 
+/// @details Adds the current stickfigure to the currently-open library buffer as a reusable item.
 void Widget::on_addItemToLibBtn_clicked()
 {
     view->AddStickFigureToLibrary();
 }
 
+/// @details Replaces the current library buffer with the contents of the chosen *.marlib file.
 void Widget::on_loadLibraryBtn_clicked()
 {
     QString file_name = QFileDialog::getOpenFileName(this,tr("load marionetta library"),
@@ -719,12 +828,14 @@ void Widget::on_loadLibraryBtn_clicked()
     }
 }
 
+/// @details Rescans the libraries folder in case files were added/removed outside the app.
 void Widget::on_refreshLibrariesBtn_clicked()
 {
     my_library_list_widget->clear();
     DetectLibraries();
 }
 
+/// @details Loads the newly-selected library file's contents into the current-library item view.
 void Widget::on_libraryList_currentRowChanged(int current_row)
 {
     QString file_name = "";
@@ -740,11 +851,18 @@ void Widget::on_libraryList_currentRowChanged(int current_row)
 
 }
 
+/// @details Removes the currently-selected item from the open library buffer.
 void Widget::on_removeFromLibraryBtn_clicked()
 {
     view->RemoveFromLibrary();
 }
 
+/**
+ * @details Adds a new stickfigure layer populated from the selected library item
+ * (PopulateLiveStickFigure() from the item's stored StickFigureData). Guards against a
+ * click with nothing actually selected first, so an empty click can't add a stray blank
+ * layer or dereference a nonexistent item.
+ */
 void Widget::on_addItemFromLibraryToSceneBtn_clicked()
 {
     // get selected item
@@ -773,6 +891,7 @@ void Widget::on_addItemFromLibraryToSceneBtn_clicked()
     //view->my_animation->CurrentFrame()->CurrentStickFigure()->LoadStickFigure(file_name)
 }
 
+/// @details Re-saves the open library buffer back to the *.marlib file it was loaded from.
 void Widget::on_saveCurrentLibraryBtn_clicked()
 {
     QString file_name = "";
@@ -791,6 +910,13 @@ void Widget::on_saveCurrentLibraryBtn_clicked()
     }
 }
 
+/**
+ * @details `sliderFlags.sliderHOffset` coalesces an entire drag into one undo snapshot:
+ * the first valueChanged() of a drag takes it (and raises the flag), every subsequent
+ * one during the same drag does not — sliderReleased() lowers the flag again so the
+ * next drag starts its own snapshot. Same pattern repeats for every image-property
+ * slider below.
+ */
 void Widget::on_imgHOffsetSlider_valueChanged(int value)
 {
     StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
@@ -812,6 +938,7 @@ void Widget::on_imgHOffsetSlider_valueChanged(int value)
 }
 
 
+/// @details Vertical counterpart of on_imgHOffsetSlider_valueChanged() — see its doc for the undo-coalescing pattern.
 void Widget::on_imgVOfsetSlider_valueChanged(int value)
 {
     StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
@@ -832,6 +959,7 @@ void Widget::on_imgVOfsetSlider_valueChanged(int value)
     }
 }
 
+/// @details Width-scale counterpart of on_imgHOffsetSlider_valueChanged(); the ternary maps the slider's signed range onto a >0 scale factor (shrinking below 1 on the negative side instead of going negative).
 void Widget::on_imgWSlider_valueChanged(int value)
 {
     StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
@@ -852,6 +980,7 @@ void Widget::on_imgWSlider_valueChanged(int value)
     }
 }
 
+/// @details Height-scale counterpart of on_imgWSlider_valueChanged() — same scale-factor mapping.
 void Widget::on_imgHSlider_valueChanged(int value)
 {
     StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
@@ -872,6 +1001,7 @@ void Widget::on_imgHSlider_valueChanged(int value)
     }
 }
 
+/// @details Rotation-offset counterpart of on_imgHOffsetSlider_valueChanged() — see its doc for the undo-coalescing pattern.
 void Widget::on_imgRotationSlider_valueChanged(int value)
 {
     StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
@@ -892,30 +1022,40 @@ void Widget::on_imgRotationSlider_valueChanged(int value)
     }
 }
 
+/**
+ * @details These five spinboxes are the numeric-entry twin of the sliders above —
+ * mirroring the typed value onto the slider is what actually applies it, since the
+ * sliders' own valueChanged() handlers hold the undo/property-update logic.
+ */
 void Widget::on_imgHOffsetSpinbox_valueChanged(int arg1)
 {
     img_h_offset_slider->setValue(img_h_offset_spinbox->value());
 }
 
+/// @details See on_imgHOffsetSpinbox_valueChanged() — mirrors onto the vertical-offset slider.
 void Widget::on_imgVOffsetSpinbox_valueChanged(int arg1)
 {
     img_v_offset_slider->setValue(img_v_offset_spinbox->value());
 }
 
+/// @details See on_imgHOffsetSpinbox_valueChanged() — mirrors onto the width-scale slider.
 void Widget::on_imgWidthSpinbox_valueChanged(int arg1)
 {
     img_width_slider->setValue(img_width_spinbox->value());
 }
 
+/// @details See on_imgHOffsetSpinbox_valueChanged() — mirrors onto the height-scale slider.
 void Widget::on_imgHeightSpinbox_valueChanged(int arg1)
 {
     img_height_slider->setValue(img_height_spinbox->value());
 }
 
+/// @details See on_imgHOffsetSpinbox_valueChanged() — mirrors onto the rotation slider.
 void Widget::on_imgRotationSpinbox_valueChanged(int arg1)
 {
     img_rotation_slider->setValue(img_rotation_spinbox->value());
 }
+/// @details Opens a color picker and sets it as the pen color for future drawing (and updates the swatch button's background to match).
 void Widget::on_chooseColorBtn_clicked()
 {
     QColor color = QColorDialog::getColor(Qt::yellow, this );
@@ -926,26 +1066,35 @@ void Widget::on_chooseColorBtn_clicked()
        ui->currentColorBtn->setStyleSheet(qss);
     }
 }
+/**
+ * @details `SetGraphics(all, attribute)`'s first argument is the actual difference
+ * between each of these button pairs below: false applies to just the current stick,
+ * true applies to every stick in the current stickfigure.
+ */
 void Widget::on_setStickColorBtn_clicked()
 {
     view->SetGraphics(false, ATTRIBUTE_PENCOLOR);
 }
 
+/// @details All-sticks counterpart of on_setStickColorBtn_clicked() — see its doc.
 void Widget::on_setAllSticksColorBtn_clicked()
 {
     view->SetGraphics(true,ATTRIBUTE_PENCOLOR);
 }
 
+/// @details Single-stick pen-width counterpart — see on_setStickColorBtn_clicked()'s doc.
 void Widget::on_setPenThicknessBtn_clicked()
 {
     view->SetGraphics(false, ATTRIBUTE_PENWIDTH);
 }
 
+/// @details All-sticks pen-width counterpart — see on_setStickColorBtn_clicked()'s doc.
 void Widget::on_setPenThicknessAllBtn_clicked()
 {
     view->SetGraphics(true, ATTRIBUTE_PENWIDTH);
 }
 
+/// @details Opens a color picker for the fill/brush color, applying the current fill-opacity slider value as alpha.
 void Widget::on_selectBrushColorBtn_clicked()
 {
     QColor color = QColorDialog::getColor(Qt::yellow, this );
@@ -959,16 +1108,19 @@ void Widget::on_selectBrushColorBtn_clicked()
     //view->SetGraphics(true,ATTRIBUTE_PENCOLOR);
 }
 
+/// @details All-sticks brush-color counterpart — see on_setStickColorBtn_clicked()'s doc.
 void Widget::on_setAllBrushColorBtn_clicked()
 {
     view->SetGraphics(true, ATTRIBUTE_BRUSHCOLOR);
 }
 
+/// @details Single-stick brush-color counterpart — see on_setStickColorBtn_clicked()'s doc.
 void Widget::on_setBrushColorBtn_clicked()
 {
     view->SetGraphics(false, ATTRIBUTE_BRUSHCOLOR);
 }
 
+/// @details Switches to the manipulate tool (drag a stick's free end, dragging its children along).
 void Widget::on_manipulateBtn_clicked()
 {
     view->SetTool(MANIPULATE);
@@ -976,6 +1128,7 @@ void Widget::on_manipulateBtn_clicked()
 
 
 
+/// @details Applies the slider's value as alpha on the current pen color, mirroring it onto the numeric spinbox.
 void Widget::on_penOpacitySlider_valueChanged(int value)
 {
     QColor c = view->my_pen.color();
@@ -984,6 +1137,7 @@ void Widget::on_penOpacitySlider_valueChanged(int value)
     pen_opacity_spinbox->setValue(pen_opacity_slider->value());
 }
 
+/// @details Brush-opacity counterpart of on_penOpacitySlider_valueChanged().
 void Widget::on_fillOpacitySlider_valueChanged(int value)
 {
     QColor c = view->my_brush.color();
@@ -992,22 +1146,26 @@ void Widget::on_fillOpacitySlider_valueChanged(int value)
     brush_opacity_spinbox->setValue(brush_opacity_slider->value());
 }
 
+/// @details Numeric-entry twin of the pen-opacity slider — mirrors onto it.
 void Widget::on_penOpacitySpinbox_valueChanged(int arg1)
 {
     pen_opacity_slider->setValue(pen_opacity_spinbox->value());
 }
 
+/// @details Numeric-entry twin of the brush-opacity slider — mirrors onto it.
 void Widget::on_fillOpacitySpinbox_valueChanged(int arg1)
 {
     brush_opacity_slider->setValue(brush_opacity_spinbox->value());
 }
 
 
+/// @details Switches to the whole-stickfigure rotate tool (drag to rotate every stick together around the figure's origin).
 void Widget::on_rotateStickFigureBtn_clicked()
 {
     view->SetTool(ROTATE);
 }
 
+/// @details Switches to the whole-stickfigure scale tool (drag to resize every stick together, proportionally).
 void Widget::on_scaleStickFigureBtn_clicked()
 {
     view->SetTool(SCALE);
@@ -1016,6 +1174,13 @@ void Widget::on_scaleStickFigureBtn_clicked()
 extern bool start_stick_figure_scale;
 
 
+/**
+ * @details Numeric alternative to the interactive scale tool: snapshots each stick's
+ * pre-scale length/pen-width as the reference (mirroring what the interactive drag does
+ * on press), applies the percentage from the spinbox to every stick in the current
+ * figure, then resets the spinbox back to 100 (the control is a one-shot multiplier,
+ * not a persistent scale-factor display).
+ */
 void Widget::on_stickFigureScaleSpinbox_editingFinished()
 {
     view->StoreUndo();
@@ -1036,6 +1201,12 @@ void Widget::on_stickFigureScaleSpinbox_editingFinished()
     stick_figure_scale_spinbox->setValue(100);
 }
 
+/**
+ * @details Numeric alternative to the interactive rotate tool: applies the spinbox's
+ * degree value as an absolute rotation of every stick in the current figure around its
+ * origin, then resets the spinbox to 0 (a one-shot rotation amount, not a persistent
+ * angle display, mirroring on_stickFigureScaleSpinbox_editingFinished()'s pattern).
+ */
 void Widget::on_stickFigureRotationSpinbox_editingFinished()
 {
     view->StoreUndo();
@@ -1052,21 +1223,25 @@ void Widget::on_stickFigureRotationSpinbox_editingFinished()
     stick_figure_rotation_spinbox->setValue(0);
 }
 
+/// @details Switches to the whole-scene pan tool (drag to move every stickfigure in the frame together).
 void Widget::on_moveSceneBtn_clicked()
 {
     view->SetTool(MOVESCENE);
 }
 
+/// @details Switches to the whole-scene scale tool (drag to resize every stickfigure in the frame together).
 void Widget::on_scaleSceneBtn_clicked()
 {
     view->SetTool(SCALESCENE);
 }
 
+/// @details Switches to the whole-scene rotate tool (drag to rotate every stickfigure in the frame together).
 void Widget::on_rotateSceneBtn_clicked()
 {
     view->SetTool(ROTATESCENE);
 }
 
+/// @details Mirrors every stick in the current figure across its own horizontal axis by rotating each 180° minus twice its current angle.
 void Widget::on_verticalFlipBtn_clicked()
 {
     if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
@@ -1081,6 +1256,7 @@ void Widget::on_verticalFlipBtn_clicked()
     }
 }
 
+/// @details Vertical-axis counterpart of on_verticalFlipBtn_clicked() — same rotation trick, mirrored the other way.
 void Widget::on_HorizontalFlipBtn_clicked()
 {
     if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
@@ -1095,6 +1271,7 @@ void Widget::on_HorizontalFlipBtn_clicked()
     }
 }
 
+/// @details Snapshots the current stickfigure into `view->copy_stick_figure_buffer` (replacing whatever was copied before) for on_pasteStickFigureBtn_clicked() to consume.
 void Widget::on_copyStickFigureBtn_clicked()
 {
     if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
@@ -1105,6 +1282,7 @@ void Widget::on_copyStickFigureBtn_clicked()
     }
 }
 
+/// @details Adds a new layer populated from the copy buffer (PopulateLiveStickFigure()); refuses with an error dialog if nothing has been copied yet this session.
 void Widget::on_pasteStickFigureBtn_clicked()
 {
    if(view->copy_stick_figure_buffer != nullptr){
@@ -1124,6 +1302,11 @@ void Widget::on_pasteStickFigureBtn_clicked()
 
 }
 
+/**
+ * @details Validates a stickfigure is selected and non-empty, then arms the JOIN tool —
+ * the actual merge happens in MyView::mousePressEvent()'s JOIN case once the user picks
+ * the second stickfigure to join into this one.
+ */
 void Widget::on_joinBtn_clicked()
 {
     if(view->my_animation->CurrentFrame()->CurrentStickFigure()== nullptr){
@@ -1153,6 +1336,11 @@ void Widget::on_splitBtn_clicked()
     view->SplitStickFigure();
 }
 
+/**
+ * @details Welds the current stick back together with the stick(s) it was previously
+ * Chop()-ped from (StickFigure::Weld()), and removes the welded-away sticks from the
+ * frame's z-order list since they no longer exist as separate entries.
+ */
 void Widget::on_joinStick_clicked()
 {
     if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr || view->my_animation->CurrentFrame()->CurrentStick() == nullptr)
@@ -1165,6 +1353,10 @@ void Widget::on_joinStick_clicked()
     //view->my_animation->CurrentFrame()->CleanTotalSticks();
 }
 
+/**
+ * @details Splits the current stick into two at its midpoint (StickFigure::Chop()),
+ * refreshing handles around the operation since the figure's stick count changes.
+ */
 void Widget::on_splitStick_clicked()
 {
     if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr || view->my_animation->CurrentFrame()->CurrentStick() == nullptr)
@@ -1180,6 +1372,7 @@ void Widget::on_splitStick_clicked()
 
 
 
+/// @details Re-roots the current stickfigure's tree at the current stick (StickFigure::SetMaster()).
 void Widget::on_setMasterNodeBtn_clicked()
 {
     if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr ||
@@ -1190,6 +1383,11 @@ void Widget::on_setMasterNodeBtn_clicked()
     view->my_animation->CurrentFrame()->CurrentStickFigure()->SetMaster(view->my_animation->CurrentFrame()->CurrentStick());
 }
 
+/**
+ * @details Saves the currently-open library first (so its in-progress edits aren't
+ * lost), then creates a brand new, empty *.marlib file at the chosen path and switches
+ * to it as the open library.
+ */
 void Widget::on_createNewLibraryBtn_clicked()
 {
     on_saveCurrentLibraryBtn_clicked();
@@ -1211,6 +1409,12 @@ void Widget::on_createNewLibraryBtn_clicked()
 
 }
 
+/**
+ * @details Sets every stick in the current figure to the same Z depth, then re-sorts
+ * `total_sticks` by Z so push-to-top/bottom and move-stick-up/down (which walk that
+ * list to find the next-nearest neighbor) see the new order immediately rather than
+ * the stale pre-change one.
+ */
 void Widget::on_setAllDepthBtn_clicked()
 {
     if(!view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty()){
@@ -1230,6 +1434,7 @@ void Widget::on_setAllDepthBtn_clicked()
     }
 }
 
+/// @details Single-stick counterpart of on_setAllDepthBtn_clicked() — see its doc for the total_sticks re-sort.
 void Widget::on_setDepthBtn_clicked()
 {
     if(!view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty()
@@ -1246,22 +1451,26 @@ void Widget::on_setDepthBtn_clicked()
     }
 }
 
+/// @details Mirrors the typed depth value onto the slider (scaled ×100, since the slider is integer-stepped and depth is a float).
 void Widget::on_depthSpinbox_valueChanged(double arg1)
 {
     depth_slider->setValue(arg1*100);
 }
 
+/// @details Mirrors the slider back onto the spinbox (÷100 — see on_depthSpinbox_valueChanged()).
 void Widget::on_depthSlider_valueChanged(int value)
 {
     float val = (float)value;
     depth_spinbox->setValue(val/100);
 }
 
+/// @details Switches to the rectangle-drawing tool.
 void Widget::on_drawRectBtn_clicked()
 {
         view->SetTool(DRAWRECT);
 }
 
+/// @details Debug/dev toggle: swaps the second tools-tab between the image-editing panel and the advanced-stick panel.
 void Widget::on_pushButton_clicked()
 {
     static bool yo = false;
@@ -1276,16 +1485,19 @@ void Widget::on_pushButton_clicked()
     }
 }
 
+/// @details Switches to the taper-drawing tool.
 void Widget::on_drawTaperBtn_clicked()
 {
     view->SetTool(DRAWTAPER);
 }
 
+/// @details Switches to the trapezoid-drawing tool.
 void Widget::on_drawTrapezoidBtn_clicked()
 {
     view->SetTool(DRAWTRAPEZOID);
 }
 
+/// @details Translates every stick in the current figure so its master stick's origin lands at the canvas center.
 void Widget::on_moveStickFigureToCenterBtn_clicked()
 {
     if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr)
@@ -1297,6 +1509,12 @@ void Widget::on_moveStickFigureToCenterBtn_clicked()
     view->my_animation->CurrentFrame()->CurrentStickFigure()->Traslate(dx,dy);
 }
 
+/**
+ * @details Moves the current stick to the end of `total_sticks` (frontmost draw order)
+ * and raises its Z to just above the current maximum across every stick in the frame
+ * (clamped to MAXDEPTH), so it's guaranteed to render in front of everything else, not
+ * just reordered without a matching Z change.
+ */
 void Widget::on_pushToTopBtn_clicked()
 {
     if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr)
@@ -1325,6 +1543,7 @@ void Widget::on_pushToTopBtn_clicked()
 
 }
 
+/// @details Bottom-of-stack counterpart of on_pushToTopBtn_clicked() — moves to index 0 and lowers Z to just below the current minimum (clamped to MINDEPTH).
 void Widget::on_pushToButtonBtn_clicked()
 {
     if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr)
@@ -1354,6 +1573,7 @@ void Widget::on_pushToButtonBtn_clicked()
 
 
 
+/// @details Numeric alternative to the interactive elongate tool: resizes the current stick's line to the typed length, keeping its start point and angle fixed (StickFigure::Elongate()).
 void Widget::on_elongateSpinbox_editingFinished()
 {
     if(view->my_animation->CurrentFrame()->CurrentStickFigure()!= nullptr && view->my_animation->CurrentFrame()->CurrentStick() !=nullptr){
@@ -1366,18 +1586,26 @@ void Widget::on_elongateSpinbox_editingFinished()
 
 }
 
+/// @details Moves the entire current stickfigure layer to the very front of the frame's draw order.
 void Widget::on_pushStickFigureToTop_clicked()
 {
     view->StoreUndo();
     view->MoveStickFigureZ(0,MODE_TOP);
 }
 
+/// @details Moves the entire current stickfigure layer to the very back of the frame's draw order.
 void Widget::on_pushStickFigureToBottom_clicked()
 {
     view->StoreUndo();
     view->MoveStickFigureZ(0,MODE_BOTTOM);
 }
 
+/**
+ * @details Moves the current stick one step forward in draw order: first looks for
+ * another stick at the exact same Z already ahead of it in `total_sticks` (a plain
+ * reorder, no Z change); failing that, finds the next-higher Z across the whole frame
+ * and adopts it (a Z change, since there was no tie to slot in next to).
+ */
 void Widget::on_moveStickUp_clicked()
 {
     if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr)
@@ -1434,6 +1662,7 @@ void Widget::on_moveStickUp_clicked()
     }
 }
 
+/// @details Mirror image of on_moveStickUp_clicked() — looks backward instead of forward for a same-Z tie, then the next-lower Z across the frame.
 void Widget::on_moveStickDown_clicked()
 {
     if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr)
@@ -1490,6 +1719,11 @@ void Widget::on_moveStickDown_clicked()
     }
 }
 
+/**
+ * @details Confirms before deleting the *.marlib file itself; the list row is removed
+ * either way (via the `removeLibraryGoto` label) whether the on-disk file existed and
+ * was actually deleted or had already gone missing out from under the app.
+ */
 void Widget::on_deleteLibrary_clicked()
 {
     QString file_name = "";
@@ -1527,6 +1761,7 @@ void Widget::on_deleteLibrary_clicked()
         }
     }
 }
+/// @details Snapshots the current frame into `frame_copy_buffer` for on_pasteFrame_clicked() to consume.
 void Widget::on_cpyFrame_clicked()
 {
     // il buffer è puro dato (Phase 2b): estrazione diretta, niente stream né flag
@@ -1534,6 +1769,12 @@ void Widget::on_cpyFrame_clicked()
     frame_copy_buffer = ExtractFrameData(*view->my_animation->CurrentFrame());
 }
 
+/**
+ * @details Adds one new layer per stickfigure in the copy buffer to the *current*
+ * frame (not a new one) — pasting a frame merges its content into whatever frame is
+ * displayed, rather than creating a separate frame for it. The last figure pasted
+ * becomes the new current selection.
+ */
 void Widget::on_pasteFrame_clicked()
 {
 
@@ -1564,11 +1805,13 @@ void Widget::on_pasteFrame_clicked()
 }
 
 
+/// @details Mirrors the slider back onto the numeric spinbox (see on_thicknessSpinBox_valueChanged() for the reverse direction).
 void Widget::on_lineThicknessSlider_sliderMoved(int position)
 {
     ui->thicknessSpinBox->setValue(position);
 }
 
+/// @details Switches to the clamp tool.
 void Widget::on_clampToolBtn_clicked()
 {
     view->SetTool(CLAMP);

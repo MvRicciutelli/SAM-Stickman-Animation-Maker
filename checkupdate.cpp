@@ -2,22 +2,29 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QProcess>
-#define VERSION 0
-#define SUBVERSION 9
-#define R 0
+#define VERSION 0     ///< this build's major version, compared against the remote one
+#define SUBVERSION 9  ///< this build's minor version
+#define R 0           ///< this build's release/patch number
 extern QDir program_folder;
 CheckUpdate::CheckUpdate()
 {
 
 }
 
+/**
+ * @details Runs the bundled version.exe (extracted from resources next to the app),
+ * reads its stdout, strips the wrapping punctuation and splits it into major,minor,
+ * release. If that triple is newer than this build's VERSION/SUBVERSION/R it emits
+ * UpdatePresent(). Every early-out routes through the `cleanup` label so the QProcess
+ * and this thread are always freed (delete p + deleteLater()); a helper that reports
+ * -1 or too few fields is treated as "no update".
+ */
 void CheckUpdate::run(){
     QProcess *p = new QProcess(this);
-    QStringList paramList;
     QString output;
-    QString exePath = QCoreApplication::applicationDirPath();
-    QFile::copy(":/version.exe",exePath+"/version.exe");
-    p->start(exePath+"/version.exe");
+    QString exe_path = QCoreApplication::applicationDirPath();
+    QFile::copy(":/version.exe",exe_path+"/version.exe");
+    p->start(exe_path+"/version.exe");
     if (!p->waitForStarted()){
 
     }else{
@@ -35,19 +42,19 @@ void CheckUpdate::run(){
         if(release.count() < 3){
             goto cleanup;
         }
-        int V = release[0].toInt();
-        int SubV = release[1].toInt();
-        int Rel = release[2].toInt();
+        int major_version = release[0].toInt();
+        int sub_version = release[1].toInt();
+        int release_num = release[2].toInt();
         if(release[0].toInt() == -1){
             goto cleanup;
         }else{
-            if(V> VERSION){
+            if(major_version> VERSION){
                 goto update;
-            }else if(V == VERSION){
-                if(SubV > SUBVERSION){
+            }else if(major_version == VERSION){
+                if(sub_version > SUBVERSION){
                     goto update;
-                }else if(SubV == SUBVERSION){
-                    if(Rel> R){
+                }else if(sub_version == SUBVERSION){
+                    if(release_num> R){
                         goto update;
                     }
                 }

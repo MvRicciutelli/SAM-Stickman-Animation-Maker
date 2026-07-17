@@ -31,14 +31,20 @@ bool load_file = false;
 ImageExport *exporter = nullptr;
 QString avi_export_folder;
 QStringList ffmpeg_options;
+/**
+ * @details Builds the menu/window from the .ui file and launches a CheckUpdate worker
+ * that pings the update site in the background; if a newer build exists it fires
+ * UpdatePresent(). `view` and `central_w` are wired up by the startup code that creates
+ * this window (see DoConnections()), not here.
+ */
 MyMainWindow::MyMainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MyMainWindow)
 {
     ui->setupUi(this);
-    CheckUpdate* Check = new CheckUpdate();
-    QObject::connect(Check, &CheckUpdate::UpdatePresent,this, &MyMainWindow::UpdatePresent);
-    Check->start();
+    CheckUpdate* check = new CheckUpdate();
+    QObject::connect(check, &CheckUpdate::UpdatePresent,this, &MyMainWindow::UpdatePresent);
+    check->start();
 
 }
 
@@ -48,6 +54,10 @@ MyMainWindow::~MyMainWindow()
     delete ui;
 }
 
+/**
+ * @details Saves the current figure alone to a .stck file (StickFigure::SaveStickFigure()).
+ * No-op if the user cancels the dialog or there is no current figure.
+ */
 void MyMainWindow::on_actionsave_triggered()
 {
     QString file_name = QFileDialog::getSaveFileName(this,tr("Save StickFigure"),
@@ -57,6 +67,12 @@ void MyMainWindow::on_actionsave_triggered()
     }
 }
 
+/**
+ * @details Loads a .stck figure into a fresh layer of the current frame: snapshots undo,
+ * adds an empty figure (Widget::AddStick()), fills it from file
+ * (StickFigure::LoadStickFigure()), then registers its sticks in the frame's total_sticks
+ * z-order list and shows their handles (MyView::AddHandles()).
+ */
 void MyMainWindow::on_actionload_triggered()
 {
 
@@ -73,6 +89,12 @@ void MyMainWindow::on_actionload_triggered()
     }
 }
 
+/**
+ * @details "Save As" for the whole animation (*.mAnim, Animation::SaveAnimation()).
+ * On success it records the path in the global `animation_path` (so later "Save" and
+ * autosave target it) and resets op_count. See the inline note on why animation_path is
+ * only written when the user actually confirms a file.
+ */
 void MyMainWindow::on_actionsave_animation_triggered()
 {
     QString file_name = QFileDialog::getSaveFileName(this,tr("Save Animation"),
@@ -86,6 +108,12 @@ void MyMainWindow::on_actionsave_animation_triggered()
     }
 }
 
+/**
+ * @details Loads a whole .mAnim animation, replacing the current document: clears undo
+ * (stale frames must not be restorable onto the new document), records the path, sets
+ * the `load_file` flag for the duration of Animation::LoadAnimation(), then shows frame
+ * 0. A corrupt file can leave frame_list empty, so that is checked before MoveToFrame().
+ */
 void MyMainWindow::on_actionload_animation_triggered()
 {
     QString file_name = QFileDialog::getOpenFileName(this,tr("Load Animation"),
@@ -107,12 +135,14 @@ void MyMainWindow::on_actionload_animation_triggered()
     }
 }
 
+/**
+ * @details AVI export, step 1: asks for the output file, (re)creates the scratch render
+ * folder, empties it, then renders the image sequence into it (ExportImageSequence with
+ * option AVI). When the render thread finishes, ImageRenderOver() calls ExportAvi() to
+ * encode those images.
+ */
 void MyMainWindow::on_actionexport_as_AVI_file_triggered()
 {
-    //QVideoEncoder encoder;
-    /*
-
-*/
     // generate folder for renderings
     avi_export_folder = QFileDialog::getSaveFileName(this,tr("Export animation as an avi file"),
                        my_video_export_folder.path(), "avi video file (*.avi)");
@@ -131,33 +161,37 @@ void MyMainWindow::on_actionexport_as_AVI_file_triggered()
     // per ogni frame crea una scena temporanea, popolala con cloni degli sticks del progetto,
     // renderizza la scena su una QImage tramite un painter e salva l'immagine nella cartella
     EmptyDirectory( path);
-    QString fullpath  = path+"/render.png";
-    ExportImageSequence(fullpath, AVI);
+    QString full_path  = path+"/render.png";
+    ExportImageSequence(full_path, AVI);
 
 }
+/**
+ * @details Launches the bundled image2Avi.exe helper, feeding it the render folder,
+ * output path, fps and geometry over stdin. Runs synchronously (waitForFinished) since
+ * it is only reached after the image sequence has already been written to disk.
+ */
 void MyMainWindow::ExportAvi(){
     // generate folder for renderings
     QString file_name = avi_export_folder;
-    QString imgPath = program_folder.path()+"/render";
     // apri il programma avi2Image, passagli i parametri per iniziale la conversione da immagini a file video
     // 1 in folder, 2 outfolder, 3 fps, 4 larghezza, 5 altezza, n immagini
     QProcess *p = new QProcess(this);
-    QStringList paramList;
-    paramList<<render_folder.path()
+    QStringList param_list;
+    param_list<<render_folder.path()
                     <<file_name
                     <<"24"
                     <<QString::number(W)
                     <<QString::number(H)
                     <<QString::number(view->my_animation->frame_list.count());
-    // la path in cui si trova l'é'eseguibile di marionetta
-    QString exePath = QCoreApplication::applicationDirPath();
+    // la path in cui si trova l'eseguibile di marionetta
+    QString exe_path = QCoreApplication::applicationDirPath();
     // estrai il file exporter di avi
-    QFile::copy(":/image2Avi.exe",exePath+"/image2Avi.exe");
+    QFile::copy(":/image2Avi.exe",exe_path+"/image2Avi.exe");
     // eseguilo
-    p->start(exePath+"/image2Avi.exe");
+    p->start(exe_path+"/image2Avi.exe");
     if (!p->waitForStarted())
         qDebug("starting render problem");
-    for(QString s: paramList){
+    for(QString s: param_list){
         p->write(s.toUtf8(),s.length());
         p->write("\n");
     }
@@ -166,6 +200,11 @@ void MyMainWindow::ExportAvi(){
     delete p;
 
 }
+/**
+ * @details Spawns a background ImageExport thread that renders every frame to a numbered
+ * PNG. Guards against a second concurrent export: the previous thread owns the global
+ * `exporter` pointer, and overwriting it would orphan the running thread.
+ */
 void MyMainWindow::ExportImageSequence(QString path, int option){
     // evita di avviare un secondo export mentre uno precedente è ancora in corso: altrimenti
     // il puntatore globale exporter verrebbe sovrascritto e il thread precedente resterebbe orfano
@@ -179,6 +218,11 @@ void MyMainWindow::ExportImageSequence(QString path, int option){
 
 }
 
+/**
+ * @details "Save" for the current animation: overwrites `animation_path` if one is set
+ * (and resets op_count), otherwise falls back to the "Save As" dialog. Also the target
+ * of AutoSave() and of the save-on-close prompt.
+ */
 void MyMainWindow::on_actionsave_animation_current_triggered()
 {
     if(QFile::exists(animation_path)){
@@ -190,6 +234,12 @@ void MyMainWindow::on_actionsave_animation_current_triggered()
     }
 }
 
+/**
+ * @details Discards the current document for a fresh one after a confirmation prompt:
+ * clears undo, forgets `animation_path` (so a later "Save" can't silently overwrite the
+ * old file with the empty animation), empties the model (Animation::ClearAnimation())
+ * and adds one starter frame (Widget::AddFrame()).
+ */
 void MyMainWindow::on_actionNew_Blank_Animation_triggered()
 {
 
@@ -210,6 +260,12 @@ void MyMainWindow::on_actionNew_Blank_Animation_triggered()
         op_count = 0;
     }
 }
+/**
+ * @details Applies the values the AnimationOptions dialog collected (fps, geometry,
+ * handle size, autosave interval) and rescales/repositions the scene via SizeChange().
+ * The dialog is torn down with deleteLater() because this slot fires from the dialog's
+ * own OK-button handler, so an immediate delete would free it mid-callstack.
+ */
 void MyMainWindow::GetAnimationParams(int option_val){
     FPS = my_options->fps;
     W   = my_options->width;
@@ -223,6 +279,12 @@ void MyMainWindow::GetAnimationParams(int option_val){
     // stack di chiamata è ancora attivo
     my_options->deleteLater();
 }
+/**
+ * @details Opens the Animation Options dialog (fps, size, handle size, autosave). Single
+ * instance: an already-open dialog is just raised. WA_DeleteOnClose frees it if closed
+ * without OK, and the destroyed hook nulls `my_options`; on OK it emits DialogOut, wired
+ * to GetAnimationParams() which applies the values.
+ */
 void MyMainWindow::on_actionAnimation_Options_triggered()
 {
     // se è già aperto, portalo in primo piano invece di aprirne un altro (perderesti il puntatore al precedente)
@@ -239,6 +301,11 @@ void MyMainWindow::on_actionAnimation_Options_triggered()
     QObject::connect(my_options, &QObject::destroyed, this, [this](){ my_options = nullptr; });
 }
 
+/**
+ * @details Entry point for the ffmpeg export: if the saved FFMPEGPath is valid it opens
+ * the export dialog straight away (ExportUsingFFMPEG()); otherwise it asks the user to
+ * locate ffmpeg.exe, remembers the path (WriteJson()) and then proceeds.
+ */
 void MyMainWindow::on_actionExport_video_using_FFMPEG_triggered()
 {
     if(QFile::exists(FFMPEGPath)){
@@ -258,44 +325,63 @@ void MyMainWindow::on_actionExport_video_using_FFMPEG_triggered()
     }
 }
 
-FfmpegExport* ffmpegDialog = nullptr;
+FfmpegExport* ffmpeg_dialog = nullptr;
+/**
+ * @details Opens the FFMPEG export options dialog (single instance: re-focuses the
+ * existing one instead of leaking a second). On accept it emits ExportVideo, wired to
+ * StartFFMPEGRender().
+ */
 void MyMainWindow::ExportUsingFFMPEG(){
     // se è già aperta, portala in primo piano invece di aprirne un'altra (perderesti il puntatore alla precedente)
-    if(ffmpegDialog){
-        ffmpegDialog->raise();
-        ffmpegDialog->activateWindow();
+    if(ffmpeg_dialog){
+        ffmpeg_dialog->raise();
+        ffmpeg_dialog->activateWindow();
         return;
     }
-    ffmpegDialog = new FfmpegExport;
-    ffmpegDialog->show();
-    QObject::connect(ffmpegDialog, &FfmpegExport::ExportVideo,this, &MyMainWindow::StartFFMPEGRender);
-    QObject::connect(ffmpegDialog, &QObject::destroyed, this, [](){ ffmpegDialog = nullptr; });
+    ffmpeg_dialog = new FfmpegExport;
+    ffmpeg_dialog->show();
+    QObject::connect(ffmpeg_dialog, &FfmpegExport::ExportVideo,this, &MyMainWindow::StartFFMPEGRender);
+    QObject::connect(ffmpeg_dialog, &QObject::destroyed, this, [](){ ffmpeg_dialog = nullptr; });
 }
 
+/**
+ * @details Accept slot of the ffmpeg dialog: stashes the chosen ffmpeg arguments in the
+ * global `ffmpeg_options`, empties the render folder and exports the image sequence with
+ * option FFMPEG — ImageRenderOver() then launches ffmpeg on the result once the render
+ * thread is done.
+ */
 void MyMainWindow::StartFFMPEGRender(QStringList options){
     // per ogni frame crea una scena temporanea, popolala con cloni degli sticks del progetto,
     // renderizza la scena su una QImage tramite un painter e salva l'immagine nella cartella
     ffmpeg_options = options;
     EmptyDirectory( render_folder.path());
     ExportImageSequence(render_folder.path()+"/img.png", FFMPEG);
-    //
-
-    //QString imagePath = program_folder.path()+"/render";
-
-
 }
 
+/**
+ * @details Bound to view->AutoSaveTrigger (see DoConnections()): saves to the current
+ * animation path via the "Save current" slot. Only actually writes if a path exists.
+ */
 void MyMainWindow::AutoSave()
 {
     on_actionsave_animation_current_triggered();
 }
 
+/**
+ * @details Shown when the background CheckUpdate worker reports a newer build is
+ * available (fired from the constructor's connection).
+ */
 void MyMainWindow::UpdatePresent(QString ver)
 {
     QMessageBox::about(this,"Old version Alert", "A newer version of this Software is available at Marionetta's website for download!");
 }
 // se questa funzione è stata chiamata per l'auto render avi, chiama una funzione che apra il processo
 // stessa cosa se originariamente l'esportazione delle immagini dovrà invece essere usata da ffmpeg
+/**
+ * @details Called when the ImageExport thread finishes. Frees the exporter and nulls
+ * the global pointer BEFORE dispatching, since ExportImageSequence()'s in-progress
+ * guard reads it. Then hands the rendered sequence to the AVI helper or ffmpeg.
+ */
 void MyMainWindow::ImageRenderOver(int option){
     // added delete exporter
     delete exporter;
@@ -319,6 +405,10 @@ void MyMainWindow::ImageRenderOver(int option){
 }
 
 
+/**
+ * @details Plain image-sequence export (option NONE): renders each frame to a numbered
+ * PNG at the chosen path and stops there — no encoder step in ImageRenderOver().
+ */
 void MyMainWindow::on_actionExport_as_image_sequence_triggered()
 {
 
@@ -327,9 +417,19 @@ void MyMainWindow::on_actionExport_as_image_sequence_triggered()
     if(file_name.length()>0)
         ExportImageSequence(file_name,NONE);
 }
+/**
+ * @details Wires this window to `view`; called once at startup after `view` is created.
+ * Currently just routes MyView::AutoSaveTrigger to AutoSave().
+ */
 void MyMainWindow::DoConnections(){
         QObject::connect(view, &MyView::AutoSaveTrigger,this, &MyMainWindow::AutoSave);
 }
+/**
+ * @details On close: first waits for any running export thread to finish (it is a child
+ * of this window and would otherwise be destroyed mid-run), then, if there is unsaved
+ * work (op_count>0), offers Save/Discard/Cancel — Cancel aborts the close via
+ * event->ignore().
+ */
 void MyMainWindow::closeEvent(QCloseEvent *event)
 {
     // se un export è ancora in corso, attendi che finisca prima di chiudere l'app: altrimenti
@@ -361,6 +461,9 @@ void MyMainWindow::closeEvent(QCloseEvent *event)
         QMainWindow::closeEvent(event);
 }
 
+/**
+ * @details Shows the About box (author, website, contact).
+ */
 void MyMainWindow::on_actionAbout_triggered()
 {
     QMessageBox::about(this, "About Marionetta 1.00",
@@ -379,6 +482,11 @@ void MyMainWindow::on_actionAbout_triggered()
 
 extern QString license;
 extern int terms_accepted;
+/**
+ * @details Shows the terms via Widget::TermsAndConditions() and enforces acceptance: if
+ * the user declines (terms_accepted==0) it asks once more, and quits the program if they
+ * still refuse, otherwise loops back to re-present them.
+ */
 void MyMainWindow::on_actionTerms_and_Conditions_triggered()
 {
     //QMessageBox::information(this, " conditions",license);
@@ -399,4 +507,3 @@ void MyMainWindow::on_actionTerms_and_Conditions_triggered()
         }
     }
 }
-
