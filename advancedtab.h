@@ -36,7 +36,9 @@ private slots:
 
 private:
     Ui::AdvancedTab *ui;
-
+    /// true while a slider drag is in progress, so only its FIRST step snapshots undo
+    /// (was a file-scope global in the .cpp; only this class touches it)
+    bool rect_w_slider_flag = false;
 };
 
 #endif // ADVANCEDTAB_H

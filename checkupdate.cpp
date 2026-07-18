@@ -60,6 +60,9 @@ void CheckUpdate::run(){
                 }
             }
         }
+        // nessuna versione più nuova: senza questo salto il flusso CADEVA dentro l'etichetta
+        // `update:` e l'avviso di aggiornamento veniva emesso anche a versioni pari o più vecchie
+        goto cleanup;
         update:
             emit UpdatePresent(output);
 

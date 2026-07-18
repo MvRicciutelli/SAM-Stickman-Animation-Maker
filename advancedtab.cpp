@@ -5,7 +5,7 @@
 extern qint32 W;
 extern qint32 H;
 extern MyView *V;
-bool rect_w_slider_flag = false; ///< true while a slider drag is in progress, so only its FIRST step snapshots undo
+// rect_w_slider_flag è diventato un membro privato di AdvancedTab (vedi advancedtab.h)
 
 /**
  * @details Ranges the rect-width slider/spinbox to the canvas width and publishes the

@@ -6,8 +6,8 @@
 extern qint32 W;
 extern qint32 H;
 extern MyView *V;
-bool taperWSliderFlag = false;
-bool taperHSliderFlag = false;
+// taperWSliderFlag/taperHSliderFlag sono diventati membri privati di AdvancedTaperWidget
+// (taper_w_slider_flag/taper_h_slider_flag, vedi advancedtaperwidget.h)
 
 AdvancedTaperWidget::AdvancedTaperWidget(QWidget *parent) :
     QWidget(parent),
@@ -34,8 +34,8 @@ void AdvancedTaperWidget::on_taperWidthSlider_valueChanged(int value)
     ui->taperWidthSpinbox->setValue(value);
     if(V->my_animation->CurrentFrame()->CurrentStick()==nullptr)
         return;
-    if(taperWSliderFlag == false){
-        taperWSliderFlag = true;
+    if(taper_w_slider_flag == false){
+        taper_w_slider_flag = true;
 
         V->StoreUndo();
     }
@@ -46,7 +46,7 @@ void AdvancedTaperWidget::on_taperWidthSlider_valueChanged(int value)
 
 void AdvancedTaperWidget::on_taperWidthSlider_sliderReleased()
 {
-    taperWSliderFlag = false;
+    taper_w_slider_flag = false;
     V->my_animation->current_frame->UpdateIcon();
 }
 
@@ -65,8 +65,8 @@ void AdvancedTaperWidget::on_taperHeightSlider_valueChanged(int value)
     ui->taperHeightSpinbox->setValue(value);
     if(V->my_animation->CurrentFrame()->CurrentStick()==nullptr)
         return;
-    if(taperHSliderFlag == false){
-        taperHSliderFlag = true;
+    if(taper_h_slider_flag == false){
+        taper_h_slider_flag = true;
 
         V->StoreUndo();
     }
@@ -76,7 +76,7 @@ void AdvancedTaperWidget::on_taperHeightSlider_valueChanged(int value)
 
 void AdvancedTaperWidget::on_taperHeightSlider_sliderReleased()
 {
-    taperHSliderFlag = false;
+    taper_h_slider_flag = false;
     V->my_animation->current_frame->UpdateIcon();
 }
 

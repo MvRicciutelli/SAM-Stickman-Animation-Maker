@@ -23,7 +23,6 @@ ImageExport::ImageExport(QObject *parent, QString path, int option)
     export_path = path;
     render_option = option;
 }
-extern bool render_flag;
 /**
  * @details Flattens each frame onto its own QImage and writes it, with the frame number
  * spliced into the file name before the extension. Every stick on screen is LIVE, so it
@@ -71,17 +70,16 @@ void ImageExport::Render(int option)
 }
 
 /**
- * @details The QThread entry point. For a real export it flips `render_flag` around
- * Render() (so code that must behave differently during a render can tell), for PREVIEW
- * it fills MyView::preview_list instead. Either way it announces completion with
+ * @details The QThread entry point. For a real export it runs Render(), for PREVIEW it
+ * fills MyView::preview_list instead. Either way it announces completion with
  * ImageExportFinished() and then schedules its own destruction (deleteLater()).
+ * (Il `render_flag` che veniva alzato attorno a Render() era write-only — nessuno lo
+ * leggeva — ed è stato eliminato nel flag sweep.)
  */
 void ImageExport::run()
 {
     if(render_option != PREVIEW){
-        render_flag = true;
         Render(render_option);
-        render_flag = false;
     }else{
         V->PreparePreview();
 

@@ -122,14 +122,9 @@ qint32 H                   = DEFAULTHEIGHT;
 int FPS                 = DEFAULTFPS;
 int handle_size          = DEFAULTHANDLES;
 int auto_save_interval    = DEFAULTAUTOSAVE;
-struct{
-    bool sliderHOffset  = false;
-    bool sliderVOffset  = false;
-    bool sliderWScale   = false;
-    bool sliderHScale   = false;
-    bool sliderRot      = false;
-}sliderFlags;
-bool play_back               = false;
+// sliderFlags è diventato un membro privato di Widget (widget.h): solo gli slot di
+// questa classe lo toccano, non c'era motivo che fosse un globale a livello di file;
+// play_back è diventato un membro di MyView (la classe che lo legge in MoveToFrame)
 float zoom_lvl               = 1;
 bool  first_time_opened       = false;
 QImage * image_draw_buffer;
@@ -635,18 +630,19 @@ void Widget::on_stickLayerView_itemDoubleClicked(QListWidgetItem *item)
     StickFigure* S = qvariant_cast<StickFigure*>(retrievedData);
     S->name = text;
 }
-bool busy_play = false;
-MySleeper *play;
+MySleeper *play = nullptr;
 /**
  * @details First click: jumps to frame 0, hides onion skins for the duration of
  * playback, computes a per-frame delay from the fps spinbox, and starts a MySleeper
  * (kept in the global `play`) which renders every frame once and then flips through
- * them on its own timer. Second click (while `busy_play`): stops that MySleeper instead
- * of starting a new one — this button is a toggle, not a one-shot action.
+ * them on its own timer. Second click (while `play` is non-null, i.e. playback is
+ * running — this replaces the old separate `busy_play` flag, which always mirrored
+ * exactly that condition): stops that MySleeper instead of starting a new one — this
+ * button is a toggle, not a one-shot action.
  */
 void Widget::on_PlayButton_clicked()
 {
-    if(busy_play == false){
+    if(play == nullptr){
         //parti dal frame 0, scegli il framerate
         view->MoveToFrame(view->my_animation->frame_list[0]);
         int fps = fps_spin_box->value();
@@ -659,7 +655,6 @@ void Widget::on_PlayButton_clicked()
         int delay = 1000/fps;
         if(delay>5)
             delay = delay/2;
-        busy_play = true;
         play = new MySleeper(view,delay);
         onion_skin_sb->setValue(onions);
     }else{
@@ -711,10 +706,13 @@ void Widget::on_drawImageBtn_clicked()
     QString file_name = QFileDialog::getOpenFileName(this,tr("Load Image"),
                        "C:/", tr("Images (*.png *.bmp *.jpg)"));
     if(QFile::exists(file_name)){
-        //image_draw_buffer = new QImage("C:/Users/riccim3/Pictures/immagine.jpg" );
+        // SetTool PRIMA di riempire il buffer: se il tool attivo è già DRAWIMG (l'utente
+        // sceglie una seconda immagine), ChangeTool() libera il buffer precedente — con
+        // l'ordine invertito liberava quello appena creato (leak del vecchio + crash al
+        // primo click di disegno su un puntatore nullo)
+        view->SetTool(DRAWIMG);
         image_draw_buffer = new QImage(file_name );
         image_name_buffer = QFileInfo(QFile(file_name)).fileName();
-        view->SetTool(DRAWIMG);
     }
 
 }
@@ -722,6 +720,8 @@ void Widget::on_drawImageBtn_clicked()
 void Widget::on_addImgBtn_clicked()
 {
     StickData* cs = view->my_animation->CurrentFrame()->CurrentStick();
+    if(cs == nullptr) // nessuno stick corrente: cs->view sotto dereferenziava un nullo
+        return;
     QString file_name = QFileDialog::getOpenFileName(this,tr("Load Image"),
                        "C:/", tr("Images (*.png *.bmp *.jpg)"));
     if(file_name.length()>0 && cs->view){
@@ -754,7 +754,10 @@ void Widget::on_setImgBtn_clicked()
 {
     int idx = img_list_widget->currentRow(); // indice immagine correntmente selezionata
     if(view->my_animation->CurrentFrame()->CurrentStick() != nullptr){
-        if(view->my_animation->CurrentFrame()->CurrentStick()->stick_type == StickData::IMAGE){
+        // idx viene dal widget: senza selezione è -1, e la lista immagini dello stick può
+        // essere più corta delle righe mostrate — indicizzarla senza controllo legge fuori dai limiti
+        if(view->my_animation->CurrentFrame()->CurrentStick()->stick_type == StickData::IMAGE
+                && idx >= 0 && idx < view->my_animation->CurrentFrame()->CurrentStick()->stick_img_list.count()){
             view->StoreUndo();
             view->my_animation->CurrentFrame()->CurrentStick()->stick_img = view->my_animation->CurrentFrame()->CurrentStick()->stick_img_list[idx];
             view->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh(0);
@@ -1171,9 +1174,6 @@ void Widget::on_scaleStickFigureBtn_clicked()
     view->SetTool(SCALE);
 }
 
-extern bool start_stick_figure_scale;
-
-
 /**
  * @details Numeric alternative to the interactive scale tool: snapshots each stick's
  * pre-scale length/pen-width as the reference (mirroring what the interactive drag does
@@ -1183,6 +1183,9 @@ extern bool start_stick_figure_scale;
  */
 void Widget::on_stickFigureScaleSpinbox_editingFinished()
 {
+    // la guardia sotto arrivava DOPO il primo ciclo, che dereferenziava già la figura corrente
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr)
+        return;
     view->StoreUndo();
     for(StickData*s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
         if(s->view){
@@ -1401,10 +1404,12 @@ void Widget::on_createNewLibraryBtn_clicked()
     }
     if(QFile::exists(file_name)){
         view->LoadLibrary(file_name);
-
-        QListWidgetItem *added = my_library_list_widget->findItems(QFileInfo(file_name).fileName(),Qt::MatchExactly)[0];
-        int row = my_library_list_widget->row(added);
-        my_library_list_widget->setCurrentRow(row);
+        // il file può essere stato salvato FUORI dalla cartella librerie: DetectLibraries()
+        // non lo elenca, e [0] su una lista vuota leggeva fuori dai limiti
+        QList<QListWidgetItem*> found = my_library_list_widget->findItems(QFileInfo(file_name).fileName(),Qt::MatchExactly);
+        if(!found.isEmpty()){
+            my_library_list_widget->setCurrentRow(my_library_list_widget->row(found[0]));
+        }
     }
 
 }
@@ -1417,7 +1422,8 @@ void Widget::on_createNewLibraryBtn_clicked()
  */
 void Widget::on_setAllDepthBtn_clicked()
 {
-    if(!view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty()){
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr
+            && !view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty()){
         view->StoreUndo(CMD_SIMPLE);
         float val = depth_spinbox->value();
         for(StickData* s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
@@ -1437,7 +1443,8 @@ void Widget::on_setAllDepthBtn_clicked()
 /// @details Single-stick counterpart of on_setAllDepthBtn_clicked() — see its doc for the total_sticks re-sort.
 void Widget::on_setDepthBtn_clicked()
 {
-    if(!view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty()
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr
+            && !view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty()
             && view->my_animation->CurrentFrame()->CurrentStick()){
         view->StoreUndo(CMD_SIMPLE);
         float val = depth_spinbox->value();

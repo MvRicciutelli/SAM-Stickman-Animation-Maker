@@ -18,16 +18,15 @@ qint32 W = 720;
 qint32 H = 480;
 int handle_size = 10;
 int auto_save_interval = 50;
-bool play_back = false;
 float zoom_lvl = 1;
 QImage *image_draw_buffer = nullptr;
 QString image_name_buffer;
+// play_back è diventato un membro di MyView; render_flag/load_file erano write-only
+// e sono stati eliminati dal flag sweep (come nell'app)
 
 // --- owned by mymainwindow.cpp in the app ---
 int op_count = 0;
-bool render_flag = false;
 QString animation_path = "";
-bool load_file = false;
 
 // --- uiItems.h externs (owned by widget.cpp in the app) ---
 QSpinBox *fps_spin_box = nullptr;

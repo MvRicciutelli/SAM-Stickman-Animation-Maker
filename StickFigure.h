@@ -21,19 +21,35 @@ public:
     void  CancelDrawing();
     void DeleteStick(int idx);
     void SaveStickFigure(QString name);
-    int draw_count;
+    int draw_count = 0;
     int stick_num = 0;
     int version = 1;
+
+    /**
+     * @brief Raised by MyView::mousePressEvent() at the start of a rotate gesture;
+     *        RotateStickFigure() consumes it on the first mouse move to record the
+     *        starting angle (so the first delta is 0). One gesture at a time exists
+     *        app-wide, hence static — formerly the free global
+     *        `start_stick_figure_rotation` (myview.cpp), now scoped to the class
+     *        that reads it.
+     */
+    static bool start_stick_figure_rotation;
+    /**
+     * @brief Same handshake as start_stick_figure_rotation, for the scale gesture:
+     *        raised on mouse press, consumed by Scale() to record the starting
+     *        distance. Formerly the free global `start_stick_figure_scale`.
+     */
+    static bool start_stick_figure_scale;
     int SelectStick( QPointF * point);
     QList<StickData*>stick_list;
     void SetLineFromPoint(QPointF *point);
     QLineF line_buffer;
     StickData* current_stick = nullptr;
     StickData* master_stick = nullptr;
-    qreal base_z;
+    qreal base_z = 0;
     void Highlight(bool setting);
-    QListWidgetItem* linked_item;
-    QGraphicsScene * scene;
+    QListWidgetItem* linked_item = nullptr;
+    QGraphicsScene * scene = nullptr;
     void UpdateZ(float value);
     QIcon*stick_figure_icon = nullptr;
     QPixmap * icon_img = nullptr;

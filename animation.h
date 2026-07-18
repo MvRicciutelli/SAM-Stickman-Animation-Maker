@@ -9,9 +9,9 @@ public:
     Animation();
     qint32 version = 1;
     QList<Frame*> frame_list;
-    Frame *frame_buffer;
+    Frame *frame_buffer = nullptr;
     Frame * AddFrame(QListWidgetItem* item, int pos);
-    Frame* current_frame;
+    Frame* current_frame = nullptr;
     /**
      * @brief Accessor for the currently displayed frame.
      * @return reference to `current_frame`, so both reads and assignments
@@ -24,7 +24,7 @@ public:
     void UpdateSelection(StickData* item);
     void UpdateSelection(StickFigure* item);
     void UpdateSelection(QPointF point);
-    QGraphicsScene * scene;
+    QGraphicsScene * scene = nullptr;
     Frame *DeleteFrame(Frame* frame);
     Frame *SetupFrame(int pos);
     void SaveAnimation(QString file_name);
@@ -32,8 +32,16 @@ public:
     void ClearAnimation();
     void UpdateSliders();
     void UpdateTab(int t);
-    qint32 width;
-    qint32 height;
+    qint32 width = 0;
+    qint32 height = 0;
+private:
+    /**
+     * @brief True only while ClearAnimation() is tearing down every frame, so
+     *        DeleteFrame() skips re-selecting a "next current frame" that is itself
+     *        about to be deleted. Was a file-scope global before the flag sweep —
+     *        only Animation's own methods ever touched it, so it lives here now.
+     */
+    bool clearing_animation = false;
 };
 Q_DECLARE_METATYPE(Animation*)
 QDataStream &operator<<(QDataStream& stream, const Animation& my_animation);

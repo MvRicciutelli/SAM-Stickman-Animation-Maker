@@ -12,12 +12,18 @@
  * start playback and calls Stop() to end it early; MySleeper deletes itself (Connected())
  * once the last frame has been shown, so it has no external owner.
  */
+class ImageExport;
 class MySleeper:public QObject
 {
     Q_OBJECT
     QTimer timer;
     MyView* v;       ///< canvas whose current animation is being previewed
     int counter = 0; ///< index of the next frame to display
+    // stato del playback: erano globali a livello di file in sleeper.cpp, ma solo questa
+    // classe li tocca — come membri ripartono puliti ad ogni riproduzione
+    bool pause_pressed = false;   ///< raised by Stop(); Connected() ends playback on its next tick
+    int interval_time = 0;        ///< milliseconds between frames (from the chosen FPS)
+    ImageExport* preview_generator = nullptr; ///< background render thread; frees itself via deleteLater()
 
 public:
     /**

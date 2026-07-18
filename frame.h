@@ -10,8 +10,8 @@ public:
     ~Frame();
     //StickFigure* AddStickFigure(QListWidgetItem* item);
     QList<StickFigure*> stick_figures;
-    StickFigure* stick_figure_buffer;
-    StickFigure* current_stick_figure;
+    StickFigure* stick_figure_buffer = nullptr;
+    StickFigure* current_stick_figure = nullptr;
     /**
      * @brief Accessor for the currently selected stickfigure in this frame.
      * @return reference to `current_stick_figure`, so reads and assignments
@@ -22,23 +22,34 @@ public:
     StickFigure*& CurrentStickFigure() { return current_stick_figure; }
     /**
      * @brief Accessor for the currently selected stick within `CurrentStickFigure()`.
-     * @return reference to that stickfigure's `current_stick`.
+     * @return reference to that stickfigure's `current_stick`, or a reference to a
+     *         static null placeholder when no stickfigure is current.
      *
-     * Replaces the `CS` macro (Phase 5). Same as the macro, this dereferences
-     * `current_stick_figure` without a null check — callers are responsible for that,
-     * exactly as before.
+     * Replaces the `CS` macro (Phase 5). Unlike the macro, this no longer dereferences
+     * a null `current_stick_figure`: several UI handlers (slider/spinbox callbacks,
+     * advanced tabs) call it *before* checking `CurrentStickFigure()`, and after an
+     * undo/redo restore the current figure can legitimately be null — the placeholder
+     * turns every one of those latent crashes into a harmless "no current stick".
+     * Assignments made through the placeholder are deliberately discarded.
      */
-    StickData*& CurrentStick() { return current_stick_figure->current_stick; }
+    StickData*& CurrentStick() {
+        static StickData* no_current_figure = nullptr;
+        if(current_stick_figure == nullptr){
+            no_current_figure = nullptr;
+            return no_current_figure;
+        }
+        return current_stick_figure->current_stick;
+    }
     StickData *SelectStick(QPointF point);
     StickData *SelectStick(StickFigure* S, StickData* s= nullptr);
     StickFigure* RemoveStickFigure(StickFigure* to_remove);
-    QIcon* frame_icon;
+    QIcon* frame_icon = nullptr;
     int num_of_items = 0;
-    QPixmap * icon_img;
+    QPixmap * icon_img = nullptr;
     //QImage * render_img;
-    QGraphicsScene * scene;
+    QGraphicsScene * scene = nullptr;
     int frame_number = 0;
-    QListWidgetItem * linked_item;
+    QListWidgetItem * linked_item = nullptr;
     void UpdateIcon();
     QList <StickData*> total_sticks;
     StickFigure *AddStickFigure( QListWidget *my_list_widget, QString name = "");

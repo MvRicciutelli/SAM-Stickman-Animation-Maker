@@ -93,7 +93,9 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
     stream << stick_data.order;
     if ((stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::IMAGE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER)) {
         if (stick_data.stick_type == StickData::IMAGE) {
-            QSize imgSize = stick_data.stick_img->size();
+            // stick_img può essere nullo solo per un record ricostruito da un file corrotto:
+            // meglio serializzare una QSize vuota che dereferenziare un puntatore nullo
+            QSize imgSize = stick_data.stick_img ? stick_data.stick_img->size() : QSize();
             stream << imgSize;
         }
         stream << stick_data.img_angle;
@@ -163,8 +165,15 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
                 stick_data.stick_img_list.append(img);
                 stream >> name;
                 stick_data.img_name_list.append(name);
+                if (stream.status() != QDataStream::Ok)
+                    break; // file troncato: non continuare ad allocare immagini da dati inesistenti
             }
-            stick_data.stick_img = stick_data.stick_img_list[stickImgIdx];
+            // l'indice viene dal file: su un file corrotto può essere -1 o fuori range, e
+            // indicizzare la lista senza controllo scrive/legge fuori dai limiti
+            if (stickImgIdx >= 0 && stickImgIdx < stick_data.stick_img_list.count())
+                stick_data.stick_img = stick_data.stick_img_list[stickImgIdx];
+            else if (!stick_data.stick_img_list.isEmpty())
+                stick_data.stick_img = stick_data.stick_img_list[0];
         }
     }
     return stream;

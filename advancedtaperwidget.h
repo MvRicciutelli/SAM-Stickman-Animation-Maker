@@ -34,6 +34,10 @@ private slots:
 
 private:
     Ui::AdvancedTaperWidget *ui;
+    // true while the respective slider drag is in progress, so only its FIRST step
+    // snapshots undo (were file-scope globals in the .cpp; only this class touches them)
+    bool taper_w_slider_flag = false;
+    bool taper_h_slider_flag = false;
 };
 
 #endif // ADVANCEDTAPERWIDGET_H

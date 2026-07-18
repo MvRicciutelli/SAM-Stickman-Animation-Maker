@@ -16,8 +16,8 @@ extern QGraphicsRectItem *my_rect;
 extern QGraphicsRectItem *limit_rect;
 extern QGraphicsScene* scene;
 
-bool clearing_animation = false;
-bool change_type_flag = false;
+// clearing_animation è diventato un membro privato di Animation (vedi animation.h);
+// change_type_flag era un residuo mai letto da nessuno ed è stato eliminato
 namespace Ui { class Widget; }
 extern Ui::Widget *my_ui;
 
@@ -167,7 +167,10 @@ void Animation::UpdateSelection(StickData* s)
 
     // update current stickfigure
     scene->clearSelection();
-    current_frame->CurrentStickFigure()->Highlight(false);
+    // dopo un ripristino undo/redo lo stickfigure corrente può essere legittimamente nullo
+    // (vedi il commento nell'overload UpdateSelection(QPointF)): niente Highlight in quel caso
+    if(current_frame->CurrentStickFigure() != nullptr)
+        current_frame->CurrentStickFigure()->Highlight(false);
 
     for(StickFigure *S : current_frame->stick_figures)
     {
@@ -177,8 +180,8 @@ void Animation::UpdateSelection(StickData* s)
             S->Highlight(true);
         }
     }
-    // update current stick
-    if(!current_frame->CurrentStickFigure()->stick_list.isEmpty())
+    // update current stick (se s non appartiene a nessuna figura del frame, il corrente resta invariato e può essere nullo)
+    if(current_frame->CurrentStickFigure() != nullptr && !current_frame->CurrentStickFigure()->stick_list.isEmpty())
     {
      current_frame->CurrentStick() = s;
      if(s->view){
@@ -259,8 +262,9 @@ void Animation::UpdateSliders(){
     elongate_spinbox->setValue(  current_frame->CurrentStick()->my_line.length());
 }
 Frame* Animation::SetupFrame(int pos){
-    QString name;
-    name.asprintf("%d",pos);
+    // QString::asprintf è statica: chiamarla su un'istanza ne scartava il risultato e
+    // il nome restava vuoto (UpdateIcon() lo sovrascrive comunque, ma l'intento era questo)
+    QString name = QString::number(pos);
 
     // prepara il widget associato
     QListWidgetItem * addedItem = new QListWidgetItem();

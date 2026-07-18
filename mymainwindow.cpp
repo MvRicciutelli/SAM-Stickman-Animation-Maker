@@ -23,11 +23,11 @@ extern QDir my_stick_figures_folder;
 extern QDir my_video_export_folder;
 extern int handle_size;
 int op_count = 0;
-bool render_flag = false;
+// flag sweep: render_flag (scritto dal thread di export ma mai letto da nessuno) e
+// load_file (impostato attorno a LoadAnimation ma mai letto da nessuno) sono stati eliminati
 QDir render_folder;
 QString animation_path = "";
 AnimationOptions* my_options = nullptr;
-bool load_file = false;
 ImageExport *exporter = nullptr;
 QString avi_export_folder;
 QStringList ffmpeg_options;
@@ -110,9 +110,9 @@ void MyMainWindow::on_actionsave_animation_triggered()
 
 /**
  * @details Loads a whole .mAnim animation, replacing the current document: clears undo
- * (stale frames must not be restorable onto the new document), records the path, sets
- * the `load_file` flag for the duration of Animation::LoadAnimation(), then shows frame
- * 0. A corrupt file can leave frame_list empty, so that is checked before MoveToFrame().
+ * (stale frames must not be restorable onto the new document), records the path, then
+ * shows frame 0. A corrupt file can leave frame_list empty, so that is checked before
+ * MoveToFrame().
  */
 void MyMainWindow::on_actionload_animation_triggered()
 {
@@ -123,14 +123,12 @@ void MyMainWindow::on_actionload_animation_triggered()
     if(QFile::exists(file_name)){
         view->ClearUndo();
         animation_path = file_name;
-        load_file = true;
         view->my_animation->LoadAnimation(file_name);
         // Animation::operator>> gia' applica W/H/my_rect dal file caricato; se il file e'
         // corrotto puo' interrompersi lasciando frame_list vuota, quindi va controllata qui
         if(!view->my_animation->frame_list.isEmpty()){
             view->MoveToFrame(view->my_animation->frame_list[0]);
         }
-        load_file = false;
         op_count = 0;
     }
 }
@@ -383,7 +381,9 @@ void MyMainWindow::UpdatePresent(QString ver)
  * guard reads it. Then hands the rendered sequence to the AVI helper or ffmpeg.
  */
 void MyMainWindow::ImageRenderOver(int option){
-    // added delete exporter
+    // il segnale è queued: può essere consegnato prima che run() sia davvero tornata, e
+    // distruggere un QThread ancora in esecuzione è UB — wait() chiude quella finestra
+    exporter->wait();
     delete exporter;
     // azzeralo subito: la guardia in ExportImageSequence legge questo puntatore, e dopo la delete sarebbe pendente
     exporter = nullptr;

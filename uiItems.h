@@ -51,7 +51,6 @@ extern AdvancedLineWidget* advanced_line_tab;
 extern AdvancedCircleWidget* advanced_circle_tab;
 extern AdvancedTaperWidget* advanced_taper_tab;
 extern QSpinBox * line_edit_thickness_width_spinbox;
-extern QSpinBox* line_edit_thickness_width_spinbox;
 extern QSlider*  circle_squash_slider;
 extern QSpinBox * circle_squash_spinbox;
 

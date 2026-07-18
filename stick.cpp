@@ -3,13 +3,14 @@
 #include <QVector>
 #include <QListWidget>
 #include <StickFigure.h>
-bool onion_render = false;
+bool StickGraphicsItem::onion_render = false;
 extern QGraphicsRectItem* my_rect;
-extern QPixmap * image_draw_buffer ;
 extern QListWidget* img_list_widget;
-extern bool render_flag;
-extern bool play_back;
 extern int handle_size;
+// nota flag sweep: qui c'erano anche `extern QPixmap * image_draw_buffer` (mai usato in
+// questo file, e per giunta dichiarato QPixmap* mentre la definizione reale è QImage* —
+// una violazione ODR pronta a esplodere), `extern bool render_flag` e `extern bool
+// play_back` (mai letti in questo file): rimossi.
 /**
  * @details Since Phase 2c: wraps an existing StickData (non-owning) and wires the
  * back-pointer (`stick_data->view = this`) so tree-walk code holding a `StickData*`
@@ -53,13 +54,13 @@ StickGraphicsItem::~StickGraphicsItem(){
 void StickGraphicsItem::RemoveImagesFromListWidget(){
     if(data->stick_type != StickData::IMAGE)
         return;
-    int j = 0;
-    for(QImage*i:data->stick_img_list)
+    // takeItem(0) una volta per immagine: le righe scalano ad ogni rimozione, quindi
+    // prendere gli indici 0,1,2,... saltava una riga sì e una no (con N>=2 immagini metà
+    // delle voci restava orfana nel widget); delete su un takeItem oltre l'ultima riga
+    // è un delete nullptr, innocuo
+    for(int j = 0; j < data->stick_img_list.count(); j++)
     {
-        Q_UNUSED(i);
-        QListWidgetItem * item= img_list_widget->takeItem(j);
-        delete  item;
-        j++;
+        delete img_list_widget->takeItem(0);
     }
 }
 void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
@@ -75,7 +76,7 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         onionSkinPen.setColor(Qt::gray);
         painter->setPen(onionSkinPen);
     }
-    if(data->stick_type == StickData::IMAGE){
+    if(data->stick_type == StickData::IMAGE && data->stick_img){ // stick_img nullo solo da file corrotto: non c'è nulla da dipingere
         // ogni immagine la facciamo partire dal punto 0,0
         // la ruotiamo
         // la trasliamo al punto di p1
@@ -83,7 +84,9 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         QImage scaled = CalcImg();
         // in caso di onion rendering converti l'immagine in grayscale
         if(onion_render){
-            scaled.convertToFormat(QImage::Format_Grayscale8);
+            // convertToFormat è const e RESTITUISCE l'immagine convertita: scartarne il
+            // risultato lasciava gli onion skin delle immagini a colori invece che in grigio
+            scaled = scaled.convertToFormat(QImage::Format_Grayscale8);
         }
         p = QPointF(data->my_line.p1().x(),data->my_line.p1().y());
         QPointF p2 = QPointF(-scaled.width()/2,-scaled.height()/2);
@@ -193,6 +196,8 @@ QRectF CalcImgRect(QLineF l,QSizeF s){
 
 QImage StickGraphicsItem::CalcImg(){
     QSizeF offsetted;
+    if(!data->stick_img) // possibile solo per un record IMAGE ricostruito da un file corrotto
+        return QImage();
     if(data->stick_img->width()>data->stick_img->height())
     {
         offsetted = QSizeF(data->my_line.length()*data->img_w_scale, data->stick_img->height()*data->my_line.length()/data->stick_img->width()*data->img_h_scale);
@@ -340,8 +345,6 @@ void StickGraphicsItem::Rotate(QPointF *point)
     float DX, DY = 0;
     float angle         = atan2(dx,dy)*180/M_PI;
     bool traslationOnly = false;
-    //agisci sull'oggetto linea
-    QPointF pBuf        = GetP2(&data->my_line);
     //setta il pivot dello stick
     //progettiamo lóffset degli stick figlio
     QPointF oldEndPos   = data->my_line.p2();
@@ -508,6 +511,8 @@ void StickGraphicsItem::AddImage(QImage* img_to_add, QString name){
     PopulateImageListWidget();
 }
 void StickGraphicsItem::RemoveImgFromList(int idx){
+    if(idx < 0 || idx >= data->stick_img_list.length()) // nessuna riga selezionata nel widget: currentRow() torna -1
+        return;
     if(data->stick_type == StickData::IMAGE){
         if(data->stick_img_list.length()>1){
             QImage* to_remove = data->stick_img_list[idx];

@@ -34,8 +34,9 @@ StickFigure* Frame::AddStickFigure(QListWidget * my_list_widget, QString name)
         if(!stick_figures.isEmpty()){
             intName = my_stick_figure_widget_list->currentRow()+1;
         }
-
-        myName.asprintf("%d",intName);
+        // QString::asprintf è statica: chiamarla su un'istanza ne scartava il risultato
+        // e il layer restava senza nome invece di ricevere il numero progressivo previsto
+        myName = QString::number(intName);
     }
     else{
         myName = name;

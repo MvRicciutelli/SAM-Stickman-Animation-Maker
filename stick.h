@@ -13,7 +13,6 @@
 #define MAXDEPTH 99.9f  ///< upper clamp for the user-editable depth (Z) of a stick
 #define MINDEPTH -99.9f ///< lower clamp for the user-editable depth (Z) of a stick
 
-extern bool onion_render;
 extern QLabel *dbg_lbl;
 class StickFigure;
 
@@ -133,6 +132,13 @@ public:
     bool IsMaster() const;
 
 //-------- variables----------//
+    /**
+     * @brief True while MyView::UpdateOnionSkins() is rendering ghost frames: paint()
+     *        switches to a gray pen and grayscale images. One render at a time exists
+     *        app-wide, hence static — formerly the free global `onion_render`
+     *        (stick.cpp), now scoped to the class whose paint() reads it.
+     */
+    static bool onion_render;
     bool highlight = false;          ///< visual emphasis when the owning figure is selected
     bool selected = false;           ///< yellow endpoint markers when this is the current stick
     int rotation_spinbox_buffer = 0;   ///< last value pushed to the rotation spinbox (UI echo suppression)

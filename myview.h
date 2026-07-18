@@ -95,6 +95,14 @@ public:
     unsigned int tool = NOTOOL; ///< active tool id (one of the DRAW/ROTATE/... constants)
 
     /**
+     * @brief True while playback is running (raised by MySleeper/PreparePreview()):
+     *        MoveToFrame() skips the interactive-only work (icons, handles, onion
+     *        skins, list selection) for the duration. Formerly the free global
+     *        `play_back` (widget.cpp), now owned by the class that consumes it.
+     */
+    bool play_back = false;
+
+    /**
      * @brief Leaves the current tool cleanly, then activates a new one.
      * @param new_tool one of the tool-id constants above.
      *

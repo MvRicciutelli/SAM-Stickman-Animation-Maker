@@ -100,21 +100,25 @@ QDataStream &operator>>(QDataStream &stream, StickFigureData &figure_data)
         figure_data.stick_list.append(loaded_stick);
         stream >> *loaded_stick;
     }
-    // ricostruisci le gerarchie di parentela tramite gli indici
+    // ricostruisci le gerarchie di parentela tramite gli indici; parent_idx viene dal
+    // file, quindi su un file corrotto va trattato come non attendibile: fuori range
+    // indicizzerebbe la lista fuori dai limiti, e un ciclo (a->b->a) non terminerebbe mai
     for (StickData *stick_data : figure_data.stick_list) {
-        if (stick_data->parent_idx >= 0) {
+        if (stick_data->parent_idx >= 0 && stick_data->parent_idx < figure_data.stick_list.count()) {
             stick_data->parent = figure_data.stick_list[stick_data->parent_idx];
             StickData *current_parent = stick_data->parent;
-            while (current_parent != nullptr) {
+            int steps = 0;
+            while (current_parent != nullptr && steps++ < figure_data.stick_list.count()) {
                 current_parent->children.append(stick_data);
-                if (current_parent->parent_idx >= 0)
+                if (current_parent->parent_idx >= 0 && current_parent->parent_idx < figure_data.stick_list.count())
                     current_parent = figure_data.stick_list[current_parent->parent_idx];
                 else // arrivati allo stickmaster vai al prossimo
                     break;
             }
         } else {
             stick_data->parent = nullptr;
-            figure_data.master_stick = stick_data;
+            if (stick_data->parent_idx < 0) // -1 è il marcatore legittimo del master; un indice oltre il range è solo corruzione
+                figure_data.master_stick = stick_data;
         }
     }
     if (current_stick_idx >= 0 && current_stick_idx < figure_data.stick_list.count())

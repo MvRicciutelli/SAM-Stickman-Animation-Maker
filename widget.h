@@ -304,5 +304,19 @@ private slots:
 
 private:
     Ui::Widget *ui;
+
+    /**
+     * @brief Per-slider "drag in progress" latches: the first valueChanged() of a drag
+     *        snapshots undo and raises its flag, the matching sliderReleased() lowers it,
+     *        so a whole drag coalesces into ONE undoable edit. Was a file-scope global
+     *        struct in widget.cpp — only Widget's own slots touch it, so it lives here now.
+     */
+    struct {
+        bool sliderHOffset  = false;
+        bool sliderVOffset  = false;
+        bool sliderWScale   = false;
+        bool sliderHScale   = false;
+        bool sliderRot      = false;
+    } sliderFlags;
 };
 #endif // WIDGET_H

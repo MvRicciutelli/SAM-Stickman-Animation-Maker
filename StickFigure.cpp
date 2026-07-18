@@ -7,6 +7,9 @@
 #include <QVector2D>
 // StickFigure work in the one active scene
 extern QGraphicsRectItem* my_rect;
+// stato di inizio gesto rotate/scale (vedi StickFigure.h): prima erano globali liberi in myview.cpp
+bool StickFigure::start_stick_figure_rotation = false;
+bool StickFigure::start_stick_figure_scale = false;
 /**
  * @details Unconditional since Phase 4's undoFlag removal: every StickFigure that
  * exists is guaranteed live (scratch/buffer figures are StickFigureData since Phase
@@ -308,6 +311,11 @@ void StickFigure::DeleteStick(int idx)
     //per ogni figlio dell'oggetto, rimuovi gli oggetti dalla scena e cancellali
     for(StickData * s : selectedStick->children){
         int childIndex          = stick_list.indexOf(s);
+        // la children list flattened può contenere duplicati o voci spurie (i percorsi di
+        // merge appendono liste intere): un indexOf a -1 qui indicizzava stick_list fuori
+        // dai limiti e faceva un removeAt(-1); la voce già processata va solo saltata
+        if(childIndex < 0)
+            continue;
         StickData *childStick   = stick_list[childIndex];
         if(childStick->view)
             FramePresenter::DetachView(childStick,scene);
@@ -317,7 +325,8 @@ void StickFigure::DeleteStick(int idx)
         while(parent != nullptr )
         {
             int removefromparentIdx = parent->children.indexOf(childStick);
-            parent->children.removeAt(removefromparentIdx);
+            if(removefromparentIdx >= 0) // una gerarchia children non pulita può non contenerlo: removeAt(-1) è UB
+                parent->children.removeAt(removefromparentIdx);
             parent = parent->parent; // update parent pointer
         }
         if(childStick->view)
@@ -331,7 +340,8 @@ void StickFigure::DeleteStick(int idx)
     while(parent != nullptr)
     {
         int removefromparentIdx = parent->children.indexOf(selectedStick);
-        parent->children.removeAt(removefromparentIdx);
+        if(removefromparentIdx >= 0) // stessa difesa del ciclo figli qui sopra
+            parent->children.removeAt(removefromparentIdx);
         parent                  = parent->parent;
     }
     if(selectedStick->view)
@@ -603,7 +613,6 @@ void StickFigure::LoadStickFigure(QString name)
 
 }
 // rotates the whole stickfigure
-extern bool start_stick_figure_rotation;
 void StickFigure::RotateStickFigure(QPointF *coord, QList<StickGraphicsItem*> sticks, bool complete_rotation){
     // traslation-only
     if(current_stick == master_stick
@@ -633,7 +642,6 @@ void StickFigure::RotateStickFigure(QPointF *coord, QList<StickGraphicsItem*> st
     }
 
 }
-extern bool start_stick_figure_scale;
 void StickFigure::Scale(QPointF *coord){
     float scale = 0;
     static float startingDist = 0;
