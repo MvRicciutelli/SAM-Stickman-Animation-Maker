@@ -461,12 +461,6 @@ void StickGraphicsItem::EndRotation()
             data->children[i]->view->Refresh(0);
     }
 }
-QPointF StickGraphicsItem::GetP2(QLineF* line)
-{
-    float x = line->p1().x()+line->length()*cos(line->angle());
-    float y = line->p1().y()+line->length()*sin(line->angle());
-    return QPointF(x,y);
-}
 void StickGraphicsItem::Scale(float scale_factor){
     QPointF oldEndPos = data->my_line.p2();
     float true_scale = scale_buffer*scale_factor;
@@ -555,12 +549,5 @@ void SceneRemover(QGraphicsScene *scene_to_clear){
     }
 }
 
-QPolygonF getRegularPolygon(int n, QPointF center, float radius){
-    QVector<QPointF> vertex;
-    for(int i = 0;i<n;i++){
-        float xoffset = cosf(M_PI/n*i)*radius;
-        float yoffset = sinf(M_PI/n*i)*radius;
-        vertex.append(QPointF(center+QPointF(xoffset,yoffset)));
-    }
-    return QPolygonF(vertex);
-}
+// getRegularPolygon() è stato eliminato nel safety sweep: mai chiamato da nessuno,
+// e per giunta copriva solo mezzo giro (M_PI/n invece di 2*M_PI/n)

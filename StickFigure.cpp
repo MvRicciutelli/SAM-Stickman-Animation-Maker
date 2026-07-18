@@ -120,8 +120,9 @@ void StickFigure::StartDrawing(QPointF *point, QPen pen, QBrush brush)
     line_buffer      = QLineF(p0,p0); // all'inizio la linea ha lunghezza zero
     StickData *stk  = new StickData();
     stk->my_line     = line_buffer;
-    //assegna l'ordine di profondità
-    stk->z = base_z+stick_list.count()/100;
+    //assegna l'ordine di profondità: offset frazionario crescente per ogni stick della figura,
+    //così i più recenti rendono sopra i precedenti (con /100 intero l'offset era sempre 0)
+    stk->z = base_z+stick_list.count()/100.0;
     stick_buffer     = stk;
     current_stick    = stk;
     // seè il primo stick ad essere disegnato

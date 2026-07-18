@@ -130,32 +130,9 @@ void Frame::Refresh(int mode){
         S->Refresh(mode);
     }
 }
-StickData *Frame::SelectStick(QPointF point)
-{
-    float distBuffer;
-    float minDist;
-    int idxBuffer;
-    int selectedIdx = -1;
-    StickFigure *selectedStickFigure;
-    for(StickFigure * S: stick_figures)
-    {
-        // su un criterio di distanza dall'handle utile, scegli l'item stick più vicino per ogni stickfigure
-            idxBuffer = S->SelectStick( &point);
-            distBuffer = QLineF(S->stick_list[idxBuffer]->my_line.p2(),point).length();
-            //scegli il più vicino tra tutti gli stickfigure
-            if(selectedIdx == -1 || (distBuffer<minDist))
-            {
-                selectedIdx = idxBuffer;
-                minDist = distBuffer;
-                selectedStickFigure = S;
-            }
-    }
-    if(selectedStickFigure->stick_list[selectedIdx]->view)
-        selectedStickFigure->stick_list[selectedIdx]->view->setSelected(true); //for scene
-    if(selectedStickFigure->current_stick->view)
-        selectedStickFigure->current_stick->view->selected = true; //for rendering purpose
-    return selectedStickFigure->stick_list[selectedIdx];
-}
+// Frame::SelectStick(QPointF) è stato eliminato nel safety sweep: nessun chiamante
+// (la selezione per punto passa da Animation::UpdateSelection(QPointF)) e conteneva
+// una dereferenziazione di puntatore non inizializzato su un frame senza figure
 /**
  * @details Snapshot copy of a live frame into pure data: every figure is extracted,
  * then the frame-wide z-order list and the current-figure pointer are remapped onto

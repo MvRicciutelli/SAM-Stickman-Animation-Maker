@@ -40,7 +40,6 @@ public:
         }
         return current_stick_figure->current_stick;
     }
-    StickData *SelectStick(QPointF point);
     StickData *SelectStick(StickFigure* S, StickData* s= nullptr);
     StickFigure* RemoveStickFigure(StickFigure* to_remove);
     QIcon* frame_icon = nullptr;

@@ -70,12 +70,8 @@ public:
      */
     void RemoveImagesFromListWidget();
 
-    /**
-     * @brief Endpoint of a segment measured trigonometrically.
-     * @param line segment to measure.
-     * @return P2 recomputed from P1 + length/angle.
-     */
-    QPointF GetP2(QLineF* line);
+    // GetP2() è stato eliminato nel safety sweep: nessun chiamante rimasto, e passava
+    // gradi (QLineF::angle()) a cos()/sin() che si aspettano radianti
 
     /**
      * @brief Scene bounding box of the item.
