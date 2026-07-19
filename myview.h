@@ -39,6 +39,7 @@
                         ///< the path until Enter/double click (finalize) or Esc (cancel = the
                         ///< stick is deleted); on an existing multi-line it inserts a vertex at
                         ///< the middle of the nearest segment, drag adjusts, Alt+click deletes
+#define DRAW_IK 23      ///< tool that adds deltes and edits ik chains
 // --- Layer reorder directions passed to MoveStickFigureZ().
 #define MODE_DOWN 1     ///< move the selected layer one step down (towards the back)
 #define MODE_UP 0       ///< move the selected layer one step up (towards the front)

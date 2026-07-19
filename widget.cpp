@@ -2004,3 +2004,9 @@ void Widget::on_multiLineBtn_clicked()
     view->SetTool(DRAWMULTI);
 }
 
+///@brief adds or deletes ik chains
+void Widget::on_addIkBtn_clicked()
+{
+    view->SetTool(DRAW_IK);
+}
+

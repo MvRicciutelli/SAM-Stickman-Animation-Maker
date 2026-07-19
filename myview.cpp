@@ -1366,6 +1366,10 @@ void MyView::ChangeTool()
         {
             break;
         }
+        case (DRAW_IK):
+        {
+            break;
+        }
         case(ROTATE):
         {
             break;

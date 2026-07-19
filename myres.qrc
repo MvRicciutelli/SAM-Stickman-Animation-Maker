@@ -280,5 +280,8 @@
         <file>resources/add_poly_00003.png</file>
         <file>resources/Add_multiline_00002.png</file>
         <file>resources/Add_multiline_00003.png</file>
+        <file>resources/Ik_00001.png</file>
+        <file>resources/Ik_00002.png</file>
+        <file>resources/Ik_00003.png</file>
     </qresource>
 </RCC>
