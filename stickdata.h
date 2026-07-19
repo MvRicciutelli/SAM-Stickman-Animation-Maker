@@ -8,6 +8,7 @@
 #include <QPen>
 #include <QPointF>
 #include <QString>
+#include <QTransform>
 
 class StickGraphicsItem; // defined in stick.h; forward-declared to avoid a header cycle
 
@@ -37,7 +38,13 @@ public:
         IMAGE = 7,      ///< user-imported image, needs stick_img_list/stick_img
         RECT = 16,      ///< rectangle extruded along the stick line
         TRAPEZOID = 17, ///< four-point polygon with independent end widths
-        TAPER = 18      ///< trapezoid with rounded (pie) ends
+        TAPER = 18,     ///< trapezoid with rounded (pie) ends
+        POLYGON = 21,   ///< closed polygon; extra vertices live in polygon_points
+                        ///< (19/20 are already taken by the ELONGATE/CLAMP tool ids)
+        MULTILINE = 22  ///< open multi-segment path: endpoints are my_line's P1/P2,
+                        ///< interior vertices live in polygon_points, with per-vertex
+                        ///< width (taper) and corner curvature in vertex_widths/
+                        ///< vertex_curvatures
     };
 
     /**
@@ -127,6 +134,49 @@ public:
     QImage *stick_img = nullptr;     ///< currently displayed image; points into stick_img_list, not separately owned
     QList<QImage*> stick_img_list;    ///< owned image variants of an IMAGE stick
     QList<QString> img_name_list;     ///< display names of stick_img_list entries, parallel by index
+    /**
+     * @brief Extra vertices of a POLYGON or MULTILINE stick, in normalized
+     *        stick-local coordinates.
+     *
+     * Local frame: origin at my_line.p1(), rotated by img_angle+img_angle_offset,
+     * translated by img_offset, and scaled by my_line.length() — the exact transform
+     * PolygonTransform() returns. Storing normalized coordinates makes the shape
+     * follow the stick's move/rotate for free (like an IMAGE) and scale with the
+     * figure when the stick's length changes.
+     *
+     * POLYGON: ALL the polygon's vertices (P1/P2 are only the skeleton).
+     * MULTILINE: the INTERIOR vertices only — the path's endpoints are my_line's own
+     * P1/P2, so vertex index i in "virtual" terms is: 0 = P1, 1..count = interior,
+     * count+1 = P2 (see StickGraphicsItem's vertex helpers).
+     */
+    QList<QPointF> polygon_points;
+
+    /**
+     * @brief MULTILINE only: stroke width at each vertex (taper), endpoints included.
+     *
+     * Indexed by virtual vertex index (size = polygon_points.count() + 2). Initialized
+     * to the pen width when the stick is drawn; edited per selected vertex via the
+     * taper slider.
+     */
+    QList<float> vertex_widths;
+
+    /**
+     * @brief POLYGON and MULTILINE: corner smoothing at each vertex, 0 (sharp angle)
+     *        to 1 (maximum rounding), rendered as quadratic curves via QPainterPath.
+     *        Indexed by (virtual) vertex index; missing entries read as 0. For a
+     *        MULTILINE the two endpoint entries exist but have no corner to smooth.
+     */
+    QList<float> vertex_curvatures;
+
+    /**
+     * @brief Maps a normalized polygon_points entry to scene coordinates.
+     * @return the local→scene transform; invert it to map a click back to a vertex.
+     *
+     * Mirrors the painter transform the IMAGE branch of paint() applies
+     * (translate p1 → rotate img_angle+img_angle_offset → translate img_offset),
+     * plus the length scaling that normalizes the stored points.
+     */
+    QTransform PolygonTransform() const;
 };
 
 /**

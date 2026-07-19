@@ -136,7 +136,10 @@ void Animation::UpdateSelection(QPointF point)
 }
 void Animation::UpdateTab(int t){
     int idx = my_tab_widget->currentIndex();
-    my_tab_widget->removeTab(1);
+    // dal supporto POLYGON un tipo può portare PIÙ tab (proprietà + vertici):
+    // svuota tutto tranne il tab base invece di rimuovere solo la posizione 1
+    while(my_tab_widget->count() > 1)
+        my_tab_widget->removeTab(1);
     if(t == StickData::IMAGE){
         my_tab_widget->insertTab(1,advanced_img_tab,"Image Editing");
     }
@@ -158,6 +161,18 @@ void Animation::UpdateTab(int t){
         my_tab_widget->insertTab(1,advanced_taper_tab,"Trapezoid Editing");
         hard_top_check->hide();
         hard_bottom_check->hide();
+    }
+    else if(t == StickData::POLYGON){
+        // pannello immagine per offset/rotazione (gli slider di scala e la lista
+        // immagini restano inerti, guardati su IMAGE) + pannello vertici per la
+        // curvatura degli spigoli (la riga larghezza è solo per le MULTILINE)
+        my_tab_widget->insertTab(1,advanced_img_tab,"Polygon Editing");
+        my_tab_widget->insertTab(2,advanced_vertex_tab,"Polygon Vertices");
+        vertex_width_row->hide();
+    }
+    else if(t == StickData::MULTILINE){
+        my_tab_widget->insertTab(1,advanced_vertex_tab,"Multiline Editing");
+        vertex_width_row->show();
     }
     my_tab_widget->setCurrentIndex(idx);
 }
@@ -257,6 +272,11 @@ void Animation::UpdateSliders(){
         hard_top_check->setChecked(cs->hard_top);
         hard_bottom_check->setChecked(cs->hard_bottom);
 
+    }
+    else if(cs->stick_type == StickData::POLYGON){
+        img_v_offset_slider->setValue(cs->img_offset.y());
+        img_h_offset_slider->setValue(cs->img_offset.x());
+        img_rotation_slider->setValue(cs->img_angle_offset);
     }
     edit_line_thickness_slider->setValue(cs->pen.width());
     elongate_spinbox->setValue(  current_frame->CurrentStick()->my_line.length());

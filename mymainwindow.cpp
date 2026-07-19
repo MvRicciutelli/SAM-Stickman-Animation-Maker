@@ -9,6 +9,7 @@
 #include <animationoptions.h>
 #include <ffmpegexport.h>
 #include <QMessageBox>
+#include "stkformat.h"
 extern QDir program_folder;
 extern qint32 W;
 extern qint32 H;
@@ -55,38 +56,109 @@ MyMainWindow::~MyMainWindow()
 }
 
 /**
- * @details Saves the current figure alone to a .stck file (StickFigure::SaveStickFigure()).
+ * @details Saves the current figure alone to a file: native .stck
+ * (StickFigure::SaveStickFigure()), Pivot .stk through StkFormat::ExportStk(), or
+ * Stick Nodes .nodes through StkFormat::ExportNodes() — the selected filter (not the
+ * extension, which both Pivot dialects share) picks the format. Export warnings
+ * about degraded features are shown once, joined.
  * No-op if the user cancels the dialog or there is no current figure.
  */
 void MyMainWindow::on_actionsave_triggered()
 {
-    QString file_name = QFileDialog::getSaveFileName(this,tr("Save StickFigure"),
-                       my_stick_figures_folder.path(), "Stickfigure (*.stck)");
-    if(file_name.length()>1 && view->my_animation->CurrentFrame()->CurrentStickFigure()){
-        view->my_animation->CurrentFrame()->CurrentStickFigure()->SaveStickFigure(file_name);
+    // una selezione multipla si esporta SOLO nella libreria nativa (spec): il salvataggio
+    // su file singolo (.stck/.stk/.nodes) riguarda una figura sola
+    if(view->MultiSelectionActive()){
+        QMessageBox::information(this, tr("Multiple selection"),
+                                 tr("A multiple selection can only be exported to the native library: use the Add To Library button, or reduce the selection to a single stickfigure."));
+        return;
     }
+    QString selected_filter;
+    QString file_name = QFileDialog::getSaveFileName(this,tr("Save StickFigure"),
+                       my_stick_figures_folder.path(),
+                       "Stickfigure (*.stck);;Pivot 5 figure (*.stk);;Pivot 2 figure - Stick Nodes compatible (*.stk);;Stick Nodes figure (*.nodes)",
+                       &selected_filter);
+    if(file_name.length()<=1 || !view->my_animation->CurrentFrame()->CurrentStickFigure())
+        return;
+    if(selected_filter.contains("Pivot") || selected_filter.contains("Stick Nodes figure")){
+        bool nodes_format = selected_filter.contains("Stick Nodes figure");
+        QString extension = nodes_format ? QStringLiteral(".nodes") : QStringLiteral(".stk");
+        if(!file_name.endsWith(extension, Qt::CaseInsensitive))
+            file_name += extension;
+        QStringList export_warnings;
+        QString export_error;
+        StickFigureData *figure_data =
+                ExtractStickFigureData(*view->my_animation->CurrentFrame()->CurrentStickFigure());
+        bool exported;
+        if(nodes_format){
+            exported = StkFormat::ExportNodes(file_name, *figure_data,
+                                              &export_warnings, &export_error);
+        } else {
+            StkFormat::StkVariant variant = selected_filter.contains("Pivot 2")
+                    ? StkFormat::PIVOT2 : StkFormat::PIVOT5;
+            exported = StkFormat::ExportStk(file_name, *figure_data, variant,
+                                            &export_warnings, &export_error);
+        }
+        delete figure_data;
+        if(!exported)
+            QMessageBox::warning(this, tr("Export failed"), export_error);
+        else if(!export_warnings.isEmpty())
+            QMessageBox::information(this, tr("Export notes"), export_warnings.join("\n"));
+        return;
+    }
+    view->my_animation->CurrentFrame()->CurrentStickFigure()->SaveStickFigure(file_name);
 }
 
 /**
- * @details Loads a .stck figure into a fresh layer of the current frame: snapshots undo,
- * adds an empty figure (Widget::AddStick()), fills it from file
- * (StickFigure::LoadStickFigure()), then registers its sticks in the frame's total_sticks
- * z-order list and shows their handles (MyView::AddHandles()).
+ * @details Loads a figure into a fresh layer of the current frame: snapshots undo,
+ * adds an empty figure (Widget::AddStick()), fills it from file, then registers its
+ * sticks in the frame's total_sticks z-order list and shows their handles
+ * (MyView::AddHandles()). Native .stck goes through StickFigure::LoadStickFigure();
+ * Pivot .stk (both dialects, auto-detected) and Stick Nodes .nodes are converted by
+ * StkFormat and land through the same PopulateLiveStickFigure() bridge the .stck
+ * path uses. Foreign files are converted BEFORE any UI mutation, so a corrupt file
+ * leaves the animation untouched; conversion warnings are shown once, joined.
  */
 void MyMainWindow::on_actionload_triggered()
 {
 
     QString file_name = QFileDialog::getOpenFileName(this,tr("Load StickFigure"),
-                       my_stick_figures_folder.path(), "Stickfigure (*.stck)");
-    if(QFile::exists(file_name)){
+                       my_stick_figures_folder.path(),
+                       "Stickfigure (*.stck);;Pivot Animator figure (*.stk);;Stick Nodes figure (*.nodes)");
+    if(!QFile::exists(file_name))
+        return;
+    QString suffix = QFileInfo(file_name).suffix().toLower();
+    if(suffix == "stk" || suffix == "nodes"){
+        QStringList import_warnings;
+        QString import_error;
+        // foreign coordinates are origin-relative: recenter onto the canvas
+        QPointF canvas_center = my_rect ? my_rect->rect().center() : QPointF(W / 2.0, H / 2.0);
+        StickFigureData *figure_data = (suffix == "stk")
+                ? StkFormat::ImportStk(file_name, canvas_center, &import_warnings, &import_error)
+                : StkFormat::ImportNodes(file_name, canvas_center, &import_warnings, &import_error);
+        if(!figure_data){
+            QMessageBox::warning(this, tr("Import failed"), import_error);
+            return;
+        }
         view->StoreUndo();
         central_w->AddStick();
-        view->my_animation->CurrentFrame()->CurrentStickFigure()->LoadStickFigure(file_name);
+        PopulateLiveStickFigure(view->my_animation->CurrentFrame()->CurrentStickFigure(),
+                                *figure_data, true, true);
+        delete figure_data;
         for(StickData*s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
             view->my_animation->CurrentFrame()->total_sticks.append(s);
         }
         view->AddHandles(view->my_animation->CurrentFrame()->CurrentStickFigure());
+        if(!import_warnings.isEmpty())
+            QMessageBox::information(this, tr("Import notes"), import_warnings.join("\n"));
+        return;
     }
+    view->StoreUndo();
+    central_w->AddStick();
+    view->my_animation->CurrentFrame()->CurrentStickFigure()->LoadStickFigure(file_name);
+    for(StickData*s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
+        view->my_animation->CurrentFrame()->total_sticks.append(s);
+    }
+    view->AddHandles(view->my_animation->CurrentFrame()->CurrentStickFigure());
 }
 
 /**

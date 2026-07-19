@@ -47,6 +47,10 @@ extern QCheckBox* hard_bottom_check;
 extern AdvancedTab* advanced_rect_tab;
 extern QTabWidget* my_tab_widget;
 extern QWidget * advanced_img_tab;
+extern QWidget * advanced_vertex_tab;   ///< POLYGON/MULTILINE vertex panel (built in Widget's ctor)
+extern QWidget * vertex_width_row;      ///< the "Vertex width" row inside it (hidden for POLYGON)
+extern QSlider * vertex_width_slider;
+extern QSlider * vertex_curve_slider;
 extern AdvancedLineWidget* advanced_line_tab;
 extern AdvancedCircleWidget* advanced_circle_tab;
 extern AdvancedTaperWidget* advanced_taper_tab;

@@ -46,6 +46,16 @@ frame copy/paste, stickfigure copy/paste, the stickfigure library) is a
 pure-data `FrameData`/`StickFigureData`/`StickData` instead of a live
 `Frame`/`StickFigure`/`stick` — see "Serialization" below.
 
+`StickData::is_linker` marks the invisible, `NoPen` bridge stick that
+`MergeStickFigures()` (`StickFigure.cpp`) creates to graft a joined
+figure's former master into the host figure's tree. `SplitStickFigures()`
+walks back up a split stick's parent chain afterward and deletes any
+linker left with no remaining children — without this a split left an
+orphaned linker (and its endpoint handles, re-added forever by
+`MyView::AddHandles()`) permanently attached to the host figure. The GC
+loop handles chained merges (a linker whose parent is itself a
+now-childless linker) by continuing up the chain.
+
 `QGraphicsScene::addItem()` transfers ownership to the scene. A
 `QGraphicsItem`'s destructor auto-detaches from its scene safely on its own,
 regardless of whether `removeItem()` was called first — never assume you
@@ -102,6 +112,50 @@ retype surfaced and fixed: `DeleteStick()` called it for every child being
 swept away but not for the selected stick itself, leaking rows in
 `img_list_widget`; caught by the pre-existing
 `DeleteImageStickClearsImageListWidget` characterization test).
+
+### The second wave: dangling app-level globals (post-refactor safety sweep)
+
+A later, separate pass (unrelated to the six historical flags above, which
+were about live/scratch disambiguation) audited every remaining
+file-scope global in the project — mostly single-purpose booleans/state
+that only one class ever touched, left at file scope from before the
+class existed or as a habit. Two outcomes per global:
+
+- **Genuinely dead → deleted.** `change_type_flag` (never read anywhere),
+  `load_file` (write-only — set around `Animation::LoadAnimation()`, never
+  checked), `render_flag` (write-only — set around `ImageExport::run()`'s
+  render, never checked), `busy_play` (always exactly mirrored
+  `play != nullptr`; `Widget::on_PlayButton_clicked()` now checks `play`
+  directly instead of a redundant twin).
+- **Actually needed, but scoped wrong → folded into the one class that
+  reads it**, as a member instead of a free global:
+  - `clearing_animation` → private member of `Animation`.
+  - `play_back` → member of `MyView` (read throughout `MoveToFrame()`).
+  - `start_stick_figure_rotation`/`start_stick_figure_scale` → `static`
+    members of `StickFigure` (one rotate/scale gesture at a time exists
+    app-wide, hence `static` rather than per-instance).
+  - `onion_render` → `static` member of `StickGraphicsItem` (same
+    one-at-a-time reasoning; read by `paint()`).
+  - the `sliderFlags` struct → private member of `Widget`; the analogous
+    per-tab drag latches (`rect_w_slider_flag`, `taper_w_slider_flag`/
+    `taper_h_slider_flag`) → members of `AdvancedTab`/
+    `AdvancedTaperWidget` respectively (renamed to `snake_case` in the
+    move).
+  - `MySleeper`'s `pausePressed`/`intervalTime`/`previewGenerator` → members
+    (`pause_pressed`/`interval_time`/`preview_generator`).
+
+The re-scoping itself is behavior-preserving. The same pass also fixed a
+number of unrelated memory-safety issues found along the way (out-of-bounds
+reads on corrupt/malformed files, `nullptr` dereferences of
+`Frame::CurrentStick()`/`CurrentStickFigure()` reachable after an
+undo/redo restore, a stale `StickData*`→`QGraphicsItem*` cast in
+`MyView::ChangeTool()` left over from before the Phase 2c stick/view
+split, a thread-teardown race in the image-export/playback path) — see
+git history (`Full-project safety sweep...`) for the complete list rather
+than duplicating it here. If you go looking for one of the old flag names
+(e.g. a stale memory of `start_stick_figure_rotation` as a bare global)
+and don't find a file-scope declaration, check the owning class first —
+it's now a member, not gone.
 
 ## Command flow: how a UI edit reaches the data model and becomes undoable
 
@@ -188,11 +242,28 @@ was extracted from:
 - `FrameData` (`framedata.h/cpp`) — `stick_figures`, the flattened
   `total_sticks` z-order list, `frame_number`/`num_of_items`.
 
-Each `*Data` class has its own `QDataStream operator<<`/`operator>>`,
-**byte-compatible with the pre-refactor format** (existing `.mAnim`/`.stck`
-files still load), and a `Clone()` that deep-copies in memory with no
-stream involved. These operators have no flag guards — they read/write
-data and nothing else.
+Each `*Data` class has its own `QDataStream operator<<`/`operator>>` and a
+`Clone()` that deep-copies in memory with no stream involved. These
+operators have no flag guards — they read/write data and nothing else.
+**Not byte-compatible with the original pre-refactor format** — backward
+compatibility was explicitly waived when two format gaps were fixed:
+`StickFigureData` now also streams `current_stick`'s index (previously
+silently dropped on every save, so reloading/copying a figure always
+reset selection to its first stick), and every serialized integer field
+uses the fixed-width `qint32` instead of plain `int` (whose width is not
+guaranteed by the language), with `StickData::z` streamed as an explicit
+`double` regardless of whether `qreal` is built as `float` or `double`
+locally. Every remaining `int`/`>>`/`<<` pair in a `*Data` operator was
+audited for the same class of bug during that pass — if you add a new
+serialized field, use `qint32`/explicit `double`, not `int`/`qreal`.
+
+The `operator>>` side of all three classes is also hardened against
+corrupt/truncated files: `StickData::stick_img` indexing and
+`StickFigureData::parent_idx` are bounds-checked (an out-of-range index
+from a bad file used to read out of bounds or, for a parent-index cycle,
+loop forever appending children), and image loops bail out on
+`stream.status() != QDataStream::Ok` instead of continuing to allocate
+from data that isn't there.
 
 The live classes (`StickFigure`, `Frame`) keep thin `operator<<`/
 `operator>>` wrappers (used only by the single-`.stck`-file and whole-
@@ -249,7 +320,7 @@ need the historical uninitialized-`.scene` care; freeing one is a plain
 ## Tests
 
 `tests/tests.pro` is a standalone qmake QtTest project (characterization
-suite, REFACTOR_PLAN.md Phase 0, 24 tests as of Phase 2c). It links the
+suite, REFACTOR_PLAN.md Phase 0, 28 tests as of the safety-sweep pass). It links the
 model/undo/serialization sources directly and does NOT link
 `widget.cpp`/`mymainwindow.cpp` — the globals those files own are
 re-defined in `tests/test_globals.cpp`, and the fixture in
@@ -279,6 +350,14 @@ release/tst_characterization.exe
 - Frame/layer list widgets have no native "grow bottom-to-top" mode in Qt;
   a scroll-to-latest-change behavior was proposed as a pragmatic
   alternative but never implemented.
+- `Animation::current_frame` is never persisted — loading a `.mAnim` file
+  always lands on frame 0 regardless of which frame was current when it
+  was saved. Flagged during the serialization audit; whether load should
+  instead restore the saved current frame is an open design question, not
+  yet decided.
+- `StickFigure::SetStepChildAsMaster()` has an unused local (`oldParent`,
+  harmless compiler warning) left over from the safety-sweep pass —
+  cosmetic, not fixed since it wasn't part of that pass's actual findings.
 
 ## Tooling
 

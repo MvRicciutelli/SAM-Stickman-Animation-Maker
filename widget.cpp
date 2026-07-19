@@ -26,6 +26,8 @@
 #include <QMessageBox>
 #include <QtAlgorithms>
 #include <algorithm>
+#include <QHBoxLayout>
+#include <QVBoxLayout>
 #include "advancedtab.h"
 #include "advancedlinewidget.h"
 #include "advancedcirclewidget.h"
@@ -109,6 +111,10 @@ QCheckBox* hard_bottom_check;
 AdvancedTab* advanced_rect_tab;
 QTabWidget* my_tab_widget;
 QWidget * advanced_img_tab;
+QWidget * advanced_vertex_tab;
+QWidget * vertex_width_row;
+QSlider * vertex_width_slider;
+QSlider * vertex_curve_slider;
 AdvancedLineWidget *advanced_line_tab;
 AdvancedCircleWidget *advanced_circle_tab;
 AdvancedTaperWidget * advanced_taper_tab;
@@ -178,6 +184,90 @@ Widget::Widget(QWidget *parent)
     depth_slider = ui->depthSlider;
     img_list_widget = ui->imgListWidget;
     advanced_rect_tab = new AdvancedTab();
+
+    // ---- pannello "vertici" per POLYGON/MULTILINE (costruito in codice: due sole ----
+    // ---- righe slider, un .ui dedicato sarebbe stato più ingombrante del codice) ----
+    // Larghezza (solo MULTILINE, la riga si nasconde per i POLYGON) e curvatura degli
+    // spigoli (entrambi i tipi); agiscono sui vertici selezionati con Ctrl(+Shift).
+    advanced_vertex_tab = new QWidget();
+    {
+        QVBoxLayout *rows = new QVBoxLayout(advanced_vertex_tab);
+        vertex_width_row = new QWidget(advanced_vertex_tab);
+        QHBoxLayout *width_row_layout = new QHBoxLayout(vertex_width_row);
+        width_row_layout->setContentsMargins(0, 0, 0, 0);
+        width_row_layout->addWidget(new QLabel(tr("Vertex width"), vertex_width_row));
+        vertex_width_slider = new QSlider(Qt::Horizontal, vertex_width_row);
+        vertex_width_slider->setRange(0, W);
+        QSpinBox *width_spin = new QSpinBox(vertex_width_row);
+        width_spin->setRange(0, W);
+        width_row_layout->addWidget(vertex_width_slider, 1);
+        width_row_layout->addWidget(width_spin);
+        rows->addWidget(vertex_width_row);
+
+        QWidget *curve_row = new QWidget(advanced_vertex_tab);
+        QHBoxLayout *curve_row_layout = new QHBoxLayout(curve_row);
+        curve_row_layout->setContentsMargins(0, 0, 0, 0);
+        curve_row_layout->addWidget(new QLabel(tr("Corner curvature"), curve_row));
+        vertex_curve_slider = new QSlider(Qt::Horizontal, curve_row);
+        vertex_curve_slider->setRange(0, 100); // percento: 0 = spigolo vivo, 100 = curvatura 1.0
+        QSpinBox *curve_spin = new QSpinBox(curve_row);
+        curve_spin->setRange(0, 100);
+        curve_row_layout->addWidget(vertex_curve_slider, 1);
+        curve_row_layout->addWidget(curve_spin);
+        rows->addWidget(curve_row);
+        rows->addStretch(1);
+
+        // gli spinbox rispecchiano gli slider (stesso schema degli altri pannelli)
+        connect(width_spin, QOverload<int>::of(&QSpinBox::valueChanged),
+                vertex_width_slider, &QSlider::setValue);
+        connect(curve_spin, QOverload<int>::of(&QSpinBox::valueChanged),
+                vertex_curve_slider, &QSlider::setValue);
+        connect(vertex_width_slider, &QSlider::valueChanged, this, [this, width_spin](int value){
+            width_spin->setValue(value);
+            StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
+            if(cs == nullptr || cs->stick_type != StickData::MULTILINE
+                    || !cs->view || cs->view->selected_vertices.isEmpty())
+                return;
+            if(!sliderFlags.vertexWidth){ // un drag = un solo snapshot di undo
+                view->StoreUndo(CMD_SIMPLE);
+                sliderFlags.vertexWidth = true;
+            }
+            for(int idx : cs->view->selected_vertices){
+                if(idx >= 0 && idx < cs->vertex_widths.length())
+                    cs->vertex_widths[idx] = value;
+            }
+            view->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
+        });
+        connect(vertex_width_slider, &QSlider::sliderReleased, this, [this](){
+            sliderFlags.vertexWidth = false;
+            view->my_animation->current_frame->UpdateIcon();
+        });
+        connect(vertex_curve_slider, &QSlider::valueChanged, this, [this, curve_spin](int value){
+            curve_spin->setValue(value);
+            StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
+            if(cs == nullptr || !cs->view || cs->view->selected_vertices.isEmpty())
+                return;
+            if(cs->stick_type != StickData::POLYGON && cs->stick_type != StickData::MULTILINE)
+                return;
+            if(!sliderFlags.vertexCurve){
+                view->StoreUndo(CMD_SIMPLE);
+                sliderFlags.vertexCurve = true;
+            }
+            float curvature = qBound(0.0f, value / 100.0f, 1.0f);
+            for(int idx : cs->view->selected_vertices){
+                // la lista può essere più corta dei vertici (file importati): allungala
+                while(cs->vertex_curvatures.length() <= idx)
+                    cs->vertex_curvatures.append(0.0f);
+                if(idx >= 0)
+                    cs->vertex_curvatures[idx] = curvature;
+            }
+            view->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
+        });
+        connect(vertex_curve_slider, &QSlider::sliderReleased, this, [this](){
+            sliderFlags.vertexCurve = false;
+            view->my_animation->current_frame->UpdateIcon();
+        });
+    }
    // dbg_lbl = ui->debugLabel;
     CreatePaths();
     DetectLibraries();
@@ -206,6 +296,23 @@ Widget::Widget(QWidget *parent)
     view->my_animation->CurrentFrame()->CurrentStickFigure() = view->my_animation->CurrentFrame()->stick_figures[0];
     //inserisci il pannello nella finestra
     ui->viewLayout->addWidget(view);
+    // multi-selezione dalla lista layer: Ctrl/Shift-click sulle righe seleziona più
+    // figure insieme, esattamente come il rettangolo di selezione sulla tela
+    ui->stickLayerView->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    connect(ui->stickLayerView, &QListWidget::itemSelectionChanged, this, [this](){
+        if(view->multi_widget_sync)
+            return; // eco della sincronizzazione fatta da MyView, non input dell'utente
+        QList<QListWidgetItem*> rows = ui->stickLayerView->selectedItems();
+        if(rows.count() > 1){
+            QList<StickFigure*> figures;
+            for(QListWidgetItem *item : rows)
+                figures.append(qvariant_cast<StickFigure*>(item->data(Qt::UserRole)));
+            view->SetMultiSelectionList(figures);
+        }
+        else if(view->MultiSelectionActive()){
+            view->ClearMultiSelection(); // tornati a una riga sola: la multi decade
+        }
+    });
     //json read
     if(!QFile::exists(lib_folder.path()+"/defaultLib.marlib")){
         view->SaveLibrary(lib_folder.path()+"/defaultLib.marlib");
@@ -490,9 +597,14 @@ void Widget::on_stickLayerView_currentItemChanged(QListWidgetItem *current, QLis
 
 }
 
-/// @details Deletes the stickfigure layer currently selected in the layer list widget.
+/// @details Deletes the stickfigure layer currently selected in the layer list widget
+/// (or the whole multi-selection when one is active).
 void Widget::on_deleteStickFigureBtn_clicked()
 {
+    if(view->MultiSelectionActive()){
+        view->DeleteMultiSelection();
+        return;
+    }
     view->DeleteStickFigure();
 }
 
@@ -926,7 +1038,8 @@ void Widget::on_imgHOffsetSlider_valueChanged(int value)
     if(cs == nullptr)
         return;
     else{
-        if(cs->stick_type == StickData::IMAGE){
+        // il POLYGON riusa l'offset dell'immagine per traslare in blocco i suoi vertici
+        if(cs->stick_type == StickData::IMAGE || cs->stick_type == StickData::POLYGON){
             if(!sliderFlags.sliderHOffset){
                 view->StoreUndo(CMD_SIMPLE);
                 sliderFlags.sliderHOffset = true;
@@ -948,7 +1061,8 @@ void Widget::on_imgVOfsetSlider_valueChanged(int value)
     if(cs == nullptr)
         return;
     else{
-        if(cs->stick_type == StickData::IMAGE){
+        // vedi on_imgHOffsetSlider_valueChanged(): vale anche per i POLYGON
+        if(cs->stick_type == StickData::IMAGE || cs->stick_type == StickData::POLYGON){
             float val = 0;
             if(!sliderFlags.sliderVOffset){
                 view->StoreUndo(CMD_SIMPLE);
@@ -1011,7 +1125,8 @@ void Widget::on_imgRotationSlider_valueChanged(int value)
     if(cs == nullptr)
         return;
     else{
-        if(cs->stick_type == StickData::IMAGE){
+        // vedi on_imgHOffsetSlider_valueChanged(): il POLYGON ruota i vertici attorno a P1
+        if(cs->stick_type == StickData::IMAGE || cs->stick_type == StickData::POLYGON){
             if(!sliderFlags.sliderRot){
                 view->StoreUndo(CMD_SIMPLE);
                 sliderFlags.sliderRot = true;
@@ -1244,39 +1359,77 @@ void Widget::on_rotateSceneBtn_clicked()
     view->SetTool(ROTATESCENE);
 }
 
-/// @details Mirrors every stick in the current figure across its own horizontal axis by rotating each 180° minus twice its current angle.
+/// @details Flips one figure with the historical per-stick rotation trick (the fixed
+/// point is the figure's master origin); `horizontal` picks the mirror axis.
+static void FlipOneFigure(StickFigure *figure, bool horizontal)
+{
+    for(StickData* s:figure->stick_list){
+        if(s->view){
+            s->view->angle_buffer2 = s->my_line.angle();
+            s->view->Rotate(horizontal ? 2*(90-s->my_line.angle())
+                                       : (-2*s->my_line.angle()));
+        }
+    }
+}
+
+/// @details Mirrors every stick in the current figure across its own horizontal axis by
+/// rotating each 180° minus twice its current angle. With a multi-selection the flip
+/// pivots on the transform handle: each figure flips in place, then its anchor is
+/// mirrored across the handle's horizontal axis.
 void Widget::on_verticalFlipBtn_clicked()
 {
-    if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
-        for(StickData* s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
-            //s->my_line.setAngle(s->my_line.angle()+180);
-            if(s->view){
-                s->view->angle_buffer2 = s->my_line.angle();
-                s->view->Rotate((-2*s->my_line.angle()));
-            }
-            //s->Refresh(0);
+    if(view->MultiSelectionActive()){
+        view->StoreUndo();
+        QPointF center = view->multi_pivot; // il perno visibile della maniglia
+        for(StickFigure *S : view->multi_selection){
+            if(S->master_stick == nullptr || S->stick_list.isEmpty())
+                continue;
+            FlipOneFigure(S, false);
+            S->Traslate(0, 2*(center.y() - S->master_stick->my_line.p1().y()));
         }
+        view->UpdateMultiSelectionUI();
+        return;
+    }
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
+        view->StoreUndo(); // mancava: il flip era l'unica mutazione senza snapshot
+        FlipOneFigure(view->my_animation->CurrentFrame()->CurrentStickFigure(), false);
     }
 }
 
 /// @details Vertical-axis counterpart of on_verticalFlipBtn_clicked() — same rotation trick, mirrored the other way.
 void Widget::on_HorizontalFlipBtn_clicked()
 {
-    if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
-        for(StickData* s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
-            //s->my_line.setAngle(s->my_line.angle()+180);
-            if(s->view){
-                s->view->angle_buffer2 = s->my_line.angle();
-                s->view->Rotate(2*(90-s->my_line.angle()));
-            }
-            //s->Refresh(0);
+    if(view->MultiSelectionActive()){
+        view->StoreUndo();
+        QPointF center = view->multi_pivot; // il perno visibile della maniglia
+        for(StickFigure *S : view->multi_selection){
+            if(S->master_stick == nullptr || S->stick_list.isEmpty())
+                continue;
+            FlipOneFigure(S, true);
+            S->Traslate(2*(center.x() - S->master_stick->my_line.p1().x()), 0);
         }
+        view->UpdateMultiSelectionUI();
+        return;
+    }
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
+        view->StoreUndo(); // mancava, come nel flip verticale
+        FlipOneFigure(view->my_animation->CurrentFrame()->CurrentStickFigure(), true);
     }
 }
 
-/// @details Snapshots the current stickfigure into `view->copy_stick_figure_buffer` (replacing whatever was copied before) for on_pasteStickFigureBtn_clicked() to consume.
+/// @details Snapshots the current stickfigure into `view->copy_stick_figure_buffer` (replacing whatever was copied before) for on_pasteStickFigureBtn_clicked() to consume. With a multi-selection active, every selected figure is snapshotted into `view->multi_copy_buffer` instead.
 void Widget::on_copyStickFigureBtn_clicked()
 {
+    // la copia più recente vince: copiare svuota SEMPRE l'altro buffer
+    qDeleteAll(view->multi_copy_buffer);
+    view->multi_copy_buffer.clear();
+    if(view->MultiSelectionActive()){
+        for(StickFigure *S : view->multi_selection){
+            if(!S->stick_list.isEmpty())
+                view->multi_copy_buffer.append(ExtractStickFigureData(*S));
+        }
+        return;
+    }
     if(view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
         // il buffer è puro dato (Phase 2b): liberarlo e riestrarlo è tutto qui,
         // niente copyFlag e niente pulizia manuale degli stick
@@ -1285,9 +1438,25 @@ void Widget::on_copyStickFigureBtn_clicked()
     }
 }
 
-/// @details Adds a new layer populated from the copy buffer (PopulateLiveStickFigure()); refuses with an error dialog if nothing has been copied yet this session.
+/// @details Adds a new layer populated from the copy buffer (PopulateLiveStickFigure()); refuses with an error dialog if nothing has been copied yet this session. A multi-selection copy pastes one new layer per copied figure and selects the pasted set.
 void Widget::on_pasteStickFigureBtn_clicked()
 {
+   if(!view->multi_copy_buffer.isEmpty()){
+       view->StoreUndo(CMD_SIMPLE);
+       QList<StickFigure*> pasted;
+       for(StickFigureData *data : view->multi_copy_buffer){
+           StickFigure* added = AddStick();
+           PopulateLiveStickFigure(added,*data,true,true);
+           added->Refresh(0);
+           for(StickData*s:added->stick_list){
+               view->my_animation->CurrentFrame()->total_sticks.append(s);
+           }
+           view->AddHandles(added);
+           pasted.append(added);
+       }
+       view->SetMultiSelectionList(pasted); // le figure incollate diventano la selezione
+       return;
+   }
    if(view->copy_stick_figure_buffer != nullptr){
        view->StoreUndo(CMD_SIMPLE);
        StickFigure* added =AddStick();
@@ -1823,3 +1992,15 @@ void Widget::on_clampToolBtn_clicked()
 {
     view->SetTool(CLAMP);
 }
+///@brief switches to the polygon drawing tool
+void Widget::on_addPolyBtn_clicked()
+{
+    view->SetTool(DRAWPOLY);
+}
+
+///@brief switches to the multi-line drawing tool
+void Widget::on_multiLineBtn_clicked()
+{
+    view->SetTool(DRAWMULTI);
+}
+

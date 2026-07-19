@@ -1,5 +1,6 @@
 #include "myview.h"
 #include <QtAlgorithms>
+#include <algorithm>
 #include <math.h>
 #include <QDebug>
 #include <QGraphicsRotation>
@@ -44,6 +45,7 @@ extern QImage * image_draw_buffer ;
 extern QString animation_path;
 extern int auto_save_interval;
 extern int op_count;
+extern int handle_size;
 
 #define MAXUNDO 50 ///< cap on undo_stack depth, enforced via QUndoStack::setUndoLimit()
 
@@ -99,6 +101,7 @@ MyView::~MyView()
     }
     delete my_animation;
     delete copy_stick_figure_buffer;
+    qDeleteAll(multi_copy_buffer); // buffer copia della selezione multipla: puro dato
     // creato nel costruttore, quindi liberato qui: senza questo la libreria corrente
     // resta allocata fino alla fine del processo
     delete stick_library_buffer;
@@ -180,6 +183,30 @@ void MyView::MoveStickFigureZ(int increment, int mode)
 {
     if(my_stick_figure_widget_list->count() <= 1 )
         return;
+    // selezione multipla: applica lo spostamento a ogni figura selezionata, in un
+    // ordine che preserva le posizioni relative (senza scavalcamenti tra selezionati)
+    static bool multi_reentry = false; // una sola gesture alla volta esiste, come gli altri latch statici
+    if(MultiSelectionActive() && !multi_reentry){
+        multi_reentry = true;
+        QList<StickFigure*> ordered = multi_selection;
+        std::sort(ordered.begin(), ordered.end(), [this](StickFigure *a, StickFigure *b){
+            return my_stick_figure_widget_list->row(a->linked_item)
+                 < my_stick_figure_widget_list->row(b->linked_item);
+        });
+        // UP e BOTTOM processano dall'alto; DOWN e TOP dal basso (vedi sopra)
+        if(mode == MODE_DOWN || mode == MODE_TOP)
+            std::reverse(ordered.begin(), ordered.end());
+        for(StickFigure *S : ordered){
+            if(!my_animation->current_frame->stick_figures.contains(S) || !S->linked_item)
+                continue;
+            my_stick_figure_widget_list->setCurrentRow(my_stick_figure_widget_list->row(S->linked_item));
+            my_animation->UpdateSelection(S);
+            MoveStickFigureZ(increment, mode);
+        }
+        multi_reentry = false;
+        UpdateMultiSelectionUI(); // ripristina le righe selezionate nella lista layer
+        return;
+    }
     int current_index = my_stick_figure_widget_list->currentRow();
     if(current_index < 0) // nessuna riga selezionata: item(new_idx) sotto tornerebbe nullptr
         return;
@@ -276,6 +303,79 @@ void MyView::mousePressEvent(QMouseEvent *event)
             case CLAMP:
             case NOTOOL:
             {
+                // Ctrl: selezione dei vertici di un poligono (Shift = multi-selezione,
+                // il trascinamento successivo sposta tutti i vertici selezionati)
+                if(event->modifiers() & Qt::ControlModifier){
+                    int vertex_idx = -1;
+                    StickData *hit = FindPolygonVertex(coord, &vertex_idx);
+                    if(hit != nullptr){
+                        if(event->modifiers() & Qt::ShiftModifier){
+                            // Shift: aggiungi/togli il vertice dalla selezione
+                            if(hit->view->selected_vertices.contains(vertex_idx))
+                                hit->view->selected_vertices.remove(vertex_idx);
+                            else
+                                hit->view->selected_vertices.insert(vertex_idx);
+                        }
+                        else if(!hit->view->selected_vertices.contains(vertex_idx)){
+                            // click su un vertice non selezionato: selezione singola
+                            DeselectAllVertices();
+                            hit->view->selected_vertices.insert(vertex_idx);
+                        }
+                        // (click senza Shift su un vertice già selezionato: la selezione
+                        // resta com'è, così si può trascinare una multi-selezione)
+                        my_animation->UpdateSelection(hit);
+                        StoreUndo(); // il drag che può seguire è un'unica modifica
+                        poly_vertex_drag = true;
+                        hit->view->Refresh(0);
+                    }
+                    else{
+                        DeselectAllVertices(); // Ctrl+click a vuoto: deseleziona tutto
+                    }
+                    break;
+                }
+                DeselectAllVertices(); // click normale altrove: la selezione vertici decade
+                // ---- multi-selezione di stickfigure ----
+                {
+                    // click (senza modificatori) sulla maniglia: trascina il PERNO delle
+                    // trasformazioni, non la selezione
+                    if(MultiSelectionActive() && event->modifiers() == Qt::NoModifier
+                            && QLineF(coord, multi_pivot).length() <= handle_size * 1.5f){
+                        pivot_dragging = true;
+                        break;
+                    }
+                    StickFigure *hit_figure = FigureAtPoint(coord);
+                    if((event->modifiers() & Qt::ShiftModifier) && hit_figure != nullptr){
+                        AddToMultiSelection(hit_figure); // Shift+click: aggiungi alla selezione
+                        break;
+                    }
+                    if((event->modifiers() & Qt::AltModifier) && hit_figure != nullptr
+                            && multi_selection.contains(hit_figure)){
+                        RemoveFromMultiSelection(hit_figure); // Alt+click: togli dalla selezione
+                        break;
+                    }
+                    if(hit_figure == nullptr){
+                        // click sulla tela vuota: la selezione multipla decade e parte
+                        // il rettangolo di selezione (bordo sottile tratteggiato)
+                        ClearMultiSelection();
+                        selection_band = new QGraphicsRectItem(QRectF(coord, coord));
+                        QPen band_pen(QColor(200, 200, 200), 0);
+                        band_pen.setStyle(Qt::DotLine);
+                        selection_band->setPen(band_pen);
+                        selection_band->setBrush(Qt::NoBrush);
+                        selection_band->setZValue(199);
+                        scene()->addItem(selection_band);
+                        band_dragging = true;
+                        break;
+                    }
+                    if(MultiSelectionActive() && multi_selection.contains(hit_figure)){
+                        // trascinare una figura selezionata sposta TUTTA la selezione
+                        StoreUndo();
+                        multi_dragging = true;
+                        break;
+                    }
+                    if(MultiSelectionActive())
+                        ClearMultiSelection(); // click su una figura fuori dalla selezione
+                }
                 StoreUndo();
                 ArrowSelection();
                 StickFigure::start_stick_figure_rotation = true;
@@ -302,6 +402,21 @@ void MyView::mousePressEvent(QMouseEvent *event)
             {
                 StoreUndo();
                 StickFigure::start_stick_figure_rotation = true;
+                if(MultiSelectionActive()){
+                    // rotazione della selezione multipla attorno alla maniglia: stessi
+                    // buffer del tool ROTATESCENE, ma centro = PERNO (la posizione
+                    // visibile della maniglia, eventualmente spostata dall'utente)
+                    multi_center_buffer = multi_pivot;
+                    for(StickFigure *S : multi_selection){
+                        if(S->master_stick && S->stick_list.count() > 0){
+                            S->origin_pos_buffer = S->master_stick->my_line.p1();
+                            for(StickData *s : S->stick_list){
+                                if(s->view) s->view->angle_buffer2 = s->my_line.angle();
+                            }
+                        }
+                    }
+                    break;
+                }
                 if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){ // vedi il caso NOTOOL
                     for(StickData*s:my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
                         if(s->view) s->view->angle_buffer2 = s->my_line.angle();
@@ -313,6 +428,23 @@ void MyView::mousePressEvent(QMouseEvent *event)
             {
                 StoreUndo();
                 StickFigure::start_stick_figure_scale = true;
+                if(MultiSelectionActive()){
+                    // scala della selezione multipla attorno alla maniglia (vedi
+                    // SCALESCENE); centro = PERNO visibile, non il baricentro ricalcolato
+                    multi_center_buffer = multi_pivot;
+                    for(StickFigure *S : multi_selection){
+                        if(S->master_stick && S->stick_list.count() > 0){
+                            S->origin_pos_buffer = S->master_stick->my_line.p1();
+                            for(StickData *s : S->stick_list){
+                                if(s->view){
+                                    s->view->scale_buffer = s->my_line.length();
+                                    s->view->width_buffer = s->pen.width();
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
                 if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){ // vedi il caso NOTOOL
                     for(StickData*s:my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
                         if(s->view){
@@ -405,6 +537,130 @@ void MyView::mousePressEvent(QMouseEvent *event)
 
                 break;
             }
+            case(DRAWPOLY):
+            {
+                StickFigure *fig = my_animation->current_frame->stick_figures.isEmpty()
+                        ? nullptr : my_animation->CurrentFrame()->CurrentStickFigure();
+                float radius = PolyPickRadius();
+                // secondo click della base: chiudi la linea e apri la sessione di vertici
+                if(fig != nullptr && fig->draw_count == 1){
+                    DrawCmd(&coord,(int)tool);
+                    poly_session_active = true;
+                    poly_session_extends = false;
+                    break;
+                }
+                StickData *session = PolySessionStick(StickData::POLYGON);
+                if(poly_session_active && session != nullptr){
+                    // Alt: cancella il vertice cliccato invece di aggiungerne uno
+                    if(event->modifiers() & Qt::AltModifier){
+                        float dist = 0;
+                        int vertex_idx = session->view->SelectPolygonPoint(coord, &dist);
+                        if(vertex_idx >= 0 && dist <= radius){
+                            StoreUndo();
+                            session->view->DeletePolygonPoint(vertex_idx);
+                        }
+                        break;
+                    }
+                    // click sul punto iniziale della base = chiusura del poligono
+                    if(QLineF(coord, session->my_line.p1()).length() <= radius){
+                        FinishPolygonSession();
+                        break;
+                    }
+                    StoreUndo(); // granularità per-vertice: ogni click si annulla da solo
+                    int insert_idx = poly_session_extends
+                            ? session->view->NearestEdgeInsertIndex(coord)
+                            : session->polygon_points.length();
+                    session->view->ClearPolygonPreview();
+                    session->view->AddPolygonPoint(coord, insert_idx);
+                    break;
+                }
+                poly_session_active = false; // sessione orfana (undo/cambio frame): riparti pulito
+                // vertice esistente: Alt = cancella, altrimenti inizia il trascinamento
+                int vertex_idx = -1;
+                StickData *hit = FindPolygonVertex(coord, &vertex_idx, StickData::POLYGON);
+                if(hit != nullptr){
+                    StoreUndo();
+                    my_animation->UpdateSelection(hit);
+                    if(event->modifiers() & Qt::AltModifier)
+                        hit->view->DeletePolygonPoint(vertex_idx);
+                    else
+                        poly_drag_idx = vertex_idx;
+                    break;
+                }
+                if(event->modifiers() & Qt::ControlModifier)
+                    break; // Ctrl: il tool può solo spostare vertici esistenti
+                // click sul bordo di un poligono esistente: inserisci lì e apri la sessione
+                int insert_idx = -1;
+                StickData *edge_hit = FindPolygonEdge(coord, &insert_idx, StickData::POLYGON);
+                if(edge_hit != nullptr){
+                    StoreUndo();
+                    my_animation->UpdateSelection(edge_hit);
+                    edge_hit->view->AddPolygonPoint(coord, insert_idx);
+                    poly_session_active = true;
+                    poly_session_extends = true;
+                    break;
+                }
+                // altrimenti: primo click di un nuovo poligono
+                DrawCmd(&coord,(int)tool);
+                break;
+            }
+            case(DRAWMULTI):
+            {
+                StickFigure *fig = my_animation->current_frame->stick_figures.isEmpty()
+                        ? nullptr : my_animation->CurrentFrame()->CurrentStickFigure();
+                float radius = PolyPickRadius();
+                // secondo click: chiude la base (2 vertici) e apre la sessione di estensione
+                if(fig != nullptr && fig->draw_count == 1){
+                    DrawCmd(&coord,(int)tool);
+                    poly_session_active = true;
+                    poly_session_extends = false;
+                    break;
+                }
+                StickData *session = PolySessionStick(StickData::MULTILINE);
+                if(poly_session_active && session != nullptr){
+                    session->view->ClearPolygonPreview();
+                    StoreUndo(); // granularità per-vertice, come per il poligono
+                    session->view->AppendMultilineVertex(coord);
+                    break;
+                }
+                poly_session_active = false; // sessione orfana: riparti pulito
+                // vertice esistente: Alt = cancella (sotto i 2 vertici sparisce lo stick
+                // intero), altrimenti trascina
+                int vertex_idx = -1;
+                StickData *hit = FindPolygonVertex(coord, &vertex_idx, StickData::MULTILINE);
+                if(hit != nullptr){
+                    StoreUndo();
+                    my_animation->UpdateSelection(hit);
+                    if(event->modifiers() & Qt::AltModifier){
+                        if(hit->view->SceneVertices().length() <= 2)
+                            DeleteWholeStick(hit); // resterebbe 1 vertice: via tutto lo stick
+                        else
+                            hit->view->DeletePolygonPoint(vertex_idx);
+                    }
+                    else{
+                        poly_drag_idx = vertex_idx;
+                    }
+                    break;
+                }
+                // vicino a un segmento esistente (o con Ctrl): nuovo punto al CENTRO del
+                // segmento più vicino, poi il drag lo posiziona
+                int insert_idx = -1;
+                StickData *edge_hit = FindPolygonEdge(coord, &insert_idx, StickData::MULTILINE);
+                if(edge_hit != nullptr){
+                    StoreUndo();
+                    my_animation->UpdateSelection(edge_hit);
+                    QPolygonF verts = edge_hit->view->SceneVertices();
+                    QPointF mid = (verts[insert_idx - 1] + verts[insert_idx % verts.length()]) / 2.0;
+                    edge_hit->view->AddPolygonPoint(mid, insert_idx);
+                    poly_drag_idx = insert_idx; // il trascinamento aggiusta subito la posizione
+                    break;
+                }
+                if(event->modifiers() & Qt::ControlModifier)
+                    break; // Ctrl: solo editing di multilinee esistenti, niente nuovo disegno
+                // altrimenti: primo click di una nuova multilinea
+                DrawCmd(&coord,(int)tool);
+                break;
+            }
     }
     }
     //QGraphicsView::mousePressEvent(event);
@@ -424,6 +680,11 @@ void MyView::keyPressEvent(QKeyEvent *event)
         case(Qt::Key_Cancel):
         case(Qt::Key_Delete):
         {
+            // con una selezione multipla il tasto Canc elimina tutte le figure selezionate
+            if(MultiSelectionActive()){
+                DeleteMultiSelection();
+                break;
+            }
             if(scene()->selectedItems().count() == 1 && my_animation->CurrentFrame()->CurrentStickFigure() != nullptr
                     && my_animation->CurrentFrame()->CurrentStickFigure()->draw_count==0)
             {
@@ -473,6 +734,10 @@ void MyView::keyPressEvent(QKeyEvent *event)
         }
         case(Qt::Key_Escape):
         {
+            if(MultiSelectionActive()){
+                ClearMultiSelection(); // Esc scioglie la selezione multipla (spec)
+                break;
+            }
             switch(tool)
             {
                 case(DRAW):
@@ -485,12 +750,95 @@ void MyView::keyPressEvent(QKeyEvent *event)
                     }
                     break;
                 }
+                case(DRAWPOLY):
+                {
+                    // prima del secondo click della base Esc annulla come per gli altri
+                    // DRAW*; a base completata termina soltanto la sessione di vertici
+                    if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr &&
+                            my_animation->CurrentFrame()->CurrentStickFigure()->draw_count==1)
+                    {
+                        my_animation->CurrentFrame()->CurrentStickFigure()->CancelDrawing();
+                        poly_session_active = false;
+                    }
+                    else if(poly_session_active)
+                    {
+                        FinishPolygonSession();
+                    }
+                    break;
+                }
+                case(DRAWMULTI):
+                {
+                    // per la multilinea Esc ANNULLA il disegno (spec): la base a metà si
+                    // scarta come per i DRAW*, uno stick già committato viene eliminato
+                    if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr &&
+                            my_animation->CurrentFrame()->CurrentStickFigure()->draw_count==1)
+                    {
+                        my_animation->CurrentFrame()->CurrentStickFigure()->CancelDrawing();
+                        poly_session_active = false;
+                    }
+                    else if(poly_session_active)
+                    {
+                        StickData *session = PolySessionStick(StickData::MULTILINE);
+                        FinishPolygonSession();
+                        if(session != nullptr){
+                            StoreUndo();
+                            DeleteWholeStick(session);
+                        }
+                    }
+                    break;
+                }
             }
+            break;
+        }
+        case(Qt::Key_Return):
+        case(Qt::Key_Enter):
+        {
+            if((tool == DRAWPOLY || tool == DRAWMULTI) && poly_session_active)
+                FinishPolygonSession();
+            break;
+        }
+        case(Qt::Key_Space):
+        {
+            // Spazio tenuto premuto: la maniglia della multi-selezione entra in
+            // anteprima e segue il cursore; il perno si sposta al rilascio del tasto
+            if(MultiSelectionActive() && !event->isAutoRepeat())
+                pivot_previewing = true;
             break;
         }
     }
 
     QGraphicsView::keyPressEvent(event);
+}
+
+/**
+ * @details Only job: releasing Space commits the previewed transform-handle position —
+ * the pivot lands on the current mouse coordinate (spec).
+ */
+void MyView::keyReleaseEvent(QKeyEvent *event)
+{
+    if(event->key() == Qt::Key_Space && !event->isAutoRepeat() && pivot_previewing){
+        pivot_previewing = false;
+        if(MultiSelectionActive()){
+            multi_pivot = coord; // `coord` è aggiornata da ogni mouseMoveEvent
+            UpdateMultiSelectionUI();
+        }
+    }
+    QGraphicsView::keyReleaseEvent(event);
+}
+
+/**
+ * @details Only job: a double click ends a DRAWPOLY/DRAWMULTI vertex session. The
+ * first press of the pair has already been delivered to mousePressEvent() and has
+ * placed the final vertex, so closing the session is all that's left to do.
+ */
+void MyView::mouseDoubleClickEvent(QMouseEvent *event)
+{
+    if(event->button() == Qt::LeftButton && (tool == DRAWPOLY || tool == DRAWMULTI)
+            && poly_session_active){
+        FinishPolygonSession();
+        return;
+    }
+    QGraphicsView::mouseDoubleClickEvent(event);
 }
 /**
  * @details Picking routine behind the NOTOOL/CLAMP/ELONGATE/MANIPULATE tools: asks the
@@ -570,6 +918,15 @@ void MyView::DrawCmd(QPointF* point, int mode)
                 new_stick->view->AddImage(img, image_name_buffer);
 
             }
+            else if(mode == DRAWPOLY){
+                new_stick->stick_type = StickData::POLYGON;
+            }
+            else if(mode == DRAWMULTI){
+                new_stick->stick_type = StickData::MULTILINE;
+                // larghezza/curvatura per i due estremi iniziali (indici virtuali 0 e 1)
+                new_stick->vertex_widths << my_pen.widthF() << my_pen.widthF();
+                new_stick->vertex_curvatures << 0.0f << 0.0f;
+            }
 
            qDebug("Draw 1 = %f, %f",point->x(),point->y());
         }
@@ -601,6 +958,360 @@ void MyView::DrawCmd(QPointF* point, int mode)
 
 
 }
+/// @details Shared predicate: the two stick types whose vertices the polygon/multiline
+/// tools and the Ctrl selection of NOTOOL can edit.
+static bool IsVertexStick(const StickData *s)
+{
+    return s->stick_type == StickData::POLYGON || s->stick_type == StickData::MULTILINE;
+}
+
+/**
+ * @details The DRAWPOLY/DRAWMULTI session target is deliberately never stored as a
+ * pointer: an undo, frame switch or delete mid-session would leave it dangling.
+ * CurrentStick() is already kept valid by those paths, so re-deriving it (with a
+ * type/view check) each time is both simpler and safe.
+ */
+StickData *MyView::PolySessionStick(qint32 wanted_type)
+{
+    if(my_animation->current_frame->stick_figures.isEmpty())
+        return nullptr;
+    StickData *cs = my_animation->CurrentFrame()->CurrentStick();
+    if(cs != nullptr && cs->stick_type == wanted_type && cs->view)
+        return cs;
+    return nullptr;
+}
+
+/**
+ * @details Replicates the single-stick half of the Delete-key handler (keyPressEvent):
+ * StickFigure::DeleteStick() plus pruning the removed sticks from total_sticks and
+ * refreshing the icons. Used where the code, not the user, decides a stick must go:
+ * DRAWMULTI's Esc-cancel and the "one vertex left" deletion rule. The caller has
+ * already taken the undo snapshot.
+ */
+void MyView::DeleteWholeStick(StickData *stick)
+{
+    StickFigure *fig = my_animation->CurrentFrame()->CurrentStickFigure();
+    if(fig == nullptr)
+        return;
+    int idx = fig->stick_list.indexOf(stick);
+    if(idx < 0)
+        return;
+    QList<StickData*> old_stick_list = fig->stick_list;
+    fig->DeleteStick(idx);
+    for(StickData *s : old_stick_list){
+        if(!fig->stick_list.contains(s))
+            my_animation->CurrentFrame()->total_sticks.removeAll(s);
+    }
+    my_animation->CurrentFrame()->num_of_items = my_animation->CurrentFrame()->total_sticks.length();
+    my_animation->CurrentFrame()->CurrentStick() = fig->stick_list.isEmpty() ? nullptr
+                                                                             : fig->master_stick;
+    fig->UpdateIcon();
+    if(fig->linked_item)
+        fig->linked_item->setIcon(*fig->stick_figure_icon);
+    my_animation->current_frame->UpdateIcon();
+}
+
+/**
+ * @details handle_size è in pixel di schermo: convertito in unità di scena il raggio
+ * di aggancio di vertici e spigoli resta percettivamente costante a ogni zoom.
+ */
+float MyView::PolyPickRadius()
+{
+    return QLineF(mapToScene(QPoint(0,0)), mapToScene(QPoint(handle_size,0))).length();
+}
+
+/**
+ * @details Ends the point-adding session (Enter/Esc/double click/close-click/tool
+ * change all route here). Clears the flags and every polygon's next-vertex preview in
+ * the frame — the preview is view-only state, so nothing here touches the model.
+ */
+void MyView::FinishPolygonSession()
+{
+    poly_session_active = false;
+    poly_session_extends = false;
+    // il null-check serve: ChangeTool() chiama qui a ogni SetTool(), anche prima che
+    // esista il primo frame (fixture dei test / avvio)
+    if(my_animation->current_frame == nullptr || my_animation->current_frame->stick_figures.isEmpty())
+        return;
+    for(StickData *s : my_animation->CurrentFrame()->total_sticks){
+        if(IsVertexStick(s) && s->view)
+            s->view->ClearPolygonPreview();
+    }
+}
+
+/**
+ * @details Clicking anywhere without Ctrl, or leaving the tool, drops the whole vertex
+ * multi-selection (per spec). Iterates the frame instead of remembering which sticks
+ * held a selection, for the same no-stored-pointer reason as PolySessionStick().
+ */
+void MyView::DeselectAllVertices()
+{
+    // vedi FinishPolygonSession() per il null-check su current_frame
+    if(my_animation->current_frame == nullptr || my_animation->current_frame->stick_figures.isEmpty())
+        return;
+    for(StickData *s : my_animation->CurrentFrame()->total_sticks){
+        if(IsVertexStick(s) && s->view && !s->view->selected_vertices.isEmpty()){
+            s->view->selected_vertices.clear();
+            s->view->Refresh(0);
+        }
+    }
+}
+
+/**
+ * @details Scans every polygon in the frame and keeps the vertex nearest to the click,
+ * accepting it only within PolyPickRadius() — the "on top or very nearby" of the spec.
+ */
+StickData *MyView::FindPolygonVertex(const QPointF &scene_pos, int *vertex_idx, qint32 type_filter)
+{
+    *vertex_idx = -1;
+    if(my_animation->current_frame->stick_figures.isEmpty())
+        return nullptr;
+    float radius = PolyPickRadius();
+    StickData *best = nullptr;
+    float best_dist = 0;
+    for(StickData *s : my_animation->CurrentFrame()->total_sticks){
+        if(!IsVertexStick(s) || !s->view || (type_filter >= 0 && s->stick_type != type_filter))
+            continue;
+        float dist = 0;
+        int idx = s->view->SelectPolygonPoint(scene_pos, &dist);
+        if(idx >= 0 && dist <= radius && (best == nullptr || dist < best_dist)){
+            best = s;
+            best_dist = dist;
+            *vertex_idx = idx;
+        }
+    }
+    return best;
+}
+
+/**
+ * @details Edge-proximity counterpart of FindPolygonVertex(): identifies the polygon
+ * a DRAWPOLY click wants to extend, and where the new vertex slots in on that edge.
+ */
+StickData *MyView::FindPolygonEdge(const QPointF &scene_pos, int *insert_idx, qint32 type_filter)
+{
+    *insert_idx = -1;
+    if(my_animation->current_frame->stick_figures.isEmpty())
+        return nullptr;
+    float radius = PolyPickRadius();
+    StickData *best = nullptr;
+    float best_dist = 0;
+    for(StickData *s : my_animation->CurrentFrame()->total_sticks){
+        if(!IsVertexStick(s) || !s->view || (type_filter >= 0 && s->stick_type != type_filter)
+                || s->view->SceneVertices().length() < 2)
+            continue;
+        float dist = 0;
+        int idx = s->view->NearestEdgeInsertIndex(scene_pos, &dist);
+        if(idx >= 0 && dist <= radius && (best == nullptr || dist < best_dist)){
+            best = s;
+            best_dist = dist;
+            *insert_idx = idx;
+        }
+    }
+    return best;
+}
+
+// ------------------------------------------------ multi-selezione di stickfigure ----
+
+/**
+ * @details Segment-distance hit test (the same metric the pick tools use), against
+ * every stick of the frame: the click is "on" a figure if it falls within the stick's
+ * half pen width or the zoom-aware pick radius, whichever is larger. Returns nullptr
+ * for a genuinely empty spot — the "click on the empty canvas" of the spec.
+ */
+StickFigure *MyView::FigureAtPoint(const QPointF &scene_pos)
+{
+    if(my_animation->current_frame == nullptr || my_animation->current_frame->stick_figures.isEmpty())
+        return nullptr;
+    float radius = PolyPickRadius();
+    for(StickFigure *S : my_animation->current_frame->stick_figures){
+        for(StickData *s : S->stick_list){
+            QPointF a = s->my_line.p1(), b = s->my_line.p2();
+            QPointF ab = b - a;
+            float len2 = ab.x()*ab.x() + ab.y()*ab.y();
+            float u = (len2 < 1e-9f) ? 0.0f
+                    : qBound(0.0f, float(((scene_pos.x()-a.x())*ab.x() + (scene_pos.y()-a.y())*ab.y()) / len2), 1.0f);
+            float dist = QLineF(scene_pos, a + u*ab).length();
+            if(dist <= qMax(radius, float(s->pen.widthF()/2.0)))
+                return S;
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * @details Single place every selection change funnels through: highlights the
+ * selected figures, keeps the layer-list rows in sync (guarded against signal
+ * feedback), and creates/moves/destroys the transform handle — the thin light-blue
+ * circle at the selection center every transformation pivots on.
+ */
+void MyView::UpdateMultiSelectionUI(bool recenter_pivot)
+{
+    if(!MultiSelectionActive()){
+        ClearMultiSelection();
+        return;
+    }
+    if(recenter_pivot)
+        multi_pivot = MultiSelectionCenter(); // la selezione è cambiata: perno al baricentro
+    for(StickFigure *S : my_animation->current_frame->stick_figures)
+        S->Highlight(multi_selection.contains(S));
+    // righe della lista layer allineate alla selezione (senza rientrare da segnali)
+    multi_widget_sync = true;
+    my_stick_figure_widget_list->clearSelection();
+    for(StickFigure *S : multi_selection){
+        if(S->linked_item)
+            S->linked_item->setSelected(true);
+    }
+    multi_widget_sync = false;
+    // maniglia di trasformazione: cerchio sottile, riempimento trasparente, bordo
+    // azzurro, disegnata SUL PERNO (che l'utente può spostare: è l'origine di ogni
+    // trasformazione, non un semplice indicatore)
+    float r = handle_size * 1.5f;
+    if(multi_handle == nullptr){
+        multi_handle = new QGraphicsEllipseItem();
+        multi_handle->setPen(QPen(QColor(0x7f, 0xc4, 0xff), 1));
+        multi_handle->setBrush(Qt::NoBrush);
+        multi_handle->setZValue(200);
+        scene()->addItem(multi_handle);
+    }
+    multi_handle->setRect(multi_pivot.x() - r, multi_pivot.y() - r, 2*r, 2*r);
+}
+
+void MyView::SetMultiSelectionList(const QList<StickFigure*> &figures)
+{
+    multi_selection = figures;
+    if(multi_selection.count() > 1 && my_animation->current_frame->stick_figures.contains(multi_selection.first()))
+        my_animation->UpdateSelection(multi_selection.first());
+    UpdateMultiSelectionUI(true);
+}
+
+/**
+ * @details Shift+click: the first addition seeds the set with the current figure, so
+ * "current + clicked" become the initial pair.
+ */
+void MyView::AddToMultiSelection(StickFigure *figure)
+{
+    if(figure == nullptr)
+        return;
+    if(multi_selection.isEmpty() && my_animation->CurrentFrame()->CurrentStickFigure() != nullptr
+            && my_animation->CurrentFrame()->CurrentStickFigure() != figure)
+        multi_selection.append(my_animation->CurrentFrame()->CurrentStickFigure());
+    if(!multi_selection.contains(figure))
+        multi_selection.append(figure);
+    UpdateMultiSelectionUI(true);
+}
+
+void MyView::RemoveFromMultiSelection(StickFigure *figure)
+{
+    multi_selection.removeAll(figure);
+    UpdateMultiSelectionUI(true); // sotto i 2 selezionati la UI azzera tutto da sé
+}
+
+void MyView::ClearMultiSelection()
+{
+    bool had_selection = !multi_selection.isEmpty();
+    for(StickFigure *S : multi_selection){
+        // le figure possono essere già morte (undo/cambio frame): tocca solo le vive
+        if(my_animation->current_frame != nullptr
+                && my_animation->current_frame->stick_figures.contains(S)
+                && S != my_animation->CurrentFrame()->CurrentStickFigure())
+            S->Highlight(false);
+    }
+    multi_selection.clear();
+    // riallinea la lista layer alla selezione singola: senza questo le righe restavano
+    // multi-selezionate e la selezione sembrava non essersi rotta
+    if(had_selection && my_animation->current_frame != nullptr){
+        multi_widget_sync = true;
+        my_stick_figure_widget_list->clearSelection();
+        StickFigure *current = my_animation->CurrentFrame()->CurrentStickFigure();
+        if(current != nullptr && current->linked_item){
+            current->linked_item->setSelected(true);
+            my_stick_figure_widget_list->setCurrentRow(my_stick_figure_widget_list->row(current->linked_item));
+        }
+        multi_widget_sync = false;
+    }
+    if(multi_handle != nullptr){
+        scene()->removeItem(multi_handle);
+        delete multi_handle;
+        multi_handle = nullptr;
+    }
+    if(selection_band != nullptr){
+        scene()->removeItem(selection_band);
+        delete selection_band;
+        selection_band = nullptr;
+    }
+    band_dragging = false;
+    multi_dragging = false;
+    pivot_dragging = false;
+    pivot_previewing = false;
+}
+
+/**
+ * @details Mean of every selected stick's endpoints — cheap, stable while dragging,
+ * and matching the intuitive "center of what I selected".
+ */
+QPointF MyView::MultiSelectionCenter() const
+{
+    QPointF sum(0, 0);
+    int count = 0;
+    for(StickFigure *S : multi_selection){
+        for(StickData *s : S->stick_list){
+            sum += s->my_line.p1() + s->my_line.p2();
+            count += 2;
+        }
+    }
+    return count > 0 ? sum / count : QPointF(0, 0);
+}
+
+QList<int> MyView::MultiSelectionIndices() const
+{
+    QList<int> indices;
+    if(my_animation->current_frame == nullptr)
+        return indices;
+    for(StickFigure *S : multi_selection){
+        int idx = my_animation->current_frame->stick_figures.indexOf(S);
+        if(idx >= 0)
+            indices.append(idx);
+    }
+    return indices;
+}
+
+void MyView::SetMultiSelectionByIndices(const QList<int> &indices)
+{
+    QList<StickFigure*> figures;
+    for(int idx : indices){
+        if(idx >= 0 && idx < my_animation->current_frame->stick_figures.count())
+            figures.append(my_animation->current_frame->stick_figures[idx]);
+    }
+    if(figures.count() > 1)
+        SetMultiSelectionList(figures);
+    else
+        ClearMultiSelection();
+}
+
+/**
+ * @details Batch delete of the selection: one snapshot, then the single-figure
+ * routine per figure (which already enforces the at-least-one-layer rule and moves
+ * the current selection to a survivor).
+ */
+void MyView::DeleteMultiSelection()
+{
+    if(!MultiSelectionActive())
+        return;
+    StoreUndo();
+    QList<StickFigure*> victims = multi_selection;
+    ClearMultiSelection();
+    for(StickFigure *S : victims){
+        if(!my_animation->current_frame->stick_figures.contains(S))
+            continue;
+        if(my_animation->current_frame->stick_figures.count() <= 1)
+            break; // regola dell'ultimo layer: DeleteStickFigure() rifiuterebbe con un popup a testa
+        my_stick_figure_widget_list->clearSelection();
+        if(S->linked_item)
+            S->linked_item->setSelected(true);
+        DeleteStickFigure();
+    }
+}
+
 //Esci dallo strumento che stai usando
 /**
  * @details Runs when a tool is left (from SetTool()). Its real job is on the DRAW*
@@ -611,6 +1322,13 @@ void MyView::DrawCmd(QPointF* point, int mode)
  */
 void MyView::ChangeTool()
 {
+    // cambiare strumento deselezionata tutti i vertici (spec) e chiude un'eventuale
+    // sessione di aggiunta vertici, qualunque fosse il tool attivo
+    DeselectAllVertices();
+    if(poly_session_active)
+        FinishPolygonSession();
+    poly_drag_idx = -1;
+    poly_vertex_drag = false;
     switch(tool)
     {
         case(NOTOOL):
@@ -680,6 +1398,21 @@ void MyView::ChangeTool()
         {
             break;
         }
+        case(DRAWPOLY):
+        case(DRAWMULTI):
+        {
+            my_animation->UpdateTab(tool); // updates ui panels
+            if(!my_animation->current_frame->stick_figures.isEmpty()
+                    && my_animation->CurrentFrame()->CurrentStickFigure() != nullptr)
+            {
+                // base a metà (un solo click): buttala via come per gli altri DRAW*
+                if(my_animation->CurrentFrame()->CurrentStickFigure()->draw_count==1)
+                {
+                    my_animation->CurrentFrame()->CurrentStickFigure()->CancelDrawing();
+                }
+            }
+            break;
+        }
     }
 }
 
@@ -733,6 +1466,21 @@ void MyView::mouseReleaseEvent(QMouseEvent *event)
 {
     if(event->button()==Qt::LeftButton){
         is_pressed = false;
+        poly_drag_idx = -1;      // fine di un eventuale trascinamento di vertice (DRAWPOLY)
+        poly_vertex_drag = false; // fine di un eventuale Ctrl-drag della selezione vertici
+        multi_dragging = false;
+        pivot_dragging = false;
+        if(band_dragging){
+            band_dragging = false;
+            // il rettangolo sparisce sempre al rilascio del mouse (la selezione resta)
+            if(selection_band != nullptr){
+                scene()->removeItem(selection_band);
+                delete selection_band;
+                selection_band = nullptr;
+            }
+            if(!MultiSelectionActive())
+                ClearMultiSelection();
+        }
         if(my_animation->current_frame->stick_figures.count()>0
                 && my_animation->CurrentFrame()->CurrentStickFigure() != nullptr) // può essere nullo dopo un ripristino undo/redo
         {
@@ -785,6 +1533,82 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         case CLAMP:
         case NOTOOL:
         {
+            if(is_pressed && band_dragging && selection_band != nullptr)
+            {
+                // estendi il rettangolo e seleziona ogni figura che tocca
+                QRectF band = QRectF(starting_coord, coord).normalized();
+                selection_band->setRect(band);
+                QList<StickFigure*> touched;
+                for(StickFigure *S : my_animation->current_frame->stick_figures){
+                    for(StickData *s : S->stick_list){
+                        if(band.intersects(QRectF(s->my_line.p1(), s->my_line.p2()).normalized())){
+                            touched.append(S);
+                            break;
+                        }
+                    }
+                }
+                multi_selection = touched;
+                if(MultiSelectionActive())
+                    UpdateMultiSelectionUI(true); // la selezione cambia: perno al baricentro
+                else{
+                    // sotto le 2 figure la maniglia sparisce (il rettangolo resta attivo
+                    // fino al rilascio) e le evidenziazioni del passaggio precedente cadono
+                    for(StickFigure *S : my_animation->current_frame->stick_figures)
+                        S->Highlight(S == my_animation->CurrentFrame()->CurrentStickFigure());
+                    if(multi_handle != nullptr){
+                        scene()->removeItem(multi_handle);
+                        delete multi_handle;
+                        multi_handle = nullptr;
+                    }
+                }
+                break;
+            }
+            if(is_pressed && pivot_dragging)
+            {
+                // trascinamento della maniglia: sposta solo il perno delle trasformazioni
+                multi_pivot = coord;
+                UpdateMultiSelectionUI();
+                break;
+            }
+            if(pivot_previewing && multi_handle != nullptr)
+            {
+                // Spazio premuto: la maniglia segue il cursore in anteprima (il perno
+                // vero si sposta al rilascio del tasto)
+                float r = handle_size * 1.5f;
+                multi_handle->setRect(coord.x() - r, coord.y() - r, 2*r, 2*r);
+                break;
+            }
+            if(is_pressed && multi_dragging)
+            {
+                // trascina tutta la selezione (incrementale come MOVESCENE); il perno
+                // viaggia con le figure
+                QPointF delta = coord - starting_coord;
+                starting_coord = coord;
+                for(StickFigure *S : multi_selection){
+                    if(S->master_stick && S->stick_list.count() > 0)
+                        S->Traslate(delta.x(), delta.y());
+                }
+                multi_pivot += delta;
+                UpdateMultiSelectionUI();
+                break;
+            }
+            if(is_pressed && poly_vertex_drag)
+            {
+                // trascinamento Ctrl: sposta tutti i vertici selezionati (anche su più
+                // poligoni/multilinee) del delta del mouse, incrementale come MOVESCENE
+                QPointF delta = coord - starting_coord;
+                starting_coord = coord;
+                for(StickData *s : my_animation->CurrentFrame()->total_sticks){
+                    if(!IsVertexStick(s) || !s->view || s->view->selected_vertices.isEmpty())
+                        continue;
+                    QPolygonF verts = s->view->SceneVertices();
+                    for(int idx : s->view->selected_vertices){
+                        if(idx >= 0 && idx < verts.length())
+                            s->view->EditPolygonPoint(idx, verts[idx] + delta);
+                    }
+                }
+                break;
+            }
             if(is_pressed)
             {
                 if(scene()->selectedItems().count() == 1)
@@ -858,8 +1682,67 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
             }
             break;
         }
+        case DRAWPOLY:
+        case DRAWMULTI:
+        {
+            StickFigure *fig = my_animation->current_frame->stick_figures.isEmpty()
+                    ? nullptr : my_animation->CurrentFrame()->CurrentStickFigure();
+            // la linea base segue il mouse come per gli altri tool DRAW*
+            if(fig != nullptr && fig->draw_count > 0){
+                fig->PreviewDrawing(&coord);
+                break;
+            }
+            StickData *session = PolySessionStick(tool == DRAWPOLY ? StickData::POLYGON
+                                                                   : StickData::MULTILINE);
+            if(session == nullptr)
+                break;
+            // trascinamento di un vertice esistente
+            if(is_pressed && poly_drag_idx >= 0){
+                session->view->EditPolygonPoint(poly_drag_idx, coord);
+                break;
+            }
+            // anteprima live: il prossimo vertice segue il mouse prima del click
+            if(poly_session_active){
+                int insert_idx;
+                if(tool == DRAWMULTI)
+                    insert_idx = session->view->SceneVertices().length(); // estende la coda
+                else if(poly_session_extends)
+                    insert_idx = session->view->NearestEdgeInsertIndex(coord);
+                else
+                    insert_idx = session->polygon_points.length();
+                session->view->SetPolygonPreview(coord, insert_idx);
+            }
+            break;
+        }
         case ROTATE:
         {
+            if(is_pressed && MultiSelectionActive()){
+                // come ROTATESCENE, ma sul solo insieme selezionato e con la maniglia
+                // (baricentro della selezione) come perno
+                QPointF center = multi_center_buffer;
+                QLineF mouse_to_center_now(coord, center);
+                QLineF mouse_to_center_start(starting_coord, center);
+                float angle = mouse_to_center_now.angle() - mouse_to_center_start.angle();
+                if(angle > 180) angle -= 360;
+                else if(angle < -180) angle += 360;
+                starting_coord = coord;
+                for(StickFigure *S : multi_selection){
+                    if(S->stick_list.count() > 0 && S->master_stick){
+                        QLineF connect_center(center, S->master_stick->my_line.p1());
+                        connect_center.setAngle(connect_center.angle() + angle);
+                        for(StickData *s : S->stick_list){
+                            if(s->view){
+                                s->view->Rotate(angle);
+                                s->view->angle_buffer2 += angle;
+                            }
+                        }
+                        QLineF delta(S->origin_pos_buffer, connect_center.p2());
+                        S->Traslate(delta.dx(), delta.dy());
+                        S->origin_pos_buffer = S->master_stick->my_line.p1();
+                    }
+                }
+                break;
+            }
             if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr)
             {
                 if(is_pressed){
@@ -874,6 +1757,27 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         }
         case(SCALE):
         {
+            if(is_pressed && MultiSelectionActive()){
+                // come SCALESCENE, con la maniglia come centro di scala
+                QPointF center = multi_center_buffer;
+                float start_dist = QLineF(starting_coord, center).length();
+                if(start_dist < 1)
+                    break; // click esattamente sul centro: divisione per (quasi) zero
+                float scale_amount = QLineF(coord, center).length() / start_dist;
+                for(StickFigure *S : multi_selection){
+                    if(S->stick_list.count() > 0 && S->master_stick){
+                        QLineF actual_dist_from_center(S->master_stick->my_line.p1(), center);
+                        QLineF original_dist_from_center(S->origin_pos_buffer, center);
+                        float dx = -original_dist_from_center.dx()*scale_amount + actual_dist_from_center.dx();
+                        float dy = -original_dist_from_center.dy()*scale_amount + actual_dist_from_center.dy();
+                        S->Traslate(dx, dy);
+                        for(StickData *s : S->stick_list){
+                            if(s->view) s->view->Scale(scale_amount);
+                        }
+                    }
+                }
+                break;
+            }
             if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr && is_pressed){
                my_animation->CurrentFrame()->CurrentStickFigure()->Scale(&coord);
             }
@@ -1075,6 +1979,13 @@ void MyView::DeleteFrame(Frame* frame){
  * skins and the frame thumbnail.
  */
 void MyView::MoveToFrame(Frame* frame){
+    // il cambio frame invalida la sessione poligono e la selezione vertici (stato UI
+    // del frame lasciato); i flag da soli non tengono puntatori, basta azzerarli
+    poly_session_active = false;
+    poly_session_extends = false;
+    poly_drag_idx = -1;
+    poly_vertex_drag = false;
+    ClearMultiSelection(); // la selezione multipla decade al cambio frame (spec)
     // rimuovi tutti gli stick dalla scena
     auto current_scene = scene();
     if(my_animation->frame_list.count()>=1){
@@ -1256,6 +2167,9 @@ public:
         : view_(view), command_tag_(command_tag)
     {
         before_ = ExtractFrameData(*view_->my_animation->current_frame);
+        // la selezione multipla viaggia con lo snapshot come indici di riga (i puntatori
+        // alle figure muoiono nel restore): undo/redo la ripristinano com'era
+        selection_before_ = view_->MultiSelectionIndices();
     }
     ~FrameUndoCommand() override
     {
@@ -1269,18 +2183,24 @@ public:
             return;
         }
         view_->RestoreFrameSnapshot(command_tag_, MODE_REDO, after_);
+        view_->SetMultiSelectionByIndices(selection_after_);
     }
     void undo() override
     {
-        if(after_ == nullptr)
+        if(after_ == nullptr){
             after_ = ExtractFrameData(*view_->my_animation->current_frame);
+            selection_after_ = view_->MultiSelectionIndices();
+        }
         view_->RestoreFrameSnapshot(command_tag_, MODE_UNDO, before_);
+        view_->SetMultiSelectionByIndices(selection_before_);
     }
 private:
     MyView *view_;
     int command_tag_;
     FrameData *before_ = nullptr;
     FrameData *after_ = nullptr;
+    QList<int> selection_before_;
+    QList<int> selection_after_;
     bool is_first_redo_ = true;
 };
 
@@ -1292,6 +2212,13 @@ private:
  */
 void MyView::RestoreFrameSnapshot(int command_tag, int mode, FrameData *snapshot)
 {
+    // un undo/redo ricostruisce gli stick del frame: qualunque sessione poligono o
+    // trascinamento in corso si riferiva a oggetti che stanno per sparire
+    poly_session_active = false;
+    poly_session_extends = false;
+    poly_drag_idx = -1;
+    poly_vertex_drag = false;
+    ClearMultiSelection(); // le figure selezionate stanno per essere ricostruite
     // se è un undo su un addframe, o un redo su un deleteframe ci sta da rimuovere un frame
     if((command_tag == CMD_ADDFRAME && mode == MODE_UNDO)||
             (command_tag == CMD_DELETEFRAME && mode == MODE_REDO)){
@@ -1484,6 +2411,25 @@ void MyView::LoadLibrary(QString file_name, int mode){
  * @return the live source figure, or nullptr if it has no sticks.
  */
 StickFigure* MyView::AddStickFigureToLibrary(){
+    // con una selezione multipla ogni figura selezionata entra in libreria — l'unico
+    // export ammesso per una selezione multipla (spec); la selezione resta attiva
+    if(MultiSelectionActive()){
+        StickFigure *last_added = nullptr;
+        QList<StickFigure*> selection = multi_selection;
+        for(StickFigure *S : selection){
+            if(S->stick_list.isEmpty())
+                continue;
+            StickFigureData *figure_data = ExtractStickFigureData(*S);
+            stick_library_buffer->stick_figures.append(figure_data);
+            QListWidgetItem *added_item = new QListWidgetItem();
+            added_item->setData(Qt::UserRole,QVariant::fromValue(figure_data));
+            added_item->setData(Qt::DisplayRole,figure_data->name);
+            added_item->setIcon(RenderLibraryIcon(*figure_data));
+            my_current_library_widget->addItem(added_item);
+            last_added = S;
+        }
+        return last_added;
+    }
     if(my_animation->CurrentFrame()->CurrentStickFigure() == nullptr) // possibile dopo un ripristino undo/redo
         return nullptr;
     if(my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.count()>0)
@@ -1536,6 +2482,24 @@ void MyView::SetGraphics(bool all, int attribute){
     if(!all && my_animation->CurrentFrame()->CurrentStick() == nullptr)
         return;
     StoreUndo(CMD_SIMPLE);
+    // con una selezione multipla attiva le modifiche "globali" (all) si applicano a
+    // TUTTE le figure selezionate, senza rompere la selezione (spec)
+    if(all && MultiSelectionActive()){
+        for(StickFigure *S : multi_selection){
+            for(StickData *s : S->stick_list){
+                if(attribute == ATTRIBUTE_PENCOLOR)
+                    s->pen.setColor(my_pen.color());
+                else if(attribute == ATTRIBUTE_PENWIDTH)
+                    s->pen.setWidth(my_pen.width());
+                else if(attribute == ATTRIBUTE_BRUSHCOLOR)
+                    s->brush.setColor(my_brush.color());
+                if(s->view)
+                    s->view->Refresh(0);
+            }
+            S->UpdateIcon();
+        }
+        return;
+    }
     if(!all){
         if(attribute == ATTRIBUTE_PENCOLOR)
         {

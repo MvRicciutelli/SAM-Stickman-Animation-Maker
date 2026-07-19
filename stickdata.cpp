@@ -46,6 +46,9 @@ void StickData::CopyFrom(const StickData &source)
     img_offset = source.img_offset;
     hard_top = source.hard_top;
     hard_bottom = source.hard_bottom;
+    polygon_points = source.polygon_points;
+    vertex_widths = source.vertex_widths;
+    vertex_curvatures = source.vertex_curvatures;
 
     // difesa in profondità come in operator>>: oggi il target è sempre appena costruito,
     // ma un riuso futuro non deve far trapelare le immagini precedenti
@@ -59,6 +62,25 @@ void StickData::CopyFrom(const StickData &source)
         if (image == source.stick_img)
             stick_img = copy;
     }
+}
+
+/**
+ * @details Single source of truth for the polygon's local frame: paint(), the vertex
+ * hit-test/edit helpers (stick.cpp) and any future exporter must all go through this,
+ * or an edited vertex would land somewhere else than where it is drawn. The zero-length
+ * guard keeps the transform invertible while the base line is still being drawn.
+ */
+QTransform StickData::PolygonTransform() const
+{
+    qreal len = my_line.length();
+    if (len < 1e-6)
+        len = 1e-6; // linea degenere: mantieni la trasformazione invertibile
+    QTransform t;
+    t.translate(my_line.p1().x(), my_line.p1().y());
+    t.rotate(img_angle + img_angle_offset);
+    t.translate(img_offset.x(), img_offset.y());
+    t.scale(len, len);
+    return t;
 }
 
 /**
@@ -91,7 +113,7 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
     stream << stick_data.pen;
     stream << stick_data.brush;
     stream << stick_data.order;
-    if ((stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::IMAGE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER)) {
+    if ((stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::IMAGE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE)) {
         if (stick_data.stick_type == StickData::IMAGE) {
             // stick_img può essere nullo solo per un record ricostruito da un file corrotto:
             // meglio serializzare una QSize vuota che dereferenziare un puntatore nullo
@@ -115,6 +137,21 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
                 stream << stick_data.img_name_list[j];
                 j++;
             }
+        }
+        if (stick_data.stick_type == StickData::POLYGON || stick_data.stick_type == StickData::MULTILINE) {
+            stream << (qint32)stick_data.polygon_points.length();
+            for (const QPointF &pt : stick_data.polygon_points)
+                stream << pt;
+            // curvatura per vertice (entrambi i tipi)
+            stream << (qint32)stick_data.vertex_curvatures.length();
+            for (float c : stick_data.vertex_curvatures)
+                stream << c;
+        }
+        if (stick_data.stick_type == StickData::MULTILINE) {
+            // larghezza per vertice virtuale (interni + 2 estremi), solo MULTILINE
+            stream << (qint32)stick_data.vertex_widths.length();
+            for (float w : stick_data.vertex_widths)
+                stream << w;
         }
     }
 
@@ -141,7 +178,7 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
     stream >> stick_data.pen;
     stream >> stick_data.brush;
     stream >> stick_data.order;
-    if ((stick_data.stick_type == StickData::IMAGE) || (stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER)) {
+    if ((stick_data.stick_type == StickData::IMAGE) || (stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE)) {
         QSize mysize;
         if (stick_data.stick_type == StickData::IMAGE) {
             stream >> mysize;
@@ -174,6 +211,37 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
                 stick_data.stick_img = stick_data.stick_img_list[stickImgIdx];
             else if (!stick_data.stick_img_list.isEmpty())
                 stick_data.stick_img = stick_data.stick_img_list[0];
+        }
+        if (stick_data.stick_type == StickData::POLYGON || stick_data.stick_type == StickData::MULTILINE) {
+            qint32 num_points = 0;
+            stream >> num_points;
+            for (qint32 i = 0; i < num_points; i++) {
+                QPointF pt;
+                stream >> pt;
+                if (stream.status() != QDataStream::Ok)
+                    break; // file troncato/corrotto: non inventare vertici da dati inesistenti
+                stick_data.polygon_points.append(pt);
+            }
+            qint32 num_curvatures = 0;
+            stream >> num_curvatures;
+            for (qint32 i = 0; i < num_curvatures; i++) {
+                float c = 0;
+                stream >> c;
+                if (stream.status() != QDataStream::Ok)
+                    break;
+                stick_data.vertex_curvatures.append(c);
+            }
+        }
+        if (stick_data.stick_type == StickData::MULTILINE) {
+            qint32 num_widths = 0;
+            stream >> num_widths;
+            for (qint32 i = 0; i < num_widths; i++) {
+                float w = 0;
+                stream >> w;
+                if (stream.status() != QDataStream::Ok)
+                    break;
+                stick_data.vertex_widths.append(w);
+            }
         }
     }
     return stream;

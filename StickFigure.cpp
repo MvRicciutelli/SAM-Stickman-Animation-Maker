@@ -144,7 +144,9 @@ void StickFigure::PreviewDrawing(QPointF *point)
             stick_buffer->stick_type == StickData::RECT||
             (stick_buffer->stick_type == StickData::TRAPEZOID)||
             (stick_buffer->stick_type == StickData::CIRCLE)||
-            (stick_buffer->stick_type == StickData::TAPER)){
+            (stick_buffer->stick_type == StickData::TAPER)||
+            (stick_buffer->stick_type == StickData::POLYGON)||
+            (stick_buffer->stick_type == StickData::MULTILINE)){
         stick_buffer->img_angle= -atan2(stick_buffer->my_line.dx(),stick_buffer->my_line.dy())*180/M_PI;
     }
 }

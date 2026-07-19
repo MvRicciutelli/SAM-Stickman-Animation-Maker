@@ -31,7 +31,14 @@
 #define DRAWRECT 16     ///< draw a rectangle-typed stick (StickData::RECT)
 #define DRAWTRAPEZOID 17 ///< draw a trapezoid-typed stick (StickData::TRAPEZOID)
 #define DRAWTAPER 18    ///< draw a tapered stick (StickData::TAPER)
-
+#define DRAWPOLY 21     ///< draw a polygon-typed stick (StickData::POLYGON): 2 clicks for the
+                        ///< base line, then every click adds a vertex until Enter/Esc/double
+                        ///< click/click-near-start; on an existing polygon it inserts vertices
+                        ///< (19/20 would collide with ELONGATE/CLAMP)
+#define DRAWMULTI 22    ///< draw a multi-line stick (StickData::MULTILINE): every click extends
+                        ///< the path until Enter/double click (finalize) or Esc (cancel = the
+                        ///< stick is deleted); on an existing multi-line it inserts a vertex at
+                        ///< the middle of the nearest segment, drag adjusts, Alt+click deletes
 // --- Layer reorder directions passed to MoveStickFigureZ().
 #define MODE_DOWN 1     ///< move the selected layer one step down (towards the back)
 #define MODE_UP 0       ///< move the selected layer one step up (towards the front)
@@ -331,6 +338,80 @@ public:
      */
     void UpdateFrameOrder(Frame *f);
 
+    // ------- multi-selezione di stickfigure (rettangolo/Shift-click/lista layer) ------
+
+    /**
+     * @brief True while two or more stickfigures are selected together.
+     */
+    bool MultiSelectionActive() const { return multi_selection.count() > 1; }
+
+    QList<StickFigure*> multi_selection; ///< the selected figures (UI state; cleared on frame change/undo restore)
+    QList<StickFigureData*> multi_copy_buffer; ///< copy buffer for a multi-selection (pure data)
+    bool multi_widget_sync = false; ///< raised while THIS code drives the layer list's selection, so Widget's itemSelectionChanged handler can tell echo from user input
+
+    /**
+     * @brief The transform pivot: where the handle is drawn and the origin every
+     *        multi-selection transformation (rotate/scale/flip) uses. Recentered on
+     *        the selection's centroid whenever the SELECTION changes; carried along
+     *        by translation drags; freely repositionable by dragging the handle or
+     *        holding Space (released at the mouse position).
+     */
+    QPointF multi_pivot;
+
+    /**
+     * @brief Replaces the multi-selection wholesale (rubber band / layer list) and
+     *        refreshes highlight, handle and layer-list rows. Passing fewer than 2
+     *        figures clears everything.
+     */
+    void SetMultiSelectionList(const QList<StickFigure*> &figures);
+
+    /**
+     * @brief Adds one figure (Shift+click); the current single selection seeds the set.
+     */
+    void AddToMultiSelection(StickFigure *figure);
+
+    /**
+     * @brief Removes one figure (Alt+click); dropping to 1 clears the whole selection.
+     */
+    void RemoveFromMultiSelection(StickFigure *figure);
+
+    /**
+     * @brief Drops the multi-selection: un-highlights, deletes the transform handle
+     *        and the selection rectangle. Safe to call at any time.
+     */
+    void ClearMultiSelection();
+
+    /**
+     * @brief Center of the multi-selection (mean of every selected stick endpoint) —
+     *        the transform handle's position and the origin of every transformation.
+     */
+    QPointF MultiSelectionCenter() const;
+
+    /**
+     * @brief The selection as row indices into current_frame->stick_figures, for the
+     *        undo machinery (pointers die on restore, indices survive).
+     */
+    QList<int> MultiSelectionIndices() const;
+
+    /**
+     * @brief Rebuilds the multi-selection from indices after an undo/redo restore.
+     */
+    void SetMultiSelectionByIndices(const QList<int> &indices);
+
+    /**
+     * @brief Deletes every selected figure (keeps the last remaining layer rule).
+     *        One undo snapshot for the whole batch.
+     */
+    void DeleteMultiSelection();
+
+    /**
+     * @brief Repaints highlight, transform handle and layer-list rows.
+     * @param recenter_pivot true when the SELECTION SET changed (the pivot snaps back
+     *        to the selection centroid, per spec); false after operations, which keep
+     *        or carry the pivot themselves.
+     */
+    void UpdateMultiSelectionUI(bool recenter_pivot = false);
+
     /**
      * @brief Adds every stick's endpoint handles of a figure to the scene.
      * @param S figure whose handles become visible (master gets a green origin handle).
@@ -362,8 +443,87 @@ protected:
     virtual void mouseReleaseEvent(QMouseEvent *event) override;
     virtual void mouseMoveEvent(QMouseEvent *event) override;
     virtual void mousePressEvent(QMouseEvent *event) override;
+    virtual void mouseDoubleClickEvent(QMouseEvent *event) override;
     virtual void keyPressEvent(QKeyEvent *event) override;
+    virtual void keyReleaseEvent(QKeyEvent *event) override;
 private:
+    // ------- POLYGON tool state. Deliberately no StickData* is stored: the session ----
+    // ------- target is always CurrentStick() (re-checked for type/view each use), so --
+    // ------- an undo/frame-switch mid-session can never leave a dangling pointer ------
+
+    bool poly_session_active = false; ///< true between the base line's completion and Enter/Esc/double-click/close-click
+    bool poly_session_extends = false;///< session started on an existing polygon: clicks insert at the nearest edge instead of appending
+    int poly_drag_idx = -1;           ///< vertex being dragged by the DRAWPOLY tool; -1 when none
+    bool poly_vertex_drag = false;    ///< true while a Ctrl-drag of the selected vertices (NOTOOL/CLAMP) is in progress
+
+    // ------- multi-selezione: stato privato -------------------------------------------
+    QGraphicsEllipseItem *multi_handle = nullptr; ///< thin light-blue transform handle at the selection center
+    QGraphicsRectItem *selection_band = nullptr;  ///< dotted selection rectangle; survives until the selection breaks
+    bool band_dragging = false;       ///< true while the selection rectangle is being spanned
+    bool multi_dragging = false;      ///< true while the whole selection is being translated by drag
+    bool pivot_dragging = false;      ///< true while the transform handle itself is being dragged
+    bool pivot_previewing = false;    ///< true while Space is held: the handle previews at the cursor
+    QPointF multi_center_buffer;      ///< pivot captured at gesture start (rotate/scale origin)
+
+    /**
+     * @brief The figure owning a stick close enough to the position (segment distance
+     *        within the pen width or the pick radius), or nullptr for empty canvas.
+     */
+    StickFigure *FigureAtPoint(const QPointF &scene_pos);
+
+    /**
+     * @brief The stick a DRAWPOLY/DRAWMULTI session is feeding, or nullptr.
+     * @param wanted_type the StickType the active tool edits (POLYGON or MULTILINE).
+     * @return CurrentStick() if it matches and has a live view, else nullptr.
+     */
+    StickData *PolySessionStick(qint32 wanted_type);
+
+    /**
+     * @brief Removes one stick (and its subtree) from the model, the scene and the
+     *        frame's z-order list — the Delete-key path for a stick the code (not the
+     *        user) picked: DRAWMULTI's Esc-cancel and the delete-last-vertex rule.
+     * @param stick stick of the current figure to remove; must be non-null.
+     */
+    void DeleteWholeStick(StickData *stick);
+
+    /**
+     * @brief Zoom-aware pick radius for vertices/edges: handle_size screen pixels
+     *        converted to scene units, so "very close" feels the same at any zoom.
+     * @return the radius in scene coordinates.
+     */
+    float PolyPickRadius();
+
+    /**
+     * @brief Ends a DRAWPOLY point-adding session: clears the session flags and the
+     *        next-vertex preview, repaints the polygon.
+     */
+    void FinishPolygonSession();
+
+    /**
+     * @brief Clears every polygon vertex selection in the current frame (the Ctrl
+     *        multi-select of the NOTOOL/CLAMP tools).
+     */
+    void DeselectAllVertices();
+
+    /**
+     * @brief Finds the POLYGON/MULTILINE stick of the current frame with a vertex
+     *        within the pick radius of a position.
+     * @param scene_pos position to test.
+     * @param vertex_idx out: (virtual) index of the found vertex.
+     * @param type_filter restrict to one StickType, or -1 for both editable types.
+     * @return the stick, or nullptr if no vertex is close enough.
+     */
+    StickData *FindPolygonVertex(const QPointF &scene_pos, int *vertex_idx, qint32 type_filter = -1);
+
+    /**
+     * @brief Finds the POLYGON/MULTILINE stick of the current frame with an edge
+     *        within the pick radius of a position (used to insert vertices).
+     * @param scene_pos position to test.
+     * @param insert_idx out: (virtual) insertion index for a vertex on that edge.
+     * @param type_filter restrict to one StickType, or -1 for both editable types.
+     * @return the stick, or nullptr if no edge is close enough.
+     */
+    StickData *FindPolygonEdge(const QPointF &scene_pos, int *insert_idx, qint32 type_filter = -1);
     /**
      * @brief Performs one click of the 2-click drawing gesture.
      * @param point click position in scene coordinates.

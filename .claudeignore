@@ -1,0 +1,20 @@
+# Qt Creator per-machine project state — not source, and there are 5 stale
+# copies of this file from different machines/checkouts
+MarionettaPlus.pro.user
+MarionettaPlus.pro.user.*
+
+# Shadow build output, if ever created alongside the project instead of as a sibling
+build-*/
+debug/
+release/
+
+# tokensave's own index — binary, regenerable, already read via MCP tools not file reads
+.tokensave/
+
+# Prebuilt binaries checked into the repo
+*.exe
+*.ico
+
+# Icon/animation asset library — binary images, not source; myres.qrc lists them by name
+resources/
+*.moho

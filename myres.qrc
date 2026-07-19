@@ -275,5 +275,10 @@
         <file>resources/clamp_00001.png</file>
         <file>resources/clamp_00002.png</file>
         <file>resources/clamp_00003.png</file>
+        <file>resources/add_poly_00001.png</file>
+        <file>resources/add_poly_00002.png</file>
+        <file>resources/add_poly_00003.png</file>
+        <file>resources/Add_multiline_00002.png</file>
+        <file>resources/Add_multiline_00003.png</file>
     </qresource>
 </RCC>

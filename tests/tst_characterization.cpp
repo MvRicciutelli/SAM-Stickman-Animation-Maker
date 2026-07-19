@@ -7,9 +7,12 @@
 #include <QGraphicsScene>
 #include <QGraphicsRectItem>
 #include <QTabWidget>
+#include <QTemporaryDir>
+#include <QtEndian>
 #include "myview.h"
 #include "uiItems.h"
 #include "framepresenter.h"
+#include "stkformat.h"
 
 extern QGraphicsScene *scene;
 extern QGraphicsRectItem *my_rect;
@@ -123,6 +126,10 @@ private slots:
         view->my_animation->scene = scene;
 
         advanced_img_tab = new QWidget;
+        advanced_vertex_tab = new QWidget;
+        vertex_width_row = new QWidget(advanced_vertex_tab);
+        vertex_width_slider = new QSlider;
+        vertex_curve_slider = new QSlider;
         advanced_line_tab = new AdvancedLineWidget;
         advanced_circle_tab = new AdvancedCircleWidget;
         advanced_taper_tab = new AdvancedTaperWidget;
@@ -246,6 +253,84 @@ private slots:
         QCOMPARE(*loaded.stick_img_list[1], *second_image);
         QCOMPARE(loaded.img_angle_offset, source.img_angle_offset);
         // no manual cleanup: ~StickData frees the images, ~stick only the handles
+    }
+
+    // POLYGON sticks persist their normalized-local vertex list after the shared img
+    // block; both the stream operators and Clone()/CopyFrom() must carry it
+    void StickPolygonRoundTrip()
+    {
+        StickData source;
+        source.stick_type = StickData::POLYGON;
+        source.my_line = QLineF(10, 10, 10, 110);
+        source.img_angle = 12.5f;
+        source.img_angle_offset = 30;
+        source.img_offset = QPointF(5, -3);
+        source.polygon_points << QPointF(0.1, 0.2) << QPointF(-0.5, 0.75) << QPointF(0.33, -0.25);
+        source.vertex_curvatures << 0.25f << 0.0f << 0.75f; // curvatura per vertice (POLYGON)
+
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << source;
+        }
+        StickData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+        QCOMPARE(loaded.stick_type, source.stick_type);
+        QCOMPARE(loaded.img_angle, source.img_angle);
+        QCOMPARE(loaded.img_angle_offset, source.img_angle_offset);
+        QCOMPARE(loaded.img_offset, source.img_offset);
+        QCOMPARE(loaded.polygon_points, source.polygon_points);
+        QCOMPARE(loaded.vertex_curvatures, source.vertex_curvatures);
+
+        StickData *clone = source.Clone();
+        QCOMPARE(clone->polygon_points, source.polygon_points);
+        delete clone;
+
+        // PolygonTransform() must be a bijection between stored vertices and the scene
+        QTransform t = source.PolygonTransform();
+        for (const QPointF &pt : source.polygon_points) {
+            QPointF back = t.inverted().map(t.map(pt));
+            QVERIFY(qAbs(back.x() - pt.x()) < 1e-9);
+            QVERIFY(qAbs(back.y() - pt.y()) < 1e-9);
+        }
+    }
+
+    // MULTILINE persists interior vertices plus the parallel per-vertex width and
+    // curvature lists (virtual indexing: interior count + the two endpoints)
+    void StickMultilineRoundTrip()
+    {
+        StickData source;
+        source.stick_type = StickData::MULTILINE;
+        source.my_line = QLineF(0, 0, 0, 100);
+        source.img_angle = 0;
+        source.polygon_points << QPointF(0.2, 0.3) << QPointF(-0.1, 0.6);
+        source.vertex_widths << 6.0f << 8.0f << 10.0f << 4.0f;
+        source.vertex_curvatures << 0.0f << 0.5f << 1.0f << 0.0f;
+        source.pen.setWidthF(6.0);
+
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << source;
+        }
+        StickData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+        QCOMPARE(loaded.stick_type, source.stick_type);
+        QCOMPARE(loaded.polygon_points, source.polygon_points);
+        QCOMPARE(loaded.vertex_widths, source.vertex_widths);
+        QCOMPARE(loaded.vertex_curvatures, source.vertex_curvatures);
+
+        StickData *clone = source.Clone();
+        QCOMPARE(clone->polygon_points, source.polygon_points);
+        QCOMPARE(clone->vertex_widths, source.vertex_widths);
+        QCOMPARE(clone->vertex_curvatures, source.vertex_curvatures);
+        delete clone;
     }
 
     // figure-level round trip on pure data: scratch objects need no scene and no flags
@@ -765,6 +850,10 @@ private slots:
         StickData *main_stick = DrawStick(QPointF(100, 100), QPointF(100, 200));
         StickFigure *to_join = AddStick("joined");
         StickData *join_master = DrawStick(QPointF(200, 200), QPointF(200, 300));
+        // il merge CLONA gli stick di to_join e DeleteStickFigure() libera gli originali:
+        // join_master diventa dangling — la geometria va fotografata ORA (prima questo
+        // confronto leggeva memoria liberata e passava per pura fortuna di heap)
+        QLineF join_master_line = join_master->my_line;
 
         // replicates the JOIN branch of MyView::mousePressEvent() (myview.cpp:314)
         view->RemoveHandles(main_figure);
@@ -799,7 +888,7 @@ private slots:
         QVERIFY(branch != main_figure);
         QCOMPARE(branch->stick_list.count(), 1);
         QCOMPARE(branch->master_stick, branch->stick_list[0]);
-        QCOMPARE(branch->stick_list[0]->my_line, join_master->my_line);
+        QCOMPARE(branch->stick_list[0]->my_line, join_master_line);
     }
 
     void SetMasterOnDirectChain()
@@ -1001,6 +1090,937 @@ private slots:
         QCOMPARE(CurrentFrame()->stick_figures[figure_index]->stick_list[0]->my_line, dragged_line);
 
         view->SetTool(NOTOOL);
+    }
+
+    // Full DRAWPOLY gesture through the real mouse/keyboard event overrides: two clicks
+    // for the base line, three vertex clicks, Enter to finish. Also pins the per-vertex
+    // undo granularity (each vertex click is its own StoreUndo()) and that stored
+    // vertices are normalized-local (their scene mapping matches the click position).
+    void DrawPolygonViaRealMouseEvents()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        view->SetTool(DRAWPOLY);
+        int sticks_before = CurrentStickFigure()->stick_list.count();
+
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 100)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 200)));
+        QCOMPARE(CurrentStickFigure()->stick_list.count(), sticks_before + 1);
+        StickData *drawn = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(drawn->stick_type, (qint32)StickData::POLYGON);
+
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(200, 150)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(250, 250)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(150, 300)));
+        QCOMPARE(drawn->polygon_points.count(), 3);
+
+        // i vertici sono in coordinate locali normalizzate: rimappati in scena devono
+        // ricadere dove si è cliccato
+        QPointF first_vertex_scene = drawn->PolygonTransform().map(drawn->polygon_points[0]);
+        QVERIFY(QLineF(first_vertex_scene, QPointF(200, 150)).length() < 0.01);
+
+        QTest::keyClick(view, Qt::Key_Return); // chiude la sessione
+
+        // granularità per-vertice: un undo toglie SOLO l'ultimo vertice (il frame viene
+        // ricostruito dallo snapshot, quindi lo stick va ripescato dalla lista)
+        view->undo_stack.undo();
+        StickData *restored = CurrentFrame()->stick_figures.last()->stick_list.last();
+        QCOMPARE(restored->stick_type, (qint32)StickData::POLYGON);
+        QCOMPARE(restored->polygon_points.count(), 2);
+
+        view->undo_stack.redo();
+        restored = CurrentFrame()->stick_figures.last()->stick_list.last();
+        QCOMPARE(restored->polygon_points.count(), 3);
+
+        view->SetTool(NOTOOL);
+    }
+
+    // DRAWMULTI end to end: every click extends the path (first/last click = P1/P2,
+    // the clicks between become interior vertices), Enter finalizes, Esc cancels the
+    // whole stick (deleting it, since by then it is already committed to the figure)
+    void DrawMultilineViaRealMouseEvents()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        view->SetTool(DRAWMULTI);
+        int sticks_before = CurrentStickFigure()->stick_list.count();
+
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 100)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(180, 120)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(240, 80)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(300, 140)));
+        QTest::keyClick(view, Qt::Key_Return);
+
+        QCOMPARE(CurrentStickFigure()->stick_list.count(), sticks_before + 1);
+        StickData *drawn = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(drawn->stick_type, (qint32)StickData::MULTILINE);
+        QCOMPARE(drawn->polygon_points.count(), 2); // i click intermedi
+        QCOMPARE(drawn->vertex_widths.count(), 4);
+        QVERIFY(QLineF(drawn->my_line.p1(), QPointF(100, 100)).length() < 0.01);
+        QVERIFY(QLineF(drawn->my_line.p2(), QPointF(300, 140)).length() < 0.01);
+        // il secondo click è diventato un vertice interno, fermo dove si è cliccato
+        QPointF first_interior = drawn->PolygonTransform().map(drawn->polygon_points[0]);
+        QVERIFY(QLineF(first_interior, QPointF(180, 120)).length() < 0.01);
+
+        // Esc a metà disegno: lo stick già committato viene eliminato del tutto
+        int count_before_cancel = CurrentStickFigure()->stick_list.count();
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(400, 100)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(450, 150)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(500, 100)));
+        QTest::keyClick(view, Qt::Key_Escape);
+        QCOMPARE(CurrentStickFigure()->stick_list.count(), count_before_cancel);
+
+        view->SetTool(NOTOOL);
+    }
+
+    // multi-selection plumbing: selection set + center handle, global color change on
+    // every selected figure without breaking the selection, and undo restoring both
+    // the model AND the selection (tracked as row indices inside FrameUndoCommand)
+    void MultiSelectionOperations()
+    {
+        AddFrame();
+        DrawStick(QPointF(100, 100), QPointF(100, 200));
+        StickFigure *fig_a = CurrentStickFigure();
+        AddStick();
+        DrawStick(QPointF(300, 100), QPointF(300, 200));
+        StickFigure *fig_b = CurrentStickFigure();
+        QVERIFY(fig_a != fig_b);
+
+        view->SetMultiSelectionList(QList<StickFigure*>() << fig_a << fig_b);
+        QVERIFY(view->MultiSelectionActive());
+        QPointF center = view->MultiSelectionCenter();
+        QVERIFY(QLineF(center, QPointF(200, 150)).length() < 0.01);
+
+        QColor original = fig_a->stick_list[0]->pen.color();
+        view->my_pen.setColor(Qt::red);
+        view->SetGraphics(true, ATTRIBUTE_PENCOLOR);
+        QCOMPARE(fig_a->stick_list[0]->pen.color(), QColor(Qt::red));
+        QCOMPARE(fig_b->stick_list[0]->pen.color(), QColor(Qt::red));
+        QVERIFY(view->MultiSelectionActive()); // l'operazione non rompe la selezione
+
+        view->undo_stack.undo();
+        // il frame è stato ricostruito: ripesca le figure per indice
+        StickFigure *restored_a = CurrentFrame()->stick_figures[CurrentFrame()->stick_figures.count()-2];
+        QCOMPARE(restored_a->stick_list[0]->pen.color(), original);
+        QVERIFY(view->MultiSelectionActive()); // la selezione è tracciata dall'undo
+
+        view->ClearMultiSelection();
+        QVERIFY(!view->MultiSelectionActive());
+        view->SetTool(NOTOOL);
+    }
+
+    // ================= STK / .nodes conversion (STK_IMPORT_EXPORT_PLAN.md §7) =================
+
+private:
+    QTemporaryDir stk_temp_dir;
+
+    static QString SamplePath(const QString &relative)
+    {
+        return QStringLiteral(TESTS_SOURCE_DIR "/data/") + relative;
+    }
+
+    QString WriteTempFile(const QByteArray &bytes)
+    {
+        static int counter = 0;
+        QString path = stk_temp_dir.filePath(QStringLiteral("stk_case_%1.bin").arg(counter++));
+        QFile file(path);
+        file.open(QIODevice::WriteOnly);
+        file.write(bytes);
+        file.close();
+        return path;
+    }
+
+    static QByteArray ReadFileBytes(const QString &path)
+    {
+        QFile file(path);
+        file.open(QIODevice::ReadOnly);
+        return file.readAll();
+    }
+
+    // raw zlib inflate via qUncompress (needs the 4-byte big-endian size-hint prefix)
+    static QByteArray InflateZlib(const QByteArray &zlib_stream)
+    {
+        quint32 hint = quint32(zlib_stream.size()) * 30 + 1024;
+        QByteArray framed;
+        framed.append(char((hint >> 24) & 0xFF));
+        framed.append(char((hint >> 16) & 0xFF));
+        framed.append(char((hint >> 8) & 0xFF));
+        framed.append(char(hint & 0xFF));
+        framed.append(zlib_stream);
+        return qUncompress(framed);
+    }
+
+    static void PutU16(QByteArray &out, quint16 v)
+    {
+        out.append(char(v & 0xFF));
+        out.append(char((v >> 8) & 0xFF));
+    }
+    static void PutI32(QByteArray &out, qint32 v)
+    {
+        for (int i = 0; i < 4; i++)
+            out.append(char((quint32(v) >> (8 * i)) & 0xFF));
+    }
+    static void PutF32(QByteArray &out, float v)
+    {
+        quint32 u;
+        memcpy(&u, &v, 4);
+        PutI32(out, qint32(u));
+    }
+    static void PutF64(QByteArray &out, double v)
+    {
+        quint64 u;
+        memcpy(&u, &v, 8);
+        for (int i = 0; i < 8; i++)
+            out.append(char((u >> (8 * i)) & 0xFF));
+    }
+
+    // a modern-format .stk file from a hand-built payload ('z' + raw zlib stream)
+    QString WriteModernStkFile(const QByteArray &payload)
+    {
+        QByteArray bytes;
+        bytes.append(char(0x7A));
+        bytes.append(qCompress(payload, 9).mid(4));
+        return WriteTempFile(bytes);
+    }
+
+    // one default modern segment record (len 48, straight up, width 6) for flags 0xBF
+    static QByteArray DefaultSegmentRecord()
+    {
+        QByteArray seg;
+        PutF32(seg, 48.0f);
+        PutF64(seg, -M_PI / 2);
+        PutF32(seg, 6.0f);
+        return seg;
+    }
+
+private slots:
+    void StkImportBasicStickman()
+    {
+        QStringList warnings;
+        QString error;
+        StickFigureData *figure = StkFormat::ImportStk(
+                    SamplePath("stk/basic stickman with a torso two arms two legs and a round head.stk"),
+                    QPointF(400, 300), &warnings, &error);
+        QVERIFY2(figure, qPrintable(error));
+        QCOMPARE(figure->stick_list.count(), 6);
+        QCOMPARE(figure->master_stick, figure->stick_list[0]);
+        QCOMPARE(figure->current_stick, figure->master_stick);
+        // torso->arm chain: attached at the master's free end, NOT a stepchild
+        QCOMPARE(figure->stick_list[1]->parent, figure->master_stick);
+        QVERIFY(!figure->stick_list[1]->stepchild);
+        QCOMPARE(figure->stick_list[1]->my_line.p1(), figure->master_stick->my_line.p2());
+        // legs: attached at the origin -> stepchildren sharing the master's P1
+        QVERIFY(figure->stick_list[2]->stepchild);
+        QCOMPARE(figure->stick_list[2]->parent, figure->master_stick);
+        QCOMPARE(figure->stick_list[2]->my_line.p1(), figure->master_stick->my_line.p1());
+        QVERIFY(figure->stick_list[3]->stepchild);
+        // round head
+        QCOMPARE(figure->stick_list[5]->stick_type, qint32(StickData::CIRCLE));
+        // flattened all-descendants children list on the master
+        QCOMPARE(figure->master_stick->children.count(), 5);
+        QVERIFY(warnings.isEmpty());
+        delete figure;
+    }
+
+    void StkImportSingleFeatureFiles()
+    {
+        QString error;
+        QStringList warnings;
+
+        StickFigureData *plain = StkFormat::ImportStk(SamplePath("stk/single stick.stk"),
+                                                      QPointF(0, 0), &warnings, &error);
+        QVERIFY2(plain, qPrintable(error));
+        QCOMPARE(plain->stick_list.count(), 1);
+        QCOMPARE(plain->stick_list[0]->stick_type, qint32(StickData::LINE));
+        QCOMPARE(plain->stick_list[0]->pen.widthF(), 6.0);
+        QCOMPARE(plain->stick_list[0]->pen.capStyle(), Qt::RoundCap);
+        QCOMPARE(plain->stick_list[0]->pen.color(), QColor(0, 0, 0));
+        QCOMPARE(plain->stick_list[0]->my_line.length(), 48.0);
+        delete plain;
+
+        StickFigureData *thick = StkFormat::ImportStk(SamplePath("stk/single stick with increased line fill.stk"),
+                                                      QPointF(0, 0), &warnings, &error);
+        QVERIFY2(thick, qPrintable(error));
+        QCOMPARE(thick->stick_list[0]->pen.widthF(), 11.0);
+        delete thick;
+
+        StickFigureData *squared = StkFormat::ImportStk(SamplePath("stk/single squared stick.stk"),
+                                                        QPointF(0, 0), &warnings, &error);
+        QVERIFY2(squared, qPrintable(error));
+        QCOMPARE(squared->stick_list[0]->stick_type, qint32(StickData::LINE));
+        QCOMPARE(squared->stick_list[0]->pen.capStyle(), Qt::SquareCap);
+        delete squared;
+
+        StickFigureData *red = StkFormat::ImportStk(SamplePath("stk/single squared stick red color.stk"),
+                                                    QPointF(0, 0), &warnings, &error);
+        QVERIFY2(red, qPrintable(error));
+        QCOMPARE(red->stick_list[0]->pen.color(), QColor(255, 0, 0));
+        delete red;
+
+        StickFigureData *circle = StkFormat::ImportStk(SamplePath("stk/single circle.stk"),
+                                                       QPointF(0, 0), &warnings, &error);
+        QVERIFY2(circle, qPrintable(error));
+        QCOMPARE(circle->stick_list[0]->stick_type, qint32(StickData::CIRCLE));
+        QCOMPARE(circle->stick_list[0]->brush.color(), QColor(Qt::white));
+        QCOMPARE(circle->stick_list[0]->img_w_scale, 1.0f);
+        delete circle;
+
+        StickFigureData *filled = StkFormat::ImportStk(SamplePath("stk/single circle with line and fill color changed.stk"),
+                                                       QPointF(0, 0), &warnings, &error);
+        QVERIFY2(filled, qPrintable(error));
+        QCOMPARE(filled->stick_list[0]->stick_type, qint32(StickData::CIRCLE));
+        QCOMPARE(filled->stick_list[0]->brush.color(), QColor(0xBB, 0x47, 0x47));
+        delete filled;
+
+        StickFigureData *chain = StkFormat::ImportStk(SamplePath("stk/two contactened sticks.stk"),
+                                                      QPointF(0, 0), &warnings, &error);
+        QVERIFY2(chain, qPrintable(error));
+        QCOMPARE(chain->stick_list.count(), 2);
+        QCOMPARE(chain->stick_list[1]->parent, chain->stick_list[0]);
+        QVERIFY(!chain->stick_list[1]->stepchild);
+        QCOMPARE(chain->stick_list[1]->my_line.p1(), chain->stick_list[0]->my_line.p2());
+        delete chain;
+    }
+
+    // the polyfill of this sample (3 verts, red) now imports as a POLYGON stick
+    // attached to the joint of its first vertex, instead of being skipped
+    void StkImportPolyfillTriangleWarns()
+    {
+        QStringList warnings;
+        QString error;
+        StickFigureData *figure = StkFormat::ImportStk(
+                    SamplePath("stk/two sticks and a polygon fill forming a red triangle.stk"),
+                    QPointF(0, 0), &warnings, &error);
+        QVERIFY2(figure, qPrintable(error));
+        QCOMPARE(figure->stick_list.count(), 3); // 2 segments + the imported polygon
+        StickData *poly = figure->stick_list.last();
+        QCOMPARE(poly->stick_type, qint32(StickData::POLYGON));
+        QCOMPARE(poly->polygon_points.count(), 3);
+        QCOMPARE(poly->brush.color().red(), 255);
+        QVERIFY(poly->parent != nullptr); // welded to the joint of its first vertex
+        // the triangle's vertices are the segments' joints: each mapped vertex must sit
+        // on an endpoint of one of the two imported segments
+        QTransform t = poly->PolygonTransform();
+        for (const QPointF &pt : poly->polygon_points) {
+            QPointF v = t.map(pt);
+            bool on_a_joint = false;
+            for (StickData *s : figure->stick_list) {
+                if (s == poly)
+                    continue;
+                on_a_joint |= QLineF(v, s->my_line.p1()).length() < 0.1
+                        || QLineF(v, s->my_line.p2()).length() < 0.1;
+            }
+            QVERIFY(on_a_joint);
+        }
+        QVERIFY(warnings.join(" ").contains("polygon"));
+        delete figure;
+    }
+
+    // builds a LINE master + POLYGON child, exports, re-imports, and checks the polygon
+    // survives with its shape intact (relative to the master origin — both directions
+    // recenter the figure). The vertices travel as invisible carrier segments/nodes plus
+    // a polyfill record, so the re-import also contains those extra invisible sticks.
+    void StkAndNodesExportImportPolygonRoundTrip()
+    {
+        QVector<QPointF> triangle { QPointF(0, 100), QPointF(70, 150), QPointF(-10, 180) };
+        auto build_figure = [&triangle](StickFigureData &figure) {
+            StickData *master = new StickData();
+            master->my_line = QLineF(0, 0, 0, 100);
+            master->pen.setWidthF(6.0);
+            master->pen.setCapStyle(Qt::RoundCap);
+            figure.stick_list.append(master);
+            figure.master_stick = master;
+            figure.current_stick = master;
+
+            StickData *poly = new StickData();
+            poly->stick_type = StickData::POLYGON;
+            poly->my_line = QLineF(0, 100, 70, 150);
+            poly->img_angle = float(-atan2(poly->my_line.dx(), poly->my_line.dy()) * 180.0 / M_PI);
+            poly->parent = master;
+            master->children.append(poly);
+            QPen no_pen;
+            no_pen.setStyle(Qt::NoPen);
+            poly->pen = no_pen;
+            poly->brush = QBrush(QColor(200, 30, 30));
+            poly->z = 1;
+            QTransform inverse = poly->PolygonTransform().inverted();
+            for (const QPointF &v : triangle)
+                poly->polygon_points.append(inverse.map(v));
+            figure.stick_list.append(poly);
+        };
+        // valida la geometria reimportata confrontando i vertici RELATIVI all'origine
+        // del master (il recentering trasla tutto rigidamente)
+        auto check_import = [&triangle](StickFigureData *imported) {
+            StickData *poly = nullptr;
+            int polygons = 0;
+            for (StickData *s : imported->stick_list) {
+                if (s->stick_type == StickData::POLYGON) {
+                    poly = s;
+                    polygons++;
+                }
+            }
+            QCOMPARE(polygons, 1);
+            QCOMPARE(poly->polygon_points.count(), 3);
+            QCOMPARE(poly->brush.color(), QColor(200, 30, 30));
+            QPointF origin = imported->master_stick->my_line.p1();
+            QTransform t = poly->PolygonTransform();
+            for (int i = 0; i < 3; i++) {
+                QPointF v = t.map(poly->polygon_points[i]) - origin;
+                QVERIFY2(QLineF(v, triangle[i]).length() < 0.1,
+                         qPrintable(QString("vertex %1 drifted: (%2,%3) vs (%4,%5)")
+                                    .arg(i).arg(v.x()).arg(v.y())
+                                    .arg(triangle[i].x()).arg(triangle[i].y())));
+            }
+        };
+
+        QStringList warnings;
+        QString error;
+
+        StickFigureData stk_figure;
+        build_figure(stk_figure);
+        QString stk_path = stk_temp_dir.filePath("polygon_roundtrip.stk");
+        QVERIFY2(StkFormat::ExportStk(stk_path, stk_figure, StkFormat::PIVOT5, &warnings, &error),
+                 qPrintable(error));
+        StickFigureData *stk_back = StkFormat::ImportStk(stk_path, QPointF(0, 0), &warnings, &error);
+        QVERIFY2(stk_back, qPrintable(error));
+        QCOMPARE(stk_back->stick_list.count(), 6); // master + skeleton + 3 carriers + polygon
+        check_import(stk_back);
+        delete stk_back;
+
+        StickFigureData nodes_figure;
+        build_figure(nodes_figure);
+        QString nodes_path = stk_temp_dir.filePath("polygon_roundtrip.nodes");
+        QVERIFY2(StkFormat::ExportNodes(nodes_path, nodes_figure, &warnings, &error),
+                 qPrintable(error));
+        StickFigureData *nodes_back = StkFormat::ImportNodes(nodes_path, QPointF(0, 0), &warnings, &error);
+        QVERIFY2(nodes_back, qPrintable(error));
+        QCOMPARE(nodes_back->stick_list.count(), 6);
+        check_import(nodes_back);
+        delete nodes_back;
+    }
+
+    // a MULTILINE exports to both formats as a chain of welded segments (one per path
+    // edge, thickness = mean of the edge's two vertex widths); re-importing yields the
+    // chain with the vertices in place
+    void StkAndNodesExportMultilineChain()
+    {
+        QVector<QPointF> path { QPointF(0, 0), QPointF(30, 40), QPointF(80, 10), QPointF(120, 50) };
+        auto build_figure = [&path](StickFigureData &figure) {
+            StickData *multi = new StickData();
+            multi->stick_type = StickData::MULTILINE;
+            multi->my_line = QLineF(path.first(), path.last());
+            multi->img_angle = float(-atan2(multi->my_line.dx(), multi->my_line.dy()) * 180.0 / M_PI);
+            multi->pen.setWidthF(6.0);
+            multi->pen.setCapStyle(Qt::RoundCap);
+            QTransform inverse = multi->PolygonTransform().inverted();
+            for (int i = 1; i < path.count() - 1; i++)
+                multi->polygon_points.append(inverse.map(path[i]));
+            multi->vertex_widths << 6.0f << 8.0f << 10.0f << 4.0f;
+            multi->vertex_curvatures << 0.0f << 0.0f << 0.0f << 0.0f;
+            figure.stick_list.append(multi);
+            figure.master_stick = multi;
+            figure.current_stick = multi;
+        };
+        // il reimport dà una catena di 3 segmenti: verifica che i giunti ricadano sui
+        // vertici del percorso (relativi al primo giunto — il recentering trasla tutto)
+        auto check_chain = [&path](StickFigureData *imported) {
+            QCOMPARE(imported->stick_list.count(), 3);
+            QPointF origin = imported->stick_list[0]->my_line.p1();
+            for (int i = 0; i < 3; i++) {
+                QCOMPARE(imported->stick_list[i]->stick_type, qint32(StickData::LINE));
+                QPointF joint = imported->stick_list[i]->my_line.p2() - origin;
+                QVERIFY2(QLineF(joint, path[i + 1]).length() < 0.1,
+                         qPrintable(QString("joint %1 drifted").arg(i)));
+            }
+            // spessore del primo tratto = media delle larghezze dei suoi due vertici
+            QVERIFY(qAbs(imported->stick_list[0]->pen.widthF() - 7.0) < 0.51); // .nodes arrotonda a int
+        };
+
+        QStringList warnings;
+        QString error;
+
+        StickFigureData stk_figure;
+        build_figure(stk_figure);
+        QString stk_path = stk_temp_dir.filePath("multiline_roundtrip.stk");
+        QVERIFY2(StkFormat::ExportStk(stk_path, stk_figure, StkFormat::PIVOT5, &warnings, &error),
+                 qPrintable(error));
+        StickFigureData *stk_back = StkFormat::ImportStk(stk_path, QPointF(0, 0), &warnings, &error);
+        QVERIFY2(stk_back, qPrintable(error));
+        check_chain(stk_back);
+        delete stk_back;
+
+        StickFigureData nodes_figure;
+        build_figure(nodes_figure);
+        QString nodes_path = stk_temp_dir.filePath("multiline_roundtrip.nodes");
+        QVERIFY2(StkFormat::ExportNodes(nodes_path, nodes_figure, &warnings, &error),
+                 qPrintable(error));
+        StickFigureData *nodes_back = StkFormat::ImportNodes(nodes_path, QPointF(0, 0), &warnings, &error);
+        QVERIFY2(nodes_back, qPrintable(error));
+        check_chain(nodes_back);
+        delete nodes_back;
+
+        QVERIFY(warnings.join(" ").contains("multi-line"));
+    }
+
+    void StkImportStaticSampleWarns()
+    {
+        QStringList warnings;
+        QString error;
+        StickFigureData *figure = StkFormat::ImportStk(
+                    SamplePath("stk/three consecutive sticks with the middle of them being a static segment.stk"),
+                    QPointF(0, 0), &warnings, &error);
+        QVERIFY2(figure, qPrintable(error));
+        QCOMPARE(figure->stick_list.count(), 3);
+        QCOMPARE(figure->stick_list[1]->parent, figure->stick_list[0]);
+        QCOMPARE(figure->stick_list[2]->parent, figure->stick_list[1]);
+        QVERIFY(warnings.join(" ").contains("1 static"));
+        delete figure;
+    }
+
+    void StkImportRejectsCorruptFiles()
+    {
+        QStringList warnings;
+        QString error;
+
+        // wrong marker byte
+        QVERIFY(!StkFormat::ImportStk(WriteTempFile("xjunkjunkjunk"), QPointF(0, 0), &warnings, &error));
+        QVERIFY(!error.isEmpty());
+
+        // 'z' marker but not a zlib stream
+        QVERIFY(!StkFormat::ImportStk(WriteTempFile("z_not_zlib_data"), QPointF(0, 0), &warnings, &error));
+
+        // unknown flag bits (bit 7 cleared)
+        QByteArray bad_flags;
+        bad_flags.append(char(0x3F));
+        PutI32(bad_flags, 1);
+        bad_flags.append(DefaultSegmentRecord());
+        PutU16(bad_flags, 0);
+        PutU16(bad_flags, 0);
+        QVERIFY(!StkFormat::ImportStk(WriteModernStkFile(bad_flags), QPointF(0, 0), &warnings, &error));
+        QVERIFY(error.contains("variant"));
+
+        // absurd segment count
+        QByteArray bad_count;
+        bad_count.append(char(0xBF));
+        PutI32(bad_count, 1000000000);
+        QVERIFY(!StkFormat::ImportStk(WriteModernStkFile(bad_count), QPointF(0, 0), &warnings, &error));
+
+        // forward parent reference
+        QByteArray forward;
+        forward.append(char(0xBF));
+        PutI32(forward, 2);
+        forward.append(DefaultSegmentRecord());
+        PutU16(forward, 5); // segment 2 claims to hang off segment 5
+        forward.append(DefaultSegmentRecord());
+        PutU16(forward, 0);
+        PutU16(forward, 0);
+        QVERIFY(!StkFormat::ImportStk(WriteModernStkFile(forward), QPointF(0, 0), &warnings, &error));
+
+        // truncated mid-segment
+        QByteArray truncated;
+        truncated.append(char(0xBF));
+        PutI32(truncated, 2);
+        truncated.append(DefaultSegmentRecord());
+        QVERIFY(!StkFormat::ImportStk(WriteModernStkFile(truncated), QPointF(0, 0), &warnings, &error));
+    }
+
+    // pins the writer to the exact byte layout Pivot produced for the same content
+    void StkExportMatchesPivotBytes()
+    {
+        StickFigureData figure;
+        StickData *stick = new StickData();
+        stick->my_line = QLineF(100, 100, 100, 52); // straight up, length 48
+        stick->stick_type = StickData::LINE;
+        stick->pen = QPen(QColor(0, 0, 0));
+        stick->pen.setWidthF(6.0);
+        stick->pen.setCapStyle(Qt::RoundCap);
+        figure.stick_list.append(stick);
+        figure.master_stick = stick;
+
+        QStringList warnings;
+        QString error;
+        QString out_path = stk_temp_dir.filePath("pin_modern.stk");
+        QVERIFY2(StkFormat::ExportStk(out_path, figure, StkFormat::PIVOT5, &warnings, &error),
+                 qPrintable(error));
+
+        QByteArray exported = ReadFileBytes(out_path);
+        QByteArray sample = ReadFileBytes(SamplePath("stk/single stick.stk"));
+        QCOMPARE(quint8(exported.at(0)), quint8(0x7A));
+        QCOMPARE(InflateZlib(exported.mid(1)), InflateZlib(sample.mid(1)));
+        QVERIFY(warnings.isEmpty());
+    }
+
+    void StkExportImportRoundTrip()
+    {
+        StickFigureData figure;
+        StickData *master = new StickData();
+        master->my_line = QLineF(200, 200, 200, 150);
+        master->stick_type = StickData::LINE;
+        master->pen = QPen(QColor(200, 30, 30));
+        master->pen.setWidthF(6.0);
+        master->pen.setCapStyle(Qt::RoundCap);
+        master->z = 0.00;
+        figure.stick_list.append(master);
+        figure.master_stick = master;
+
+        StickData *circle = new StickData();
+        circle->my_line = QLineF(200, 150, 200, 100);
+        circle->stick_type = StickData::CIRCLE;
+        circle->pen = QPen(QColor(0, 0, 0));
+        circle->pen.setWidthF(4.0);
+        circle->brush = QBrush(Qt::white);
+        circle->img_w_scale = 1;
+        circle->parent = master;
+        circle->z = 0.01;
+        figure.stick_list.append(circle);
+
+        StickData *step = new StickData();
+        step->my_line = QLineF(200, 200, 250, 200);
+        step->stick_type = StickData::LINE;
+        step->pen = QPen(QColor(30, 30, 200));
+        step->pen.setWidthF(3.0);
+        step->pen.setCapStyle(Qt::SquareCap);
+        step->parent = master;
+        step->stepchild = true;
+        step->z = 0.02;
+        figure.stick_list.append(step);
+
+        StickData *rect = new StickData();
+        rect->my_line = QLineF(200, 100, 240, 80);
+        rect->stick_type = StickData::RECT;
+        rect->pen = QPen(QColor(20, 120, 20));
+        rect->brush = QBrush(QColor(20, 120, 20));
+        rect->img_w_scale = 12;
+        rect->parent = circle;
+        rect->z = 0.03;
+        figure.stick_list.append(rect);
+
+        QStringList export_warnings;
+        QString error;
+        QString out_path = stk_temp_dir.filePath("roundtrip.stk");
+        QVERIFY2(StkFormat::ExportStk(out_path, figure, StkFormat::PIVOT5, &export_warnings, &error),
+                 qPrintable(error));
+        QVERIFY(export_warnings.join(" ").contains("plain Pivot segments")); // the RECT
+
+        // reimport centered on the original bounding box so coordinates line up
+        QRectF bounds(QPointF(200, 80), QPointF(250, 200));
+        QStringList import_warnings;
+        StickFigureData *loaded = StkFormat::ImportStk(out_path, bounds.center(),
+                                                       &import_warnings, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QCOMPARE(loaded->stick_list.count(), 4);
+        for (int i = 0; i < 4; i++) {
+            QVERIFY2(QLineF(loaded->stick_list[i]->my_line.p1(), figure.stick_list[i]->my_line.p1()).length() < 1e-3
+                     && QLineF(loaded->stick_list[i]->my_line.p2(), figure.stick_list[i]->my_line.p2()).length() < 1e-3,
+                     qPrintable(QStringLiteral("stick %1 moved").arg(i)));
+        }
+        QCOMPARE(loaded->stick_list[0]->stick_type, qint32(StickData::LINE));
+        QCOMPARE(loaded->stick_list[0]->pen.color(), QColor(200, 30, 30));
+        QCOMPARE(loaded->stick_list[1]->stick_type, qint32(StickData::CIRCLE));
+        QCOMPARE(loaded->stick_list[1]->brush.color(), QColor(Qt::white));
+        QVERIFY(loaded->stick_list[2]->stepchild);
+        QCOMPARE(loaded->stick_list[2]->pen.capStyle(), Qt::SquareCap);
+        // the RECT degrades to a square-capped line of the same width
+        QCOMPARE(loaded->stick_list[3]->stick_type, qint32(StickData::LINE));
+        QCOMPARE(loaded->stick_list[3]->pen.capStyle(), Qt::SquareCap);
+        QCOMPARE(loaded->stick_list[3]->pen.widthF(), 12.0);
+        delete loaded;
+    }
+
+    void StkImportV2Files()
+    {
+        QStringList warnings;
+        QString error;
+
+        StickFigureData *plain = StkFormat::ImportStk(SamplePath("stk/v2/single stick.stk"),
+                                                      QPointF(0, 0), &warnings, &error);
+        QVERIFY2(plain, qPrintable(error));
+        QCOMPARE(plain->stick_list.count(), 1);
+        QCOMPARE(plain->stick_list[0]->stick_type, qint32(StickData::LINE));
+        QCOMPARE(plain->stick_list[0]->pen.widthF(), 5.0);
+        // v2 angles live in [0, 2pi) but must decode to the same direction: straight up
+        QVERIFY(qAbs(plain->stick_list[0]->my_line.dx()) < 1e-3);
+        QVERIFY(plain->stick_list[0]->my_line.dy() < 0);
+        QVERIFY(qAbs(plain->stick_list[0]->my_line.length() - 48.0) < 1e-3);
+        delete plain;
+
+        StickFigureData *stickman = StkFormat::ImportStk(
+                    SamplePath("stk/v2/basic stickman with a torso two arms two legs and a round head.stk"),
+                    QPointF(0, 0), &warnings, &error);
+        QVERIFY2(stickman, qPrintable(error));
+        QCOMPARE(stickman->stick_list.count(), 6);
+        QCOMPARE(stickman->stick_list[1]->parent, stickman->master_stick); // arm at the neck
+        QCOMPARE(stickman->stick_list[3]->stick_type, qint32(StickData::CIRCLE)); // the head
+        QVERIFY(stickman->stick_list[4]->stepchild); // legs at the origin
+        QVERIFY(stickman->stick_list[5]->stepchild);
+        QCOMPARE(stickman->stick_list[0]->pen.widthF(), 15.0);
+        delete stickman;
+
+        warnings.clear();
+        StickFigureData *chain = StkFormat::ImportStk(
+                    SamplePath("stk/v2/three consecutive sticks with the middle of them being a static segment.stk"),
+                    QPointF(0, 0), &warnings, &error);
+        QVERIFY2(chain, qPrintable(error));
+        QCOMPARE(chain->stick_list.count(), 3);
+        QCOMPARE(chain->stick_list[2]->parent, chain->stick_list[1]);
+        QVERIFY(warnings.join(" ").contains("1 static"));
+        delete chain;
+    }
+
+    void StkImportRejectsCorruptV2()
+    {
+        QStringList warnings;
+        QString error;
+        QByteArray valid = ReadFileBytes(SamplePath("stk/v2/single stick.stk"));
+
+        // size not matching 2 + 24*count
+        QVERIFY(!StkFormat::ImportStk(WriteTempFile(valid + char(0)), QPointF(0, 0), &warnings, &error));
+
+        // non-sequential segment id
+        QByteArray bad_id = valid;
+        bad_id[3] = char(2); // id u16 low byte at record offset 1
+        QVERIFY(!StkFormat::ImportStk(WriteTempFile(bad_id), QPointF(0, 0), &warnings, &error));
+
+        // parent joint referencing itself/forward
+        QByteArray bad_parent = valid;
+        bad_parent[2] = char(1); // parent u8 of segment 1 must be 0
+        QVERIFY(!StkFormat::ImportStk(WriteTempFile(bad_parent), QPointF(0, 0), &warnings, &error));
+    }
+
+    void StkExportV2MatchesPivotBytesAndLimits()
+    {
+        StickFigureData figure;
+        StickData *stick = new StickData();
+        stick->my_line = QLineF(100, 100, 100, 52); // straight up, length 48
+        stick->stick_type = StickData::LINE;
+        stick->pen = QPen(QColor(0, 0, 0));
+        stick->pen.setWidthF(5.0);
+        stick->pen.setCapStyle(Qt::RoundCap);
+        figure.stick_list.append(stick);
+        figure.master_stick = stick;
+
+        QStringList warnings;
+        QString error;
+        QString out_path = stk_temp_dir.filePath("pin_v2.stk");
+        QVERIFY2(StkFormat::ExportStk(out_path, figure, StkFormat::PIVOT2, &warnings, &error),
+                 qPrintable(error));
+        QCOMPARE(ReadFileBytes(out_path), ReadFileBytes(SamplePath("stk/v2/single stick.stk")));
+
+        // the u8 count/parent fields cap the v2 format at 255 sticks
+        StickFigureData big;
+        StickData *big_master = new StickData();
+        big_master->my_line = QLineF(0, 0, 0, 50);
+        big.stick_list.append(big_master);
+        big.master_stick = big_master;
+        for (int i = 0; i < 255; i++) {
+            StickData *child = new StickData();
+            child->my_line = QLineF(0, 50, 10, 60);
+            child->parent = big_master;
+            big.stick_list.append(child);
+        }
+        QVERIFY(!StkFormat::ExportStk(stk_temp_dir.filePath("too_big.stk"), big,
+                                      StkFormat::PIVOT2, &warnings, &error));
+        QVERIFY(error.contains("255"));
+    }
+
+    void NodesImportZedStickman()
+    {
+        QStringList warnings;
+        QString error;
+        StickFigureData *figure = StkFormat::ImportNodes(SamplePath("nodes/Zed-Stickman.nodes"),
+                                                         QPointF(0, 0), &warnings, &error);
+        QVERIFY2(figure, qPrintable(error));
+        QCOMPARE(figure->stick_list.count(), 91); // 92 nodes minus the pure-joint root
+        QCOMPARE(figure->master_stick, figure->stick_list[0]);
+        QCOMPARE(figure->master_stick->children.count(), 90); // ancestor of everything
+
+        int origin_stepchildren = 0, circles = 0, trapezoids = 0;
+        for (StickData *stick : figure->stick_list) {
+            if (stick->stepchild && stick->parent == figure->master_stick)
+                origin_stepchildren++;
+            if (stick->stick_type == StickData::CIRCLE)
+                circles++;
+            if (stick->stick_type == StickData::TRAPEZOID)
+                trapezoids++;
+        }
+        QCOMPARE(origin_stepchildren, 2); // the root had 3 children: master + 2
+        QCOMPARE(circles, 1);
+        QCOMPARE(trapezoids, 10); // the 10 triangle nodes
+
+        // header scale 1.5 applied to geometry and thickness (node 1: len 132.73, th 50)
+        QVERIFY(qAbs(figure->master_stick->my_line.length() - 132.7297 * 1.5) < 0.5);
+        QVERIFY(qAbs(figure->master_stick->pen.widthF() - 50 * 1.5) < 1e-6);
+
+        QString joined = warnings.join(" ");
+        QVERIFY(joined.contains("72 static"));
+        QVERIFY(joined.contains("33 stretchy"));
+        delete figure;
+    }
+
+    void NodesExportRoundTrip()
+    {
+        // line + white circle + origin-stepchild + taper, deliberately listing the
+        // master NOT first in draw order (z) to exercise the draw_order ranks
+        StickFigureData figure;
+        StickData *master = new StickData();
+        master->my_line = QLineF(300, 300, 300, 250);
+        master->stick_type = StickData::LINE;
+        master->pen = QPen(QColor(10, 20, 30));
+        master->pen.setWidthF(6.0);
+        master->pen.setCapStyle(Qt::RoundCap);
+        master->z = 0.02; // drawn ABOVE the circle
+        figure.stick_list.append(master);
+        figure.master_stick = master;
+
+        StickData *circle = new StickData();
+        circle->my_line = QLineF(300, 250, 300, 200);
+        circle->stick_type = StickData::CIRCLE;
+        circle->pen = QPen(QColor(0, 0, 0));
+        circle->pen.setWidthF(4.0);
+        circle->brush = QBrush(Qt::white);
+        circle->img_w_scale = 1;
+        circle->parent = master;
+        circle->z = 0.01;
+        figure.stick_list.append(circle);
+
+        StickData *step = new StickData();
+        step->my_line = QLineF(300, 300, 350, 310);
+        step->stick_type = StickData::LINE;
+        step->pen = QPen(QColor(200, 10, 10, 128)); // semi-transparent
+        step->pen.setWidthF(3.0);
+        step->pen.setCapStyle(Qt::SquareCap);
+        step->parent = master;
+        step->stepchild = true;
+        step->z = 0.03;
+        figure.stick_list.append(step);
+
+        StickData *taper = new StickData();
+        taper->my_line = QLineF(300, 200, 340, 180);
+        taper->stick_type = StickData::TAPER;
+        taper->pen = QPen(QColor(20, 120, 20));
+        taper->brush = QBrush(QColor(20, 120, 20));
+        taper->img_w_scale = 14;
+        taper->img_h_scale = 6;
+        taper->parent = circle;
+        taper->z = 0.04;
+        figure.stick_list.append(taper);
+
+        QStringList export_warnings;
+        QString error;
+        QString out_path = stk_temp_dir.filePath("roundtrip.nodes");
+        QVERIFY2(StkFormat::ExportNodes(out_path, figure, &export_warnings, &error),
+                 qPrintable(error));
+
+        // the payload must be the newest dialect: bare zlib, v403 b72 little-endian
+        QByteArray payload = InflateZlib(ReadFileBytes(out_path));
+        QVERIFY(payload.size() > 12);
+        QCOMPARE(qFromLittleEndian<qint32>(reinterpret_cast<const uchar *>(payload.constData())), 403);
+        QCOMPARE(qFromLittleEndian<qint32>(reinterpret_cast<const uchar *>(payload.constData()) + 4), 72);
+
+        QRectF bounds(QPointF(300, 180), QPointF(350, 310));
+        QStringList import_warnings;
+        StickFigureData *loaded = StkFormat::ImportNodes(out_path, bounds.center(),
+                                                         &import_warnings, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QCOMPARE(loaded->stick_list.count(), 4);
+        QCOMPARE(loaded->master_stick, loaded->stick_list[0]); // master survives z-reordering
+
+        // .nodes files are depth-first pre-order, so the reimported list order is
+        // master, circle, taper, then the origin-stepchild
+        const int original_index[4] = {0, 1, 3, 2};
+        for (int i = 0; i < 4; i++) {
+            StickData *expected = figure.stick_list[original_index[i]];
+            StickData *actual = loaded->stick_list[i];
+            QVERIFY2(QLineF(actual->my_line.p1(), expected->my_line.p1()).length() < 1e-2
+                     && QLineF(actual->my_line.p2(), expected->my_line.p2()).length() < 1e-2,
+                     qPrintable(QStringLiteral("stick %1 moved").arg(i)));
+        }
+        StickData *loaded_master = loaded->stick_list[0];
+        StickData *loaded_circle = loaded->stick_list[1];
+        StickData *loaded_taper = loaded->stick_list[2];
+        StickData *loaded_step = loaded->stick_list[3];
+        // draw order came through the draw_order_index ranks, not the file order
+        QVERIFY(loaded_circle->z < loaded_master->z);
+        QVERIFY(loaded_master->z < loaded_step->z);
+        QVERIFY(loaded_step->z < loaded_taper->z);
+        QCOMPARE(loaded_master->pen.color(), QColor(10, 20, 30));
+        QCOMPARE(loaded_master->pen.capStyle(), Qt::RoundCap);
+        QCOMPARE(loaded_circle->stick_type, qint32(StickData::CIRCLE));
+        QCOMPARE(loaded_circle->brush.color(), QColor(Qt::white));
+        QCOMPARE(loaded_circle->pen.color(), QColor(0, 0, 0)); // outline color kept
+        QVERIFY(loaded_step->stepchild);
+        QCOMPARE(loaded_step->pen.color(), QColor(200, 10, 10, 128)); // alpha as-is
+        QCOMPARE(loaded_step->pen.capStyle(), Qt::SquareCap);
+        QCOMPARE(loaded_taper->stick_type, qint32(StickData::TAPER)); // rounded trapezoid
+        QCOMPARE(loaded_taper->img_w_scale, 14.0f);
+        QCOMPARE(loaded_taper->img_h_scale, 6.0f);
+        delete loaded;
+    }
+
+    void NodesExportZedRoundTrip()
+    {
+        QStringList warnings;
+        QString error;
+        StickFigureData *zed = StkFormat::ImportNodes(SamplePath("nodes/Zed-Stickman.nodes"),
+                                                      QPointF(500, 400), &warnings, &error);
+        QVERIFY2(zed, qPrintable(error));
+
+        QString out_path = stk_temp_dir.filePath("zed_reexport.nodes");
+        QStringList export_warnings;
+        QVERIFY2(StkFormat::ExportNodes(out_path, *zed, &export_warnings, &error),
+                 qPrintable(error));
+
+        // recompute the exported figure's bounding box center so coordinates line up
+        QRectF bounds;
+        for (StickData *stick : zed->stick_list) {
+            QRectF box = QRectF(stick->my_line.p1(), stick->my_line.p2()).normalized();
+            bounds = bounds.isNull() ? box : bounds.united(box);
+        }
+        QStringList import_warnings;
+        StickFigureData *reloaded = StkFormat::ImportNodes(out_path, bounds.center(),
+                                                           &import_warnings, &error);
+        QVERIFY2(reloaded, qPrintable(error));
+        QCOMPARE(reloaded->stick_list.count(), zed->stick_list.count());
+        double worst = 0;
+        for (int i = 0; i < zed->stick_list.count(); i++) {
+            worst = qMax(worst, double(QLineF(reloaded->stick_list[i]->my_line.p2(),
+                                              zed->stick_list[i]->my_line.p2()).length()));
+        }
+        QVERIFY2(worst < 0.75, qPrintable(QStringLiteral("worst endpoint drift %1 px").arg(worst)));
+        delete zed;
+        delete reloaded;
+    }
+
+    void NodesImportRejectsCorruptFiles()
+    {
+        QStringList warnings;
+        QString error;
+
+        // truncated real file
+        QByteArray zed = ReadFileBytes(SamplePath("nodes/Zed-Stickman.nodes"));
+        QVERIFY(!StkFormat::ImportNodes(WriteTempFile(zed.left(100)), QPointF(0, 0), &warnings, &error));
+        QVERIFY(!error.isEmpty());
+
+        // implausible version and not a zlib stream either
+        QVERIFY(!StkFormat::ImportNodes(WriteTempFile("GARBAGEGARBAGEGARBAGE"), QPointF(0, 0), &warnings, &error));
+
+        // node-count bomb: valid v224 header + root whose child_count is enormous
+        QByteArray bomb = zed.left(12 + 55); // header + root node, all fields genuine
+        for (int i = 0; i < 4; i++)          // overwrite the root's trailing child_count (BE)
+            bomb[12 + 51 + i] = char((quint32(1000000) >> (8 * (3 - i))) & 0xFF);
+        QVERIFY(!StkFormat::ImportNodes(WriteTempFile(bomb), QPointF(0, 0), &warnings, &error));
     }
 };
 

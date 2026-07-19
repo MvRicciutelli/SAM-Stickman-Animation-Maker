@@ -6,6 +6,10 @@ TARGET = tst_characterization
 
 INCLUDEPATH += ..
 
+# absolute path of this directory, so the tests find data/ regardless of the
+# shadow-build working directory
+DEFINES += TESTS_SOURCE_DIR=\\\"$$PWD\\\"
+
 # App sources under test: the model/undo/serialization layer plus the advanced-tab widgets
 # that animation.cpp's updateTab() needs. widget.cpp/mymainwindow.cpp are NOT linked (their
 # constructors do file I/O and dialogs); the globals they own are defined in test_globals.cpp.
@@ -24,7 +28,8 @@ SOURCES += \
     ../myview.cpp \
     ../stick.cpp \
     ../stickdata.cpp \
-    ../stickfiguredata.cpp
+    ../stickfiguredata.cpp \
+    ../stkformat.cpp
 
 HEADERS += \
     ../StickFigure.h \
@@ -40,6 +45,7 @@ HEADERS += \
     ../stick.h \
     ../stickdata.h \
     ../stickfiguredata.h \
+    ../stkformat.h \
     ../style.h \
     ../uiItems.h
 

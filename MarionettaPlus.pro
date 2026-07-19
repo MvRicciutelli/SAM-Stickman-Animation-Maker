@@ -36,6 +36,7 @@ SOURCES += \
     stick.cpp \
     stickdata.cpp \
     stickfiguredata.cpp \
+    stkformat.cpp \
     widget.cpp
 
 HEADERS += \
@@ -58,6 +59,7 @@ HEADERS += \
     stick.h \
     stickdata.h \
     stickfiguredata.h \
+    stkformat.h \
     style.h \
     uiItems.h \
     widget.h
@@ -81,5 +83,9 @@ RESOURCES += \
     myres.qrc
 
 DISTFILES += \
+    resources/Add_multiline_00003.png \
+    resources/add_poly_00001.png \
+    resources/add_poly_00002.png \
+    resources/add_poly_00003.png \
     version.exe
 RC_ICONS = marionettaIcon_00001.ico

@@ -302,6 +302,10 @@ private slots:
 
     void on_clampToolBtn_clicked();
 
+    void on_addPolyBtn_clicked();
+
+    void on_multiLineBtn_clicked();
+
 private:
     Ui::Widget *ui;
 
@@ -317,6 +321,8 @@ private:
         bool sliderWScale   = false;
         bool sliderHScale   = false;
         bool sliderRot      = false;
+        bool vertexWidth    = false; ///< vertex-width slider of the POLYGON/MULTILINE panel
+        bool vertexCurve    = false; ///< corner-curvature slider of the same panel
     } sliderFlags;
 };
 #endif // WIDGET_H
