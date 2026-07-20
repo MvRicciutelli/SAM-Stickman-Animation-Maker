@@ -2431,6 +2431,44 @@ QPushButton:pressed{
                                </property>
                               </widget>
                              </item>
+                             <item>
+                              <widget class="QPushButton" name="addIkBtn">
+                               <property name="minimumSize">
+                                <size>
+                                 <width>50</width>
+                                 <height>50</height>
+                                </size>
+                               </property>
+                               <property name="maximumSize">
+                                <size>
+                                 <width>50</width>
+                                 <height>50</height>
+                                </size>
+                               </property>
+                               <property name="styleSheet">
+                                <string notr="true">QPushButton {
+    qproperty-icon: url(&quot; &quot;); /* empty image */
+    qproperty-iconSize: 16px 16px; /* space for the background image */
+    background-image: url(:/resources/Ik_00001.png);
+    background-repeat: no-repeat;
+	border: 0px solid #5A5A5A;
+}
+QPushButton:hover{
+    background-image: url(:/resources/Ik_00002.png);
+    background-repeat: no-repeat;
+	background-color: rgb(25, 25, 25)
+}
+QPushButton:pressed{
+    background-image: url(:/resources/Ik_00003.png);
+    background-repeat: no-repeat;
+}
+</string>
+                               </property>
+                               <property name="text">
+                                <string/>
+                               </property>
+                              </widget>
+                             </item>
                             </layout>
                            </widget>
                           </item>

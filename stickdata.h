@@ -104,7 +104,9 @@ public:
 
     // ------- persistent fields (exactly what operator<</operator>> read and write) ------
 
-    qint32 version = 1;              ///< serialization format version of this record
+    qint32 version = 2;              ///< serialization format version of this record; 2 adds the
+                                     ///< IK fields below, gated in operator<</operator>> so files
+                                     ///< saved before IK existed (version 1) still load correctly
     qint32 stick_type = StickType::LINE;///< StickType value; drives painting and serialization
     /**
      * @brief True only for the invisible bridge stick MergeStickFigures() creates to
@@ -177,6 +179,48 @@ public:
      * plus the length scaling that normalizes the stored points.
      */
     QTransform PolygonTransform() const;
+
+    /**
+     * @brief Role of a stick inside an inverse-kinematics chain (the DRAW_IK tool,
+     *        myview.cpp). A chain is a straight ancestor line inside one stickfigure:
+     *        one IK_START (the anchor, never moves), zero or more IK_NODE sticks in
+     *        between, and one IK_TARGET_ON/IK_TARGET_OFF stick whose free end (P2) is
+     *        the effector the user drags. IK_TARGET_ON/OFF encodes the chain's on/off
+     *        toggle — there is no separate "active" flag to fall out of sync with it.
+     *
+     * Only DeleteStick() is currently aware that OTHER tree-restructuring operations
+     * exist (Weld/Chop/SetMaster family/MergeStickFigures/SplitStickFigures are not):
+     * one of those breaking a chain's straight ancestor line leaves the chain inert
+     * (StickFigure.cpp's chain-walk helpers fail their consistency check and no-op)
+     * rather than corrupting data, but does not clear the stale roles. Deliberate
+     * scope boundary, not a bug — revisit if that gap turns out to matter in practice.
+     */
+    enum IkRole {
+        IK_NONE = 0,     ///< not part of any chain (the vast majority of sticks)
+        IK_START,        ///< the chain's fixed anchor; ik_target names its target stick
+        IK_NODE,         ///< an intermediate link, carried along by the solve
+        IK_TARGET_ON,    ///< the chain's effector; solved toward the dragged position
+        IK_TARGET_OFF    ///< same stick, chain toggled off: behaves like a plain stick
+    };
+
+    qint32 ik_role = IK_NONE;      ///< one of the IkRole values above
+    qint32 ik_start_idx = -1;      ///< scratch for (de)serialization only, like parent_idx — see StickFigureData's operator<<
+    qint32 ik_target_idx = -1;     ///< scratch for (de)serialization only, like parent_idx
+
+    /**
+     * @brief IK_START only: the chain's target stick. Non-owning, not copied by
+     *        CopyFrom() (same rule as `parent`/`children`) — resolved from
+     *        ik_target_idx by whoever orchestrates a clone/load (ExtractStickFigureData/
+     *        PopulateLiveStickFigure/StickFigureData::Clone(), mirroring how those
+     *        already remap `parent`/`children`).
+     */
+    StickData *ik_target = nullptr;
+
+    /**
+     * @brief IK_TARGET_ON/OFF only: the chain's start stick. Same non-owning,
+     *        remapped-externally rule as ik_target.
+     */
+    StickData *ik_start = nullptr;
 };
 
 /**

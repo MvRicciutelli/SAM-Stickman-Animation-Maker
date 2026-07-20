@@ -41,6 +41,18 @@ StickFigureData *StickFigureData::Clone() const
             if (child_index >= 0)
                 copied_stick->children.append(copy->stick_list[child_index]);
         }
+        // ik_start/ik_target: stesso remapping per indice di parent/children (ik_start_idx/
+        // ik_target_idx sono scratch solo per lo stream su file, vedi operator<< sotto)
+        if (source_stick->ik_target != nullptr) {
+            int target_index = stick_list.indexOf(source_stick->ik_target);
+            if (target_index >= 0)
+                copied_stick->ik_target = copy->stick_list[target_index];
+        }
+        if (source_stick->ik_start != nullptr) {
+            int start_index = stick_list.indexOf(source_stick->ik_start);
+            if (start_index >= 0)
+                copied_stick->ik_start = copy->stick_list[start_index];
+        }
     }
     int master_index = stick_list.indexOf(master_stick);
     if (master_index >= 0)
@@ -69,6 +81,12 @@ QDataStream &operator<<(QDataStream &stream, const StickFigureData &figure_data)
             stick_data->parent_idx = (qint32)figure_data.stick_list.indexOf(stick_data->parent);
         else
             stick_data->parent_idx = -1;
+        // ik_start_idx/ik_target_idx: stesso schema di parent_idx, ricalcolati qui appena
+        // prima dello stream (StickData::operator<< li scrive solo se version >= 2)
+        stick_data->ik_target_idx = stick_data->ik_target
+                ? (qint32)figure_data.stick_list.indexOf(stick_data->ik_target) : -1;
+        stick_data->ik_start_idx = stick_data->ik_start
+                ? (qint32)figure_data.stick_list.indexOf(stick_data->ik_start) : -1;
         stream << *stick_data;
     }
     return stream;
@@ -125,5 +143,14 @@ QDataStream &operator>>(QDataStream &stream, StickFigureData &figure_data)
         figure_data.current_stick = figure_data.stick_list[current_stick_idx];
     else if (figure_data.stick_list.count() > 0)
         figure_data.current_stick = figure_data.stick_list[0];
+    // risolvi ik_start/ik_target dagli indici, stessa fase in cui parent_idx è già
+    // diventato parent sopra; indici fuori range (file corrotto) restano semplicemente
+    // non risolti (nullptr), come l'analogo controllo su parent_idx
+    for (StickData *stick_data : figure_data.stick_list) {
+        if (stick_data->ik_target_idx >= 0 && stick_data->ik_target_idx < figure_data.stick_list.count())
+            stick_data->ik_target = figure_data.stick_list[stick_data->ik_target_idx];
+        if (stick_data->ik_start_idx >= 0 && stick_data->ik_start_idx < figure_data.stick_list.count())
+            stick_data->ik_start = figure_data.stick_list[stick_data->ik_start_idx];
+    }
     return stream;
 }

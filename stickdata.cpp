@@ -49,6 +49,14 @@ void StickData::CopyFrom(const StickData &source)
     polygon_points = source.polygon_points;
     vertex_widths = source.vertex_widths;
     vertex_curvatures = source.vertex_curvatures;
+    ik_role = source.ik_role;
+    ik_start_idx = source.ik_start_idx;
+    ik_target_idx = source.ik_target_idx;
+    // ik_start/ik_target NON copiati: puntatori non posseduti, come parent/children —
+    // difesa in profondità: azzerali esplicitamente nel caso il target di CopyFrom non
+    // sia appena costruito, così non trapelano i puntatori di un uso precedente
+    ik_start = nullptr;
+    ik_target = nullptr;
 
     // difesa in profondità come in operator>>: oggi il target è sempre appena costruito,
     // ma un riuso futuro non deve far trapelare le immagini precedenti
@@ -113,6 +121,16 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
     stream << stick_data.pen;
     stream << stick_data.brush;
     stream << stick_data.order;
+    if (stick_data.version >= 2) {
+        // ruolo IK: ortogonale allo stick_type, quindi fuori dal blocco type-gated sotto;
+        // version-gated così un file salvato prima che l'IK esistesse (version 1) resta
+        // leggibile — ik_start_idx/ik_target_idx sono scratch di (de)serializzazione,
+        // ricalcolati da StickFigureData::operator<< appena prima di questa chiamata,
+        // esattamente come parent_idx
+        stream << stick_data.ik_role;
+        stream << stick_data.ik_start_idx;
+        stream << stick_data.ik_target_idx;
+    }
     if ((stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::IMAGE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE)) {
         if (stick_data.stick_type == StickData::IMAGE) {
             // stick_img può essere nullo solo per un record ricostruito da un file corrotto:
@@ -178,6 +196,13 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
     stream >> stick_data.pen;
     stream >> stick_data.brush;
     stream >> stick_data.order;
+    if (stick_data.version >= 2) {
+        stream >> stick_data.ik_role;
+        stream >> stick_data.ik_start_idx;
+        stream >> stick_data.ik_target_idx;
+        // ik_start/ik_target vengono risolti dagli indici più tardi, a livello di
+        // StickFigureData::operator>> (stessa fase in cui parent_idx diventa parent)
+    }
     if ((stick_data.stick_type == StickData::IMAGE) || (stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE)) {
         QSize mysize;
         if (stick_data.stick_type == StickData::IMAGE) {

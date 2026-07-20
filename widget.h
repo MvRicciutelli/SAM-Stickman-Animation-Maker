@@ -306,6 +306,8 @@ private slots:
 
     void on_multiLineBtn_clicked();
 
+    void on_addIkBtn_clicked();
+
 private:
     Ui::Widget *ui;
 

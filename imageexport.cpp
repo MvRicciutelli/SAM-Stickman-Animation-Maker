@@ -34,6 +34,7 @@ ImageExport::ImageExport(QObject *parent, QString path, int option)
 void ImageExport::Render(int option)
 {
     Q_UNUSED(option); // la modalità in uso è già in render_option (impostata dal costruttore)
+    StickGraphicsItem::offscreen_render = true; // niente marcatore IK nei fotogrammi esportati
     for(Frame* f :V->my_animation->frame_list){
         QGraphicsScene render_scene; //scena fittizia
         QImage *render_img = new QImage(W,H,QImage::Format_ARGB32); //immagine temporanea
@@ -63,6 +64,7 @@ void ImageExport::Render(int option)
         qDeleteAll(render_clones);
         //...add all other video frames here
     }
+    StickGraphicsItem::offscreen_render = false;
 
 
     //emit ImageExportFinished(render_option);

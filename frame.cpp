@@ -333,8 +333,11 @@ void Frame::UpdateIcon()
     }
     // crea un painter che disegni sull'immagine
     QPainter painter(icon_img);
-    // renderizza dalla scena sull'immagine mediante il painter
+    // renderizza dalla scena sull'immagine mediante il painter (mai il marcatore IK: è
+    // UI viva, non una proprietà dello stickfigure da mostrare in un'iconea)
+    StickGraphicsItem::offscreen_render = true;
     icoScene.render(&painter);
+    StickGraphicsItem::offscreen_render = false;
     // disegna il numero del frame direttamente sull'iconea (fascia scura semi-trasparente in basso,
     // testo bianco sopra): affidarsi all'etichetta nativa della QListWidgetItem in IconMode non
     // mostrava il numero in modo affidabile, quindi lo "cuociamo" nell'immagine stessa

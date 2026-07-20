@@ -39,7 +39,11 @@
                         ///< the path until Enter/double click (finalize) or Esc (cancel = the
                         ///< stick is deleted); on an existing multi-line it inserts a vertex at
                         ///< the middle of the nearest segment, drag adjusts, Alt+click deletes
-#define DRAW_IK 23      ///< tool that adds deltes and edits ik chains
+#define DRAW_IK 23      ///< creates/edits inverse-kinematics chains (StickData::IK_START/
+                        ///< IK_NODE/IK_TARGET_ON/IK_TARGET_OFF): first click on an eligible
+                        ///< stick's start handle begins a chain, second click on a
+                        ///< descendant stick commits it; clicking an existing target
+                        ///< toggles it on/off, Alt+click on one deletes the whole chain
 // --- Layer reorder directions passed to MoveStickFigureZ().
 #define MODE_DOWN 1     ///< move the selected layer one step down (towards the back)
 #define MODE_UP 0       ///< move the selected layer one step up (towards the front)
@@ -456,6 +460,73 @@ private:
     bool poly_session_extends = false;///< session started on an existing polygon: clicks insert at the nearest edge instead of appending
     int poly_drag_idx = -1;           ///< vertex being dragged by the DRAWPOLY tool; -1 when none
     bool poly_vertex_drag = false;    ///< true while a Ctrl-drag of the selected vertices (NOTOOL/CLAMP) is in progress
+
+    // ------- DRAW_IK tool state. Like the POLYGON session above, no StickData* is ------
+    // ------- stored for the pending chain start: IkPendingStart() re-derives it from ---
+    // ------- CurrentStick() each time, so an undo/frame-switch mid-gesture can't leave -
+    // ------- a dangling pointer. The two preview items ARE genuinely transient scene ---
+    // ------- state (there is no committed chain yet for paint() to draw from) ----------
+    bool ik_drawing = false; ///< true between a chain's first click and its second (commit/reject) or Esc/tool-change (abort)
+    QGraphicsLineItem *ik_preview_line = nullptr;  ///< dotted line, pending start handle to mouse
+    QGraphicsPathItem *ik_preview_cross = nullptr; ///< cross following the mouse (previews the target position)
+
+    /**
+     * @brief The chain's not-yet-committed start stick during an DRAW_IK session.
+     * @return CurrentStick() if ik_drawing is true, its role is IK_START and it has no
+     *         target yet (still pending), else nullptr.
+     */
+    StickData *IkPendingStart();
+
+    /**
+     * @brief Removes the two transient preview items, if present.
+     */
+    void ClearIkPreviewItems();
+
+    /**
+     * @brief Aborts an in-progress chain: reverts the pending start back to IK_NONE
+     *        (safe unconditionally — see the eligibility rule in FindIkStartCandidate(),
+     *        which guarantees a stick can only reach IK_START through this one path) and
+     *        clears the session state/preview. Esc and ChangeTool() both route here.
+     */
+    void CancelIkDrawing();
+
+    /**
+     * @brief "Near a stick's start handle" (P1-only proximity, not a whole-segment
+     *        test) among sticks eligible to begin a NEW chain.
+     * @param figure figure to search (always CurrentStickFigure() at call sites, same
+     *        scoping DRAWPOLY/DRAWMULTI already use for their own first click).
+     * @param scene_pos position to test.
+     * @return the nearest eligible stick within the pick radius, or nullptr. Eligible
+     *         means ik_role == IK_NONE (covers the spec's explicit "not IK_TARGET_ON"
+     *         exclusion, and more broadly any stick already committed to another chain
+     *         — reusing one would desync that chain's own role bookkeeping) and at
+     *         least one child (spec: "has one or more child items").
+     */
+    StickData *FindIkStartCandidate(StickFigure *figure, const QPointF &scene_pos);
+
+    /**
+     * @brief "Near an existing chain's target handle" (P2-only proximity) among
+     *        sticks already committed as a target, either polarity.
+     * @param figure figure to search.
+     * @param scene_pos position to test.
+     * @return the nearest such stick within the pick radius, or nullptr.
+     */
+    StickData *FindIkTargetHandle(StickFigure *figure, const QPointF &scene_pos);
+
+    /**
+     * @brief The second click's validity test: a whole-segment proximity hit (the
+     *        same metric FigureAtPoint() uses) that is also a descendant of
+     *        `chain_start` reached through an unbroken free-end-to-origin path (no
+     *        stepchild links partway — FABRIK's joint-sharing assumption requires
+     *        every link's P1 to equal the previous link's P2) and carries no IK role
+     *        of its own yet.
+     * @param figure figure to search (both chain_start and the candidate must be in it).
+     * @param chain_start the pending chain's start stick.
+     * @param scene_pos position to test.
+     * @return the nearest valid candidate within the pick radius, or nullptr — "not
+     *         valid, try again" per spec.
+     */
+    StickData *FindIkTargetCandidate(StickFigure *figure, StickData *chain_start, const QPointF &scene_pos);
 
     // ------- multi-selezione: stato privato -------------------------------------------
     QGraphicsEllipseItem *multi_handle = nullptr; ///< thin light-blue transform handle at the selection center

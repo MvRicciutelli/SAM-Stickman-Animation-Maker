@@ -1221,6 +1221,250 @@ private slots:
         view->SetTool(NOTOOL);
     }
 
+    // ============================= DRAW_IK (inverse kinematics) =============================
+    // helper: a 3-stick straight chain master(100,100->100,200) -> child(->100,300) ->
+    // grandchild(->100,400), each DrawStick() call's `from` matching the previous
+    // stick's `to` so SelectOrigin() attaches it as a proper (non-stepchild) child
+    void BuildIkChainFixture(StickData **master, StickData **child, StickData **grandchild)
+    {
+        AddFrame();
+        *master = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        *child = DrawStick(QPointF(100, 200), QPointF(100, 300));
+        *grandchild = DrawStick(QPointF(100, 300), QPointF(100, 400));
+    }
+
+    // commits master..grandchild as a chain without going through the 2-click UI flow;
+    // sets the start role first, matching the real order (mousePressEvent's first
+    // click sets IK_START before the second click calls CommitIkChain())
+    void CommitIkChainFixture(StickData *master, StickData *grandchild)
+    {
+        master->ik_role = StickData::IK_START;
+        CommitIkChain(master, grandchild);
+    }
+
+    // 2 real clicks: near the master's start handle, then on the grandchild — commits
+    // a chain covering all 3 sticks with the roles the spec describes
+    void DrawIkChainViaRealMouseEvents()
+    {
+        StickData *master, *child, *grandchild;
+        BuildIkChainFixture(&master, &child, &grandchild);
+        view->resize(800, 600);
+        view->SetTool(DRAW_IK);
+
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 100))); // master's start handle
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 350))); // somewhere on the grandchild segment
+
+        QCOMPARE(master->ik_role, (qint32)StickData::IK_START);
+        QCOMPARE(child->ik_role, (qint32)StickData::IK_NODE);
+        QCOMPARE(grandchild->ik_role, (qint32)StickData::IK_TARGET_ON);
+        QCOMPARE(master->ik_target, grandchild);
+        QCOMPARE(grandchild->ik_start, master);
+        QVERIFY(StickIsInActiveIkChain(child));
+
+        view->SetTool(NOTOOL);
+    }
+
+    // an invalid second click (not a descendant of the pending start) leaves the
+    // session open instead of committing garbage; a valid click afterward still works
+    void DrawIkChainRejectsInvalidTargetThenAcceptsValid()
+    {
+        StickData *master, *child, *grandchild;
+        BuildIkChainFixture(&master, &child, &grandchild);
+        AddStick(); // uno stickfigure estraneo, per fornire un bersaglio non discendente
+        StickData *unrelated = DrawStick(QPointF(400, 100), QPointF(400, 200));
+        // DRAW_IK opera sempre su CurrentStickFigure() (stessa convenzione di
+        // DRAWPOLY/DRAWMULTI): il secondo AddStick() l'ha spostata sullo stickfigure
+        // estraneo, quindi va rimessa su quello della catena prima di usare il tool
+        view->my_animation->UpdateSelection(master);
+        view->resize(800, 600);
+        view->SetTool(DRAW_IK);
+
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 100)));
+        QCOMPARE(master->ik_role, (qint32)StickData::IK_START);
+
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(400, 150))); // stick estraneo: non valido
+        QCOMPARE(unrelated->ik_role, (qint32)StickData::IK_NONE);
+        QCOMPARE(master->ik_target, static_cast<StickData*>(nullptr)); // sessione ancora aperta
+
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 350))); // ora un click valido
+        QCOMPARE(grandchild->ik_role, (qint32)StickData::IK_TARGET_ON);
+        QCOMPARE(master->ik_target, grandchild);
+
+        view->SetTool(NOTOOL);
+    }
+
+    // Esc mid-creation reverts the pending start back to IK_NONE (spec)
+    void DrawIkChainEscapeAbortsAndRevertsStart()
+    {
+        StickData *master, *child, *grandchild;
+        BuildIkChainFixture(&master, &child, &grandchild);
+        Q_UNUSED(child); Q_UNUSED(grandchild);
+        view->resize(800, 600);
+        view->SetTool(DRAW_IK);
+
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 100)));
+        QCOMPARE(master->ik_role, (qint32)StickData::IK_START);
+
+        QTest::keyClick(view, Qt::Key_Escape);
+        QCOMPARE(master->ik_role, (qint32)StickData::IK_NONE);
+
+        view->SetTool(NOTOOL);
+    }
+
+    // clicking an existing target toggles it, Alt+click clears the whole chain
+    void DrawIkChainToggleAndClear()
+    {
+        StickData *master, *child, *grandchild;
+        BuildIkChainFixture(&master, &child, &grandchild);
+        view->resize(800, 600);
+        view->SetTool(DRAW_IK);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 100)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 350)));
+        QCOMPARE(grandchild->ik_role, (qint32)StickData::IK_TARGET_ON);
+
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 400))); // sul target handle: toggle
+        QCOMPARE(grandchild->ik_role, (qint32)StickData::IK_TARGET_OFF);
+        QVERIFY(!StickIsInActiveIkChain(master));
+
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 400))); // di nuovo: riaccende
+        QCOMPARE(grandchild->ik_role, (qint32)StickData::IK_TARGET_ON);
+
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::AltModifier,
+                          view->mapFromScene(QPointF(100, 400))); // Alt+click: cancella la catena
+        QCOMPARE(master->ik_role, (qint32)StickData::IK_NONE);
+        QCOMPARE(child->ik_role, (qint32)StickData::IK_NONE);
+        QCOMPARE(grandchild->ik_role, (qint32)StickData::IK_NONE);
+
+        view->SetTool(NOTOOL);
+    }
+
+    // deleting a chain member (any of them) must dissolve the WHOLE chain, not just
+    // leave the survivors with a stale IK role pointing at a freed stick
+    void DeletingChainMemberClearsWholeChain()
+    {
+        StickData *master, *child, *grandchild;
+        BuildIkChainFixture(&master, &child, &grandchild);
+        CommitIkChainFixture(master, grandchild);
+        QCOMPARE(grandchild->ik_role, (qint32)StickData::IK_TARGET_ON);
+
+        int child_idx = CurrentStickFigure()->stick_list.indexOf(child);
+        CurrentStickFigure()->DeleteStick(child_idx); // cancella il nodo di mezzo
+
+        QCOMPARE(master->ik_role, (qint32)StickData::IK_NONE);
+        QCOMPARE(grandchild->ik_role, (qint32)StickData::IK_NONE);
+        QVERIFY(master->ik_target == nullptr);
+        QVERIFY(grandchild->ik_start == nullptr);
+    }
+
+    // FABRIK: dragging the target with the select tool reshapes the whole chain, and
+    // clamps to the chain's combined reach instead of stretching past it
+    void SolveIkChainReshapesAndClampsReach()
+    {
+        StickData *master, *child, *grandchild;
+        BuildIkChainFixture(&master, &child, &grandchild);
+        CommitIkChainFixture(master, grandchild);
+        double total_length = master->my_line.length() + child->my_line.length() + grandchild->my_line.length();
+
+        // bersaglio ben oltre il raggio raggiungibile: il target deve fermarsi esattamente
+        // a total_length dall'ancora (master->my_line.p1(), che non si muove)
+        SolveIkChain(master, QPointF(100, 100) + QPointF(0, total_length * 3));
+        double reached = QLineF(master->my_line.p1(), grandchild->my_line.p2()).length();
+        QVERIFY(qAbs(reached - total_length) < 2.5); // tolleranza dell'algoritmo (spec: 2 unità) + margine
+
+        // l'ancora non si è mai mossa
+        QCOMPARE(master->my_line.p1(), QPointF(100, 100));
+
+        // un bersaglio raggiungibile viene raggiunto entro la tolleranza specificata
+        QPointF reachable_target(100 + total_length * 0.5, 100);
+        SolveIkChain(master, reachable_target);
+        double final_dist = QLineF(grandchild->my_line.p2(), reachable_target).length();
+        QVERIFY(final_dist <= 2.0);
+
+        // la catena resta continua (nessun giunto si è staccato)
+        QCOMPARE(master->my_line.p2(), child->my_line.p1());
+        QCOMPARE(child->my_line.p2(), grandchild->my_line.p1());
+    }
+
+    // an ACTIVE chain blocks the normal per-stick rotate drag for its START/NODE
+    // members (only the target responds, and via FABRIK, not a rotation)
+    void ActiveChainBlocksNormalRotateOnNonTargetMembers()
+    {
+        StickData *master, *child, *grandchild;
+        BuildIkChainFixture(&master, &child, &grandchild);
+        CommitIkChainFixture(master, grandchild);
+        QLineF child_line_before = child->my_line;
+
+        view->resize(800, 600);
+        view->SetTool(NOTOOL);
+        // click sul nodo di mezzo e trascina: dovrebbe essere bloccato (nessun movimento)
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 300)));
+        QTest::mouseMove(view->viewport(), view->mapFromScene(QPointF(250, 300)));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                            view->mapFromScene(QPointF(250, 300)));
+
+        QCOMPARE(child->my_line, child_line_before);
+        view->SetTool(NOTOOL);
+    }
+
+    // native (.stck-style, in-memory) round trip carries the chain: roles plus the
+    // start/target pointers, remapped onto the copies exactly like parent/children
+    void IkChainSurvivesExtractAndPopulate()
+    {
+        StickData *master, *child, *grandchild;
+        BuildIkChainFixture(&master, &child, &grandchild);
+        CommitIkChainFixture(master, grandchild);
+
+        StickFigureData *extracted = ExtractStickFigureData(*CurrentStickFigure());
+        QCOMPARE(extracted->stick_list[0]->ik_role, (qint32)StickData::IK_START);
+        QCOMPARE(extracted->stick_list[1]->ik_role, (qint32)StickData::IK_NODE);
+        QCOMPARE(extracted->stick_list[2]->ik_role, (qint32)StickData::IK_TARGET_ON);
+        QCOMPARE(extracted->stick_list[0]->ik_target, extracted->stick_list[2]);
+        QCOMPARE(extracted->stick_list[2]->ik_start, extracted->stick_list[0]);
+
+        StickFigure fresh_figure;
+        fresh_figure.scene = scene;
+        PopulateLiveStickFigure(&fresh_figure, *extracted, false, false);
+        QCOMPARE(fresh_figure.stick_list[0]->ik_role, (qint32)StickData::IK_START);
+        QCOMPARE(fresh_figure.stick_list[0]->ik_target, fresh_figure.stick_list[2]);
+        QCOMPARE(fresh_figure.stick_list[2]->ik_start, fresh_figure.stick_list[0]);
+        delete extracted;
+    }
+
+    // undo: chain creation (the second click's commit) is one undoable step
+    void DrawIkChainCreationIsUndoable()
+    {
+        StickData *master, *child, *grandchild;
+        BuildIkChainFixture(&master, &child, &grandchild);
+        view->resize(800, 600);
+        view->SetTool(DRAW_IK);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 100)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 350)));
+        QCOMPARE(grandchild->ik_role, (qint32)StickData::IK_TARGET_ON);
+
+        view->undo_stack.undo();
+        // il frame è stato ricostruito dallo snapshot: ripesca gli stick per indice
+        StickFigure *restored_figure = CurrentStickFigure();
+        QCOMPARE(restored_figure->stick_list[2]->ik_role, (qint32)StickData::IK_NONE);
+
+        view->undo_stack.redo();
+        QCOMPARE(CurrentStickFigure()->stick_list[2]->ik_role, (qint32)StickData::IK_TARGET_ON);
+
+        view->SetTool(NOTOOL);
+    }
+
     // ================= STK / .nodes conversion (STK_IMPORT_EXPORT_PLAN.md §7) =================
 
 private:

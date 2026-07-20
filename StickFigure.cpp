@@ -4,6 +4,7 @@
 #include <QtAlgorithms>
 #include <QDebug>
 #include <QFile>
+#include <QSet>
 #include <QVector2D>
 // StickFigure work in the one active scene
 extern QGraphicsRectItem* my_rect;
@@ -59,8 +60,11 @@ void StickFigure::UpdateIcon()
     }
     // crea un painter che disegni sull'immagine
     QPainter painter(icon_img);
-    // renderizza dalla scena sull'immagine mediante il painter
+    // renderizza dalla scena sull'immagine mediante il painter (mai il marcatore IK: è
+    // UI viva, non una proprietà dello stickfigure da mostrare in un'iconea)
+    StickGraphicsItem::offscreen_render = true;
     icoScene.render(&painter);
+    StickGraphicsItem::offscreen_render = false;
     // imposta l'iconea
     delete stick_figure_icon;
     stick_figure_icon = new QIcon(*icon_img);
@@ -305,6 +309,24 @@ int StickFigure::SelectStick( QPointF * point)
 void StickFigure::DeleteStick(int idx)
 {
     StickData *selectedStick = stick_list[idx];
+    // se lo stick (o uno dei suoi figli, che stanno per essere cancellati con lui) fa
+    // parte di una catena IK, l'intera catena va sciolta ORA: ClearIkChain() cammina
+    // sui puntatori parent, quindi deve girare prima che qualunque albero venga toccato
+    // sotto. Una StickData* può comparire più volte fra selectedStick e i suoi figli
+    // appiattiti; QSet tiene la deduplica gratis.
+    {
+        QSet<StickData*> chains_to_clear;
+        StickData *start = IkChainStart(selectedStick);
+        if(start != nullptr)
+            chains_to_clear.insert(start);
+        for(StickData *child : selectedStick->children){
+            start = IkChainStart(child);
+            if(start != nullptr)
+                chains_to_clear.insert(start);
+        }
+        for(StickData *start_to_clear : chains_to_clear)
+            ClearIkChain(start_to_clear);
+    }
     if(selectedStick->view){
         selectedStick->view->RemoveImagesFromListWidget(); // stick vivo: aggiorna la UI prima di distruggerlo
         FramePresenter::DetachView(selectedStick,scene);
@@ -381,6 +403,19 @@ StickFigureData *ExtractStickFigureData(const StickFigure &source_figure)
             if (child_index >= 0)
                 copied_stick->children.append(data->stick_list[child_index]);
         }
+        // ik_start/ik_target: stessa tecnica di remapping per indice di parent/children,
+        // niente a che fare con ik_start_idx/ik_target_idx (quelli sono scratch solo per
+        // lo stream su file, vedi StickFigureData::operator<<)
+        if (live_stick->ik_target != nullptr) {
+            int target_index = source_figure.stick_list.indexOf(live_stick->ik_target);
+            if (target_index >= 0)
+                copied_stick->ik_target = data->stick_list[target_index];
+        }
+        if (live_stick->ik_start != nullptr) {
+            int start_index = source_figure.stick_list.indexOf(live_stick->ik_start);
+            if (start_index >= 0)
+                copied_stick->ik_start = data->stick_list[start_index];
+        }
     }
     int master_index = source_figure.stick_list.indexOf(source_figure.master_stick);
     if (master_index >= 0)
@@ -434,6 +469,17 @@ void PopulateLiveStickFigure(StickFigure *target_figure, const StickFigureData &
         } else { // se stiamo considerando lo stickmaster
             live_stick->parent = nullptr;
             target_figure->master_stick = live_stick;
+        }
+        // ik_start/ik_target: stesso remapping per indice usato sopra per parent/children
+        if (source_stick->ik_target != nullptr) {
+            int target_index = source_data.stick_list.indexOf(source_stick->ik_target);
+            if (target_index >= 0)
+                live_stick->ik_target = target_figure->stick_list[target_index];
+        }
+        if (source_stick->ik_start != nullptr) {
+            int start_index = source_data.stick_list.indexOf(source_stick->ik_start);
+            if (start_index >= 0)
+                live_stick->ik_start = target_figure->stick_list[start_index];
         }
         if (attach_to_scene){
             StickGraphicsItem *view = FramePresenter::AttachView(live_stick, target_figure->scene);
@@ -1281,4 +1327,238 @@ float StickFigure::MaxZ(){
  */
 void CloneStick(StickData* dest, StickData*src){
     dest->CopyFrom(*src);
+}
+
+// ---------------------------------------------------------------------------------
+// IK (inverse kinematics): pure-model half. See StickFigure.h for the design notes —
+// MyView (myview.cpp, DRAW_IK tool) owns hit-testing and undo; this is chain
+// bookkeeping and the FABRIK solve itself.
+// ---------------------------------------------------------------------------------
+
+bool IsStickDescendantOf(const StickData *ancestor, const StickData *descendant)
+{
+    while(descendant != nullptr){
+        if(descendant == ancestor)
+            return true;
+        descendant = descendant->parent;
+    }
+    return false;
+}
+
+/**
+ * @details A chain's IK_START is always an ANCESTOR of every other member (the chain
+ * is a straight ancestor line by construction — see MyView::FindIkTargetCandidate()),
+ * so walking up via `parent` from any member (including the target) reaches it
+ * directly; from the start itself the loop exits immediately.
+ */
+StickData *IkChainStart(StickData *stick)
+{
+    if(stick == nullptr || stick->ik_role == StickData::IK_NONE)
+        return nullptr;
+    StickData *current = stick;
+    while(current != nullptr && current->ik_role != StickData::IK_START)
+        current = current->parent;
+    return current; // nullptr only if the tree is corrupt (a NODE/TARGET with no START above it)
+}
+
+bool StickIsInActiveIkChain(const StickData *stick)
+{
+    StickData *start = IkChainStart(const_cast<StickData*>(stick));
+    if(start == nullptr || start->ik_target == nullptr)
+        return false;
+    return start->ik_target->ik_role == StickData::IK_TARGET_ON;
+}
+
+void CommitIkChain(StickData *chain_start, StickData *target)
+{
+    if(chain_start == nullptr || target == nullptr || chain_start == target)
+        return;
+    QList<StickData*> chain;
+    StickData *current = target;
+    while(current != nullptr && current != chain_start){
+        chain.prepend(current);
+        current = current->parent;
+    }
+    if(current != chain_start)
+        return; // target non è un discendente di chain_start: il chiamante ha già validato, questo è solo difensivo
+    chain.prepend(chain_start);
+
+    for(int i = 1; i < chain.count() - 1; i++)
+        chain[i]->ik_role = StickData::IK_NODE;
+    target->ik_role = StickData::IK_TARGET_ON;
+    chain_start->ik_target = target;
+    target->ik_start = chain_start;
+    for(StickData *s : chain)
+        if(s->view) s->view->Refresh(0);
+}
+
+void ClearIkChain(StickData *chain_start)
+{
+    if(chain_start == nullptr || chain_start->ik_role != StickData::IK_START)
+        return;
+    StickData *target = chain_start->ik_target;
+    if(target == nullptr)
+        return;
+    QList<StickData*> chain;
+    StickData *current = target;
+    while(current != nullptr && current != chain_start){
+        chain.prepend(current);
+        current = current->parent;
+    }
+    if(current != chain_start)
+        return; // albero incoerente: non toccare nulla piuttosto che cancellare a metà
+    chain.prepend(chain_start);
+
+    for(StickData *s : chain){
+        s->ik_role = StickData::IK_NONE;
+        s->ik_start = nullptr;
+        s->ik_target = nullptr;
+        if(s->view) s->view->Refresh(0);
+    }
+}
+
+void ToggleIkChain(StickData *target)
+{
+    if(target == nullptr)
+        return;
+    if(target->ik_role == StickData::IK_TARGET_ON)
+        target->ik_role = StickData::IK_TARGET_OFF;
+    else if(target->ik_role == StickData::IK_TARGET_OFF)
+        target->ik_role = StickData::IK_TARGET_ON;
+    else
+        return;
+    if(target->view) target->view->Refresh(0);
+}
+
+void SolveIkChain(StickData *chain_start, const QPointF &desired_target_pos)
+{
+    if(chain_start == nullptr || chain_start->ik_target == nullptr)
+        return;
+    StickData *target = chain_start->ik_target;
+
+    // il percorso start->target è una linea d'antenati ininterrotta per costruzione
+    // (validato una volta da MyView::FindIkTargetCandidate() alla creazione); ricamminarlo
+    // qui è economico e protegge da una modifica strutturale successiva (Weld/SetMaster/
+    // Merge/Split non sanno nulla delle catene IK — vedi la nota in stickdata.h) che
+    // l'avesse spezzato: in quel caso la catena diventa semplicemente inerte
+    QList<StickData*> chain;
+    StickData *current = target;
+    while(current != nullptr && current != chain_start){
+        chain.prepend(current);
+        current = current->parent;
+    }
+    if(current != chain_start)
+        return;
+    chain.prepend(chain_start);
+
+    int n = chain.count();
+    QVector<QPointF> joints(n + 1);
+    QVector<double> lengths(n);
+    for(int i = 0; i < n; i++){
+        joints[i] = chain[i]->my_line.p1();
+        lengths[i] = chain[i]->my_line.length();
+    }
+    joints[n] = chain[n-1]->my_line.p2();
+
+    QPointF root = chain_start->my_line.p1(); // l'ancora: non si muove mai
+    double total_length = 0;
+    for(double len : lengths) total_length += len;
+
+    // non far allontanare il target oltre il raggio raggiungibile dalla catena (spec);
+    // include anche il caso di sovrapposizione a distanza ~0 sull'handle di start: in
+    // quel caso clamp_line ha lunghezza ~0 e setLength(total_length) la allunga comunque
+    // in una direzione arbitraria ma stabile (nessuna divisione per zero, QLineF gestisce
+    // internamente l'angolo di una linea a lunghezza zero come 0)
+    QPointF clamped_target = desired_target_pos;
+    if(total_length > 1e-6){
+        QLineF clamp_line(root, desired_target_pos);
+        if(clamp_line.length() > total_length){
+            clamp_line.setLength(total_length);
+            clamped_target = clamp_line.p2();
+        }
+    }
+    else{
+        clamped_target = root; // catena degenere (tutti segmenti a lunghezza zero)
+    }
+
+    const int MAX_ITERATIONS = 10;
+    const double TOLERANCE = 2.0;
+    for(int iteration = 0; iteration < MAX_ITERATIONS; iteration++){
+        joints[n] = clamped_target;
+
+        // forward pass (target verso start): il tecnica specificata letteralmente —
+        // scambia P1/P2 così che QLineF::setLength() (che tiene SEMPRE fermo P1) possa
+        // riscalare rispetto al giunto LONTANO invece che quello vicino, poi riscambia
+        for(int i = n - 1; i >= 0; i--){
+            QLineF segment(joints[i], joints[i+1]);
+            segment = QLineF(segment.p2(), segment.p1()); // 1) scambia P1/P2
+            // 2) P1 (ex P2) è già il giunto lontano aggiornato: nessun'assegnazione ulteriore
+            if(segment.length() < 1e-6){
+                joints[i] = segment.p1(); // sovrapposizione: nessuna direzione da preservare
+                continue;
+            }
+            segment.setLength(lengths[i]);                 // 3) riscala a lunghezza originale
+            segment = QLineF(segment.p2(), segment.p1());  // 4) riscambia
+            joints[i] = segment.p1();
+        }
+
+        // backward pass (start verso target): l'ancora root è fissa, quindi P1 gioca già
+        // il ruolo che QLineF::setLength() tiene fermo — nessuno scambio necessario
+        joints[0] = root;
+        for(int i = 0; i < n; i++){
+            QLineF segment(joints[i], joints[i+1]);
+            if(segment.length() < 1e-6){
+                joints[i+1] = joints[i];
+                continue;
+            }
+            segment.setLength(lengths[i]);
+            joints[i+1] = segment.p2();
+        }
+
+        if(QLineF(joints[n], clamped_target).length() <= TOLERANCE)
+            break;
+    }
+
+    // applica la nuova geometria a tutta la catena PRIMA di toccare qualunque view: il
+    // marcatore IK di chain_start legge ik_target->my_line, quindi deve vedere la
+    // posizione finale del target, non quella di un giunto intermedio non ancora risolto
+    QVector<QPointF> old_p2(n);
+    for(int i = 0; i < n; i++)
+        old_p2[i] = chain[i]->my_line.p2();
+    for(int i = 0; i < n; i++){
+        chain[i]->my_line = QLineF(joints[i], joints[i+1]);
+        // "sostituisci il valore di rotazione senza applicarlo" (spec): aggiorna
+        // img_angle direttamente per i tipi che lo usano, MAI tramite Rotate()/
+        // Manipulate() — quelle cascatano sui figli con regole incompatibili col
+        // posizionamento esplicito che questo solve sta già facendo
+        if(chain[i]->stick_type == StickData::IMAGE || chain[i]->stick_type == StickData::RECT
+                || chain[i]->stick_type == StickData::TRAPEZOID || chain[i]->stick_type == StickData::TAPER
+                || chain[i]->stick_type == StickData::CIRCLE || chain[i]->stick_type == StickData::POLYGON
+                || chain[i]->stick_type == StickData::MULTILINE){
+            chain[i]->img_angle = float(-atan2(chain[i]->my_line.dx(), chain[i]->my_line.dy())*180.0/M_PI);
+        }
+    }
+
+    // rami fuori catena: ogni figlio DIRETTO di un anello che non prosegue la catena
+    // (ed il suo intero sottoalbero, già appiattito in children) segue rigidamente lo
+    // stesso spostamento del suo genitore — mirror di StickGraphicsItem::Manipulate()
+    for(int i = 0; i < n; i++){
+        QPointF delta = chain[i]->my_line.p2() - old_p2[i];
+        if(delta.isNull())
+            continue;
+        StickData *next_in_chain = (i + 1 < n) ? chain[i+1] : nullptr;
+        for(StickData *child : chain[i]->children){
+            if(child->parent != chain[i] || child == next_in_chain)
+                continue;
+            child->my_line.translate(delta.x(), delta.y());
+            if(child->view) child->view->Refresh(1);
+            for(StickData *descendant : child->children){
+                descendant->my_line.translate(delta.x(), delta.y());
+                if(descendant->view) descendant->view->Refresh(1);
+            }
+        }
+    }
+
+    for(StickData *s : chain)
+        if(s->view) s->view->Refresh(1);
 }

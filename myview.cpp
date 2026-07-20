@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <math.h>
 #include <QDebug>
+#include <QPainterPath>
 #include <QGraphicsRotation>
 #include <frame.h>
 #include <QMessageBox>
@@ -661,6 +662,65 @@ void MyView::mousePressEvent(QMouseEvent *event)
                 DrawCmd(&coord,(int)tool);
                 break;
             }
+            case(DRAW_IK):
+            {
+                StickFigure *fig = my_animation->current_frame->stick_figures.isEmpty()
+                        ? nullptr : my_animation->CurrentFrame()->CurrentStickFigure();
+                if(fig == nullptr) break;
+
+                StickData *pending = IkPendingStart();
+                if(ik_drawing && pending != nullptr){
+                    // secondo click: valida il target (stesso stickfigure, discendente,
+                    // percorso libero-da-origine ininterrotto — vedi FindIkTargetCandidate)
+                    StickData *target = FindIkTargetCandidate(fig, pending, coord);
+                    if(target != nullptr){
+                        StoreUndo(); // granularità per-click, come per DRAWPOLY/DRAWMULTI
+                        CommitIkChain(pending, target);
+                        ik_drawing = false;
+                        ClearIkPreviewItems(); // NON CancelIkDrawing(): il ruolo appena
+                                               // commesso non va disfatto
+                    }
+                    // target non valido: nessuna mutazione, resta in attesa di un altro click
+                    break;
+                }
+
+                // non in sessione: click su un target esistente lo accende/spegne (Alt =
+                // cancella l'intera catena), altrimenti click su uno start idoneo apre
+                // una nuova sessione di creazione
+                StickData *existing_target = FindIkTargetHandle(fig, coord);
+                if(existing_target != nullptr){
+                    StoreUndo();
+                    if(event->modifiers() & Qt::AltModifier)
+                        ClearIkChain(existing_target->ik_start);
+                    else
+                        ToggleIkChain(existing_target);
+                    break;
+                }
+                StickData *candidate = FindIkStartCandidate(fig, coord);
+                if(candidate != nullptr){
+                    StoreUndo();
+                    candidate->ik_role = StickData::IK_START; // spec: il primo click commette subito il ruolo
+                    my_animation->UpdateSelection(candidate);
+                    if(candidate->view)
+                        candidate->view->Refresh(0);
+                    ik_drawing = true;
+                    ik_preview_line = new QGraphicsLineItem(QLineF(candidate->my_line.p1(), coord));
+                    ik_preview_line->setPen(QPen(Qt::black, 1, Qt::DotLine));
+                    ik_preview_line->setZValue(1000);
+                    scene()->addItem(ik_preview_line);
+                    QPainterPath cross_path;
+                    cross_path.moveTo(-5,-5); cross_path.lineTo(5,5);
+                    cross_path.moveTo(5,-5); cross_path.lineTo(-5,5);
+                    ik_preview_cross = new QGraphicsPathItem(cross_path);
+                    ik_preview_cross->setPen(QPen(Qt::black, 1));
+                    ik_preview_cross->setZValue(1000);
+                    ik_preview_cross->setPos(coord);
+                    scene()->addItem(ik_preview_cross);
+                    break;
+                }
+                // altrimenti: click a vuoto, scartato (spec)
+                break;
+            }
     }
     }
     //QGraphicsView::mousePressEvent(event);
@@ -785,6 +845,12 @@ void MyView::keyPressEvent(QKeyEvent *event)
                             DeleteWholeStick(session);
                         }
                     }
+                    break;
+                }
+                case(DRAW_IK):
+                {
+                    if(ik_drawing)
+                        CancelIkDrawing();
                     break;
                 }
             }
@@ -1110,6 +1176,127 @@ StickData *MyView::FindPolygonEdge(const QPointF &scene_pos, int *insert_idx, qi
     return best;
 }
 
+// --------------------------------------------------------------------- DRAW_IK ----
+
+/**
+ * @details Mirrors PolySessionStick()'s no-stored-pointer approach: "pending" means
+ * ik_drawing is true AND CurrentStick() is already IK_START (set at the first click,
+ * see the DRAW_IK case of mousePressEvent) but has no target yet, i.e. the second
+ * click hasn't committed a chain. An undo/frame-switch mid-gesture simply makes this
+ * return nullptr instead of a dangling pointer.
+ */
+StickData *MyView::IkPendingStart()
+{
+    if(!ik_drawing || my_animation->current_frame->stick_figures.isEmpty())
+        return nullptr;
+    StickData *cs = my_animation->CurrentFrame()->CurrentStick();
+    if(cs != nullptr && cs->ik_role == StickData::IK_START && cs->ik_target == nullptr)
+        return cs;
+    return nullptr;
+}
+
+void MyView::ClearIkPreviewItems()
+{
+    if(ik_preview_line != nullptr){
+        scene()->removeItem(ik_preview_line);
+        delete ik_preview_line;
+        ik_preview_line = nullptr;
+    }
+    if(ik_preview_cross != nullptr){
+        scene()->removeItem(ik_preview_cross);
+        delete ik_preview_cross;
+        ik_preview_cross = nullptr;
+    }
+}
+
+void MyView::CancelIkDrawing()
+{
+    StickData *pending = IkPendingStart();
+    if(pending != nullptr){
+        // sicuro incondizionatamente: FindIkStartCandidate() ammette solo sticks con
+        // ik_role già NONE al primo click, quindi questo non può mai "rubare" un ruolo
+        // che lo stick aveva legittimamente per un'altra catena (si veda la spec: "a
+        // meno che non avesse già un'altra catena ik" — con questa regola di
+        // idoneità quella clausola non è mai raggiungibile)
+        pending->ik_role = StickData::IK_NONE;
+        if(pending->view)
+            pending->view->Refresh(0);
+    }
+    ik_drawing = false;
+    ClearIkPreviewItems();
+}
+
+StickData *MyView::FindIkStartCandidate(StickFigure *figure, const QPointF &scene_pos)
+{
+    if(figure == nullptr) return nullptr;
+    float radius = PolyPickRadius();
+    StickData *best = nullptr;
+    float best_dist = 0;
+    for(StickData *s : figure->stick_list){
+        if(s->ik_role != StickData::IK_NONE || s->children.isEmpty())
+            continue;
+        float dist = QLineF(scene_pos, s->my_line.p1()).length();
+        if(dist <= radius && (best == nullptr || dist < best_dist)){
+            best = s;
+            best_dist = dist;
+        }
+    }
+    return best;
+}
+
+StickData *MyView::FindIkTargetHandle(StickFigure *figure, const QPointF &scene_pos)
+{
+    if(figure == nullptr) return nullptr;
+    float radius = PolyPickRadius();
+    StickData *best = nullptr;
+    float best_dist = 0;
+    for(StickData *s : figure->stick_list){
+        if(s->ik_role != StickData::IK_TARGET_ON && s->ik_role != StickData::IK_TARGET_OFF)
+            continue;
+        float dist = QLineF(scene_pos, s->my_line.p2()).length();
+        if(dist <= radius && (best == nullptr || dist < best_dist)){
+            best = s;
+            best_dist = dist;
+        }
+    }
+    return best;
+}
+
+StickData *MyView::FindIkTargetCandidate(StickFigure *figure, StickData *chain_start, const QPointF &scene_pos)
+{
+    if(figure == nullptr || chain_start == nullptr) return nullptr;
+    float radius = PolyPickRadius();
+    StickData *best = nullptr;
+    float best_dist = 0;
+    for(StickData *s : figure->stick_list){
+        if(s == chain_start || s->ik_role != StickData::IK_NONE)
+            continue;
+        if(!IsStickDescendantOf(chain_start, s))
+            continue;
+        // percorso libero-da-origine ininterrotto: ogni anello (tranne lo start stesso)
+        // deve iniziare dove finisce il suo genitore, non dall'origine — è l'invariante
+        // geometrico ("segmenti che condividono un giunto") su cui si basa FABRIK
+        bool continuous = true;
+        for(StickData *cur = s; cur != nullptr && cur != chain_start; cur = cur->parent){
+            if(cur->stepchild){ continuous = false; break; }
+        }
+        if(!continuous)
+            continue;
+        // stesso test di prossimità a segmento usato da FigureAtPoint()
+        QPointF a = s->my_line.p1(), b = s->my_line.p2();
+        QPointF ab = b - a;
+        float len2 = ab.x()*ab.x() + ab.y()*ab.y();
+        float u = (len2 < 1e-9f) ? 0.0f
+                : qBound(0.0f, float(((scene_pos.x()-a.x())*ab.x() + (scene_pos.y()-a.y())*ab.y()) / len2), 1.0f);
+        float dist = QLineF(scene_pos, a + u*ab).length();
+        if(dist <= qMax(radius, float(s->pen.widthF()/2.0)) && (best == nullptr || dist < best_dist)){
+            best = s;
+            best_dist = dist;
+        }
+    }
+    return best;
+}
+
 // ------------------------------------------------ multi-selezione di stickfigure ----
 
 /**
@@ -1368,6 +1555,8 @@ void MyView::ChangeTool()
         }
         case (DRAW_IK):
         {
+            if(ik_drawing)
+                CancelIkDrawing();
             break;
         }
         case(ROTATE):
@@ -1627,6 +1816,22 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                     if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr &&
                             my_animation->CurrentFrame()->CurrentStick() != nullptr &&
                             my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.count()>0){
+
+                        StickData *picked = my_animation->CurrentFrame()->CurrentStick();
+                        StickData *ik_chain_start = IkChainStart(picked);
+                        if(ik_chain_start != nullptr && ik_chain_start->ik_target != nullptr
+                                && ik_chain_start->ik_target->ik_role == StickData::IK_TARGET_ON){
+                            // lo stick pescato appartiene a una catena IK ATTIVA: la
+                            // rotazione normale è bloccata per tutti i suoi membri (spec:
+                            // "non può essere ruotato normalmente a meno che l'intero
+                            // stickfigure ruoti"); solo il TARGET risponde al drag, e lo
+                            // fa tramite FABRIK invece della rotazione standard (spec:
+                            // "simile al tool MANIPULATE, ma la catena risponde al movimento")
+                            if(picked == ik_chain_start->ik_target)
+                                SolveIkChain(ik_chain_start, coord);
+                            break;
+                        }
+
                         if(tool == CLAMP){
                             if(my_animation->CurrentFrame()->CurrentStick()->view)
                                 my_animation->CurrentFrame()->CurrentStick()->view->Rotate(&coord);
@@ -1715,6 +1920,17 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                 else
                     insert_idx = session->polygon_points.length();
                 session->view->SetPolygonPreview(coord, insert_idx);
+            }
+            break;
+        }
+        case DRAW_IK:
+        {
+            // durante la creazione, la linea tratteggiata e la croce seguono il mouse
+            // finché il secondo click non commette (o Esc/cambio tool non annulla)
+            StickData *pending = IkPendingStart();
+            if(pending != nullptr && ik_preview_line != nullptr){
+                ik_preview_line->setLine(QLineF(pending->my_line.p1(), coord));
+                ik_preview_cross->setPos(coord);
             }
             break;
         }
@@ -1990,6 +2206,11 @@ void MyView::MoveToFrame(Frame* frame){
     poly_drag_idx = -1;
     poly_vertex_drag = false;
     ClearMultiSelection(); // la selezione multipla decade al cambio frame (spec)
+    // idem per un'eventuale creazione di catena IK a metà: niente CancelIkDrawing() qui
+    // (toccherebbe ik_role di uno stick del frame che si sta per lasciare), solo lo
+    // stato di sessione e gli item di anteprima (altrimenti orfani sulla scena)
+    ik_drawing = false;
+    ClearIkPreviewItems();
     // rimuovi tutti gli stick dalla scena
     auto current_scene = scene();
     if(my_animation->frame_list.count()>=1){
@@ -2223,6 +2444,8 @@ void MyView::RestoreFrameSnapshot(int command_tag, int mode, FrameData *snapshot
     poly_drag_idx = -1;
     poly_vertex_drag = false;
     ClearMultiSelection(); // le figure selezionate stanno per essere ricostruite
+    ik_drawing = false; // idem per una creazione di catena IK a metà: vedi MoveToFrame()
+    ClearIkPreviewItems();
     // se è un undo su un addframe, o un redo su un deleteframe ci sta da rimuovere un frame
     if((command_tag == CMD_ADDFRAME && mode == MODE_UNDO)||
             (command_tag == CMD_DELETEFRAME && mode == MODE_REDO)){
@@ -2356,7 +2579,9 @@ static QIcon RenderLibraryIcon(const StickFigureData &figure_data){
         icon_scene.addItem(render_view); // la scena diventa proprietaria della view
     }
     QPainter painter(&icon_pixmap);
+    StickGraphicsItem::offscreen_render = true;
     icon_scene.render(&painter);
+    StickGraphicsItem::offscreen_render = false;
     return QIcon(icon_pixmap);
 }
 /**
@@ -2641,6 +2866,7 @@ void MyView::SizeChange(int option){
 void MyView::PreparePreview(){
 
     play_back = true;
+    StickGraphicsItem::offscreen_render = true; // niente marcatore IK nei fotogrammi di anteprima
     for(Frame* f :my_animation->frame_list){
         QGraphicsScene render_scene; //scena fittizia
         QImage *render_img = new QImage(W,H,QImage::Format_ARGB32); //immagine temporanea
@@ -2671,6 +2897,7 @@ void MyView::PreparePreview(){
         qDeleteAll(render_clones);
         //...add all other video frames here
     }
+    StickGraphicsItem::offscreen_render = false;
     play_back = false;
 }
 /**
