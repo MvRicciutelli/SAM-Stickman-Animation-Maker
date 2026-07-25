@@ -55,6 +55,14 @@ public:
     QPixmap * icon_img = nullptr;
     QPointF origin_pos_buffer;
     float scene_rotation_buffer = 0;
+    /**
+     * @brief Persistent offset of the rotation/scale pivot handle from the master's
+     *        origin (master_stick->my_line.p1()). The handle scene position is always
+     *        master.p1 + pivot_offset, so it follows the figure when the master is
+     *        dragged; only a select-tool Ctrl-drag rewrites it. (0,0) = handle on the
+     *        master origin (the default). See MyView pivot handling.
+     */
+    QPointF pivot_offset = QPointF(0, 0);
     QString name;
 
     void UpdateIcon();
@@ -185,6 +193,21 @@ void ClearIkChain(StickData *chain_start);
  * @param target the chain's target stick (IK_TARGET_ON or IK_TARGET_OFF); no-op otherwise.
  */
 void ToggleIkChain(StickData *target);
+
+/**
+ * @brief Garbage-collects every IK chain in a figure: keeps only sticks that belong to
+ *        a fully structurally-valid chain (a distinct IK_START ancestor of an
+ *        IK_TARGET_ON/OFF through an unbroken parent path, with start<->target pointers
+ *        agreeing), and resets every other IK-roled stick back to IK_NONE.
+ * @param figure figure to sanitize.
+ *
+ * The single validity/"delete the chain if conditions are insufficient" pass the spec's
+ * split/merge rules end with. Tree-restructuring ops (Chop/Weld/MergeStickFigures/
+ * SplitStickFigures) apply their specific role inheritance first, then call this to drop
+ * anything the mutation left inconsistent (e.g. a start welded onto its own target, or a
+ * chain the split cut in half). Pointer-safe: it only reads live sticks in stick_list.
+ */
+void SanitizeFigureIkChains(StickFigure *figure);
 
 /**
  * @brief FABRIK solve: reshapes the chain anchored at `chain_start` so its target's

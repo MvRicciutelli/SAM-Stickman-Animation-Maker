@@ -112,6 +112,8 @@ AdvancedTab* advanced_rect_tab;
 QTabWidget* my_tab_widget;
 QWidget * advanced_img_tab;
 QWidget * advanced_vertex_tab;
+QWidget * advanced_ik_tab;
+QCheckBox * ik_active_check;
 QWidget * vertex_width_row;
 QSlider * vertex_width_slider;
 QSlider * vertex_curve_slider;
@@ -291,6 +293,34 @@ Widget::Widget(QWidget *parent)
     auto num = scene->items();
     view->setScene(scene);
     view->my_animation->scene = scene;
+
+    // ---- pannello "IK properties": una sola casella acceso/spento della catena. Come
+    // per il pannello vertici è costruito in codice; Animation::UpdateSliders() lo
+    // aggiunge/rimuove da my_tab_widget a seconda del ruolo IK dello stick selezionato. ----
+    advanced_ik_tab = new QWidget();
+    {
+        QVBoxLayout *ik_rows = new QVBoxLayout(advanced_ik_tab);
+        ik_active_check = new QCheckBox(tr("Chain active"), advanced_ik_tab);
+        ik_rows->addWidget(ik_active_check);
+        ik_rows->addStretch(1);
+        // toggle utente: accende/spegne la catena dello stick corrente (IK_TARGET_ON<->OFF).
+        // L'aggiornamento programmatico della casella (UpdateSliders) blocca il segnale, ma
+        // la guardia currently_on==checked lo rende comunque idempotente.
+        connect(ik_active_check, &QCheckBox::toggled, this, [this](bool checked){
+            StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
+            if(cs == nullptr) return;
+            StickData *start = IkChainStart(cs);
+            if(start == nullptr || start->ik_target == nullptr) return;
+            StickData *target = start->ik_target;
+            bool currently_on = target->ik_role == StickData::IK_TARGET_ON;
+            if(currently_on == checked) return;
+            view->StoreUndo();
+            ToggleIkChain(target);
+            view->UpdateIkOverlay();
+            if(target->view) target->view->Refresh(0);
+        });
+    }
+
     AddFrame();
     num = scene->items();
     view->my_animation->CurrentFrame()->CurrentStickFigure() = view->my_animation->CurrentFrame()->stick_figures[0];
@@ -544,6 +574,8 @@ Widget::~Widget()
     delete advanced_taper_tab;
     advanced_rect_tab->setParent(nullptr);
     delete advanced_rect_tab;
+    advanced_ik_tab->setParent(nullptr);
+    delete advanced_ik_tab;
     delete ui;
 }
 

@@ -424,6 +424,16 @@ public:
     void AddHandles(StickFigure*S);
 
     /**
+     * @brief Forces a viewport repaint so the IK chain markers (drawForeground) refresh.
+     *
+     * The markers are painted in drawForeground(), which runs on every viewport paint —
+     * so most edits refresh them for free. This just nudges a repaint for the cases where
+     * only StickData geometry changed (e.g. a FABRIK drag) without otherwise dirtying the
+     * viewport. Public because the IK-properties toggle (widget.cpp) also calls it.
+     */
+    void UpdateIkOverlay();
+
+    /**
      * @brief Removes a figure's endpoint handles from the scene (without deleting them).
      * @param S figure whose handles are hidden.
      */
@@ -451,6 +461,13 @@ protected:
     virtual void mouseDoubleClickEvent(QMouseEvent *event) override;
     virtual void keyPressEvent(QKeyEvent *event) override;
     virtual void keyReleaseEvent(QKeyEvent *event) override;
+    /**
+     * @brief Draws every committed IK chain's marker (dotted line start->target + a cross
+     *        on the effector) on top of everything, like the endpoint handles. In the
+     *        interactive view only: export/render/icons paint a separate render scene
+     *        (ImageExport, StickFigure/Frame::UpdateIcon), never this view's foreground.
+     */
+    virtual void drawForeground(QPainter *painter, const QRectF &rect) override;
 private:
     // ------- POLYGON tool state. Deliberately no StickData* is stored: the session ----
     // ------- target is always CurrentStick() (re-checked for type/view each use), so --
@@ -514,28 +531,96 @@ private:
     StickData *FindIkTargetHandle(StickFigure *figure, const QPointF &scene_pos);
 
     /**
-     * @brief The second click's validity test: a whole-segment proximity hit (the
-     *        same metric FigureAtPoint() uses) that is also a descendant of
-     *        `chain_start` reached through an unbroken free-end-to-origin path (no
-     *        stepchild links partway — FABRIK's joint-sharing assumption requires
-     *        every link's P1 to equal the previous link's P2) and carries no IK role
-     *        of its own yet.
-     * @param figure figure to search (both chain_start and the candidate must be in it).
-     * @param chain_start the pending chain's start stick.
+     * @brief The second click's validity test: a whole-segment proximity hit (the same
+     *        metric FigureAtPoint() uses) that carries no IK role of its own yet and for
+     *        which a valid chain start exists, anchored at the FIRST click's point and
+     *        reached by an unbroken free-end-to-origin path (every link's P1 on the
+     *        previous link's P2 — FABRIK's joint-sharing assumption). The start is
+     *        RE-derived here (ResolveIkStartForTarget), not taken as `provisional_start`:
+     *        when several sticks (e.g. two limbs) share the start anchor point, the first
+     *        click cannot tell which branch the user means — the target's branch decides.
+     * @param figure figure to search.
+     * @param provisional_start the stick tentatively picked by the first click; only its
+     *        P1 (the anchor point) and identity (as an allowed start) matter here.
      * @param scene_pos position to test.
-     * @return the nearest valid candidate within the pick radius, or nullptr — "not
-     *         valid, try again" per spec.
+     * @return the nearest valid target within the pick radius, or nullptr — "not valid,
+     *         try again" per spec.
      */
-    StickData *FindIkTargetCandidate(StickFigure *figure, StickData *chain_start, const QPointF &scene_pos);
+    StickData *FindIkTargetCandidate(StickFigure *figure, StickData *provisional_start, const QPointF &scene_pos);
+
+    /**
+     * @brief Walk up from `target` and return the chain start anchored at ~`anchor_p1`,
+     *        reachable by a geometrically continuous parent path (each link's P1 on its
+     *        parent's P2). Resolves the branch ambiguity a shared start anchor creates
+     *        (Group D follow-up): the branch that actually reaches the clicked target
+     *        wins over the first click's arbitrary tie-break.
+     * @param target the clicked effector.
+     * @param anchor_p1 the first click's anchor (the provisional start's P1).
+     * @param provisional_start allowed as a start even though the first click already
+     *        marked it IK_START; every OTHER stick must be IK_NONE to qualify.
+     * @return the resolved start (closest such ancestor to the target), or nullptr.
+     */
+    StickData *ResolveIkStartForTarget(StickData *target, const QPointF &anchor_p1, StickData *provisional_start);
 
     // ------- multi-selezione: stato privato -------------------------------------------
-    QGraphicsEllipseItem *multi_handle = nullptr; ///< thin light-blue transform handle at the selection center
+    QGraphicsEllipseItem *multi_handle = nullptr; ///< thin light-blue transform handle drawn on the pivot (any selection, 1+ figures)
+    QGraphicsRectItem *selection_bbox = nullptr;  ///< thin light-blue no-fill bounding box of the current selection (spec)
     QGraphicsRectItem *selection_band = nullptr;  ///< dotted selection rectangle; survives until the selection breaks
     bool band_dragging = false;       ///< true while the selection rectangle is being spanned
     bool multi_dragging = false;      ///< true while the whole selection is being translated by drag
-    bool pivot_dragging = false;      ///< true while the transform handle itself is being dragged
-    bool pivot_previewing = false;    ///< true while Space is held: the handle previews at the cursor
+    bool pivot_dragging = false;      ///< true while the transform handle/pivot is being relocated (handle drag or Ctrl+drag on empty canvas)
+    bool space_dragging = false;      ///< true while Space is held: the selection follows the cursor, dragged by its master stick(s)
     QPointF multi_center_buffer;      ///< pivot captured at gesture start (rotate/scale origin)
+
+    /**
+     * @brief The figures the handle/pivot/bbox act on: the multi-selection when 2+ are
+     *        selected, otherwise the single current figure (if any). Empty on an empty
+     *        frame or a figure with no sticks.
+     */
+    QList<StickFigure*> SelectedFigures() const;
+
+    /**
+     * @brief True when SelectedFigures() is non-empty (a handle/pivot is meaningful).
+     */
+    bool HasActiveSelection() const { return !SelectedFigures().isEmpty(); }
+
+    /**
+     * @brief True for the tools that show a selection handle/bbox (pick/transform tools);
+     *        the drawing/scene-wide tools hide them.
+     */
+    bool ToolUsesSelection() const;
+
+    /**
+     * @brief Default pivot position: the master-stick origin (P1) of the single selected
+     *        figure, or the average of the masters' origins for a multi-selection (spec).
+     */
+    QPointF SelectionPivotDefault() const;
+
+    /**
+     * @brief The pivot the transform tools actually use: for a single figure the
+     *        persistent handle (master origin + StickFigure::pivot_offset), for a
+     *        multi-selection the group pivot (multi_pivot). This is what ROTATE/SCALE
+     *        turn/scale around (bug 3), not the bare master origin.
+     */
+    QPointF SelectionPivotCurrent() const;
+
+    /**
+     * @brief Endpoint bounding box (union of every selected stick's P1/P2) of the current
+     *        selection, in scene coordinates.
+     */
+    QRectF SelectionBoundingBox() const;
+
+    /**
+     * @brief (Re)draws the transform handle and selection bounding box for the current
+     *        selection, or removes them when nothing is selected / the tool doesn't use a
+     *        selection. Optionally re-centers the pivot on SelectionPivotDefault().
+     */
+    void UpdateSelectionDecorations(bool recenter_pivot = false);
+
+    /**
+     * @brief Removes the handle and bounding-box items from the scene, if present.
+     */
+    void RemoveSelectionDecorations();
 
     /**
      * @brief The figure owning a stick close enough to the position (segment distance

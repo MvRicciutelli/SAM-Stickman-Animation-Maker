@@ -8,6 +8,7 @@
 #include "advancedtaperwidget.h"
 #include <QCheckBox>
 #include "uiItems.h"
+#include "StickFigure.h" // IkChainStart()/StickIsInActiveIkChain() per il tab IK
 
 extern qint32 W;
 extern qint32 H;
@@ -280,6 +281,28 @@ void Animation::UpdateSliders(){
     }
     edit_line_thickness_slider->setValue(cs->pen.width());
     elongate_spinbox->setValue(  current_frame->CurrentStick()->my_line.length());
+
+    // tab "IK properties": compare solo quando lo stick selezionato fa parte di una
+    // catena IK, e sparisce quando non lo è (spec). Gestito qui (non in UpdateTab, che
+    // scatta solo al CAMBIO di stick_type) perché il ruolo IK è ortogonale al tipo, e
+    // UpdateSliders() gira a ogni selezione. La casella riflette lo stato acceso/spento
+    // della catena; il segnale è bloccato durante l'aggiornamento per non innescare
+    // l'handler (che altrimenti spingerebbe un undo spurio) — vedi Widget's ctor.
+    if(my_tab_widget != nullptr && advanced_ik_tab != nullptr){
+        int ik_tab_idx = my_tab_widget->indexOf(advanced_ik_tab);
+        if(cs->ik_role != StickData::IK_NONE){
+            if(ik_tab_idx < 0)
+                my_tab_widget->addTab(advanced_ik_tab, "IK properties");
+            if(ik_active_check != nullptr){
+                ik_active_check->blockSignals(true);
+                ik_active_check->setChecked(StickIsInActiveIkChain(cs));
+                ik_active_check->blockSignals(false);
+            }
+        }
+        else if(ik_tab_idx >= 0){
+            my_tab_widget->removeTab(ik_tab_idx);
+        }
+    }
 }
 Frame* Animation::SetupFrame(int pos){
     // QString::asprintf è statica: chiamarla su un'istanza ne scartava il risultato e

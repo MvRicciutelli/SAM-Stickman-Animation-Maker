@@ -4,6 +4,7 @@
 // replicates. If a later refactor phase changes observable behavior, a failure here means
 // "behavior changed", not necessarily "behavior is wrong".
 #include <QtTest>
+#include <cmath>
 #include <QGraphicsScene>
 #include <QGraphicsRectItem>
 #include <QTabWidget>
@@ -72,6 +73,95 @@ class TestCharacterization : public QObject
         CurrentFrame()->total_sticks.append(drawn);
         view->my_animation->UpdateSelection(drawn);
         return drawn;
+    }
+
+    // Group D bug 2: changing the master stick reverses the spine (p1<->p2) of the sticks
+    // on the parent chain. A POLYGON/MULTILINE in that chain must keep its shape in scene
+    // space (its vertices are stored normalized to the reversed spine's frame; before the
+    // fix they flipped/reshaped). Builds master(LINE)->middle(vertex)->grandchild(LINE),
+    // makes the grandchild master (SetDirectChainAsMaster -> reverses master+middle) and
+    // checks the middle stick's scene vertices are unchanged. (Not a test slot: the
+    // ChangeMasterKeeps*Shape wrappers drive it.)
+    void ChangeMasterKeepsVertexShape(qint32 middle_type)
+    {
+        AddFrame();
+        StickFigure *fig = CurrentStickFigure();
+        // wipe whatever AddStick/DrawStick may have left; build a clean linear chain
+        qDeleteAll(fig->stick_list);
+        fig->stick_list.clear();
+
+        StickData *master = new StickData();
+        master->stick_type = StickData::LINE;
+        master->my_line = QLineF(100, 100, 100, 200);
+        master->parent = nullptr;
+        master->stepchild = false;
+
+        StickData *mid = new StickData();
+        mid->stick_type = middle_type;
+        mid->my_line = QLineF(100, 200, 200, 200);
+        mid->parent = master;
+        mid->stepchild = false;
+        // choose scene vertices, then store them normalized to mid's current frame
+        QList<QPointF> want;
+        if (middle_type == StickData::MULTILINE)
+            want << QPointF(130, 180) << QPointF(170, 220); // interior only (endpoints are p1/p2)
+        else
+            want << QPointF(120, 180) << QPointF(180, 180) << QPointF(150, 240);
+        QTransform inv = mid->PolygonTransform().inverted();
+        for (const QPointF &p : want)
+            mid->polygon_points.append(inv.map(p));
+        if (middle_type == StickData::MULTILINE) {
+            mid->vertex_widths << 3 << 4 << 5 << 6;        // per-vertex incl. endpoints
+            mid->vertex_curvatures << 0.1f << 0.2f << 0.3f << 0.4f;
+        }
+
+        StickData *gc = new StickData();
+        gc->stick_type = StickData::LINE;
+        gc->my_line = QLineF(200, 200, 200, 300);
+        gc->parent = mid;
+        gc->stepchild = false;
+
+        master->children << mid << gc; // children is flattened (all descendants)
+        mid->children << gc;
+
+        fig->stick_list << master << mid << gc;
+        fig->master_stick = master;
+        fig->current_stick = master;
+
+        // scene positions of the middle stick's full vertex path, BEFORE the master change
+        auto scene_verts = [&](StickData *s) {
+            QList<QPointF> v;
+            QTransform t = s->PolygonTransform();
+            if (s->stick_type == StickData::MULTILINE) v << s->my_line.p1();
+            for (const QPointF &p : s->polygon_points) v << t.map(p);
+            if (s->stick_type == StickData::MULTILINE) v << s->my_line.p2();
+            return v;
+        };
+        QList<QPointF> before = scene_verts(mid);
+
+        fig->SetMaster(gc);
+        QCOMPARE(fig->master_stick, gc); // the change actually happened
+
+        QList<QPointF> after = scene_verts(mid);
+        // the shape occupies the same scene points (order may reverse for a multiline —
+        // same visual polyline), so compare as an unordered set within tolerance
+        QCOMPARE(after.count(), before.count());
+        for (const QPointF &b : before) {
+            bool found = false;
+            for (const QPointF &a : after)
+                if (QLineF(a, b).length() < 0.5) { found = true; break; }
+            QVERIFY2(found, "a vertex moved: shape flipped/reshaped on master change");
+        }
+
+        // ...and img_angle must keep tracking the (reversed) spine, exactly as a fresh
+        // draw/Manipulate leaves it. StickGraphicsItem::Rotate() rewrites img_angle from
+        // the drag direction on the first rotate; if the master change left it 180° off
+        // (static render still fine, because polygon_points were baked against it) the
+        // vertices snap on that first rotate (Group D follow-up).
+        float expected = -atan2(mid->my_line.dx(), mid->my_line.dy()) * 180.0 / M_PI;
+        float diff = std::fmod(std::abs(mid->img_angle - expected), 360.0f);
+        if (diff > 180.0f) diff = 360.0f - diff;
+        QVERIFY2(diff < 0.5f, "img_angle no longer tracks the spine: vertices jump on the first rotate");
     }
 
 private slots:
@@ -1140,6 +1230,35 @@ private slots:
         view->SetTool(NOTOOL);
     }
 
+    // Group D bug 1: clicking an existing polygon's edge with DRAWPOLY adds exactly ONE
+    // vertex and does NOT leave an extend-session open (it used to; the user's next click
+    // then silently added a second vertex -> "two vertices per click", polygons only).
+    void ExistingPolygonEdgeClickAddsOneVertexNoSession()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        view->SetTool(DRAWPOLY);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(100, 100)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(100, 200)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(200, 150)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(250, 250)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(150, 300)));
+        QTest::keyClick(view, Qt::Key_Return); // chiude la sessione di disegno
+        StickData *poly = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(poly->polygon_points.count(), 3);
+
+        // click on the edge midpoint between vertex0 (200,150) and vertex1 (250,250)
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(225, 200)));
+        QCOMPARE(poly->polygon_points.count(), 4); // esattamente un vertice aggiunto
+
+        // NESSUNA sessione aperta: un click lontano NON deve aggiungere un secondo vertice
+        // al poligono (avvia semmai un nuovo poligono, che è un altro stick)
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(600, 500)));
+        QCOMPARE(poly->polygon_points.count(), 4);
+
+        view->SetTool(NOTOOL);
+    }
+
     // DRAWMULTI end to end: every click extends the path (first/last click = P1/P2,
     // the clicks between become interior vertices), Enter finalizes, Esc cancels the
     // whole stick (deleting it, since by then it is already committed to the figure)
@@ -1181,6 +1300,54 @@ private slots:
                           view->mapFromScene(QPointF(500, 100)));
         QTest::keyClick(view, Qt::Key_Escape);
         QCOMPARE(CurrentStickFigure()->stick_list.count(), count_before_cancel);
+
+        view->SetTool(NOTOOL);
+    }
+
+    void ChangeMasterKeepsPolygonShape()   { ChangeMasterKeepsVertexShape(StickData::POLYGON); }
+    void ChangeMasterKeepsMultilineShape() { ChangeMasterKeepsVertexShape(StickData::MULTILINE); }
+
+    // Group D bug 3: the scale tool must scale a MULTILINE's per-vertex thickness
+    // (vertex_widths) along with its shape, and a POLYGON's outline pen. Replicates the
+    // buffers mousePressEvent's SCALE case caches, then calls StickGraphicsItem::Scale().
+    void ScaleToolScalesMultilineThicknessAndPolygonPen()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        view->SetTool(DRAWMULTI);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(100, 100)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(180, 120)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(300, 140)));
+        QTest::keyClick(view, Qt::Key_Return);
+        StickData *ml = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(ml->stick_type, (qint32)StickData::MULTILINE);
+        QList<float> widths_before = ml->vertex_widths;
+        QVERIFY(!widths_before.isEmpty());
+
+        // as mousePressEvent's SCALE case does before a scale drag
+        ml->view->scale_buffer = ml->my_line.length();
+        ml->view->width_buffer = ml->pen.widthF();
+        ml->view->Scale(2.0f);
+        for (int i = 0; i < widths_before.count(); i++)
+            QVERIFY2(qAbs(ml->vertex_widths[i] - widths_before[i] * 2.0f) < 0.01f,
+                     "multiline vertex thickness did not scale");
+
+        view->SetTool(NOTOOL);
+        // POLYGON outline is data->pen, which Scale() already scaled before this fix
+        view->SetTool(DRAWPOLY);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(400, 100)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(400, 200)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(450, 150)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(500, 250)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(420, 300)));
+        QTest::keyClick(view, Qt::Key_Return);
+        StickData *pg = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(pg->stick_type, (qint32)StickData::POLYGON);
+        float pen_before = pg->pen.widthF();
+        pg->view->scale_buffer = pg->my_line.length();
+        pg->view->width_buffer = pg->pen.widthF();
+        pg->view->Scale(2.0f);
+        QVERIFY2(qAbs(pg->pen.widthF() - pen_before * 2.0f) < 0.01f, "polygon outline pen did not scale");
 
         view->SetTool(NOTOOL);
     }
@@ -1348,6 +1515,269 @@ private slots:
         view->SetTool(NOTOOL);
     }
 
+    // A limb whose sticks are stepchildren by INHERITANCE (they branch off the master's
+    // origin, so EndDrawing() propagates stepchild=true down the whole subtree) but are
+    // geometrically continuous (each p1 sits on its parent's p2) must still allow an IK
+    // target. The old continuity test keyed on the stepchild FLAG and rejected every such
+    // node, so on a real articulated figure "you cannot click any node to be the target"
+    // (Group D follow-up). FindIkTargetCandidate now compares the real joints instead.
+    void IkTargetSelectableOnContinuousStepchildLimb()
+    {
+        AddFrame();
+        StickFigure *fig = CurrentStickFigure();
+        qDeleteAll(fig->stick_list);
+        fig->stick_list.clear();
+
+        StickData *master = new StickData();
+        master->stick_type = StickData::LINE;
+        master->my_line = QLineF(100, 100, 100, 200);
+        master->parent = nullptr; master->stepchild = false;
+
+        StickData *thigh = new StickData();   // branches from the master's ORIGIN -> stepchild
+        thigh->stick_type = StickData::LINE;
+        thigh->my_line = QLineF(100, 100, 250, 100);
+        thigh->parent = master; thigh->stepchild = true;
+
+        StickData *shin = new StickData();    // continuation of thigh (p1 exactly on thigh's p2)
+        shin->stick_type = StickData::LINE;
+        shin->my_line = QLineF(250, 100, 400, 100);
+        shin->parent = thigh; shin->stepchild = true; // inherited flag, but geometrically continuous
+
+        master->children << thigh << shin; // children is flattened (all descendants)
+        thigh->children << shin;
+        fig->stick_list << master << thigh << shin;
+        fig->master_stick = master;
+        fig->current_stick = master;
+
+        view->resize(800, 600);
+        view->SetTool(DRAW_IK);
+        // first click at the shared origin (100,100): master.p1 and thigh.p1 coincide, the
+        // tie-break prefers the stepchild so the chain can start at the limb root
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 100)));
+        QCOMPARE(thigh->ik_role, (qint32)StickData::IK_START);
+        // second click on the shin segment: it must commit as the target
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(325, 100)));
+        QCOMPARE(shin->ik_role, (qint32)StickData::IK_TARGET_ON);
+        QCOMPARE(thigh->ik_target, shin);
+
+        view->SetTool(NOTOOL);
+    }
+
+    // Two stepchild limbs share the master's origin, so the first click cannot tell which
+    // limb the user means (the old tie-break picked one arbitrarily and the target on the
+    // OTHER limb was then unreachable — "can't select the target when a branch sits at the
+    // next stick", Group D follow-up). The start must be re-derived from the target's
+    // branch on the second click.
+    void IkStartResolvesToTargetsBranchAtSharedOrigin()
+    {
+        AddFrame();
+        StickFigure *fig = CurrentStickFigure();
+        qDeleteAll(fig->stick_list); fig->stick_list.clear();
+        auto mk = [&](QLineF l, StickData *par, bool sc){
+            StickData *s = new StickData(); s->stick_type = StickData::LINE; s->my_line = l; s->parent = par; s->stepchild = sc;
+            return s; };
+        StickData *M   = mk(QLineF(100,100,100,300), nullptr, false);
+        StickData *L1a = mk(QLineF(100,100, 50,150),  M, true);   // limb 1 (would win the old tie-break)
+        StickData *L1b = mk(QLineF( 50,150, 20,200),  L1a, true);
+        StickData *L2a = mk(QLineF(100,100,150,150),  M, true);   // limb 2 (the user's target is here)
+        StickData *L2b = mk(QLineF(150,150,180,200),  L2a, true);
+        M->children << L1a << L1b << L2a << L2b; L1a->children << L1b; L2a->children << L2b;
+        fig->stick_list << M << L1a << L1b << L2a << L2b;
+        fig->master_stick = M; fig->current_stick = M;
+
+        view->resize(800,600); view->SetTool(DRAW_IK);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(100,100)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(165,175)));
+        QCOMPARE(L2b->ik_role, (qint32)StickData::IK_TARGET_ON); // the clicked limb's tip is the target
+        QCOMPARE(L2a->ik_role, (qint32)StickData::IK_START);     // start re-derived onto limb 2's root
+        QCOMPARE(L1a->ik_role, (qint32)StickData::IK_NONE);      // provisional start on limb 1 was released
+        view->SetTool(NOTOOL);
+    }
+
+    // a plain continuous chain with a branch hanging off a MIDDLE stick must still let the
+    // target past the branch be selected (a mid-chain branch does not break the parent line)
+    void IkTargetSelectableAcrossMidChainBranch()
+    {
+        AddFrame();
+        StickFigure *fig = CurrentStickFigure();
+        qDeleteAll(fig->stick_list); fig->stick_list.clear();
+        auto mk = [&](QLineF l, StickData *par){
+            StickData *s = new StickData(); s->stick_type = StickData::LINE; s->my_line = l; s->parent = par; s->stepchild = false;
+            return s; };
+        StickData *M = mk(QLineF(100,100,100,200), nullptr);
+        StickData *A = mk(QLineF(100,200,100,300), M);
+        StickData *C = mk(QLineF(100,300,200,300), A); // branch off A's endpoint
+        StickData *B = mk(QLineF(100,300,100,400), A); // chain continues from A's endpoint
+        StickData *T = mk(QLineF(100,400,100,500), B);
+        M->children << A << C << B << T; A->children << C << B << T; B->children << T;
+        fig->stick_list << M << A << C << B << T;
+        fig->master_stick = M; fig->current_stick = M;
+
+        view->resize(800,600); view->SetTool(DRAW_IK);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(100,100)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(100,450)));
+        QCOMPARE(T->ik_role, (qint32)StickData::IK_TARGET_ON);
+        QCOMPARE(M->ik_role, (qint32)StickData::IK_START);
+        view->SetTool(NOTOOL);
+    }
+
+    // FABRIK on a stepchild chain whose TARGET is not the chain end: the continuation after
+    // the target (attached to the target's free end P2, but flagged stepchild by inheritance)
+    // must follow the target's P2, not its P1. The old flag-based delta moved it by the P1
+    // (origin) delta, so it trailed the previous stick with an offset (Group D follow-up).
+    void SolveIkChainDragsPostTargetContinuationByFreeEnd()
+    {
+        AddFrame();
+        StickFigure *fig = CurrentStickFigure();
+        qDeleteAll(fig->stick_list); fig->stick_list.clear();
+        auto mk = [&](QLineF l, StickData *par, bool sc){
+            StickData *s = new StickData(); s->stick_type = StickData::LINE; s->my_line = l; s->parent = par; s->stepchild = sc;
+            return s; };
+        StickData *thigh = mk(QLineF(100,100,200,100), nullptr, false); // start/anchor
+        StickData *shin  = mk(QLineF(200,100,300,100), thigh, true);    // node
+        StickData *foot  = mk(QLineF(300,100,400,100), shin,  true);    // target
+        StickData *toe   = mk(QLineF(400,100,450,100), foot,  true);    // continuation AFTER the target
+        thigh->children << shin << foot << toe; shin->children << foot << toe; foot->children << toe;
+        fig->stick_list << thigh << shin << foot << toe;
+        fig->master_stick = thigh; fig->current_stick = thigh;
+
+        thigh->ik_role = StickData::IK_START;
+        CommitIkChain(thigh, foot);
+        QCOMPARE(foot->ik_role, (qint32)StickData::IK_TARGET_ON);
+
+        SolveIkChain(thigh, QPointF(300, 250)); // pull the target out of line: the chain bends
+        // the continuation stays welded to the target's free end (no offset)
+        QVERIFY2(QLineF(toe->my_line.p1(), foot->my_line.p2()).length() < 0.5,
+                 "post-target continuation trailed the previous stick instead of the target's P2");
+    }
+
+    // clicking near the SECOND-LAST stick's end handle (the joint it shares with the last
+    // stick) must target the second-last, not snap to the last. Target selection ranks by
+    // the endpoint handle (P2), so the stick whose free end is nearest the click wins even
+    // when the click also grazes the last stick's segment (Group D follow-up, adjustment 3).
+    void IkTargetPicksStickByEndHandleNotSegment()
+    {
+        AddFrame();
+        StickFigure *fig = CurrentStickFigure();
+        qDeleteAll(fig->stick_list); fig->stick_list.clear();
+        auto mk = [&](QLineF l, StickData *par, bool sc){
+            StickData *s = new StickData(); s->stick_type = StickData::LINE; s->my_line = l; s->parent = par; s->stepchild = sc;
+            return s; };
+        StickData *thigh = mk(QLineF(100,100,200,100), nullptr, false); // master/start
+        StickData *shin  = mk(QLineF(200,100,300,100), thigh, true);
+        StickData *foot  = mk(QLineF(300,100,400,100), shin,  true);    // second-last (desired target)
+        StickData *toe   = mk(QLineF(400,100,500,100), foot,  true);    // last
+        thigh->children << shin << foot << toe; shin->children << foot << toe; foot->children << toe;
+        fig->stick_list << thigh << shin << foot << toe;
+        fig->master_stick = thigh; fig->current_stick = thigh;
+
+        view->resize(800, 600);
+        view->SetTool(DRAW_IK);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(100,100)));
+        // click just past foot's end handle (400,100): grazes toe's segment, but foot's P2 is nearest
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(405,100)));
+        QCOMPARE(foot->ik_role, (qint32)StickData::IK_TARGET_ON); // second-last chosen
+        QCOMPARE(toe->ik_role,  (qint32)StickData::IK_NONE);      // last NOT snapped to
+        view->SetTool(NOTOOL);
+    }
+
+    // Bug 1: rotating the whole figure by dragging the MASTER must carry the stepchild
+    // limbs too (they hang off the master's origin). The old master-drag filtered out
+    // stepchildren, so those limbs stayed put while the rest turned.
+    void MasterDragRotatesStepchildChain()
+    {
+        AddFrame();
+        StickData *master = DrawStick(QPointF(100,100), QPointF(100,200));
+        StickData *child  = DrawStick(QPointF(100,200), QPointF(100,300)); // direct child
+        StickData *step   = DrawStick(QPointF(100,100), QPointF(200,100)); // stepchild off master origin
+        QVERIFY(step->stepchild);
+        float step_a0 = step->my_line.angle(), child_a0 = child->my_line.angle();
+        view->resize(800,600);
+        view->SetTool(NOTOOL);
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(100,180)));
+        QTest::mouseMove(view->viewport(),  view->mapFromScene(QPointF(100,180))); // latch startingAngle
+        QTest::mouseMove(view->viewport(),  view->mapFromScene(QPointF(220,220))); // rotate (closer to p2)
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(220,220)));
+        QVERIFY2(qAbs(child->my_line.angle() - child_a0) > 1.0, "test setup: master drag did not rotate at all");
+        QVERIFY2(qAbs(step->my_line.angle()  - step_a0)  > 1.0, "stepchild limb was left behind by the master-drag rotation");
+        view->SetTool(NOTOOL);
+    }
+
+    // Bug 3: the ROTATE tool pivots on the HANDLE (master origin + pivot_offset), not on
+    // the master origin. With the handle offset to (300,100), a 180° drag orbits the
+    // master's origin around the handle to the mirrored point.
+    void RotateToolPivotsOnHandle()
+    {
+        AddFrame();
+        StickData *master = DrawStick(QPointF(100,100), QPointF(100,200));
+        StickFigure *fig = CurrentStickFigure();
+        fig->pivot_offset = QPointF(200, 0);                     // handle at (300,100)
+        QPointF handle = master->my_line.p1() + fig->pivot_offset;
+        QPointF p1_before = master->my_line.p1();
+        view->resize(800,600);
+        view->SetTool(ROTATE);
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(400,100)));
+        QTest::mouseMove(view->viewport(),  view->mapFromScene(QPointF(400,100)));
+        QTest::mouseMove(view->viewport(),  view->mapFromScene(QPointF(200,100))); // 180° around (300,100)
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(200,100)));
+        QPointF expected = 2*handle - p1_before;                 // mirror of p1 through the handle => (500,100)
+        QVERIFY2(QLineF(master->my_line.p1(), expected).length() < 5.0,
+                 "ROTATE tool did not pivot on the handle");
+        view->SetTool(NOTOOL);
+    }
+
+    // Bug 2: pivot_offset persists and is anchored to the master, so translating the
+    // figure (master drag) carries the handle. After a translate, the ROTATE tool still
+    // pivots on master.p1 + offset (now at the moved location).
+    void PivotHandleFollowsMasterTranslate()
+    {
+        AddFrame();
+        StickData *master = DrawStick(QPointF(100,100), QPointF(100,200));
+        StickFigure *fig = CurrentStickFigure();
+        fig->pivot_offset = QPointF(200, 0);
+        fig->Traslate(100, 50);                                  // move the whole figure
+        QPointF handle = master->my_line.p1() + fig->pivot_offset; // follows the master
+        QPointF p1_before = master->my_line.p1();
+        view->resize(800,600);
+        view->SetTool(ROTATE);
+        QPointF a(handle.x() + 100, handle.y());                 // east of the (moved) handle
+        QPointF b(handle.x() - 100, handle.y());                 // west => 180°
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(a));
+        QTest::mouseMove(view->viewport(),  view->mapFromScene(a));
+        QTest::mouseMove(view->viewport(),  view->mapFromScene(b));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(b));
+        QPointF expected = 2*handle - p1_before;
+        QVERIFY2(QLineF(master->my_line.p1(), expected).length() < 5.0,
+                 "handle did not follow the master translate (offset not maintained)");
+        view->SetTool(NOTOOL);
+    }
+
+    // Multi-selection: a Ctrl-dragged pivot handle must survive a tool switch (e.g. to
+    // ROTATE/SCALE) — switching used to recenter it to the selection default.
+    void MultiSelectionPivotSurvivesToolSwitch()
+    {
+        AddFrame();
+        StickFigure *f1 = CurrentStickFigure();
+        DrawStick(QPointF(100,100), QPointF(100,200));   // stick on figure 1
+        StickFigure *f2 = AddStick();
+        DrawStick(QPointF(300,100), QPointF(300,200));   // stick on figure 2 (now current)
+        view->resize(800,600);
+        view->SetTool(NOTOOL);
+        view->AddToMultiSelection(f1);
+        view->AddToMultiSelection(f2);
+        QVERIFY(view->MultiSelectionActive());
+
+        QPointF custom(500, 450);
+        view->multi_pivot = custom;      // simulate a Ctrl-drag of the group handle
+        view->SetTool(ROTATE);           // switching tools must NOT recenter it
+        QCOMPARE(view->multi_pivot, custom);
+        view->SetTool(SCALE);
+        QCOMPARE(view->multi_pivot, custom);
+        view->SetTool(NOTOOL);
+    }
+
     // deleting a chain member (any of them) must dissolve the WHOLE chain, not just
     // leave the survivors with a stale IK role pointing at a freed stick
     void DeletingChainMemberClearsWholeChain()
@@ -1463,6 +1893,206 @@ private slots:
         QCOMPARE(CurrentStickFigure()->stick_list[2]->ik_role, (qint32)StickData::IK_TARGET_ON);
 
         view->SetTool(NOTOOL);
+    }
+
+    // A single Undo of a 2-click chain creation must clear ALL roles (start included), so
+    // both the start and the target can anchor a NEW chain. The gesture used to push two
+    // undo steps, so one Undo reversed only the commit and left the start stuck on
+    // IK_START (and the target on an orphan role) — neither reusable (Group D follow-up).
+    void UndoingChainCreationClearsAllRolesForReuse()
+    {
+        StickData *master, *child, *grandchild;
+        BuildIkChainFixture(&master, &child, &grandchild);
+        view->resize(800, 600);
+        view->SetTool(DRAW_IK);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 100)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 350)));
+        QCOMPARE(master->ik_role, (qint32)StickData::IK_START);
+        QCOMPARE(grandchild->ik_role, (qint32)StickData::IK_TARGET_ON);
+
+        view->undo_stack.undo(); // ONE undo must remove the whole gesture
+
+        StickFigure *fig = CurrentStickFigure(); // frame rebuilt: old pointers are stale
+        QCOMPARE(fig->stick_list[0]->ik_role, (qint32)StickData::IK_NONE); // start reusable
+        QCOMPARE(fig->stick_list[2]->ik_role, (qint32)StickData::IK_NONE); // target reusable
+
+        // and the same sticks can indeed anchor a fresh chain again
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 100)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(QPointF(100, 350)));
+        QCOMPARE(fig->stick_list[0]->ik_role, (qint32)StickData::IK_START);
+        QCOMPARE(fig->stick_list[2]->ik_role, (qint32)StickData::IK_TARGET_ON);
+
+        view->SetTool(NOTOOL);
+    }
+
+    // ---- IK graph semantics under stick split (Chop) / merge (Weld) / figure merge+split ----
+
+    // splitting an IK_NODE leaves both halves as IK_NODE and the chain intact (spec)
+    void ChopIkNodeKeepsBothNodes()
+    {
+        StickData *master, *child, *grandchild;
+        BuildIkChainFixture(&master, &child, &grandchild);
+        StickFigure *figure = CurrentStickFigure();
+        master->ik_role = StickData::IK_START;
+        CommitIkChain(master, grandchild); // master(start)->child(node)->grandchild(target)
+        QCOMPARE(child->ik_role, (qint32)StickData::IK_NODE);
+
+        StickData *added = figure->Chop(child); // splitta il nodo
+        QCOMPARE(child->ik_role, (qint32)StickData::IK_NODE);
+        QCOMPARE(added->ik_role, (qint32)StickData::IK_NODE);
+        QCOMPARE(master->ik_target, grandchild);
+        QCOMPARE(grandchild->ik_start, master);
+        QVERIFY(StickIsInActiveIkChain(added));
+    }
+
+    // splitting the target: the free-end child inherits the target role, the parent
+    // becomes a node, and the start's target pointer follows the new effector (spec)
+    void ChopIkTargetMovesRoleToChild()
+    {
+        StickData *master, *child, *grandchild;
+        BuildIkChainFixture(&master, &child, &grandchild);
+        StickFigure *figure = CurrentStickFigure();
+        master->ik_role = StickData::IK_START;
+        CommitIkChain(master, grandchild);
+
+        StickData *added = figure->Chop(grandchild); // splitta il target
+        QCOMPARE(added->ik_role, (qint32)StickData::IK_TARGET_ON);
+        QCOMPARE(grandchild->ik_role, (qint32)StickData::IK_NODE);
+        QCOMPARE(master->ik_target, added);
+        QCOMPARE(added->ik_start, master);
+        QVERIFY(StickIsInActiveIkChain(grandchild));
+    }
+
+    // splitting the start (beginning): parent keeps the start/anchor, child becomes a node
+    void ChopIkStartKeepsRoleOnParent()
+    {
+        StickData *master, *child, *grandchild;
+        BuildIkChainFixture(&master, &child, &grandchild);
+        StickFigure *figure = CurrentStickFigure();
+        master->ik_role = StickData::IK_START;
+        CommitIkChain(master, grandchild);
+
+        StickData *added = figure->Chop(master); // splitta l'inizio
+        QCOMPARE(master->ik_role, (qint32)StickData::IK_START);
+        QCOMPARE(added->ik_role, (qint32)StickData::IK_NODE);
+        QCOMPARE(master->ik_target, grandchild);
+        QVERIFY(StickIsInActiveIkChain(added));
+    }
+
+    // welding the target into its parent node makes the surviving stick the target (spec)
+    void WeldTargetIntoNodeBecomesTarget()
+    {
+        StickData *master, *child, *grandchild;
+        BuildIkChainFixture(&master, &child, &grandchild);
+        StickFigure *figure = CurrentStickFigure();
+        master->ik_role = StickData::IK_START;
+        CommitIkChain(master, grandchild);
+
+        QList<StickData*> welded = figure->Weld(child); // assorbe il target grandchild
+        QVERIFY(welded.contains(grandchild));
+        QCOMPARE(child->ik_role, (qint32)StickData::IK_TARGET_ON);
+        QCOMPARE(master->ik_target, child);
+        QCOMPARE(child->ik_start, master);
+    }
+
+    // welding a 2-stick chain's start onto its own target leaves no room for a chain:
+    // the "check ancestry, delete if insufficient" pass dissolves it (spec)
+    void WeldStartAndTargetDissolvesChain()
+    {
+        AddFrame();
+        StickFigure *figure = CurrentStickFigure();
+        StickData *start = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        StickData *target = DrawStick(QPointF(100, 200), QPointF(100, 300));
+        start->ik_role = StickData::IK_START;
+        CommitIkChain(start, target); // catena a 2 stick: start->target
+
+        figure->Weld(start); // assorbe il target dentro lo start
+        QCOMPARE(figure->stick_list.count(), 1);
+        QCOMPARE(start->ik_role, (qint32)StickData::IK_NONE);
+        QCOMPARE(start->ik_target, static_cast<StickData*>(nullptr));
+    }
+
+    // merging a figure that carries a chain grafts the chain (roles + pointers) into the host
+    void MergeStickFiguresInheritsChain()
+    {
+        AddFrame();
+        StickFigure *main_figure = CurrentStickFigure();
+        StickData *main_stick = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        StickFigure *to_join = AddStick("joined");
+        StickData *j_start = DrawStick(QPointF(300, 100), QPointF(300, 200));
+        StickData *j_mid   = DrawStick(QPointF(300, 200), QPointF(300, 300));
+        StickData *j_target= DrawStick(QPointF(300, 300), QPointF(300, 400));
+        j_start->ik_role = StickData::IK_START;
+        CommitIkChain(j_start, j_target);
+
+        view->RemoveHandles(main_figure);
+        MergeStickFigures(main_figure, main_stick, to_join);
+        view->AddHandles(main_figure);
+
+        // ritrova i cloni per geometria (l'ordine è: originale, linker, poi i cloni di to_join)
+        StickData *start_clone = nullptr, *target_clone = nullptr;
+        for(StickData *s : main_figure->stick_list){
+            if(s->ik_role == StickData::IK_START) start_clone = s;
+            if(s->ik_role == StickData::IK_TARGET_ON) target_clone = s;
+        }
+        QVERIFY(start_clone != nullptr);
+        QVERIFY(target_clone != nullptr);
+        QCOMPARE(start_clone->ik_target, target_clone);
+        QCOMPARE(target_clone->ik_start, start_clone);
+        QVERIFY(StickIsInActiveIkChain(target_clone));
+    }
+
+    // splitting a figure along a chain: a chain wholly inside the moved subtree is
+    // inherited by the branch; a chain crossing the split point is broken on both sides (spec)
+    void SplitStickFigureBreaksSpanningChainKeepsContained()
+    {
+        // contained: catena interamente sotto il punto di split
+        {
+            AddFrame();
+            StickFigure *figure = CurrentStickFigure();
+            /*master*/ DrawStick(QPointF(100, 100), QPointF(100, 200));
+            StickData *b = DrawStick(QPointF(100, 200), QPointF(100, 300)); // punto di split (start della catena)
+            StickData *c = DrawStick(QPointF(100, 300), QPointF(100, 400));
+            StickData *d = DrawStick(QPointF(100, 400), QPointF(100, 500));
+            b->ik_role = StickData::IK_START;
+            CommitIkChain(b, d); // catena b->c->d, tutta nel sottoalbero di b
+            Q_UNUSED(c);
+            figure->current_stick = b;
+            view->SplitStickFigure();
+            StickFigure *branch = CurrentStickFigure();
+            QVERIFY(branch != figure);
+            StickData *bs = nullptr, *bt = nullptr;
+            for(StickData *s : branch->stick_list){
+                if(s->ik_role == StickData::IK_START) bs = s;
+                if(s->ik_role == StickData::IK_TARGET_ON) bt = s;
+            }
+            QVERIFY(bs != nullptr); // la catena è stata ereditata dal branch
+            QVERIFY(bt != nullptr);
+            QCOMPARE(bs->ik_target, bt);
+        }
+        // spanning: start sopra il punto di split, target sotto → catena spezzata ovunque
+        {
+            AddFrame();
+            StickFigure *figure = CurrentStickFigure();
+            /*master*/ DrawStick(QPointF(500, 100), QPointF(500, 200));
+            StickData *b = DrawStick(QPointF(500, 200), QPointF(500, 300)); // start
+            StickData *c = DrawStick(QPointF(500, 300), QPointF(500, 400)); // punto di split (nodo)
+            StickData *d = DrawStick(QPointF(500, 400), QPointF(500, 500)); // target
+            b->ik_role = StickData::IK_START;
+            CommitIkChain(b, d);
+            figure->current_stick = c;
+            view->SplitStickFigure();
+            StickFigure *branch = CurrentStickFigure();
+            // lato split: catena sciolta da DeleteStick(c)
+            QCOMPARE(b->ik_role, (qint32)StickData::IK_NONE);
+            // lato branch: nessun ruolo IK sopravvive (mancava lo start)
+            for(StickData *s : branch->stick_list)
+                QCOMPARE(s->ik_role, (qint32)StickData::IK_NONE);
+        }
     }
 
     // ================= STK / .nodes conversion (STK_IMPORT_EXPORT_PLAN.md §7) =================

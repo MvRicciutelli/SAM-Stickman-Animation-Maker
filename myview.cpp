@@ -11,6 +11,7 @@
 #include <QCheckBox>
 #include <animationoptions.h>
 #include <QMessageBox>
+#include <QShortcut>
 #include "uiItems.h"
 #include "framepresenter.h"
 
@@ -78,6 +79,13 @@ MyView::MyView(QWidget *parent) : QGraphicsView(parent)
             emit AutoSaveTrigger();
         }
     });
+    // Ctrl+Z / Ctrl+Y (QKeySequence::Undo/Redo — Ctrl+Y is the Redo default on Windows):
+    // window-scoped shortcuts so undo/redo work from the keyboard regardless of which
+    // canvas child has focus, same targets as the undo/redo toolbar buttons (widget.cpp)
+    connect(new QShortcut(QKeySequence::Undo, this), &QShortcut::activated,
+            this, [this]{ undo_stack.undo(); });
+    connect(new QShortcut(QKeySequence::Redo, this), &QShortcut::activated,
+            this, [this]{ undo_stack.redo(); });
 }
 
 /**
@@ -118,6 +126,11 @@ void MyView::SetTool(int new_tool)
     ChangeTool();
 
     tool = new_tool;
+    // maniglia/bounding box appaiono sui tool di selezione, spariscono sugli altri (spec).
+    // NON ricentrare il perno: un cambio tool deve conservare la posizione della maniglia
+    // spostata dall'utente con Ctrl-trascina (una NUOVA selezione la ricentra da sé, via
+    // UpdateMultiSelectionUI(true)). Prima, passare a ROTATE/SCALE la riportava al centro.
+    UpdateSelectionDecorations(false);
 }
 
 /**
@@ -331,6 +344,22 @@ void MyView::mousePressEvent(QMouseEvent *event)
                     }
                     else{
                         DeselectAllVertices(); // Ctrl+click a vuoto: deseleziona tutto
+                        // Ctrl+click/trascina sulla tela vuota riposiziona il perno della
+                        // selezione al cursore (sostituisce il vecchio Spazio, spec)
+                        if(HasActiveSelection()){
+                            multi_pivot = coord;
+                            pivot_dragging = true;
+                            // singola figura: registra subito l'offset persistente, altrimenti
+                            // UpdateSelectionDecorations ricalcolerebbe il perno dal vecchio
+                            // offset e la maniglia rimbalzerebbe fino al primo movimento (bug 2)
+                            if(!MultiSelectionActive()){
+                                QList<StickFigure*> sel = SelectedFigures();
+                                StickFigure *S = sel.isEmpty() ? nullptr : sel.first();
+                                if(S != nullptr && S->master_stick != nullptr)
+                                    S->pivot_offset = coord - S->master_stick->my_line.p1();
+                            }
+                            UpdateSelectionDecorations();
+                        }
                     }
                     break;
                 }
@@ -387,6 +416,8 @@ void MyView::mousePressEvent(QMouseEvent *event)
                         if(s->view) s->view->angle_buffer2 = s->my_line.angle();
                     }
                 }
+                // selezione singola: maniglia (sul master) + bounding box (spec)
+                UpdateSelectionDecorations(true);
                 break;
             }
             case DRAW:
@@ -403,24 +434,17 @@ void MyView::mousePressEvent(QMouseEvent *event)
             {
                 StoreUndo();
                 StickFigure::start_stick_figure_rotation = true;
-                if(MultiSelectionActive()){
-                    // rotazione della selezione multipla attorno alla maniglia: stessi
-                    // buffer del tool ROTATESCENE, ma centro = PERNO (la posizione
-                    // visibile della maniglia, eventualmente spostata dall'utente)
-                    multi_center_buffer = multi_pivot;
-                    for(StickFigure *S : multi_selection){
-                        if(S->master_stick && S->stick_list.count() > 0){
-                            S->origin_pos_buffer = S->master_stick->my_line.p1();
-                            for(StickData *s : S->stick_list){
-                                if(s->view) s->view->angle_buffer2 = s->my_line.angle();
-                            }
+                // singola figura e multi-selezione condividono lo stesso perno = MANIGLIA
+                // (bug 3): per una figura sola è master.p1 + pivot_offset persistente, per
+                // la multi il perno di gruppo. Stessi buffer per entrambe.
+                multi_center_buffer = SelectionPivotCurrent();
+                multi_pivot = multi_center_buffer;
+                for(StickFigure *S : SelectedFigures()){
+                    if(S->master_stick && S->stick_list.count() > 0){
+                        S->origin_pos_buffer = S->master_stick->my_line.p1();
+                        for(StickData *s : S->stick_list){
+                            if(s->view) s->view->angle_buffer2 = s->my_line.angle();
                         }
-                    }
-                    break;
-                }
-                if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){ // vedi il caso NOTOOL
-                    for(StickData*s:my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
-                        if(s->view) s->view->angle_buffer2 = s->my_line.angle();
                     }
                 }
                 break;
@@ -429,28 +453,17 @@ void MyView::mousePressEvent(QMouseEvent *event)
             {
                 StoreUndo();
                 StickFigure::start_stick_figure_scale = true;
-                if(MultiSelectionActive()){
-                    // scala della selezione multipla attorno alla maniglia (vedi
-                    // SCALESCENE); centro = PERNO visibile, non il baricentro ricalcolato
-                    multi_center_buffer = multi_pivot;
-                    for(StickFigure *S : multi_selection){
-                        if(S->master_stick && S->stick_list.count() > 0){
-                            S->origin_pos_buffer = S->master_stick->my_line.p1();
-                            for(StickData *s : S->stick_list){
-                                if(s->view){
-                                    s->view->scale_buffer = s->my_line.length();
-                                    s->view->width_buffer = s->pen.width();
-                                }
+                // come ROTATE: perno = MANIGLIA per singola figura e multi-selezione (bug 3)
+                multi_center_buffer = SelectionPivotCurrent();
+                multi_pivot = multi_center_buffer;
+                for(StickFigure *S : SelectedFigures()){
+                    if(S->master_stick && S->stick_list.count() > 0){
+                        S->origin_pos_buffer = S->master_stick->my_line.p1();
+                        for(StickData *s : S->stick_list){
+                            if(s->view){
+                                s->view->scale_buffer = s->my_line.length();
+                                s->view->width_buffer = s->pen.width();
                             }
-                        }
-                    }
-                    break;
-                }
-                if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){ // vedi il caso NOTOOL
-                    for(StickData*s:my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
-                        if(s->view){
-                            s->view->scale_buffer = s->my_line.length();
-                            s->view->width_buffer = s->pen.width();
                         }
                     }
                 }
@@ -590,15 +603,19 @@ void MyView::mousePressEvent(QMouseEvent *event)
                 }
                 if(event->modifiers() & Qt::ControlModifier)
                     break; // Ctrl: il tool può solo spostare vertici esistenti
-                // click sul bordo di un poligono esistente: inserisci lì e apri la sessione
+                // click sul bordo di un poligono esistente: inserisci UN vertice e
+                // consenti di trascinarlo subito, esattamente come la multilinea (sotto).
+                // Un tempo apriva una sessione persistente (poly_session_extends): il
+                // click SUCCESSIVO dell'utente, spesso non inteso come "aggiungi vertice",
+                // ne inseriva un secondo di nascosto -> "due vertici per click" solo sui
+                // poligoni (Group D). Niente sessione = un vertice per click, come le multilinee.
                 int insert_idx = -1;
                 StickData *edge_hit = FindPolygonEdge(coord, &insert_idx, StickData::POLYGON);
                 if(edge_hit != nullptr){
                     StoreUndo();
                     my_animation->UpdateSelection(edge_hit);
                     edge_hit->view->AddPolygonPoint(coord, insert_idx);
-                    poly_session_active = true;
-                    poly_session_extends = true;
+                    poly_drag_idx = insert_idx; // il trascinamento aggiusta subito la posizione
                     break;
                 }
                 // altrimenti: primo click di un nuovo poligono
@@ -670,12 +687,31 @@ void MyView::mousePressEvent(QMouseEvent *event)
 
                 StickData *pending = IkPendingStart();
                 if(ik_drawing && pending != nullptr){
-                    // secondo click: valida il target (stesso stickfigure, discendente,
-                    // percorso libero-da-origine ininterrotto — vedi FindIkTargetCandidate)
+                    // secondo click: valida il target e RI-DERIVA lo start dal ramo del
+                    // target (FindIkTargetCandidate/ResolveIkStartForTarget). Il primo
+                    // click sceglie uno start provvisorio, ma se piu' arti condividono
+                    // l'ancora non puo' sapere quale intende l'utente: lo decide il target.
                     StickData *target = FindIkTargetCandidate(fig, pending, coord);
-                    if(target != nullptr){
-                        StoreUndo(); // granularità per-click, come per DRAWPOLY/DRAWMULTI
-                        CommitIkChain(pending, target);
+                    StickData *start  = target != nullptr
+                            ? ResolveIkStartForTarget(target, pending->my_line.p1(), pending)
+                            : nullptr;
+                    if(target != nullptr && start != nullptr){
+                        // NIENTE StoreUndo qui: la creazione catena è UN gesto a due click
+                        // il cui snapshot pre-gesto è già stato preso al primo click (sotto,
+                        // prima di IK_START). Un secondo snapshot spezzava l'annullamento in
+                        // due: un solo Undo disfaceva il commit ma lasciava lo start bloccato
+                        // su IK_START (e il target su un ruolo orfano), così ne' lo start ne'
+                        // il target si potevano riselezionare per una nuova catena. Con un
+                        // unico comando, Undo riporta tutto a IK_NONE in un colpo.
+                        if(start != pending){
+                            // lo start giusto è su un ramo diverso che condivide l'ancora:
+                            // libera il provvisorio (ramo sbagliato) e promuovi quello reale
+                            pending->ik_role = StickData::IK_NONE;
+                            if(pending->view) pending->view->Refresh(0);
+                            start->ik_role = StickData::IK_START;
+                            if(start->view) start->view->Refresh(0);
+                        }
+                        CommitIkChain(start, target);
                         ik_drawing = false;
                         ClearIkPreviewItems(); // NON CancelIkDrawing(): il ruolo appena
                                                // commesso non va disfatto
@@ -704,15 +740,24 @@ void MyView::mousePressEvent(QMouseEvent *event)
                     if(candidate->view)
                         candidate->view->Refresh(0);
                     ik_drawing = true;
+                    QPen preview_line_pen(Qt::black, 1, Qt::DotLine);
+                    preview_line_pen.setCosmetic(true); // spessore costante a ogni zoom
                     ik_preview_line = new QGraphicsLineItem(QLineF(candidate->my_line.p1(), coord));
-                    ik_preview_line->setPen(QPen(Qt::black, 1, Qt::DotLine));
+                    ik_preview_line->setPen(preview_line_pen);
                     ik_preview_line->setZValue(1000);
                     scene()->addItem(ik_preview_line);
+                    // stessa croce del marcatore persistente (drawForeground): dimensione in
+                    // unità di scena legata a handle_size e penna COSMETICA, così è ben
+                    // visibile a ogni zoom. Prima era 10px con penna non-cosmetica da 1 unità:
+                    // su una scena grande a zoom-adatta risultava quasi invisibile (bug Group D).
+                    float s = handle_size * 1.1f;
                     QPainterPath cross_path;
-                    cross_path.moveTo(-5,-5); cross_path.lineTo(5,5);
-                    cross_path.moveTo(5,-5); cross_path.lineTo(-5,5);
+                    cross_path.moveTo(-s,-s); cross_path.lineTo(s,s);
+                    cross_path.moveTo(s,-s); cross_path.lineTo(-s,s);
+                    QPen cross_pen(QColor(220, 30, 30), 2.5);
+                    cross_pen.setCosmetic(true);
                     ik_preview_cross = new QGraphicsPathItem(cross_path);
-                    ik_preview_cross->setPen(QPen(Qt::black, 1));
+                    ik_preview_cross->setPen(cross_pen);
                     ik_preview_cross->setZValue(1000);
                     ik_preview_cross->setPos(coord);
                     scene()->addItem(ik_preview_cross);
@@ -723,6 +768,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
             }
     }
     }
+    UpdateIkOverlay(); // un click DRAW_IK può creare/attivare/cancellare una catena
     //QGraphicsView::mousePressEvent(event);
 }
 
@@ -865,10 +911,14 @@ void MyView::keyPressEvent(QKeyEvent *event)
         }
         case(Qt::Key_Space):
         {
-            // Spazio tenuto premuto: la maniglia della multi-selezione entra in
-            // anteprima e segue il cursore; il perno si sposta al rilascio del tasto
-            if(MultiSelectionActive() && !event->isAutoRepeat())
-                pivot_previewing = true;
+            // Spazio tenuto premuto: trascina la selezione (una o più figure) seguendo il
+            // cursore, come se la si prendesse dallo stick master (spec). Un'unica voce di
+            // undo per il gesto; il movimento avviene in mouseMoveEvent finché è premuto.
+            if(ToolUsesSelection() && HasActiveSelection() && !event->isAutoRepeat()){
+                StoreUndo();
+                space_dragging = true;
+                starting_coord = coord; // `coord` è aggiornata da ogni mouseMoveEvent
+            }
             break;
         }
     }
@@ -877,17 +927,21 @@ void MyView::keyPressEvent(QKeyEvent *event)
 }
 
 /**
- * @details Only job: releasing Space commits the previewed transform-handle position —
- * the pivot lands on the current mouse coordinate (spec).
+ * @details Only job: releasing Space ends the drag-by-master gesture and refreshes the
+ * moved figures' icons and the selection decorations.
  */
 void MyView::keyReleaseEvent(QKeyEvent *event)
 {
-    if(event->key() == Qt::Key_Space && !event->isAutoRepeat() && pivot_previewing){
-        pivot_previewing = false;
-        if(MultiSelectionActive()){
-            multi_pivot = coord; // `coord` è aggiornata da ogni mouseMoveEvent
-            UpdateMultiSelectionUI();
+    if(event->key() == Qt::Key_Space && !event->isAutoRepeat() && space_dragging){
+        space_dragging = false;
+        for(StickFigure *S : SelectedFigures()){
+            S->UpdateIcon();
+            if(S->linked_item)
+                S->linked_item->setIcon(*S->stick_figure_icon);
         }
+        if(my_animation->current_frame != nullptr)
+            my_animation->current_frame->UpdateIcon();
+        UpdateSelectionDecorations();
     }
     QGraphicsView::keyReleaseEvent(event);
 }
@@ -1195,6 +1249,48 @@ StickData *MyView::IkPendingStart()
     return nullptr;
 }
 
+void MyView::UpdateIkOverlay()
+{
+    // i marcatori sono disegnati in drawForeground() (ridisegnato a ogni repaint del
+    // viewport); qui basta forzare un repaint per i casi in cui è cambiata solo la
+    // geometria dei dati (es. un drag FABRIK) senza altrimenti sporcare il viewport
+    if(viewport() != nullptr)
+        viewport()->update();
+}
+
+void MyView::drawForeground(QPainter *painter, const QRectF &rect)
+{
+    QGraphicsView::drawForeground(painter, rect);
+    if(my_animation == nullptr || my_animation->current_frame == nullptr)
+        return;
+    // marcatori delle catene IX: come le maniglie, sempre visibili nell'editor e MAI
+    // negli export/render (che disegnano una render scene separata, non questa view).
+    // Disegnati qui (foreground della view) invece che con un item di scena, così sono
+    // affidabili come le maniglie: ridisegnati a ogni repaint, per OGNI catena, senza
+    // dipendere da un item pigro da creare/aggiornare.
+    painter->save();
+    for(StickFigure *S : my_animation->current_frame->stick_figures){
+        if(S == nullptr) continue;
+        for(StickData *s : S->stick_list){
+            if(s->ik_role != StickData::IK_START || s->ik_target == nullptr)
+                continue;
+            QPointF target_pos = s->ik_target->my_line.p2();
+            QPen line_pen(Qt::black, 1, Qt::DotLine);
+            line_pen.setCosmetic(true); // spessore costante a ogni zoom, come le maniglie
+            painter->setPen(line_pen);
+            painter->drawLine(s->my_line.p1(), target_pos);
+            bool on = s->ik_target->ik_role == StickData::IK_TARGET_ON;
+            float sz = handle_size * 1.1f; // estensione in unità di scena (scala come le maniglie)
+            QPen cross_pen(on ? QColor(220, 30, 30) : QColor(130, 130, 130), 2.5);
+            cross_pen.setCosmetic(true);
+            painter->setPen(cross_pen);
+            painter->drawLine(target_pos + QPointF(-sz, -sz), target_pos + QPointF(sz, sz));
+            painter->drawLine(target_pos + QPointF(sz, -sz), target_pos + QPointF(-sz, sz));
+        }
+    }
+    painter->restore();
+}
+
 void MyView::ClearIkPreviewItems()
 {
     if(ik_preview_line != nullptr){
@@ -1236,10 +1332,18 @@ StickData *MyView::FindIkStartCandidate(StickFigure *figure, const QPointF &scen
         if(s->ik_role != StickData::IK_NONE || s->children.isEmpty())
             continue;
         float dist = QLineF(scene_pos, s->my_line.p1()).length();
-        if(dist <= radius && (best == nullptr || dist < best_dist)){
-            best = s;
-            best_dist = dist;
-        }
+        if(dist > radius)
+            continue;
+        if(best == nullptr){ best = s; best_dist = dist; continue; }
+        // più vicino vince; a PARITÀ (P1 coincidenti — uno stepchild condivide l'origine
+        // del suo genitore, tipicamente il master) si preferisce lo stepchild, altrimenti
+        // il master vinceva sempre il tie sull'handle condiviso e una catena derivata da
+        // uno stepchild non era mai avviabile: il target risultava non selezionabile
+        const float EPS = 0.5f;
+        if(dist < best_dist - EPS)
+            { best = s; best_dist = dist; }
+        else if(dist <= best_dist + EPS && s->stepchild && !best->stepchild)
+            { best = s; best_dist = dist; }
     }
     return best;
 }
@@ -1262,36 +1366,61 @@ StickData *MyView::FindIkTargetHandle(StickFigure *figure, const QPointF &scene_
     return best;
 }
 
-StickData *MyView::FindIkTargetCandidate(StickFigure *figure, StickData *chain_start, const QPointF &scene_pos)
+StickData *MyView::ResolveIkStartForTarget(StickData *target, const QPointF &anchor_p1, StickData *provisional_start)
 {
-    if(figure == nullptr || chain_start == nullptr) return nullptr;
+    if(target == nullptr) return nullptr;
+    float radius = PolyPickRadius();
+    // cammina verso la radice; `child` è l'anello sotto `cur` sul percorso verso il target
+    StickData *child = target;
+    for(StickData *cur = target->parent; cur != nullptr; cur = cur->parent){
+        // il giunto dev'essere continuo: la P1 del figlio sta sulla P2 di cur (p0 è posto
+        // esattamente su p2 del genitore in StartDrawing, quindi confronto esatto a meno
+        // del drift float). Uno strappo qui = nessuno start valido più in alto.
+        if(QLineF(child->my_line.p1(), cur->my_line.p2()).length() > 0.5f)
+            break;
+        bool eligible = (cur->ik_role == StickData::IK_NONE) || (cur == provisional_start);
+        if(eligible && !cur->children.isEmpty()
+                && QLineF(cur->my_line.p1(), anchor_p1).length() <= radius)
+            return cur; // primo antenato ancorato al punto di start: la radice dell'arto cliccato
+        child = cur;
+    }
+    return nullptr;
+}
+
+StickData *MyView::FindIkTargetCandidate(StickFigure *figure, StickData *provisional_start, const QPointF &scene_pos)
+{
+    if(figure == nullptr || provisional_start == nullptr) return nullptr;
+    const QPointF anchor = provisional_start->my_line.p1();
     float radius = PolyPickRadius();
     StickData *best = nullptr;
     float best_dist = 0;
     for(StickData *s : figure->stick_list){
-        if(s == chain_start || s->ik_role != StickData::IK_NONE)
+        if(s == provisional_start || s->ik_role != StickData::IK_NONE)
             continue;
-        if(!IsStickDescendantOf(chain_start, s))
+        // dev'esserci uno start valido ancorato al primo click e raggiungibile da s con
+        // una spina continua: se piu' arti condividono l'ancora, e' il RAMO del target a
+        // scegliere lo start giusto, non il tie-break arbitrario del primo click (Group D
+        // follow-up: "non si riusciva a selezionare il target con un ramo tra start e fine")
+        if(ResolveIkStartForTarget(s, anchor, provisional_start) == nullptr)
             continue;
-        // percorso libero-da-origine ininterrotto: ogni anello (tranne lo start stesso)
-        // deve iniziare dove finisce il suo genitore, non dall'origine — è l'invariante
-        // geometrico ("segmenti che condividono un giunto") su cui si basa FABRIK
-        bool continuous = true;
-        for(StickData *cur = s; cur != nullptr && cur != chain_start; cur = cur->parent){
-            if(cur->stepchild){ continuous = false; break; }
-        }
-        if(!continuous)
-            continue;
-        // stesso test di prossimità a segmento usato da FigureAtPoint()
+        // eligibilità: vicino al SEGMENTO (così il click a metà stick funziona), come FigureAtPoint()
         QPointF a = s->my_line.p1(), b = s->my_line.p2();
         QPointF ab = b - a;
         float len2 = ab.x()*ab.x() + ab.y()*ab.y();
         float u = (len2 < 1e-9f) ? 0.0f
                 : qBound(0.0f, float(((scene_pos.x()-a.x())*ab.x() + (scene_pos.y()-a.y())*ab.y()) / len2), 1.0f);
-        float dist = QLineF(scene_pos, a + u*ab).length();
-        if(dist <= qMax(radius, float(s->pen.widthF()/2.0)) && (best == nullptr || dist < best_dist)){
+        float seg_dist = QLineF(scene_pos, a + u*ab).length();
+        if(seg_dist > qMax(radius, float(s->pen.widthF()/2.0)))
+            continue;
+        // ...ma la SCELTA fra più candidati usa la MANIGLIA DI ESTREMITÀ (P2 = l'effettore):
+        // in una catena stepchild gli anelli si toccano, e col solo test di segmento la scelta
+        // scattava sempre sull'ultimo (secondo-ultimo quasi impossibile). La P2 del secondo-
+        // ultimo è sul giunto, quella dell'ultimo sulla punta, quindi la distanza dalla P2
+        // discrimina quando due segmenti condividono il punto cliccato (adjustment 3).
+        float p2_dist = QLineF(scene_pos, s->my_line.p2()).length();
+        if(best == nullptr || p2_dist < best_dist){
             best = s;
-            best_dist = dist;
+            best_dist = p2_dist;
         }
     }
     return best;
@@ -1338,7 +1467,7 @@ void MyView::UpdateMultiSelectionUI(bool recenter_pivot)
         return;
     }
     if(recenter_pivot)
-        multi_pivot = MultiSelectionCenter(); // la selezione è cambiata: perno al baricentro
+        multi_pivot = SelectionPivotDefault(); // la selezione è cambiata: perno alle origini master (spec)
     for(StickFigure *S : my_animation->current_frame->stick_figures)
         S->Highlight(multi_selection.contains(S));
     // righe della lista layer allineate alla selezione (senza rientrare da segnali)
@@ -1349,9 +1478,108 @@ void MyView::UpdateMultiSelectionUI(bool recenter_pivot)
             S->linked_item->setSelected(true);
     }
     multi_widget_sync = false;
-    // maniglia di trasformazione: cerchio sottile, riempimento trasparente, bordo
-    // azzurro, disegnata SUL PERNO (che l'utente può spostare: è l'origine di ogni
-    // trasformazione, non un semplice indicatore)
+    UpdateSelectionDecorations(); // maniglia + bounding box (perno già impostato sopra)
+}
+
+/**
+ * @details The figures the handle/pivot/bbox act on. A multi-selection (2+) uses its own
+ * list; below that the single current figure stands in, so the same handle/space/ctrl
+ * machinery covers one selected figure too (spec). Empty frame or a stickless figure →
+ * no selection.
+ */
+QList<StickFigure*> MyView::SelectedFigures() const
+{
+    if(MultiSelectionActive())
+        return multi_selection;
+    QList<StickFigure*> out;
+    if(my_animation->current_frame != nullptr){
+        StickFigure *current = my_animation->CurrentFrame()->CurrentStickFigure();
+        if(current != nullptr && !current->stick_list.isEmpty())
+            out.append(current);
+    }
+    return out;
+}
+
+/**
+ * @details Only the pick/transform tools carry a visible selection handle and bounding
+ * box; the drawing and scene-wide tools hide them (there is nothing to pivot on).
+ */
+bool MyView::ToolUsesSelection() const
+{
+    switch(tool){
+        case NOTOOL: case CLAMP: case ROTATE: case SCALE:
+        case MANIPULATE: case ELONGATE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+/**
+ * @details The pivot the handle defaults to: the master stick's origin for a single
+ * figure, the mean of the masters' origins for several (spec) — not the endpoint
+ * centroid MultiSelectionCenter() computes.
+ */
+QPointF MyView::SelectionPivotDefault() const
+{
+    QPointF sum(0, 0);
+    int count = 0;
+    for(StickFigure *S : SelectedFigures()){
+        if(S->master_stick){
+            sum += S->master_stick->my_line.p1();
+            count++;
+        }
+    }
+    return count > 0 ? sum / count : QPointF(0, 0);
+}
+
+QPointF MyView::SelectionPivotCurrent() const
+{
+    if(!MultiSelectionActive()){
+        QList<StickFigure*> sel = SelectedFigures();
+        StickFigure *S = sel.isEmpty() ? nullptr : sel.first();
+        if(S != nullptr && S->master_stick != nullptr)
+            return S->master_stick->my_line.p1() + S->pivot_offset;
+    }
+    return multi_pivot;
+}
+
+/**
+ * @details Endpoint bounding box of the selection — the union of every selected stick's
+ * P1/P2. ponytail: endpoints only (ignores pen width / shape overflow), matching the
+ * endpoint model the rubber band and centroid already use; tighten if shapes visibly spill.
+ */
+QRectF MyView::SelectionBoundingBox() const
+{
+    QRectF box;
+    for(StickFigure *S : SelectedFigures())
+        for(StickData *s : S->stick_list)
+            box = box.united(QRectF(s->my_line.p1(), s->my_line.p2()).normalized());
+    return box;
+}
+
+/**
+ * @details Single place the handle (thin light-blue circle on the pivot) and the
+ * selection bounding box (thin light-blue no-fill rectangle) are (re)drawn. Removes both
+ * when nothing is selected or the active tool doesn't use a selection.
+ */
+void MyView::UpdateSelectionDecorations(bool recenter_pivot)
+{
+    if(!ToolUsesSelection() || !HasActiveSelection()){
+        RemoveSelectionDecorations();
+        return;
+    }
+    if(!MultiSelectionActive()){
+        // singola figura: il perno è persistente, ancorato al master col suo offset — segue
+        // il master quando lo si trascina e NON si resetta al cambio selezione/tool (bug 2);
+        // solo un Ctrl-trascina lo riposiziona (aggiornando pivot_offset)
+        QList<StickFigure*> sel = SelectedFigures();
+        StickFigure *S = sel.isEmpty() ? nullptr : sel.first();
+        if(S != nullptr && S->master_stick != nullptr)
+            multi_pivot = S->master_stick->my_line.p1() + S->pivot_offset;
+    }
+    else if(recenter_pivot)
+        multi_pivot = SelectionPivotDefault();
     float r = handle_size * 1.5f;
     if(multi_handle == nullptr){
         multi_handle = new QGraphicsEllipseItem();
@@ -1361,6 +1589,28 @@ void MyView::UpdateMultiSelectionUI(bool recenter_pivot)
         scene()->addItem(multi_handle);
     }
     multi_handle->setRect(multi_pivot.x() - r, multi_pivot.y() - r, 2*r, 2*r);
+    if(selection_bbox == nullptr){
+        selection_bbox = new QGraphicsRectItem();
+        selection_bbox->setPen(QPen(QColor(0x7f, 0xc4, 0xff), 0)); // cosmetic (zoom-invariant) thin edge
+        selection_bbox->setBrush(Qt::NoBrush);
+        selection_bbox->setZValue(198);
+        scene()->addItem(selection_bbox);
+    }
+    selection_bbox->setRect(SelectionBoundingBox());
+}
+
+void MyView::RemoveSelectionDecorations()
+{
+    if(multi_handle != nullptr){
+        scene()->removeItem(multi_handle);
+        delete multi_handle;
+        multi_handle = nullptr;
+    }
+    if(selection_bbox != nullptr){
+        scene()->removeItem(selection_bbox);
+        delete selection_bbox;
+        selection_bbox = nullptr;
+    }
 }
 
 void MyView::SetMultiSelectionList(const QList<StickFigure*> &figures)
@@ -1391,6 +1641,8 @@ void MyView::RemoveFromMultiSelection(StickFigure *figure)
 {
     multi_selection.removeAll(figure);
     UpdateMultiSelectionUI(true); // sotto i 2 selezionati la UI azzera tutto da sé
+    // scesi a una sola figura: mostra la maniglia/bounding box della selezione singola
+    UpdateSelectionDecorations(true);
 }
 
 void MyView::ClearMultiSelection()
@@ -1416,11 +1668,7 @@ void MyView::ClearMultiSelection()
         }
         multi_widget_sync = false;
     }
-    if(multi_handle != nullptr){
-        scene()->removeItem(multi_handle);
-        delete multi_handle;
-        multi_handle = nullptr;
-    }
+    RemoveSelectionDecorations(); // maniglia + bounding box
     if(selection_band != nullptr){
         scene()->removeItem(selection_band);
         delete selection_band;
@@ -1429,7 +1677,7 @@ void MyView::ClearMultiSelection()
     band_dragging = false;
     multi_dragging = false;
     pivot_dragging = false;
-    pivot_previewing = false;
+    space_dragging = false;
 }
 
 /**
@@ -1696,6 +1944,10 @@ void MyView::mouseReleaseEvent(QMouseEvent *event)
                 }
             }
         }
+        // il gesto può aver spostato/ruotato/scalato la selezione: riadatta bounding box
+        // (e maniglia, se il perno è al default) alla nuova posizione delle figure
+        UpdateSelectionDecorations();
+        UpdateIkOverlay(); // un edit può aver mosso lo start o il target di una catena
     }else if(event->button()==Qt::RightButton){
         is_right_pressed = false;
         setTransformationAnchor(QGraphicsView::AnchorViewCenter);
@@ -1748,27 +2000,40 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                     // fino al rilascio) e le evidenziazioni del passaggio precedente cadono
                     for(StickFigure *S : my_animation->current_frame->stick_figures)
                         S->Highlight(S == my_animation->CurrentFrame()->CurrentStickFigure());
-                    if(multi_handle != nullptr){
-                        scene()->removeItem(multi_handle);
-                        delete multi_handle;
-                        multi_handle = nullptr;
-                    }
+                    RemoveSelectionDecorations();
                 }
+                break;
+            }
+            if(space_dragging && HasActiveSelection())
+            {
+                // Spazio tenuto premuto: la selezione segue il cursore, trascinata dai
+                // suoi stick master (spec) — incrementale come MOVESCENE, senza click
+                QPointF delta = coord - starting_coord;
+                starting_coord = coord;
+                for(StickFigure *S : SelectedFigures()){
+                    if(S->master_stick && !S->stick_list.isEmpty())
+                        S->Traslate(delta.x(), delta.y());
+                }
+                multi_pivot += delta;
+                UpdateSelectionDecorations();
                 break;
             }
             if(is_pressed && pivot_dragging)
             {
-                // trascinamento della maniglia: sposta solo il perno delle trasformazioni
+                // trascinamento della maniglia (o Ctrl+trascina su tela vuota): sposta
+                // solo il perno delle trasformazioni, non la selezione
                 multi_pivot = coord;
-                UpdateMultiSelectionUI();
-                break;
-            }
-            if(pivot_previewing && multi_handle != nullptr)
-            {
-                // Spazio premuto: la maniglia segue il cursore in anteprima (il perno
-                // vero si sposta al rilascio del tasto)
-                float r = handle_size * 1.5f;
-                multi_handle->setRect(coord.x() - r, coord.y() - r, 2*r, 2*r);
+                // singola figura: memorizza lo spostamento come offset persistente dal master
+                // (l'unico punto che aggiorna pivot_offset — bug 2). Va fatto PRIMA di
+                // UpdateSelectionDecorations, che per la singola figura ricalcola multi_pivot
+                // proprio da master.p1 + pivot_offset.
+                if(!MultiSelectionActive()){
+                    QList<StickFigure*> sel = SelectedFigures();
+                    StickFigure *S = sel.isEmpty() ? nullptr : sel.first();
+                    if(S != nullptr && S->master_stick != nullptr)
+                        S->pivot_offset = coord - S->master_stick->my_line.p1();
+                }
+                UpdateSelectionDecorations();
                 break;
             }
             if(is_pressed && multi_dragging)
@@ -1819,7 +2084,11 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
 
                         StickData *picked = my_animation->CurrentFrame()->CurrentStick();
                         StickData *ik_chain_start = IkChainStart(picked);
-                        if(ik_chain_start != nullptr && ik_chain_start->ik_target != nullptr
+                        bool picked_is_master = (picked == my_animation->CurrentFrame()->CurrentStickFigure()->master_stick);
+                        // il master muove/ruota SEMPRE l'intera figura, anche se fa parte di
+                        // una catena IK (spec): il blocco della rotazione normale vale solo
+                        // per gli altri membri della catena, non per il master
+                        if(!picked_is_master && ik_chain_start != nullptr && ik_chain_start->ik_target != nullptr
                                 && ik_chain_start->ik_target->ik_role == StickData::IK_TARGET_ON){
                             // lo stick pescato appartiene a una catena IK ATTIVA: la
                             // rotazione normale è bloccata per tutti i suoi membri (spec:
@@ -1827,8 +2096,10 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                             // stickfigure ruoti"); solo il TARGET risponde al drag, e lo
                             // fa tramite FABRIK invece della rotazione standard (spec:
                             // "simile al tool MANIPULATE, ma la catena risponde al movimento")
-                            if(picked == ik_chain_start->ik_target)
+                            if(picked == ik_chain_start->ik_target){
                                 SolveIkChain(ik_chain_start, coord);
+                                UpdateIkOverlay(); // il marcatore (croce + linea) segue il target trascinato
+                            }
                             break;
                         }
 
@@ -1839,8 +2110,11 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                         else{
                             QList<StickGraphicsItem*> to_rotate;
                             if(my_animation->CurrentFrame()->CurrentStick() == my_animation->CurrentFrame()->CurrentStickFigure()->master_stick){
+                                // ruotando dal master ruota TUTTA la figura, stepchild inclusi:
+                                // il vecchio filtro !s->stepchild lasciava indietro gli arti
+                                // agganciati all'origine del master (bug: la figura si spezzava)
                                 for(StickData*s:my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
-                                    if(!s->stepchild && s->view){
+                                    if(s->view){
                                         to_rotate.append(s->view);
                                     }
                                 }
@@ -1936,9 +2210,10 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         }
         case ROTATE:
         {
-            if(is_pressed && MultiSelectionActive()){
-                // come ROTATESCENE, ma sul solo insieme selezionato e con la maniglia
-                // (baricentro della selezione) come perno
+            // singola figura e multi-selezione ruotano attorno alla MANIGLIA (multi_center_buffer),
+            // non attorno all'origine del master (bug 3). Ruota OGNI stick, stepchild inclusi
+            // (bug 1), poi trasla la figura così che il master orbiti il perno fisso.
+            if(is_pressed && HasActiveSelection()){
                 QPointF center = multi_center_buffer;
                 QLineF mouse_to_center_now(coord, center);
                 QLineF mouse_to_center_start(starting_coord, center);
@@ -1946,7 +2221,8 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                 if(angle > 180) angle -= 360;
                 else if(angle < -180) angle += 360;
                 starting_coord = coord;
-                for(StickFigure *S : multi_selection){
+                bool single = !MultiSelectionActive();
+                for(StickFigure *S : SelectedFigures()){
                     if(S->stick_list.count() > 0 && S->master_stick){
                         QLineF connect_center(center, S->master_stick->my_line.p1());
                         connect_center.setAngle(connect_center.angle() + angle);
@@ -1959,32 +2235,30 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                         QLineF delta(S->origin_pos_buffer, connect_center.p2());
                         S->Traslate(delta.dx(), delta.dy());
                         S->origin_pos_buffer = S->master_stick->my_line.p1();
+                        // il master ha orbitato: mantieni la maniglia sul perno fisso
+                        if(single)
+                            S->pivot_offset = center - S->master_stick->my_line.p1();
                     }
                 }
-                break;
-            }
-            if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr)
-            {
-                if(is_pressed){
-                    QList<StickGraphicsItem*> views;
-                    for(StickData* s: my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
-                        if(s->view) views.append(s->view);
-                    }
-                    my_animation->CurrentFrame()->CurrentStickFigure()->RotateStickFigure(&coord,views,true);
-                }
+                if(single)
+                    UpdateSelectionDecorations(false); // la maniglia resta sul perno
+                else
+                    UpdateMultiSelectionUI();
             }
             break;
         }
         case(SCALE):
         {
-            if(is_pressed && MultiSelectionActive()){
-                // come SCALESCENE, con la maniglia come centro di scala
+            // singola figura e multi-selezione scalano attorno alla MANIGLIA (bug 3),
+            // scalando OGNI stick, stepchild inclusi (bug 1)
+            if(is_pressed && HasActiveSelection()){
                 QPointF center = multi_center_buffer;
                 float start_dist = QLineF(starting_coord, center).length();
                 if(start_dist < 1)
                     break; // click esattamente sul centro: divisione per (quasi) zero
                 float scale_amount = QLineF(coord, center).length() / start_dist;
-                for(StickFigure *S : multi_selection){
+                bool single = !MultiSelectionActive();
+                for(StickFigure *S : SelectedFigures()){
                     if(S->stick_list.count() > 0 && S->master_stick){
                         QLineF actual_dist_from_center(S->master_stick->my_line.p1(), center);
                         QLineF original_dist_from_center(S->origin_pos_buffer, center);
@@ -1994,12 +2268,15 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                         for(StickData *s : S->stick_list){
                             if(s->view) s->view->Scale(scale_amount);
                         }
+                        // il master si è spostato scalando: tieni la maniglia sul perno fisso
+                        if(single)
+                            S->pivot_offset = center - S->master_stick->my_line.p1();
                     }
                 }
-                break;
-            }
-            if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr && is_pressed){
-               my_animation->CurrentFrame()->CurrentStickFigure()->Scale(&coord);
+                if(single)
+                    UpdateSelectionDecorations(false);
+                else
+                    UpdateMultiSelectionUI();
             }
             break;
         }
@@ -2127,6 +2404,8 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         zoom_lvl = zoom_lvl_buf;
     }
     prev_coord = coord;
+    if(is_pressed) // solo durante un trascinamento: un edit può muovere start/target IK
+        UpdateIkOverlay();
     QGraphicsView::mouseMoveEvent(event);
 }
 //funzione usata per riscalare interamente il frame quando si riscala l'animazione intera
@@ -2294,8 +2573,10 @@ void MyView::MoveToFrame(Frame* frame){
         if(!my_animation->frame_list.isEmpty()){
             my_animation->current_frame->UpdateIcon();
         }
+        UpdateSelectionDecorations(true); // maniglia + bounding box della figura corrente
     }
     my_animation->CurrentFrame()->Refresh(0);
+    UpdateIkOverlay(); // il nuovo frame può avere le sue catene IK da marcare
 }
 // routine per calcolare gli onion skins, prima cancellali, ridisegnali su un immagine, e aggiungi l'immagine alla scena
 /**

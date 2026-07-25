@@ -6,11 +6,52 @@
 #include <QFile>
 #include <QSet>
 #include <QVector2D>
+#include <algorithm>
 // StickFigure work in the one active scene
 extern QGraphicsRectItem* my_rect;
 // stato di inizio gesto rotate/scale (vedi StickFigure.h): prima erano globali liberi in myview.cpp
 bool StickFigure::start_stick_figure_rotation = false;
 bool StickFigure::start_stick_figure_scale = false;
+
+// Group D bug 2: un cambio di master inverte la spina di alcuni stick (scambio p1<->p2).
+// I vertici di POLYGON/MULTILINE sono memorizzati normalizzati rispetto al frame della
+// spina (StickData::PolygonTransform), quindi lo scambio li ribalterebbe/deformerebbe.
+// Questi due helper catturano le posizioni di scena dei vertici PRIMA dello scambio e le
+// ri-normalizzano DOPO, così la forma resta ferma. Gli stick non-vertice restituiscono
+// una lista vuota e ReanchorVertexScenePositions() non fa nulla, lasciando intatta la
+// logica esistente sui tipi immagine.
+static QList<QPointF> CaptureVertexScenePositions(StickData *s)
+{
+    QList<QPointF> pts;
+    if(s->stick_type != StickData::POLYGON && s->stick_type != StickData::MULTILINE)
+        return pts;
+    QTransform t = s->PolygonTransform();
+    for(const QPointF &p : s->polygon_points)
+        pts.append(t.map(p));
+    return pts;
+}
+static void ReanchorVertexScenePositions(StickData *s, QList<QPointF> scene_pts)
+{
+    if(scene_pts.isEmpty())
+        return;
+    if(s->stick_type == StickData::MULTILINE){
+        // p1/p2 sono capo/coda della spezzata: scambiandoli va invertito anche l'ordine
+        // dei vertici interni (e dei loro width/curvature) per ritracciare la stessa forma
+        std::reverse(scene_pts.begin(), scene_pts.end());
+        std::reverse(s->vertex_widths.begin(), s->vertex_widths.end());
+        std::reverse(s->vertex_curvatures.begin(), s->vertex_curvatures.end());
+    }
+    // img_angle deve tornare a tracciare la direzione della (nuova) spina, come dopo un
+    // disegno/Manipulate (stessa formula). Se lo lasciassimo sfasato di 180° dallo scambio
+    // p1<->p2, il rendering statico resterebbe corretto (i vertici sono ribaccati qui sotto
+    // rispetto a QUESTO img_angle) ma StickGraphicsItem::Rotate() riscrive img_angle dalla
+    // direzione al primo trascinamento: i polygon_points, normalizzati rispetto all'angolo
+    // sfasato, salterebbero di colpo (Group D follow-up). Ricalcolo PRIMA di ribaccare.
+    s->img_angle = -atan2(s->my_line.dx(), s->my_line.dy())*180/M_PI;
+    QTransform inv = s->PolygonTransform().inverted();
+    for(int i = 0; i < s->polygon_points.length() && i < scene_pts.length(); i++)
+        s->polygon_points[i] = inv.map(scene_pts[i]);
+}
 /**
  * @details Unconditional since Phase 4's undoFlag removal: every StickFigure that
  * exists is guaranteed live (scratch/buffer figures are StickFigureData since Phase
@@ -591,6 +632,48 @@ QList<StickData*> StickFigure::Weld(StickData* master){
             recursive = recursive->parent;
         }
     }//delete and remove from scenevivi la vitas
+
+    // --- IK: regole di merge (spec). I figli in toWeld spariscono dentro `master`, che
+    // eredita un ruolo dal combinato {master} ∪ toWeld con priorità target > inizio >
+    // catena. Va fatto PRIMA della cancellazione, così nessun puntatore ik_start/ik_target
+    // resta appeso a uno stick liberato; SanitizeFigureIkChains() poi scioglie la catena
+    // se il merge l'ha resa degenere (es. inizio saldato sul proprio target). ---
+    {
+        StickData *incoming_target = nullptr, *incoming_start = nullptr;
+        bool incoming_node = false;
+        for(StickData *c : toWeld){
+            if(c->ik_role == StickData::IK_TARGET_ON || c->ik_role == StickData::IK_TARGET_OFF)
+                incoming_target = c;
+            else if(c->ik_role == StickData::IK_START)
+                incoming_start = c;
+            else if(c->ik_role == StickData::IK_NODE)
+                incoming_node = true;
+        }
+        bool master_is_target = (master->ik_role == StickData::IK_TARGET_ON || master->ik_role == StickData::IK_TARGET_OFF);
+        if(master_is_target || incoming_target){
+            // risultato: target. Prende polarità e start dalla parte che era target.
+            StickData *src = master_is_target ? master : incoming_target;
+            qint32 polarity = src->ik_role;
+            StickData *chain_start = src->ik_start;
+            master->ik_role = polarity;
+            master->ik_start = chain_start;
+            master->ik_target = nullptr;
+            if(chain_start) chain_start->ik_target = master;
+        }
+        else if(master->ik_role == StickData::IK_START || incoming_start){
+            // risultato: inizio/beginning. Prende il target dalla parte che era inizio.
+            StickData *src = (master->ik_role == StickData::IK_START) ? master : incoming_start;
+            StickData *chain_target = src->ik_target;
+            master->ik_role = StickData::IK_START;
+            master->ik_target = chain_target;
+            master->ik_start = nullptr;
+            if(chain_target) chain_target->ik_start = master;
+        }
+        else if(master->ik_role == StickData::IK_NODE || incoming_node){
+            master->ik_role = StickData::IK_NODE;
+        }
+    }
+
     for(StickData*s: toWeld)
     {
         stick_list.removeAll(s);
@@ -600,6 +683,7 @@ QList<StickData*> StickFigure::Weld(StickData* master){
         }
         delete s;
     }
+    SanitizeFigureIkChains(this); // scioglie una catena resa degenere dal merge
     Refresh(0);
     return toWeld;
 }
@@ -641,6 +725,35 @@ StickData*  StickFigure::Chop(StickData* origin){
     }
     FramePresenter::AttachView(toAdd,scene);
     stick_list.append(toAdd);
+
+    // --- IK: regole di split (spec). toAdd ha già ereditato ik_role da CloneStick
+    // (CopyFrom copia ik_role ma azzera ik_start/ik_target). toAdd è il figlio (contiene
+    // l'estremità libera P2), origin il genitore (contiene l'origine/ancora P1). ---
+    switch(origin->ik_role){
+    case StickData::IK_NODE:
+        // entrambe restano IK_NODE (toAdd già IK_NODE per CopyFrom); i nodi non hanno
+        // puntatori, la catena resta connessa perché toAdd si inserisce fra origin e i
+        // suoi vecchi figli (target incluso, che resta un discendente dello start)
+        break;
+    case StickData::IK_TARGET_ON:
+    case StickData::IK_TARGET_OFF:
+        // il figlio eredita il ruolo di target (l'effettore P2 è passato a lui), il
+        // genitore diventa un nodo intermedio
+        toAdd->ik_start = origin->ik_start;
+        if(origin->ik_start) origin->ik_start->ik_target = toAdd;
+        origin->ik_role = StickData::IK_NODE;
+        origin->ik_start = nullptr;
+        break;
+    case StickData::IK_START:
+        // opposto: il genitore resta l'inizio/ancora (P1 invariata, conserva ik_target),
+        // il figlio diventa un nodo
+        toAdd->ik_role = StickData::IK_NODE;
+        toAdd->ik_target = nullptr;
+        break;
+    default:
+        break;
+    }
+    SanitizeFigureIkChains(this); // rete di sicurezza sulle catene residue
 
     Refresh(0);
     return toAdd;
@@ -795,6 +908,23 @@ void MergeStickFigures(StickFigure* main_stick_figure, StickData* main_stick,Sti
          matchIndexes[to_join->stick_list.indexOf(to_join->master_stick)]->children.removeAll(child);
     }
 
+    // --- IK: le catene di to_join sono ereditate dalla figura risultante (spec). I cloni
+    // hanno già ik_role via Clone() ma ik_start/ik_target azzerati: rimappali sui cloni,
+    // stessa tecnica per-indice usata sopra per parent/children (matchIndexes[i] è il
+    // clone di to_join->stick_list[i]). Le catene di main_stick_figure non sono toccate. ---
+    for(int mi = 0; mi < to_join->stick_list.count(); mi++){
+        StickData *src = to_join->stick_list[mi];
+        StickData *dst = matchIndexes[mi];
+        if(src->ik_target){
+            int ti = to_join->stick_list.indexOf(src->ik_target);
+            if(ti >= 0) dst->ik_target = matchIndexes[ti];
+        }
+        if(src->ik_start){
+            int si = to_join->stick_list.indexOf(src->ik_start);
+            if(si >= 0) dst->ik_start = matchIndexes[si];
+        }
+    }
+    SanitizeFigureIkChains(main_stick_figure);
 }
 // i genitori dello stick sono stepchild e invertono direzione fino al vecchio
 // master stick che mantiene la stessa direzione
@@ -880,6 +1010,7 @@ void StickFigure::SetStepChildAsMaster(StickData* to_master){
     // nella catena da invertire scambia p1 con p2 e ricostruisci la lista dei figli
     for(StickData* s:catenaGenitori){
         if(s!=oldMaster){ // il vecchio master mantiene la stessa direzione di prima
+            QList<QPointF> vertex_scene = CaptureVertexScenePositions(s); // vedi helper (Group D bug 2)
             p2Buf = s->my_line.p2();
             s->my_line.setP2(s->my_line.p1());
             s->my_line.setP1(p2Buf);
@@ -892,6 +1023,7 @@ void StickFigure::SetStepChildAsMaster(StickData* to_master){
 
                 s->img_angle = s->img_angle-180;
             }
+            ReanchorVertexScenePositions(s, vertex_scene); // no-op sui tipi non-vertice
         }
         StickData* recursive = s->parent; // segna lo stick corrente come figlio di tutti i suoi genitori
         int n = 0;
@@ -1002,6 +1134,7 @@ void StickFigure::SetDirectChainAsMaster(StickData* to_master){
             iterator = iterator->parent;
     }
     for(StickData*s: catenaGenitori) {
+        QList<QPointF> vertex_scene = CaptureVertexScenePositions(s); // vedi helper (Group D bug 2)
         p2Buf = s->my_line.p2();
         s->my_line.setP2(s->my_line.p1());
         s->my_line.setP1(p2Buf);
@@ -1014,6 +1147,7 @@ void StickFigure::SetDirectChainAsMaster(StickData* to_master){
             }
 
         }
+        ReanchorVertexScenePositions(s, vertex_scene); // no-op sui tipi non-vertice
         // pulisci i figli dello stick, la catena va ricostruita
         s->children.clear(); // attenzione il master così si perde anch gli stepchild che non vengono ricostruiti al for successivo
     }
@@ -1103,6 +1237,7 @@ void StickFigure::InvertMaster(StickData* to_master){
     QPointF p2Buf;
 
     // inverti p1 con p2 per cambiare la direzione
+    QList<QPointF> vertex_scene = CaptureVertexScenePositions(to_master); // vedi helper (Group D bug 2)
     p2Buf = to_master->my_line.p2();
     to_master->my_line.setP2(to_master->my_line.p1());
     to_master->my_line.setP1(p2Buf);
@@ -1115,6 +1250,7 @@ void StickFigure::InvertMaster(StickData* to_master){
          }
 
     }
+    ReanchorVertexScenePositions(to_master, vertex_scene); // no-op sui tipi non-vertice
     // qui si capisce quale inversione occorre compiere,
     // si parte con l'estremo di origine senza stepchild
     // o si parte con un estremo di origine da cui partono stepchild?
@@ -1173,6 +1309,7 @@ void StickFigure::StepDownMaster(StickData* to_master){
     }
     oldMaster->parent = to_master;
     // inverti la direzione del nuovo master
+    QList<QPointF> vertex_scene = CaptureVertexScenePositions(to_master); // vedi helper (Group D bug 2)
     QPointF p2Buf = to_master->my_line.p2();
     to_master->my_line.setP2(to_master->my_line.p1());
     to_master->my_line.setP1(p2Buf);
@@ -1182,6 +1319,7 @@ void StickFigure::StepDownMaster(StickData* to_master){
             to_master->img_h_scale = to_master->img_w_scale;
             to_master->img_w_scale= buf;
         }
+    ReanchorVertexScenePositions(to_master, vertex_scene); // no-op sui tipi non-vertice
     // il nuovo master ha come children tutti gli stick tranne se stesso
     to_master->children.clear();
     for(StickData* s: stick_list)
@@ -1285,6 +1423,27 @@ void SplitStickFigures(StickFigure* split, StickData* origin,StickFigure* branch
         view->Refresh(0);
     }
 
+    // --- IK: rimappa ik_start/ik_target sui cloni del branch, PRIMA che DeleteStick()
+    // sotto ripulisca i puntatori sugli originali. matchingIndex[k] è l'originale,
+    // branch->stick_list[k] il suo clone. Un endpoint fuori dal branch (catena che
+    // attraversa il punto di split) resta non rimappato → SanitizeFigureIkChains() sotto
+    // scioglierà quella catena in entrambe le figure: sul lato split ci pensa già
+    // DeleteStick(origin) (cammina fino allo start ovunque sia), sul lato branch il
+    // sanitize elimina i ruoli orfani. Le catene interamente nel sottoalbero spostato
+    // vengono invece ereditate dal branch. (spec) ---
+    for(int k = 0; k < matchingIndex.count(); k++){
+        StickData *src = matchingIndex[k];
+        StickData *dst = branch->stick_list[k];
+        if(src->ik_target){
+            int ti = matchingIndex.indexOf(src->ik_target);
+            if(ti >= 0) dst->ik_target = branch->stick_list[ti];
+        }
+        if(src->ik_start){
+            int si = matchingIndex.indexOf(src->ik_start);
+            if(si >= 0) dst->ik_start = branch->stick_list[si];
+        }
+    }
+
     StickData* origin_parent = origin->parent;
     split->DeleteStick( split->stick_list.indexOf(origin));
     // un merge precedente puo' aver lasciato un linker invisibile (StickData::is_linker) come
@@ -1297,6 +1456,10 @@ void SplitStickFigures(StickFigure* split, StickData* origin,StickFigure* branch
         split->DeleteStick(split->stick_list.indexOf(origin_parent));
         origin_parent = next;
     }
+    // sciogli nel branch ogni ruolo IK orfano (catene che attraversavano lo split); il
+    // lato split è già stato ripulito da DeleteStick(origin)
+    SanitizeFigureIkChains(branch);
+    SanitizeFigureIkChains(split);
 }
 float StickFigure::MinZ(){
     if(stick_list.isEmpty()){
@@ -1430,6 +1593,44 @@ void ToggleIkChain(StickData *target)
     if(target->view) target->view->Refresh(0);
 }
 
+void SanitizeFigureIkChains(StickFigure *figure)
+{
+    if(figure == nullptr)
+        return;
+    // 1) raccogli i membri di ogni catena STRUTTURALMENTE valida
+    QSet<StickData*> valid_members;
+    for(StickData *start : figure->stick_list){
+        if(start->ik_role != StickData::IK_START)
+            continue;
+        StickData *target = start->ik_target;
+        bool ok = target != nullptr
+                && (target->ik_role == StickData::IK_TARGET_ON || target->ik_role == StickData::IK_TARGET_OFF)
+                && target->ik_start == start
+                && target != start
+                && IsStickDescendantOf(start, target); // start è un antenato proprio di target
+        if(!ok)
+            continue;
+        // percorso target->start via parent: raccoglie i membri (start incluso)
+        QList<StickData*> members;
+        StickData *cur = target;
+        while(cur != nullptr && cur != start){ members.append(cur); cur = cur->parent; }
+        if(cur != start)
+            continue; // percorso spezzato: catena non valida, non marcare nulla
+        members.append(start);
+        for(StickData *m : members)
+            valid_members.insert(m);
+    }
+    // 2) ogni stick con un ruolo IK ma NON membro di una catena valida torna IK_NONE
+    for(StickData *s : figure->stick_list){
+        if(s->ik_role != StickData::IK_NONE && !valid_members.contains(s)){
+            s->ik_role = StickData::IK_NONE;
+            s->ik_start = nullptr;
+            s->ik_target = nullptr;
+            if(s->view) s->view->Refresh(0);
+        }
+    }
+}
+
 void SolveIkChain(StickData *chain_start, const QPointF &desired_target_pos)
 {
     if(chain_start == nullptr || chain_start->ik_target == nullptr)
@@ -1522,9 +1723,11 @@ void SolveIkChain(StickData *chain_start, const QPointF &desired_target_pos)
     // applica la nuova geometria a tutta la catena PRIMA di toccare qualunque view: il
     // marcatore IK di chain_start legge ik_target->my_line, quindi deve vedere la
     // posizione finale del target, non quella di un giunto intermedio non ancora risolto
-    QVector<QPointF> old_p2(n);
-    for(int i = 0; i < n; i++)
+    QVector<QPointF> old_p2(n), old_p1(n);
+    for(int i = 0; i < n; i++){
         old_p2[i] = chain[i]->my_line.p2();
+        old_p1[i] = chain[i]->my_line.p1();
+    }
     for(int i = 0; i < n; i++){
         chain[i]->my_line = QLineF(joints[i], joints[i+1]);
         // "sostituisci il valore di rotazione senza applicarlo" (spec): aggiorna
@@ -1541,14 +1744,29 @@ void SolveIkChain(StickData *chain_start, const QPointF &desired_target_pos)
 
     // rami fuori catena: ogni figlio DIRETTO di un anello che non prosegue la catena
     // (ed il suo intero sottoalbero, già appiattito in children) segue rigidamente lo
-    // stesso spostamento del suo genitore — mirror di StickGraphicsItem::Manipulate()
+    // spostamento del giunto a cui è ancorato — mirror di StickGraphicsItem::Manipulate().
+    // Un figlio normale è attaccato all'estremità libera (P2) del genitore, uno stepchild
+    // alla sua origine (P1): usare sempre il delta di P2 spostava gli stepchild di un anello
+    // (in particolare gli stepchild del master/start, la cui P1 è FISSA) offsettandoli dal
+    // genitore quando si trascinava il target — bug della master-come-IK_BEGINNING
     for(int i = 0; i < n; i++){
-        QPointF delta = chain[i]->my_line.p2() - old_p2[i];
-        if(delta.isNull())
-            continue;
+        QPointF p2_delta = chain[i]->my_line.p2() - old_p2[i];
+        QPointF p1_delta = chain[i]->my_line.p1() - old_p1[i];
         StickData *next_in_chain = (i + 1 < n) ? chain[i+1] : nullptr;
         for(StickData *child : chain[i]->children){
             if(child->parent != chain[i] || child == next_in_chain)
+                continue;
+            // segui l'attaccatura REALE, non il flag stepchild: EndDrawing() eredita
+            // stepchild=true a tutto il sottoalbero di uno stepchild, quindi la
+            // prosecuzione della catena DOPO il target (attaccata alla sua estremità
+            // libera P2) risultava stepchild=true e veniva mossa col delta di P1 (origine)
+            // -> seguiva lo stick PRECEDENTE con un offset, solo sulle catene stepchild
+            // (Group D follow-up). Confronto la P1 del figlio con le vecchie P2/P1 del
+            // genitore per capire a quale estremo è davvero ancorato.
+            QPointF delta = (QLineF(child->my_line.p1(), old_p2[i]).length()
+                             <= QLineF(child->my_line.p1(), old_p1[i]).length())
+                            ? p2_delta : p1_delta;
+            if(delta.isNull())
                 continue;
             child->my_line.translate(delta.x(), delta.y());
             if(child->view) child->view->Refresh(1);

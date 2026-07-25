@@ -312,23 +312,10 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         painter->drawLine(data->my_line.x1(),data->my_line.y1(),data->my_line.x2(),data->my_line.y2());
     }
 
-    // marcatore della catena IK (linea tratteggiata dallo start handle al target, croce
-    // sul target): SOLO sulla tela interattiva. A differenza dei quadratini dei vertici
-    // (che si escludono da soli perché 'selected'/'selected_vertices' non sopravvivono
-    // a Clone()), ik_role/ik_target SONO campi persistenti che sopravvivono alla
-    // clonazione — serve quindi il guard esplicito offscreen_render, altrimenti il
-    // marcatore comparirebbe anche nelle iconee e nei frame esportati
-    if(data->ik_role == StickData::IK_START && data->ik_target != nullptr
-            && !onion_render && !offscreen_render){
-        QPointF target_pos = data->ik_target->my_line.p2();
-        painter->setPen(QPen(Qt::black, 1, Qt::DotLine));
-        painter->drawLine(data->my_line.p1(), target_pos);
-        painter->setPen(QPen(Qt::black, 1));
-        float s = handle_size * 0.5f;
-        painter->drawLine(target_pos + QPointF(-s,-s), target_pos + QPointF(s,s));
-        painter->drawLine(target_pos + QPointF(s,-s), target_pos + QPointF(-s,s));
-        painter->setPen(data->pen);
-    }
+    // il marcatore della catena IK (linea tratteggiata + croce sul target) non è più
+    // dipinto qui: era vincolato allo z di questo item (~0) e finiva sotto le maniglie
+    // (z 100/101). Ora lo disegna MyView::drawForeground(), sopra tutto e solo nella view
+    // interattiva (mai negli export) — vedi myview.cpp
 
     stick_handle[0]->setRect(data->my_line.p1().x()-handle_size/2,data->my_line.p1().y()-handle_size/2,handle_size,handle_size);
     stick_handle[1]->setRect(data->my_line.p2().x()-handle_size/2,data->my_line.p2().y()-handle_size/2,handle_size,handle_size);
@@ -461,14 +448,8 @@ QRectF StickGraphicsItem::UpdateBr(int mode)
     qreal fP2x;
     qreal fP2y;
     QRectF newBr = ConstructBr();
-    // il marcatore della catena IK (vedi paint()) può disegnare ben oltre l'ingombro
-    // naturale dello stick, fin sopra il target: senza includerlo qui il painter lo
-    // taglierebbe/lascerebbe trail, dato che Qt invalida solo boundingRect()
-    if(data->ik_role == StickData::IK_START && data->ik_target != nullptr){
-        QPointF target_pos = data->ik_target->my_line.p2();
-        float m = handle_size * 0.5f + 2;
-        newBr = newBr.united(QRectF(target_pos.x()-m, target_pos.y()-m, 2*m, 2*m));
-    }
+    // (il marcatore IK non si dipinge più in questo item, quindi il suo ingombro non va
+    // più unito qui — vedi MyView::drawForeground())
 
     // 1 Assicurati che a seconda della direzione della linea, il rettangolo abbia come P1 il punto più in alto a sx
     //      e come P2 il punto più in basso a destra
@@ -944,6 +925,14 @@ void StickGraphicsItem::Scale(float scale_factor){
     Refresh(1);
     float previous_factor = data->pen.widthF()/width_buffer;
     data->pen.setWidthF(width_buffer*scale_factor);
+    // La MULTILINE non disegna con data->pen ma con lo spessore per-vertice vertex_widths:
+    // senza scalarlo la spezzata cresce di forma ma resta spessa uguale (Group D bug 3).
+    // Stessa normalizzazione incrementale di img_w_scale (il drag richiama Scale più volte).
+    // Il POLYGON invece traccia il contorno con data->pen, già scalata sopra.
+    if(data->stick_type == StickData::MULTILINE){
+        for(float &w : data->vertex_widths)
+            w = (w/previous_factor)*scale_factor;
+    }
     if(data->stick_type == StickData::RECT){
         data->img_w_scale = (data->img_w_scale/previous_factor)*scale_factor;
     }
