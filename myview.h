@@ -159,13 +159,22 @@ public:
     QColor draw_brush_color = Qt::black;     ///< brush tint
     QImage draw_brush_stamp;                ///< grayscale-alpha stamp mask (built-in soft round in Phase 1)
 
+    bool stickfig_lasso = false;            ///< figure-selection rubber band: false=rect, true=lasso (menu checkbox)
+
     // ---- Pixel selection & free-transform (draw-mode only) ---------------------------
     // Two selection sub-tools (rectangle, lasso) mark a set of canvas pixels; the selection
     // is then wrapped in a move/scale/rotate gizmo. Entirely separate from stick/frame
     // selection and alive only while draw_mode is: any exit, a switch to brush/eraser, or
     // Ctrl+D discards it. Shift adds to / Alt subtracts from the current selection.
-    enum DrawTool { DT_BRUSH = 0, DT_ERASER, DT_SEL_RECT, DT_SEL_LASSO };
-    int draw_tool = DT_BRUSH;               ///< active draw-mode sub-tool
+    /// @brief Draw-mode sub-tools, selected by SetDrawTool() (draw-mode panel buttons,
+    /// widget.cpp). DT_SEL_* drive the pixel-selection gizmo; DT_BRUSH/DT_ERASER paint.
+    enum DrawTool {
+        DT_BRUSH = 0,   ///< paint dabs with the current brush (StampBrush)
+        DT_ERASER,      ///< erase (brush composited DestinationOut)
+        DT_SEL_RECT,    ///< rectangle pixel-selection marquee (DrawSelPress/Move/Release)
+        DT_SEL_LASSO    ///< freehand (lasso) pixel-selection marquee
+    };
+    int draw_tool = DT_BRUSH;               ///< active draw-mode sub-tool (a DrawTool value)
     QRegion draw_selection;                 ///< selected pixels in canvas space (empty = no selection)
     QRect   draw_sel_bounds;                ///< bbox of draw_selection at (re)definition, canvas px
     // gizmo: transform about draw_sel_bounds.center(), applied to the selected pixels
@@ -424,6 +433,18 @@ public:
      */
     bool MultiSelectionActive() const { return multi_selection.count() > 1; }
 
+    /**
+     * @brief Re-anchors the selection bounding box, pivot and transform handles onto the
+     *        CURRENT figure after the active layer is switched from the list widget. Without
+     *        this the scene-item decorations and the drawForeground overlay stay on the
+     *        previously selected figure (only partially cleared). No-op during a multi-
+     *        selection (its UI is driven separately) or a programmatic list-sync echo.
+     */
+    void RefreshSelectionForCurrentLayer(){
+        if(multi_widget_sync || MultiSelectionActive()) return;
+        UpdateSelectionDecorations(true);
+    }
+
     QList<StickFigure*> multi_selection; ///< the selected figures (UI state; cleared on frame change/undo restore)
     QList<StickFigureData*> multi_copy_buffer; ///< copy buffer for a multi-selection (pure data)
     bool multi_widget_sync = false; ///< raised while THIS code drives the layer list's selection, so Widget's itemSelectionChanged handler can tell echo from user input
@@ -653,6 +674,10 @@ private:
     bool pivot_dragging = false;      ///< true while the transform handle/pivot is being relocated (handle drag or Ctrl+drag on empty canvas)
     bool space_dragging = false;      ///< true while Space is held: the selection follows the cursor, dragged by its master stick(s)
     QPointF multi_center_buffer;      ///< pivot captured at gesture start (rotate/scale origin)
+    // ---- transformation box (stile del gizmo della selezione pixel, applicato alle figure) ----
+    int sel_box_gesture = 0;          ///< 0 nessuno, 1 scala (uniforme), 2 rotazione: drag di una maniglia della box
+    bool band_is_lasso = false;       ///< il gesto rubber band in corso è un lazo (senza selection_band scene item)
+    QPolygonF band_poly;              ///< punti del lazo (coordinate di scena) accumulati durante il drag
 
     /**
      * @brief The figures the handle/pivot/bbox act on: the multi-selection when 2+ are
@@ -703,6 +728,64 @@ private:
      * @brief Removes the handle and bounding-box items from the scene, if present.
      */
     void RemoveSelectionDecorations();
+
+    /**
+     * @brief Transformation-box handle positions in scene coords: 0-3 corners
+     *        TL,TR,BR,BL; 4-7 edge mids top,right,bottom,left; 8 rotation knob above
+     *        the top edge. Sits on SelectionBoundingBox().
+     */
+    void SelectionHandles(QPointF out[9]) const;
+
+    /**
+     * @brief Which transformation-box handle a scene point hits (within PolyPickRadius):
+     *        0-7 a scale handle, 8 the rotation knob, -1 none.
+     */
+    int HitSelectionHandle(const QPointF &scene) const;
+
+    /**
+     * @brief Draws the shared transform-box gizmo: 8 white square scale handles (pts 0-7)
+     *        and a round rotation knob (pt 8) with a stem to the top-mid handle (pt 4), in
+     *        the light-blue cosmetic style used by BOTH the pixel-selection gizmo and the
+     *        stickfigure transformation box.
+     * @param painter the drawForeground painter (scene transform already applied).
+     * @param pts 9 handle centres in SCENE coordinates (from GizmoHandles()/SelectionHandles()).
+     * @param draw_outline also stroke the box quad (pts 0-3). true for the pixel gizmo (its
+     *        box rotates with the gizmo, so it has no separate outline item); false for the
+     *        stickfigure box, whose outline is already the selection_bbox scene item — passing
+     *        true there would double-draw it. This bool is the ONLY difference between the two
+     *        call sites; everything else (colour, handle size, shapes) is shared.
+     */
+    void DrawTransformHandles(QPainter *painter, const QPointF pts[9], bool draw_outline);
+
+    /**
+     * @brief True when the transformation box is shown and its handles are actionable —
+     *        the NOTOOL selection tool with an active selection.
+     */
+    bool SelectionHandlesActive() const;
+
+    /**
+     * @brief Snapshot + per-figure buffers for a rotate gesture (shared by the ROTATE tool
+     *        and the transformation-box rotation knob). Pivot = SelectionPivotCurrent().
+     */
+    void BeginSelectionRotate();
+
+    /**
+     * @brief Snapshot + per-figure buffers for a scale gesture (shared by the SCALE tool
+     *        and the transformation-box scale handles). Pivot = SelectionPivotCurrent().
+     */
+    void BeginSelectionScale();
+
+    /**
+     * @brief Rotates SelectedFigures about multi_center_buffer by the drag increment
+     *        (starting_coord -> coord); the ROTATE-tool move body, reused by the box knob.
+     */
+    void ApplySelectionRotate();
+
+    /**
+     * @brief Uniformly scales SelectedFigures about multi_center_buffer by the drag ratio
+     *        (dist(coord)/dist(starting_coord)); the SCALE-tool move body, reused by the box.
+     */
+    void ApplySelectionScale();
 
     /**
      * @brief The figure owning a stick close enough to the position (segment distance
@@ -811,8 +894,14 @@ private:
     void LiftPixelFloat();                 ///< cut selected pixels out of the canvas into draw_float
     void CommitPixelFloat();               ///< stamp draw_float (transformed) back, push a draw-undo step
     void SetPixelSelection(const QRegion &r, int op); ///< replace/add/subtract, recompute bounds+reset gizmo
+    /** @brief Pixel-selection mouse-down: starts a new marquee (rect/lasso, Shift=add/Alt=subtract)
+     *  or a move/scale/rotate gesture when a handle/box is grabbed. Driven by mousePressEvent. */
     void DrawSelPress(const QPointF &scene, Qt::KeyboardModifiers mods);
+    /** @brief Pixel-selection mouse-drag: extends the marquee or applies the active gizmo gesture.
+     *  Driven by mouseMoveEvent while draw_sel_gesture is set. */
     void DrawSelMove(const QPointF &scene);
+    /** @brief Pixel-selection mouse-up: commits a freshly-drawn rect/lasso into the selection;
+     *  a move/scale/rotate leaves its float active. Driven by mouseReleaseEvent. */
     void DrawSelRelease(const QPointF &scene);
     /** @brief Tight bounding rect of the non-transparent pixels of an image (empty if none). */
     static QRect OpaqueBounds(const QImage &img);

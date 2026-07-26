@@ -402,6 +402,16 @@ void MyView::mousePressEvent(QMouseEvent *event)
                         pivot_dragging = true;
                         break;
                     }
+                    // maniglie della transformation box: pomello = rotazione, spigoli/lati =
+                    // scala (uniforme), attorno alla maniglia mobile. Solo senza modificatori
+                    // (Shift/Alt restano add/sub della selezione). Va PRIMA di FigureAtPoint:
+                    // le maniglie stanno sul bordo del box, non su uno stick, quindi altrimenti
+                    // partirebbe il rubber band.
+                    if(SelectionHandlesActive() && event->modifiers() == Qt::NoModifier){
+                        int bh = HitSelectionHandle(coord);
+                        if(bh == 8){ BeginSelectionRotate(); sel_box_gesture = 2; break; }
+                        if(bh >= 0){ BeginSelectionScale();  sel_box_gesture = 1; break; }
+                    }
                     StickFigure *hit_figure = FigureAtPoint(coord);
                     if((event->modifiers() & Qt::ShiftModifier) && hit_figure != nullptr){
                         AddToMultiSelection(hit_figure); // Shift+click: aggiungi alla selezione
@@ -413,16 +423,24 @@ void MyView::mousePressEvent(QMouseEvent *event)
                         break;
                     }
                     if(hit_figure == nullptr){
-                        // click sulla tela vuota: la selezione multipla decade e parte
-                        // il rettangolo di selezione (bordo sottile tratteggiato)
+                        // click sulla tela vuota: la selezione multipla decade e parte il
+                        // rubber band. La forma (rettangolo o lazo) dipende dal checkbox del
+                        // menu (stickfig_lasso); il lazo è disegnato in drawForeground.
                         ClearMultiSelection();
-                        selection_band = new QGraphicsRectItem(QRectF(coord, coord));
-                        QPen band_pen(QColor(200, 200, 200), 0);
-                        band_pen.setStyle(Qt::DotLine);
-                        selection_band->setPen(band_pen);
-                        selection_band->setBrush(Qt::NoBrush);
-                        selection_band->setZValue(199);
-                        scene()->addItem(selection_band);
+                        if(stickfig_lasso){
+                            band_is_lasso = true;
+                            band_poly.clear();
+                            band_poly << coord;
+                        } else {
+                            band_is_lasso = false;
+                            selection_band = new QGraphicsRectItem(QRectF(coord, coord));
+                            QPen band_pen(QColor(200, 200, 200), 0);
+                            band_pen.setStyle(Qt::DotLine);
+                            selection_band->setPen(band_pen);
+                            selection_band->setBrush(Qt::NoBrush);
+                            selection_band->setZValue(199);
+                            scene()->addItem(selection_band);
+                        }
                         band_dragging = true;
                         break;
                     }
@@ -462,41 +480,12 @@ void MyView::mousePressEvent(QMouseEvent *event)
             }
             case(ROTATE):
             {
-                StoreUndo();
-                StickFigure::start_stick_figure_rotation = true;
-                // singola figura e multi-selezione condividono lo stesso perno = MANIGLIA
-                // (bug 3): per una figura sola è master.p1 + pivot_offset persistente, per
-                // la multi il perno di gruppo. Stessi buffer per entrambe.
-                multi_center_buffer = SelectionPivotCurrent();
-                multi_pivot = multi_center_buffer;
-                for(StickFigure *S : SelectedFigures()){
-                    if(S->master_stick && S->stick_list.count() > 0){
-                        S->origin_pos_buffer = S->master_stick->my_line.p1();
-                        for(StickData *s : S->stick_list){
-                            if(s->view) s->view->angle_buffer2 = s->my_line.angle();
-                        }
-                    }
-                }
+                BeginSelectionRotate(); // snapshot + buffer (condiviso col pomello della transformation box)
                 break;
             }
             case(SCALE):
             {
-                StoreUndo();
-                StickFigure::start_stick_figure_scale = true;
-                // come ROTATE: perno = MANIGLIA per singola figura e multi-selezione (bug 3)
-                multi_center_buffer = SelectionPivotCurrent();
-                multi_pivot = multi_center_buffer;
-                for(StickFigure *S : SelectedFigures()){
-                    if(S->master_stick && S->stick_list.count() > 0){
-                        S->origin_pos_buffer = S->master_stick->my_line.p1();
-                        for(StickData *s : S->stick_list){
-                            if(s->view){
-                                s->view->scale_buffer = s->my_line.length();
-                                s->view->width_buffer = s->pen.width();
-                            }
-                        }
-                    }
-                }
+                BeginSelectionScale(); // snapshot + buffer (condiviso con le maniglie della transformation box)
                 break;
             }
             case(MOVESCENE):
@@ -1158,10 +1147,27 @@ void MyView::DrawCmd(QPointF* point, int mode)
 }
 
 // ===================== Freehand draw mode ============================================
-// A FREEHAND stick is an IMAGE-like raster stick. Draw mode replaces its image with a
-// live, viewport-sized canvas painted in place, then on exit crops it to the drawn area
-// and re-anchors the stick. The canvas maps 1 pixel per scene unit over the enter-time
-// visible rect (draw_region) — so mouse->pixel is a plain subtraction at any pan/zoom.
+// A FREEHAND stick (StickData::FREEHAND, stickdata.h) is an IMAGE-like raster stick. Draw
+// mode replaces its image with a live, viewport-sized canvas painted in place, then on exit
+// crops it to the drawn area and re-anchors the stick. The canvas maps 1 pixel per scene unit
+// over the enter-time visible rect (draw_region) — so mouse->pixel is a plain subtraction at
+// any pan/zoom.
+//
+// Lifecycle:   DrawCmd()'s DRAWFREEHAND branch (the Freehand toolbar tool) creates the
+//              invisible 2-click stick and calls EnterDrawMode(); ExitDrawMode() (Esc/Enter,
+//              any tool switch, or a save/load/render that must finalize the image) crops and
+//              re-anchors it. draw_mode gates every mouse/key event in the input overrides.
+// Painting:    mousePressEvent/mouseMoveEvent stamp the brush along the drag — StampBrush()
+//              (one dab, built from MakeRoundBrush()) via PaintStrokeSegment() (spacing +
+//              interpolation). tabletEvent() latches pen pressure into draw_pressure_val
+//              (Phase 3); the eraser composites DestinationOut.
+// Undo:        a draw-local chain (PushDrawUndo()/DrawStrokeUndo()/DrawStrokeRedo()), driven
+//              by MyView::Undo()/Redo() while draw_mode is on — it NEVER touches the frame
+//              undo_stack (one frame-undo entry, taken at EnterDrawMode(), reverts the session).
+// Beneficiaries: the Freehand toolbar button (widget.cpp on_drawFreehandBtn_clicked) and the draw-mode
+//              panel (widget.cpp advanced_draw_tab: brush/eraser/size/opacity/colour/pressure,
+//              plus the pixel-selection tools documented in the next section).
+//
 // ponytail: 1px == 1 scene unit; screen-DPI-independent, and pan/zoom are frozen for the
 // session (the canvas is fixed to the viewport captured on entry). Wider-than-viewport
 // or re-scaled-resolution painting is out of scope for Phase 1.
@@ -1335,34 +1341,35 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
         StoreUndo();
 
     draw_target = stick;
-    draw_orig_line = stick->my_line; // scheletro dei 2 click: origine (p1) e rotazione dello stick
-    if(draw_orig_line.length() < 1.0) // 2 click coincidenti: dai lunghezza/rotazione fittizia
+    draw_orig_line = stick->my_line; // the 2-click skeleton: origin (p1) and the stick's rotation
+    if(draw_orig_line.length() < 1.0) // the 2 clicks coincided: give it a fake length/rotation
         draw_orig_line = QLineF(draw_orig_line.p1(), draw_orig_line.p1() + QPointF(0, 100));
 
     draw_region = mapToScene(viewport()->rect()).boundingRect();
-    QPointF vc = draw_region.center(); // centro del viewport in scena
-    // canvas QUADRATO di lato = diagonale del viewport: ruotato a qualunque angolo copre
-    // comunque tutto il viewport visibile (1 px = 1 unità di scena)
+    QPointF vc = draw_region.center(); // viewport centre, in scene coordinates
+    // Make the canvas a SQUARE whose side is the viewport's diagonal: at that size, no matter
+    // what angle it's rotated to (see theta below), it still covers the entire visible viewport.
     int D = int(ceil(sqrt(draw_region.width()*draw_region.width()
                           + draw_region.height()*draw_region.height())));
     if(D < 1) D = 1;
 
-    // rotazione di visualizzazione = angolo della linea (stessa convenzione degli IMAGE:
-    // img_angle segue la direzione dello stick). Il canvas vive e si dipinge in questo frame
-    // ruotato, così il disegno nasce già sulla posizione+rotazione dello stick (niente
-    // ri-rotazione all'uscita) e ruota con lui
+    // Display rotation = the stick's own line angle (same convention IMAGE sticks use: img_angle
+    // follows the stick's direction). The canvas lives and paints in this already-rotated frame,
+    // so the drawing is born at the stick's position+rotation directly — no re-rotation is needed
+    // on exit — and it keeps rotating with the stick from then on.
     double theta = -atan2(draw_orig_line.dx(), draw_orig_line.dy()) * 180.0 / M_PI;
     double len = draw_orig_line.length();
     QPointF p1 = draw_orig_line.p1();
     draw_theta = theta;
 
-    // img_offset tale che il CENTRO del canvas cada sul centro del viewport:
-    // paint fa  scene = p1 + R(theta)*(img_offset + (pixel - D/2)); centro pixel = D/2 →
-    // vc = p1 + R(theta)*img_offset  → img_offset = R(-theta)*(vc - p1)
+    // Solve for the img_offset that puts the canvas's CENTRE on the viewport's centre. paint()
+    // computes scene = p1 + R(theta)*(img_offset + (pixel - D/2)); at the canvas centre pixel
+    // (D/2), that reduces to vc = p1 + R(theta)*img_offset, so img_offset = R(-theta)*(vc - p1) —
+    // R(-theta), the inverse rotation, is what QTransform::inverted() below builds and applies.
     QTransform rot; rot.rotate(theta);
     QPointF img_offset = rot.inverted().map(vc - p1);
 
-    // trasformazione di visualizzazione del canvas, IDENTICA a quella di paint():
+    // The canvas's display transform, built to be IDENTICAL to what paint() uses later:
     // scene = draw_disp.map(pixel - D/2)
     QTransform disp;
     disp.translate(p1.x(), p1.y());
@@ -1371,9 +1378,10 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
     draw_disp = disp;
     draw_disp_inv = disp.inverted();
 
-    // aspetto ATTUALE (per un re-edit) catturato PRIMA di modificare lo stick
+    // The stick's CURRENT on-screen appearance (needed to re-open an existing drawing for
+    // editing) is captured here, before anything below overwrites the stick's own transform.
     QImage old_scaled;
-    QTransform old_disp; // pixel-locale (centrato) → scena del vecchio aspetto
+    QTransform old_disp; // old appearance's centred local pixel -> scene transform
     if(stick->view && stick->stick_img && !stick->stick_img->isNull()){
         old_scaled = stick->view->CalcImg();
         old_disp.translate(stick->my_line.p1().x(), stick->my_line.p1().y());
@@ -1383,15 +1391,18 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
 
     QImage *canvas = new QImage(D, D, QImage::Format_ARGB32_Premultiplied);
     canvas->fill(Qt::transparent);
-    // bake: porta il vecchio aspetto (posizionato in SCENA da old_disp) nel canvas nuovo.
-    // pixel-vecchio(u,v) → scena → pixel-canvas, in un'unica QTransform composta (l'ordine
-    // A*B mappa come B.map(A.map(p))):
+    // Bake the old appearance (positioned in SCENE space by old_disp) into the new canvas.
+    // Four QTransform stages chained with operator* into one matrix — for `A * B`, a point is
+    // mapped by A first, then B, so reading left-to-right below IS the pipeline order:
+    //   old raw pixel -> centred on its own middle -> placed in the scene (old_disp) ->
+    //   back into the new canvas's centred pixel space (draw_disp_inv, the exact inverse of
+    //   draw_disp above) -> shifted from centred to the canvas's raw top-left addressing.
     if(!old_scaled.isNull()){
         QTransform bake =
-              QTransform::fromTranslate(-old_scaled.width()/2.0, -old_scaled.height()/2.0) // pixel raw → centrato
-            * old_disp                                                                     // → scena
-            * draw_disp_inv                                                                // → pixel-canvas centrato
-            * QTransform::fromTranslate(D/2.0, D/2.0);                                      // → pixel-canvas raw
+              QTransform::fromTranslate(-old_scaled.width()/2.0, -old_scaled.height()/2.0) // raw -> centred
+            * old_disp                                                                     // -> scene
+            * draw_disp_inv                                                                // -> new canvas, centred
+            * QTransform::fromTranslate(D/2.0, D/2.0);                                      // -> new canvas, raw
         QPainter cp(canvas);
         cp.setRenderHint(QPainter::SmoothPixmapTransform);
         cp.setTransform(bake);
@@ -1452,28 +1463,30 @@ void MyView::ExitDrawMode()
 {
     if(!draw_mode)
         return;
-    DiscardPixelSelection(); // una selezione flottante viene fusa nel canvas prima del ritaglio
+    DiscardPixelSelection(); // a floating pixel selection is baked into the canvas before cropping
     StickData *stick = draw_target;
     QImage *canvas = draw_canvas;
-    // azzera lo stato PRIMA di qualunque callback, così una SetTool/ExitDrawMode rientrante
-    // non ricorre
+    // Clear all draw-mode state BEFORE any callback below runs, so a reentrant SetTool()/
+    // ExitDrawMode() call (e.g. triggered by emit DrawModeChanged() further down) sees
+    // draw_mode already false and returns immediately instead of recursing.
     draw_mode = false;
     draw_target = nullptr;
     draw_canvas = nullptr;
     draw_stroking = false;
     draw_undo.clear();
     draw_undo_idx = -1;
-    emit DrawModeChanged(false); // qualunque via d'uscita: tiene in sync il bottone del pannello
+    emit DrawModeChanged(false); // keeps the panel's toggle button in sync on every exit path
 
     if(!stick || !canvas)
         return;
 
     QRect bounds = OpaqueBounds(*canvas);
-    // dimensioni del canvas catturate ORA: canvas == stick->stick_img_list[0], quindi il
-    // qDeleteAll sotto lo libera e ogni suo uso successivo sarebbe use-after-free
+    // Capture the canvas's dimensions NOW: canvas is the same QImage* as stick->stick_img_list[0],
+    // so the qDeleteAll() below frees it — any read of canvas->width()/height() after that point
+    // would be a use-after-free.
     double canvas_half_w = canvas->width()/2.0, canvas_half_h = canvas->height()/2.0;
     if(bounds.isEmpty())
-        bounds = QRect(int(canvas_half_w), int(canvas_half_h), 1, 1); // niente dipinto: 1x1 invisibile
+        bounds = QRect(int(canvas_half_w), int(canvas_half_h), 1, 1); // nothing was painted: 1x1 invisible placeholder
 
     QImage *cropped = new QImage(canvas->copy(bounds));
     qDeleteAll(stick->stick_img_list);
@@ -1483,22 +1496,29 @@ void MyView::ExitDrawMode()
     stick->img_name_list.append("freehand");
     stick->stick_img = cropped;
 
-    // il disegno è GIÀ nel frame ruotato dello stick: niente ri-rotazione. Basta ritagliare
-    // e riancorare l'immagine (come un IMAGE) sullo stesso scheletro/rotazione, così resta
-    // esattamente dove è stata dipinta e ruota con lo stick.
+    // The drawing is ALREADY sitting in the stick's own rotated frame (that's the whole point of
+    // painting in a canvas pre-rotated by EnterDrawMode), so no re-rotation is needed here — just
+    // crop it and re-anchor the cropped image on the same skeleton/rotation, exactly like an
+    // IMAGE stick, so it stays exactly where it was painted and keeps rotating with the stick.
     double bw = bounds.width(), bh = bounds.height();
     QPointF center_px(bounds.x() + bw/2.0, bounds.y() + bh/2.0);
-    // scena del centro del ritaglio (draw_disp mappa pixel-centrato → scena)
+    // Crop centre, in canvas-pixel space, re-centred (- canvas_half_w/h) then mapped through
+    // draw_disp — the same centred-pixel-to-scene transform EnterDrawMode() built — to land in
+    // scene coordinates.
     QPointF crop_center_scene = draw_disp.map(center_px - QPointF(canvas_half_w, canvas_half_h));
     double len = draw_orig_line.length();
     QPointF p1 = draw_orig_line.p1();
     QTransform rot; rot.rotate(draw_theta);
-    stick->my_line = draw_orig_line;                               // scheletro/origine/rotazione normali
-    stick->img_angle = draw_theta;                                // segue la linea come un IMAGE
+    stick->my_line = draw_orig_line;                               // normal skeleton/origin/rotation
+    stick->img_angle = draw_theta;                                // follows the line, like an IMAGE
     stick->img_angle_offset = 0;
-    stick->img_offset = rot.inverted().map(crop_center_scene - p1);// centro immagine = crop_center_scene
+    // img_offset must place the image so its own centre lands on crop_center_scene; since
+    // paint() applies scene = p1 + R(img_angle)*img_offset (+ ...), solving for img_offset means
+    // undoing that rotation on the vector from p1 to the target centre — R(-theta), built here as
+    // rot.inverted() (Qt QTransform), mapped over (crop_center_scene - p1).
+    stick->img_offset = rot.inverted().map(crop_center_scene - p1);
     double max_dim = qMax(bw, bh);
-    stick->img_w_scale = float(max_dim / len);                    // CalcImg → dimensione naturale (1:1)
+    stick->img_w_scale = float(max_dim / len);                    // CalcImg() -> natural (1:1) size
     stick->img_h_scale = float(max_dim / len);
 
     if(stick->view){
@@ -1512,15 +1532,40 @@ void MyView::ExitDrawMode()
 }
 
 // ===== Pixel selection & free-transform (draw mode) ==================================
+// Draw mode's two marquee sub-tools — rectangle (DT_SEL_RECT) and lasso (DT_SEL_LASSO),
+// chosen with SetDrawTool() — select a set of canvas pixels into draw_selection, then wrap
+// them in a move/scale/rotate gizmo that LOOKS identical to the stickfigure transformation
+// box but is fully separate: it transforms PIXELS (not figures), exists only while draw_mode
+// is active, and is discarded on draw-mode exit, on a switch to brush/eraser, or on Ctrl+D
+// (all routed through DiscardPixelSelection()). Shift adds to / Alt subtracts from the set.
+//
+// Coordinates: SceneToCanvas()/CanvasToScene() convert between the viewport-rotated canvas
+//              pixels and the scene (draw_disp/draw_disp_inv, the same transform the paint
+//              path uses), so selection math lines up with what the brush painted.
+// Selection:   DrawSelPress()/DrawSelMove()/DrawSelRelease() build a QRegion and hand it to
+//              SetPixelSelection() (replace/add/subtract). PixelGizmo() is the transform about
+//              the box centre; GizmoHandles()/HitPixelHandle() give the handle geometry/hit-test.
+// Float:       the first move/scale/rotate lifts the pixels into draw_float (LiftPixelFloat(),
+//              punching a transparent hole); CommitPixelFloat() bakes them back and records one
+//              draw-local undo step (see the Freehand section's undo chain).
+// Rendering:   drawForeground() paints the floating pixels, the marching-ants marquee, and the
+//              gizmo — the gizmo via the SHARED DrawTransformHandles() with draw_outline=true.
+// Beneficiaries: the draw-mode panel's Select/Lasso buttons (widget.cpp advanced_draw_tab tool
+//              row). This subsystem is the pixel-space twin of the stickfigure transformation
+//              box below; the only shared code is DrawTransformHandles() (the renderer).
 
-/// @details scene <-> canvas-pixel mapping, the inverse pair used by the paint path.
-/// draw_disp maps a canvas pixel measured from the canvas centre into the scene.
+/// @details Scene coord -> canvas pixel (measured from the canvas top-left): the inverse of
+/// draw_disp used by the selection/hit-test path, paired with CanvasToScene() below. draw_disp
+/// maps a canvas pixel measured from the canvas centre into the scene, so this un-maps and
+/// re-centres. Identity fallback when there is no canvas (outside draw mode).
 QPointF MyView::SceneToCanvas(const QPointF &scene) const
 {
     if(!draw_canvas) return scene;
     QPointF half(draw_canvas->width()/2.0, draw_canvas->height()/2.0);
     return draw_disp_inv.map(scene) + half;
 }
+/// @details Canvas pixel -> scene coord: the exact inverse of SceneToCanvas(), placing a
+/// canvas pixel back where paint() draws it. Used to position handles/marquee in the scene.
 QPointF MyView::CanvasToScene(const QPointF &canvas) const
 {
     if(!draw_canvas) return canvas;
@@ -1557,6 +1602,9 @@ void MyView::GizmoHandles(QPointF out[9]) const
         out[i] = g.map(base[i]);
 }
 
+/// @details Which pixel-gizmo handle a scene click grabs: 0-7 a scale handle, 8 the rotation
+/// knob, -1 none. Handles are mapped to the scene (CanvasToScene) and matched within a screen-
+/// constant radius (PolyPickRadius), so the pick feels the same at any zoom. Used by DrawSelPress.
 int MyView::HitPixelHandle(const QPointF &scene) const
 {
     if(draw_selection.isEmpty())
@@ -1582,14 +1630,24 @@ void MyView::LiftPixelFloat()
     QRegion local = draw_selection.translated(-b.topLeft());
     QImage mask(b.size(), QImage::Format_ARGB32_Premultiplied);
     mask.fill(Qt::transparent);
+    // Build a stencil the size of the selection bounds: opaque black inside the selected
+    // region, transparent everywhere else. QPainter::setClipRegion() (Qt) restricts the
+    // subsequent fillRect() to that region, so painting black over the whole mask rect
+    // only actually paints inside the selection shape (which may be a lasso, not a rect).
     { QPainter mp(&mask); mp.setClipRegion(local); mp.fillRect(mask.rect(), Qt::black); }
 
     draw_float = draw_canvas->copy(b);
+    // CompositionMode_DestinationIn (Qt) keeps only the destination pixels where the drawn
+    // image (mask) is opaque, using the mask's alpha as a keep/discard test — this erases
+    // everything in draw_float outside the (possibly non-rectangular) selection shape.
     { QPainter fp(&draw_float);
       fp.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-      fp.drawImage(0, 0, mask); }                       // tieni solo i pixel dentro la regione
+      fp.drawImage(0, 0, mask); }
 
-    { QPainter cp(draw_canvas);                          // buca il canvas dove erano
+    // CompositionMode_DestinationOut (Qt) is the inverse: it erases destination pixels where
+    // the drawn image (mask) is opaque, punching the same selection shape as a transparent
+    // hole in the live canvas — the pixels now live only in draw_float, ready to be dragged.
+    { QPainter cp(draw_canvas);
       cp.setCompositionMode(QPainter::CompositionMode_DestinationOut);
       cp.drawImage(b.topLeft(), mask); }
     draw_float_active = true;
@@ -1601,8 +1659,13 @@ void MyView::CommitPixelFloat()
 {
     if(!draw_canvas || !draw_float_active)
         return;
+    // draw_float's pixel (0,0) is draw_sel_bounds.topLeft() in canvas space (that's where
+    // LiftPixelFloat() copied it from), so fromTranslate() re-places it there first. For
+    // `A * B`, QTransform::operator* transforms a point by A, then by B — the opposite order
+    // from chained .translate()/.rotate()/.scale() calls, which apply last-called-first — so
+    // PixelGizmo()'s live rotate/scale/move (centred on that same box) is applied afterwards.
     QTransform m = QTransform::fromTranslate(draw_sel_bounds.left(), draw_sel_bounds.top())
-                 * PixelGizmo();                         // float-pixel -> canvas-pixel
+                 * PixelGizmo();
     QPainter cp(draw_canvas);
     cp.setRenderHint(QPainter::SmoothPixmapTransform);
     cp.setTransform(m);
@@ -1670,15 +1733,21 @@ void MyView::DrawSelPress(const QPointF &scene, Qt::KeyboardModifiers mods)
 
     if(!forced_new && !draw_selection.isEmpty()){
         int h = HitPixelHandle(scene);
-        if(h == 8){                                     // knob di rotazione
+        if(h == 8){                                     // rotation knob
             LiftPixelFloat();
             draw_sel_gesture = 5;
             draw_sel_r0 = draw_sel_r;
+            // QRectF::center() gives the box's centre in canvas pixels (untransformed); mapping
+            // it through PixelGizmo() (Qt QTransform::map()) applies the *current* live rotate/
+            // scale/move so the pivot tracks the box as the user has already dragged it, not its
+            // original position; CanvasToScene() then converts that canvas-pixel point into scene
+            // coordinates, since `scene` (the mouse position) and QLineF::angle() below both work
+            // in scene space.
             QPointF c = CanvasToScene(PixelGizmo().map(QRectF(draw_sel_bounds).center()));
-            draw_sel_ang0 = QLineF(c, scene).angle();
+            draw_sel_ang0 = QLineF(c, scene).angle();     // pointer-to-pivot angle at gesture start
             return;
         }
-        if(h >= 0){                                     // maniglia di scala
+        if(h >= 0){                                     // scale handle
             LiftPixelFloat();
             draw_sel_gesture = 4;
             draw_sel_handle = h;
@@ -1710,6 +1779,11 @@ void MyView::DrawSelPress(const QPointF &scene, Qt::KeyboardModifiers mods)
     }
 }
 
+/// @details Per-gesture drag update (mouseMoveEvent, left button held). Dispatches on
+/// draw_sel_gesture: 1/2 grow the rubber-band rectangle / lasso polyline; 3 translates the
+/// gizmo; 4 scales it about the box centre (corners = both axes, edge mids = one, recovered in
+/// the rotated-but-unscaled frame so the axes stay meaningful); 5 rotates about the box centre.
+/// Repaints so drawForeground shows the live selection/float.
 void MyView::DrawSelMove(const QPointF &scene)
 {
     QPointF cp = SceneToCanvas(scene);
@@ -1719,9 +1793,13 @@ void MyView::DrawSelMove(const QPointF &scene)
     case 3: // move
         draw_sel_t = draw_sel_t0 + (cp - draw_sel_p0);
         break;
-    case 4: { // scale about box centre (corners: entrambe le assi; spigoli: una)
+    case 4: { // scale about box centre (corners scale both axes; edge mids scale only one)
         QPointF c = QRectF(draw_sel_bounds).center();
-        // porta il puntatore nel frame ruotato-ma-non-scalato (rigido), così la scala è per-asse
+        // Build the box's rotation+move (no scale) as its own QTransform, then invert it: mapping
+        // the live cursor position (cp, still in canvas pixels) through that inverse undoes the
+        // gizmo's current rotation/translation, landing the cursor back in the box's own rigid
+        // (unscaled, unrotated) frame. That keeps the two scale axes meaningful (aligned to the
+        // box's own top/side edges) no matter how far the box has already been rotated.
         QTransform rigid; rigid.translate(c.x()+draw_sel_t.x(), c.y()+draw_sel_t.y());
         rigid.rotate(draw_sel_r); rigid.translate(-c.x(), -c.y());
         QPointF u = rigid.inverted().map(cp);           // u - c = scale * (base - c)
@@ -1730,16 +1808,19 @@ void MyView::DrawSelMove(const QPointF &scene)
             (r.topLeft()+r.topRight())/2.0, (r.topRight()+r.bottomRight())/2.0,
             (r.bottomRight()+r.bottomLeft())/2.0, (r.bottomLeft()+r.topLeft())/2.0 };
         QPointF h = base[draw_sel_handle];
-        bool horiz = (draw_sel_handle != 4 && draw_sel_handle != 6); // top/bottom mid = solo Y
-        bool vert  = (draw_sel_handle != 5 && draw_sel_handle != 7); // left/right mid = solo X
+        bool horiz = (draw_sel_handle != 4 && draw_sel_handle != 6); // top/bottom mid = Y only
+        bool vert  = (draw_sel_handle != 5 && draw_sel_handle != 7); // left/right mid = X only
         if(horiz && qAbs(h.x() - c.x()) > 1e-3) draw_sel_sx = (u.x() - c.x()) / (h.x() - c.x());
         if(vert  && qAbs(h.y() - c.y()) > 1e-3) draw_sel_sy = (u.y() - c.y()) / (h.y() - c.y());
         break;
     }
     case 5: { // rotate about box centre
+        // Same pivot as DrawSelPress: the box centre, mapped through the live PixelGizmo()
+        // transform and converted from canvas pixels to scene coordinates, so it matches the
+        // frame of `scene` (the current mouse position) that QLineF() below measures against.
         QPointF c = CanvasToScene(PixelGizmo().map(QRectF(draw_sel_bounds).center()));
         double a = QLineF(c, scene).angle();
-        draw_sel_r = draw_sel_r0 - (a - draw_sel_ang0); // QLineF::angle cresce in senso antiorario
+        draw_sel_r = draw_sel_r0 - (a - draw_sel_ang0); // QLineF::angle() increases counter-clockwise
         break;
     }
     default: return;
@@ -1750,10 +1831,19 @@ void MyView::DrawSelMove(const QPointF &scene)
     }
 }
 
+/// @details Ends a gesture (mouseReleaseEvent). A rectangle (1) or lasso (2) is finalized into
+/// the selection via SetPixelSelection() with the pending op; the lasso needs >=3 points. A
+/// move/scale/rotate (3/4/5) needs nothing here — its gizmo state is already live and the
+/// lifted float stays active until it is committed (DiscardPixelSelection/CommitPixelFloat).
 void MyView::DrawSelRelease(const QPointF &scene)
 {
     QPointF cp = SceneToCanvas(scene);
-    if(draw_sel_gesture == 1){                          // rettangolo
+    if(draw_sel_gesture == 1){                          // rectangle
+        // draw_sel_p0 is the first corner clicked, cp the corner under the cursor now; the user
+        // may have dragged in any direction, so QRectF(p0,cp) can have a negative width/height.
+        // .normalized() (Qt) swaps corners as needed so left<=right and top<=bottom; .toRect()
+        // rounds to whole pixels since the canvas is pixel-addressed; .intersected() (Qt) clips
+        // the result to the canvas bounds so the selection can never reach outside the image.
         QRect rc = QRectF(draw_sel_p0, cp).normalized().toRect().intersected(draw_canvas->rect());
         if(rc.width() > 0 && rc.height() > 0)
             SetPixelSelection(QRegion(rc), draw_sel_op);
@@ -1989,11 +2079,19 @@ void MyView::drawForeground(QPainter *painter, const QRectF &rect)
        (!draw_selection.isEmpty() || draw_sel_gesture == 1 || draw_sel_gesture == 2)){
         painter->save();
         QPointF half(draw_canvas->width()/2.0, draw_canvas->height()/2.0);
+        // draw_canvas pixels are addressed from its top-left corner, but draw_disp (the same
+        // scene<->canvas map paint() uses) is built around the canvas's centre; fromTranslate()
+        // re-centres a pixel coordinate first, then draw_disp places it in the scene, so this
+        // overlay lands exactly on top of whatever paint() already drew for the canvas.
         QTransform pix_to_scene = QTransform::fromTranslate(-half.x(), -half.y()) * draw_disp;
 
-        // 1) pixel flottanti trasformati (mostrano ciò che il gizmo sta muovendo)
+        // 1) transformed floating pixels (shows what the gizmo is currently dragging)
         if(draw_float_active && !draw_float.isNull()){
             painter->save();
+            // Chains all three mappings the float needs in one QTransform: float-local pixel
+            // (0,0) -> its canvas position (fromTranslate to bounds.topLeft()) -> the live
+            // rotate/scale/move (PixelGizmo()) -> scene coordinates (pix_to_scene), each stage
+            // applied left-to-right per QTransform::operator*'s point-then-matrix convention.
             QTransform m = QTransform::fromTranslate(draw_sel_bounds.left(), draw_sel_bounds.top())
                          * PixelGizmo() * pix_to_scene;
             painter->setTransform(m, true);
@@ -2013,33 +2111,66 @@ void MyView::drawForeground(QPainter *painter, const QRectF &rect)
             painter->drawPolyline(poly);
         }
 
-        // 3) marquee della selezione (tratteggio bianco+nero per leggibilità su ogni sfondo)
+        // 3) selection marquee (white+black dashes stay visible over any background)
         if(!draw_selection.isEmpty()){
-            // addRegion() aggiunge OGNI rettangolo di scanline della regione come sottopercorso:
-            // per un lazo sono molte strisce e i loro bordi interni sembrano uno "scarabocchio".
-            // simplified() li fonde nel solo contorno esterno (un rettangolo resta invariato).
+            // QRegion stores an irregular shape as a set of horizontal scanline rectangles;
+            // QPainterPath::addRegion() (Qt) adds every one of those rectangles as its own
+            // subpath, so for a lasso (many thin strips) their shared internal edges would
+            // otherwise draw as a "scribble" of extra lines. QPainterPath::simplified() (Qt)
+            // merges overlapping subpaths into just the outer silhouette (a no-op for a plain
+            // rectangle selection, which is already a single subpath).
             QPainterPath ants; ants.addRegion(draw_selection);
             ants = ants.simplified();
-            ants = pix_to_scene.map(ants);
+            ants = pix_to_scene.map(ants);           // canvas-pixel path -> scene coordinates
             QPen white(Qt::white, 1); white.setCosmetic(true);
             painter->setPen(white); painter->drawPath(ants);
             QPen black(Qt::black, 1, Qt::DashLine); black.setCosmetic(true);
             painter->setPen(black); painter->drawPath(ants);
 
-            // 4) box del gizmo + maniglie (8 quadretti + pomello di rotazione)
+            // 4) box del gizmo + maniglie: il box pixel ruota col gizmo, quindi traccia anche
+            // il proprio contorno (draw_outline=true). Maniglie in coordinate di scena.
             QPointF h[9]; GizmoHandles(h);
             QPointF hs[9]; for(int i = 0; i < 9; i++) hs[i] = CanvasToScene(h[i]);
-            QPen box(QColor(0, 120, 255), 1); box.setCosmetic(true);
-            painter->setPen(box); painter->setBrush(Qt::NoBrush);
-            QPolygonF frame; frame << hs[0] << hs[1] << hs[2] << hs[3];
-            painter->drawPolygon(frame);
-            painter->drawLine(hs[4], hs[8]);            // stelo del pomello di rotazione
-            double hz = PolyPickRadius() * 0.6;         // mezza dimensione maniglia (schermo-costante)
-            painter->setBrush(Qt::white);
-            for(int i = 0; i < 8; i++)
-                painter->drawRect(QRectF(hs[i].x()-hz, hs[i].y()-hz, 2*hz, 2*hz));
-            painter->drawEllipse(hs[8], hz, hz);        // pomello di rotazione
+            DrawTransformHandles(painter, hs, true);
         }
+        painter->restore();
+    }
+
+    // --- lazo di selezione figure in corso (tracciato tratteggiato) --------------------
+    if(band_dragging && band_is_lasso && band_poly.size() >= 2){
+        painter->save();
+        QPen bp(QColor(200, 200, 200), 0); bp.setStyle(Qt::DotLine); // stesso stile del rettangolo
+        painter->setPen(bp); painter->setBrush(Qt::NoBrush);
+        painter->drawPolyline(band_poly);
+        painter->restore();
+    }
+
+    // --- transformation box della selezione figure: 8 maniglie di scala + pomello di
+    // rotazione (stile del gizmo della selezione pixel). Il box (rettangolo azzurro) e il
+    // perno (cerchietto) restano disegnati dagli scene item di UpdateSelectionDecorations;
+    // qui si aggiungono solo le maniglie afferrabili.
+    if(SelectionHandlesActive()){
+        painter->save();
+        // draw_outline=false: il contorno del box figure è già lo scene item selection_bbox
+        QPointF h[9]; SelectionHandles(h);
+        DrawTransformHandles(painter, h, false);
+        // TUTTE le maniglie degli stick della selezione (master verde incluso) restano SOPRA
+        // la transformation box e la sua maniglia di scala coincidente (spec): ridisegnate qui
+        // in foreground DOPO le maniglie del box, replicando l'aspetto reale dei loro scene
+        // item (rect/penna/pennello, quindi colore e stato di selezione corretti). Le maniglie
+        // sono in coordinate di scena (setRect assoluto, nessun setPos), come questo painter.
+        for(StickFigure *S : SelectedFigures())
+            for(StickData *s : S->stick_list){
+                if(!s->view) continue;
+                for(int k = 0; k < 2; k++){
+                    QGraphicsEllipseItem *hnd = s->view->stick_handle[k];
+                    if(hnd && hnd->isVisible()){
+                        painter->setPen(hnd->pen());
+                        painter->setBrush(hnd->brush());
+                        painter->drawEllipse(hnd->rect());
+                    }
+                }
+            }
         painter->restore();
     }
 }
@@ -2350,6 +2481,10 @@ void MyView::UpdateSelectionDecorations(bool recenter_pivot)
         scene()->addItem(selection_bbox);
     }
     selection_bbox->setRect(SelectionBoundingBox());
+    // le maniglie/box della transformation box sono un overlay di drawForeground: al cambio
+    // selezione vanno ridisegnate esplicitamente, altrimenti quelle della selezione precedente
+    // restano "fantasma" nelle zone non invalidate dallo spostamento dei soli scene item (spec).
+    if(viewport()) viewport()->update();
 }
 
 void MyView::RemoveSelectionDecorations()
@@ -2364,6 +2499,222 @@ void MyView::RemoveSelectionDecorations()
         delete selection_bbox;
         selection_bbox = nullptr;
     }
+    // ridisegna il foreground: cancella l'overlay di maniglie/master della selezione appena
+    // rimossa (vedi UpdateSelectionDecorations per il motivo del repaint esplicito).
+    if(viewport()) viewport()->update();
+}
+
+// ===== Stickfigure transformation box ================================================
+// The move/scale/rotate gizmo drawn around the current stickfigure selection under the arrow
+// (NOTOOL) tool. It is the figure-space twin of the draw-mode pixel selection above: same
+// look (they share only the renderer, DrawTransformHandles()), but this one transforms whole
+// FIGURES and reuses the ROTATE/SCALE tools' math instead of a QTransform on pixels.
+//
+// Geometry:    SelectionHandles() places 8 scale squares on SelectionBoundingBox() plus a
+//              rotation knob above it (scene coords); HitSelectionHandle() maps a click to a
+//              handle index, deliberately yielding priority to the stick handles (a click on a
+//              stick endpoint manipulates that stick — moves from the master, rotates — and
+//              never scales). SelectionHandlesActive() gates it to NOTOOL + a live selection.
+// Interaction: grabbing a handle in mousePressEvent() starts a gesture — BeginSelectionScale()
+//              /BeginSelectionRotate() snapshot the pre-gesture state (and are ALSO the press
+//              bodies of the ROTATE/SCALE tools), ApplySelectionScale()/ApplySelectionRotate()
+//              apply the drag each mouseMoveEvent(). Both pivot on SelectionPivotCurrent(), the
+//              user-movable pivot (drag its handle, or Ctrl+drag, or hold Space).
+// Rendering:   drawForeground() draws the box via DrawTransformHandles(draw_outline=false — the
+//              outline is the selection_bbox scene item) and redraws every stick handle on top;
+//              UpdateSelectionDecorations()/RemoveSelectionDecorations() keep the scene items in
+//              sync and force the overlay repaint on any selection change.
+// Beneficiaries: the arrow/select toolbar tool (widget.cpp on_cursor_clicked) and, sharing the
+//              Begin*/Apply* math, the ROTATE and SCALE tool buttons. The rectangle-vs-lasso
+//              rubber band for PICKING figures is chosen by the Selection menu checkbox
+//              (mymainwindow.cpp, MyView::stickfig_lasso) — separate from draw-mode's lasso.
+
+/**
+ * @details Transformation-box handles (stile del gizmo della selezione pixel, applicato
+ * alla selezione di figure): 8 quadretti sul bounding box axis-aligned + un pomello di
+ * rotazione sopra il lato superiore. Il pomello sta a distanza schermo-costante
+ * (PolyPickRadius) così resta grande uguale a ogni zoom.
+ */
+void MyView::SelectionHandles(QPointF out[9]) const
+{
+    QRectF r = SelectionBoundingBox();
+    double gap = const_cast<MyView*>(this)->PolyPickRadius() * 3.0;
+    out[0] = r.topLeft();  out[1] = r.topRight();  out[2] = r.bottomRight();  out[3] = r.bottomLeft();
+    out[4] = (r.topLeft()+r.topRight())/2.0;     out[5] = (r.topRight()+r.bottomRight())/2.0;
+    out[6] = (r.bottomRight()+r.bottomLeft())/2.0; out[7] = (r.bottomLeft()+r.topLeft())/2.0;
+    out[8] = QPointF(r.center().x(), r.top() - gap);
+}
+
+/// @details Which transformation-box handle a scene click grabs: 8 the rotation knob (checked
+/// first, it sits above the box), 0-7 a scale handle, -1 none. Enforces the priority rules:
+/// a click on/near any stick handle of the selection returns -1 so the click falls through to
+/// normal stick manipulation (move from the master, rotate) instead of scaling. Used by
+/// mousePressEvent (NOTOOL) to start a box gesture.
+int MyView::HitSelectionHandle(const QPointF &scene) const
+{
+    if(!HasActiveSelection())
+        return -1;
+    QPointF h[9];
+    SelectionHandles(h);
+    float radius = const_cast<MyView*>(this)->PolyPickRadius();
+    // il pomello di rotazione (8) ha la precedenza: sta sopra il box e non coincide mai con
+    // una maniglia di stick, quindi lo si controlla per primo
+    if(QLineF(scene, h[8]).length() <= radius)
+        return 8;
+    // priorità alle maniglie degli stick (spec): se il click cade sopra (o vicino a) un
+    // estremo — maniglia — di uno stick della selezione, NON afferrare una maniglia di scala.
+    // Lascia passare il click alla manipolazione normale dello stick (trasla dal master,
+    // ruota, ecc.). Vale per OGNI maniglia, non solo il master. Gli spigoli del box coincidono
+    // con gli estremi esterni, quindi lì vince la maniglia; per scalare restano lati e pomello.
+    // "vicino" = raggio della maniglia stessa o quello di aggancio, il più grande dei due.
+    float handle_r = qMax(radius, float(handle_size) / 2.0f);
+    for(StickFigure *S : SelectedFigures())
+        for(StickData *s : S->stick_list){
+            if(QLineF(scene, s->my_line.p1()).length() <= handle_r) return -1;
+            if(QLineF(scene, s->my_line.p2()).length() <= handle_r) return -1;
+        }
+    for(int i = 0; i < 8; i++)
+        if(QLineF(scene, h[i]).length() <= radius)
+            return i;
+    return -1;
+}
+
+/// @details Unico disegnatore del gizmo di trasformazione, condiviso tra la selezione pixel
+/// e la transformation box delle figure (vedi drawForeground). Stile azzurro cosmetico +
+/// quadretti bianchi + pomello: identico per entrambi; l'unica variazione è draw_outline
+/// (il box pixel ruota col gizmo e traccia qui il proprio contorno; il box figure lo prende
+/// dallo scene item selection_bbox).
+void MyView::DrawTransformHandles(QPainter *painter, const QPointF pts[9], bool draw_outline)
+{
+    QPen box(QColor(0, 120, 255), 1); box.setCosmetic(true); // azzurro, spessore costante a ogni zoom
+    painter->setPen(box); painter->setBrush(Qt::NoBrush);
+    if(draw_outline){
+        QPolygonF frame; frame << pts[0] << pts[1] << pts[2] << pts[3];
+        painter->drawPolygon(frame);
+    }
+    painter->drawLine(pts[4], pts[8]);          // stelo del pomello di rotazione
+    double hz = PolyPickRadius() * 0.6;         // mezza dimensione maniglia (schermo-costante)
+    painter->setBrush(Qt::white);
+    for(int i = 0; i < 8; i++)
+        painter->drawRect(QRectF(pts[i].x()-hz, pts[i].y()-hz, 2*hz, 2*hz));
+    painter->drawEllipse(pts[8], hz, hz);       // pomello di rotazione
+}
+
+/// @details La transformation box è attiva/afferrabile solo col tool di selezione
+/// (NOTOOL) e una selezione presente: gli altri tool (ROTATE/SCALE dedicati, disegno)
+/// non ne mostrano le maniglie.
+bool MyView::SelectionHandlesActive() const
+{
+    return tool == NOTOOL && HasActiveSelection();
+}
+
+/// @details Snapshot pre-gesto + buffer per la rotazione, identici a quelli che il tool
+/// ROTATE preparava inline: perno = SelectionPivotCurrent() (maniglia mobile), angolo
+/// iniziale di ogni stick in angle_buffer2, origine del master in origin_pos_buffer.
+void MyView::BeginSelectionRotate()
+{
+    StoreUndo();
+    StickFigure::start_stick_figure_rotation = true;
+    multi_center_buffer = SelectionPivotCurrent();
+    multi_pivot = multi_center_buffer;
+    for(StickFigure *S : SelectedFigures()){
+        if(S->master_stick && S->stick_list.count() > 0){
+            S->origin_pos_buffer = S->master_stick->my_line.p1();
+            for(StickData *s : S->stick_list){
+                if(s->view) s->view->angle_buffer2 = s->my_line.angle();
+            }
+        }
+    }
+}
+
+/// @details Come BeginSelectionRotate() ma per la scala: memorizza lunghezza/spessore di
+/// ogni stick (scale_buffer/width_buffer) e l'origine del master. La scala delle figure è
+/// UNIFORME (StickGraphicsItem::Scale prende un solo fattore), quindi anche le maniglie di
+/// spigolo scalano in modo uniforme come quelle d'angolo (ponytail: non-uniforme fuori scope,
+/// il modello di scala figure non lo supporta).
+void MyView::BeginSelectionScale()
+{
+    StoreUndo();
+    StickFigure::start_stick_figure_scale = true;
+    multi_center_buffer = SelectionPivotCurrent();
+    multi_pivot = multi_center_buffer;
+    for(StickFigure *S : SelectedFigures()){
+        if(S->master_stick && S->stick_list.count() > 0){
+            S->origin_pos_buffer = S->master_stick->my_line.p1();
+            for(StickData *s : S->stick_list){
+                if(s->view){
+                    s->view->scale_buffer = s->my_line.length();
+                    s->view->width_buffer = s->pen.width();
+                }
+            }
+        }
+    }
+}
+
+/// @details Corpo di rotazione, estratto dalla case ROTATE del mouseMove: singola figura e
+/// multi ruotano attorno alla maniglia (multi_center_buffer). Incrementale (starting_coord
+/// riazzerato a ogni chiamata); ogni stick ruota, poi il master orbita il perno fisso.
+void MyView::ApplySelectionRotate()
+{
+    if(!HasActiveSelection())
+        return;
+    QPointF center = multi_center_buffer;
+    float angle = QLineF(coord, center).angle() - QLineF(starting_coord, center).angle();
+    if(angle > 180) angle -= 360;
+    else if(angle < -180) angle += 360;
+    starting_coord = coord;
+    bool single = !MultiSelectionActive();
+    for(StickFigure *S : SelectedFigures()){
+        if(S->stick_list.count() > 0 && S->master_stick){
+            QLineF connect_center(center, S->master_stick->my_line.p1());
+            connect_center.setAngle(connect_center.angle() + angle);
+            for(StickData *s : S->stick_list){
+                if(s->view){
+                    s->view->Rotate(angle);
+                    s->view->angle_buffer2 += angle;
+                }
+            }
+            QLineF delta(S->origin_pos_buffer, connect_center.p2());
+            S->Traslate(delta.dx(), delta.dy());
+            S->origin_pos_buffer = S->master_stick->my_line.p1();
+            if(single)
+                S->pivot_offset = center - S->master_stick->my_line.p1();
+        }
+    }
+    if(single) UpdateSelectionDecorations(false);
+    else       UpdateMultiSelectionUI();
+    if(viewport()) viewport()->update(); // ridisegna le maniglie della box che seguono la selezione
+}
+
+/// @details Corpo di scala, estratto dalla case SCALE del mouseMove: fattore assoluto
+/// dist(coord)/dist(press) attorno alla maniglia (multi_center_buffer). Uniforme.
+void MyView::ApplySelectionScale()
+{
+    if(!HasActiveSelection())
+        return;
+    QPointF center = multi_center_buffer;
+    float start_dist = QLineF(starting_coord, center).length();
+    if(start_dist < 1)
+        return; // press esattamente sul perno: divisione per (quasi) zero
+    float scale_amount = QLineF(coord, center).length() / start_dist;
+    bool single = !MultiSelectionActive();
+    for(StickFigure *S : SelectedFigures()){
+        if(S->stick_list.count() > 0 && S->master_stick){
+            QLineF actual_dist_from_center(S->master_stick->my_line.p1(), center);
+            QLineF original_dist_from_center(S->origin_pos_buffer, center);
+            float dx = -original_dist_from_center.dx()*scale_amount + actual_dist_from_center.dx();
+            float dy = -original_dist_from_center.dy()*scale_amount + actual_dist_from_center.dy();
+            S->Traslate(dx, dy);
+            for(StickData *s : S->stick_list){
+                if(s->view) s->view->Scale(scale_amount);
+            }
+            if(single)
+                S->pivot_offset = center - S->master_stick->my_line.p1();
+        }
+    }
+    if(single) UpdateSelectionDecorations(false);
+    else       UpdateMultiSelectionUI();
+    if(viewport()) viewport()->update();
 }
 
 void MyView::SetMultiSelectionList(const QList<StickFigure*> &figures)
@@ -2431,6 +2782,9 @@ void MyView::ClearMultiSelection()
     multi_dragging = false;
     pivot_dragging = false;
     space_dragging = false;
+    sel_box_gesture = 0;
+    band_is_lasso = false;
+    band_poly.clear();
 }
 
 /**
@@ -2691,14 +3045,18 @@ void MyView::mouseReleaseEvent(QMouseEvent *event)
         poly_vertex_drag = false; // fine di un eventuale Ctrl-drag della selezione vertici
         multi_dragging = false;
         pivot_dragging = false;
+        sel_box_gesture = 0; // fine di un eventuale drag di una maniglia della transformation box
         if(band_dragging){
             band_dragging = false;
-            // il rettangolo sparisce sempre al rilascio del mouse (la selezione resta)
+            // il rubber band sparisce sempre al rilascio del mouse (la selezione resta)
             if(selection_band != nullptr){
                 scene()->removeItem(selection_band);
                 delete selection_band;
                 selection_band = nullptr;
             }
+            band_is_lasso = false;
+            band_poly.clear();
+            if(viewport()) viewport()->update(); // cancella il tracciato del lazo dal foreground
             if(!MultiSelectionActive())
                 ClearMultiSelection();
         }
@@ -2769,25 +3127,43 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         case CLAMP:
         case NOTOOL:
         {
-            if(is_pressed && band_dragging && selection_band != nullptr)
+            if(is_pressed && band_dragging)
             {
-                // estendi il rettangolo e seleziona ogni figura che tocca
-                QRectF band = QRectF(starting_coord, coord).normalized();
-                selection_band->setRect(band);
+                // rubber band di selezione: rettangolo o lazo secondo stickfig_lasso. Entrambi
+                // usano il modello "solo estremi" — una figura entra se un estremo di uno dei
+                // suoi stick cade nel rettangolo (intersects) o dentro il poligono del lazo.
                 QList<StickFigure*> touched;
-                for(StickFigure *S : my_animation->current_frame->stick_figures){
-                    for(StickData *s : S->stick_list){
-                        if(band.intersects(QRectF(s->my_line.p1(), s->my_line.p2()).normalized())){
-                            touched.append(S);
-                            break;
+                if(band_is_lasso){
+                    band_poly << coord;
+                    for(StickFigure *S : my_animation->current_frame->stick_figures){
+                        for(StickData *s : S->stick_list){
+                            if(band_poly.containsPoint(s->my_line.p1(), Qt::OddEvenFill) ||
+                               band_poly.containsPoint(s->my_line.p2(), Qt::OddEvenFill)){
+                                touched.append(S);
+                                break;
+                            }
                         }
                     }
+                    if(viewport()) viewport()->update(); // il lazo è disegnato in drawForeground
+                } else if(selection_band != nullptr){
+                    QRectF band = QRectF(starting_coord, coord).normalized();
+                    selection_band->setRect(band);
+                    for(StickFigure *S : my_animation->current_frame->stick_figures){
+                        for(StickData *s : S->stick_list){
+                            if(band.intersects(QRectF(s->my_line.p1(), s->my_line.p2()).normalized())){
+                                touched.append(S);
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    break;
                 }
                 multi_selection = touched;
                 if(MultiSelectionActive())
                     UpdateMultiSelectionUI(true); // la selezione cambia: perno al baricentro
                 else{
-                    // sotto le 2 figure la maniglia sparisce (il rettangolo resta attivo
+                    // sotto le 2 figure la maniglia sparisce (il rubber band resta attivo
                     // fino al rilascio) e le evidenziazioni del passaggio precedente cadono
                     for(StickFigure *S : my_animation->current_frame->stick_figures)
                         S->Highlight(S == my_animation->CurrentFrame()->CurrentStickFigure());
@@ -2795,6 +3171,8 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                 }
                 break;
             }
+            if(is_pressed && sel_box_gesture == 2){ ApplySelectionRotate(); break; } // pomello box
+            if(is_pressed && sel_box_gesture == 1){ ApplySelectionScale();  break; } // maniglia scala box
             if(space_dragging && HasActiveSelection())
             {
                 // Spazio tenuto premuto: la selezione segue il cursore, trascinata dai
@@ -3002,74 +3380,14 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         }
         case ROTATE:
         {
-            // singola figura e multi-selezione ruotano attorno alla MANIGLIA (multi_center_buffer),
-            // non attorno all'origine del master (bug 3). Ruota OGNI stick, stepchild inclusi
-            // (bug 1), poi trasla la figura così che il master orbiti il perno fisso.
-            if(is_pressed && HasActiveSelection()){
-                QPointF center = multi_center_buffer;
-                QLineF mouse_to_center_now(coord, center);
-                QLineF mouse_to_center_start(starting_coord, center);
-                float angle = mouse_to_center_now.angle() - mouse_to_center_start.angle();
-                if(angle > 180) angle -= 360;
-                else if(angle < -180) angle += 360;
-                starting_coord = coord;
-                bool single = !MultiSelectionActive();
-                for(StickFigure *S : SelectedFigures()){
-                    if(S->stick_list.count() > 0 && S->master_stick){
-                        QLineF connect_center(center, S->master_stick->my_line.p1());
-                        connect_center.setAngle(connect_center.angle() + angle);
-                        for(StickData *s : S->stick_list){
-                            if(s->view){
-                                s->view->Rotate(angle);
-                                s->view->angle_buffer2 += angle;
-                            }
-                        }
-                        QLineF delta(S->origin_pos_buffer, connect_center.p2());
-                        S->Traslate(delta.dx(), delta.dy());
-                        S->origin_pos_buffer = S->master_stick->my_line.p1();
-                        // il master ha orbitato: mantieni la maniglia sul perno fisso
-                        if(single)
-                            S->pivot_offset = center - S->master_stick->my_line.p1();
-                    }
-                }
-                if(single)
-                    UpdateSelectionDecorations(false); // la maniglia resta sul perno
-                else
-                    UpdateMultiSelectionUI();
-            }
+            if(is_pressed)
+                ApplySelectionRotate(); // stessa rotazione del pomello della transformation box
             break;
         }
         case(SCALE):
         {
-            // singola figura e multi-selezione scalano attorno alla MANIGLIA (bug 3),
-            // scalando OGNI stick, stepchild inclusi (bug 1)
-            if(is_pressed && HasActiveSelection()){
-                QPointF center = multi_center_buffer;
-                float start_dist = QLineF(starting_coord, center).length();
-                if(start_dist < 1)
-                    break; // click esattamente sul centro: divisione per (quasi) zero
-                float scale_amount = QLineF(coord, center).length() / start_dist;
-                bool single = !MultiSelectionActive();
-                for(StickFigure *S : SelectedFigures()){
-                    if(S->stick_list.count() > 0 && S->master_stick){
-                        QLineF actual_dist_from_center(S->master_stick->my_line.p1(), center);
-                        QLineF original_dist_from_center(S->origin_pos_buffer, center);
-                        float dx = -original_dist_from_center.dx()*scale_amount + actual_dist_from_center.dx();
-                        float dy = -original_dist_from_center.dy()*scale_amount + actual_dist_from_center.dy();
-                        S->Traslate(dx, dy);
-                        for(StickData *s : S->stick_list){
-                            if(s->view) s->view->Scale(scale_amount);
-                        }
-                        // il master si è spostato scalando: tieni la maniglia sul perno fisso
-                        if(single)
-                            S->pivot_offset = center - S->master_stick->my_line.p1();
-                    }
-                }
-                if(single)
-                    UpdateSelectionDecorations(false);
-                else
-                    UpdateMultiSelectionUI();
-            }
+            if(is_pressed)
+                ApplySelectionScale(); // stessa scala delle maniglie della transformation box
             break;
         }
         case(MOVESCENE):

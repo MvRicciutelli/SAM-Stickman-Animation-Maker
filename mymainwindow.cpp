@@ -9,6 +9,9 @@
 #include <animationoptions.h>
 #include <ffmpegexport.h>
 #include <QMessageBox>
+#include <QMenuBar>
+#include <QMenu>
+#include <QAction>
 #include "stkformat.h"
 extern QDir program_folder;
 extern qint32 W;
@@ -499,6 +502,14 @@ void MyMainWindow::on_actionExport_as_image_sequence_triggered()
  */
 void MyMainWindow::DoConnections(){
         QObject::connect(view, &MyView::AutoSaveTrigger,this, &MyMainWindow::AutoSave);
+        // menu "Selection": scelta rettangolo/lazo per il rubber band di selezione figure.
+        // Costruito in codice (come i pannelli vertici/IK) invece che nel .ui; scrive
+        // direttamente MyView::stickfig_lasso.
+        QMenu *selection_menu = menuBar()->addMenu(tr("Selection"));
+        QAction *lasso_action = selection_menu->addAction(tr("Lasso select figures"));
+        lasso_action->setCheckable(true);
+        lasso_action->setChecked(view->stickfig_lasso);
+        QObject::connect(lasso_action, &QAction::toggled, this, [this](bool on){ view->stickfig_lasso = on; });
 }
 /**
  * @details On close: first waits for any running export thread to finish (it is a child

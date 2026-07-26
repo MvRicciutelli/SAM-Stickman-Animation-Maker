@@ -859,7 +859,9 @@ void Widget::on_stickLayerView_currentItemChanged(QListWidgetItem *current, QLis
         QVariant  retrievedData = (current->data(Qt::UserRole));
         StickFigure* cs = qvariant_cast<StickFigure*>(retrievedData);
         view->my_animation->UpdateSelection(cs);
-
+        // sposta box/perno/maniglie sulla nuova figura: UpdateSelection cambia solo il modello,
+        // le decorazioni di selezione resterebbero sulla figura precedente (spec)
+        view->RefreshSelectionForCurrentLayer();
     }
 
 }
