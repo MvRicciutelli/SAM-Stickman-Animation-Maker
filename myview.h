@@ -152,11 +152,35 @@ public:
     QRectF draw_region;                     ///< scene rect the canvas covers (the enter-time visible viewport)
     // brush state — edited live by DrawModeWidget's controls (widget.cpp):
     bool draw_eraser = false;               ///< eraser sub-tool (composites DestinationOut)
-    bool draw_pressure = true;              ///< pressure modulation checkbox; inert in Phase 1 (mouse-only)
+    bool draw_pressure = true;              ///< pressure modulation checkbox (Phase 3); ignored on mouse input
+    double draw_pressure_val = 1.0;         ///< live pen pressure 0..1 from tabletEvent; 1.0 on mouse (reset each stroke)
     int draw_brush_size = 20;               ///< stamp diameter in scene units
     int draw_brush_opacity = 100;           ///< 0..100
     QColor draw_brush_color = Qt::black;     ///< brush tint
     QImage draw_brush_stamp;                ///< grayscale-alpha stamp mask (built-in soft round in Phase 1)
+
+    // ---- Pixel selection & free-transform (draw-mode only) ---------------------------
+    // Two selection sub-tools (rectangle, lasso) mark a set of canvas pixels; the selection
+    // is then wrapped in a move/scale/rotate gizmo. Entirely separate from stick/frame
+    // selection and alive only while draw_mode is: any exit, a switch to brush/eraser, or
+    // Ctrl+D discards it. Shift adds to / Alt subtracts from the current selection.
+    enum DrawTool { DT_BRUSH = 0, DT_ERASER, DT_SEL_RECT, DT_SEL_LASSO };
+    int draw_tool = DT_BRUSH;               ///< active draw-mode sub-tool
+    QRegion draw_selection;                 ///< selected pixels in canvas space (empty = no selection)
+    QRect   draw_sel_bounds;                ///< bbox of draw_selection at (re)definition, canvas px
+    // gizmo: transform about draw_sel_bounds.center(), applied to the selected pixels
+    QPointF draw_sel_t;                     ///< gizmo translation (canvas px)
+    double  draw_sel_r = 0;                 ///< gizmo rotation (degrees)
+    double  draw_sel_sx = 1, draw_sel_sy = 1; ///< gizmo scale (about box centre)
+    bool    draw_float_active = false;      ///< selected pixels lifted into draw_float and being transformed
+    QImage  draw_float;                     ///< lifted pixels, origin = draw_sel_bounds.topLeft()
+
+    /** @brief Switch the active draw-mode sub-tool; leaving a selection tool for brush/eraser
+     *  discards (committing) any pixel selection. */
+    void SetDrawTool(int t);
+    /** @brief Bake a floating (transformed) selection back into the canvas, then clear the
+     *  selection and gizmo. Safe when nothing is selected. */
+    void DiscardPixelSelection();
 
     /**
      * @brief Enters draw mode on a FREEHAND stick: bakes its current transform into a
@@ -515,6 +539,7 @@ protected:
     virtual void mouseReleaseEvent(QMouseEvent *event) override;
     virtual void mouseMoveEvent(QMouseEvent *event) override;
     virtual void mousePressEvent(QMouseEvent *event) override;
+    virtual void tabletEvent(QTabletEvent *event) override;
     virtual void mouseDoubleClickEvent(QMouseEvent *event) override;
     virtual void keyPressEvent(QKeyEvent *event) override;
     virtual void keyReleaseEvent(QKeyEvent *event) override;
@@ -766,6 +791,29 @@ private:
     void PushDrawUndo();
     /** @brief Builds a soft round grayscale-alpha stamp of the given diameter (built-in brush). */
     QImage MakeRoundBrush(int size) const;
+
+    // ---- Pixel-selection internals ---------------------------------------------------
+    int     draw_sel_gesture = 0; ///< 0 none, 1 new-rect, 2 new-lasso, 3 move, 4 scale, 5 rotate
+    int     draw_sel_handle = -1; ///< scale-handle index (0..7) during a scale gesture
+    int     draw_sel_op = 0;      ///< pending new-selection op: 0 replace, 1 add, 2 subtract
+    QPointF draw_sel_p0;          ///< gesture anchor, canvas px (rubber-band start / move-prev)
+    QPolygonF draw_lasso;         ///< lasso points, canvas px
+    QPointF draw_sel_t0;          ///< gizmo translation at gesture start
+    double  draw_sel_r0 = 0;      ///< gizmo rotation at gesture start
+    double  draw_sel_sx0 = 1, draw_sel_sy0 = 1; ///< gizmo scale at gesture start
+    double  draw_sel_ang0 = 0;    ///< pointer angle (deg) at rotate-gesture start
+
+    QPointF SceneToCanvas(const QPointF &scene) const; ///< scene coord -> raw canvas pixel
+    QPointF CanvasToScene(const QPointF &canvas) const; ///< raw canvas pixel -> scene coord
+    QTransform PixelGizmo() const;         ///< current gizmo transform (about bounds centre)
+    void GizmoHandles(QPointF out[9]) const; ///< 8 box handles + rotation handle, canvas px (post-gizmo)
+    int  HitPixelHandle(const QPointF &scene) const; ///< handle idx under a scene point, 8=rotate, -1 none
+    void LiftPixelFloat();                 ///< cut selected pixels out of the canvas into draw_float
+    void CommitPixelFloat();               ///< stamp draw_float (transformed) back, push a draw-undo step
+    void SetPixelSelection(const QRegion &r, int op); ///< replace/add/subtract, recompute bounds+reset gizmo
+    void DrawSelPress(const QPointF &scene, Qt::KeyboardModifiers mods);
+    void DrawSelMove(const QPointF &scene);
+    void DrawSelRelease(const QPointF &scene);
     /** @brief Tight bounding rect of the non-transparent pixels of an image (empty if none). */
     static QRect OpaqueBounds(const QImage &img);
 

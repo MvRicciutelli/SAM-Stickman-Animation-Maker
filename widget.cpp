@@ -29,13 +29,17 @@
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QPushButton>
+#include <QButtonGroup>
 #include <QPixmap>
+#include <QComboBox>
+#include <QSplitter>
 #include "advancedtab.h"
 #include "advancedlinewidget.h"
 #include "advancedcirclewidget.h"
 #include "advancedtaperwidget.h"
 #include "uiItems.h"
 #include "imageexport.h"
+#include "abrbrush.h"
 #define DEFAULTWIDTH 720
 #define DEFAULTHEIGHT 480
 #define DEFAULTFPS 24
@@ -71,6 +75,7 @@ QGraphicsRectItem *limit_rect;
 QPointF onion_offset;
 QDir program_folder;
 QDir lib_folder;
+QDir brush_folder; ///< cartella pennelli .abr, accanto a Libraries/myStickFigures (creata in CreatePaths)
 QDir temp_render_folder;
 QDir my_animations_folder;
 QDir my_stick_figures_folder;
@@ -332,26 +337,23 @@ Widget::Widget(QWidget *parent)
     {
         QVBoxLayout *col = new QVBoxLayout(advanced_draw_tab);
 
-        // pennello / gomma (mutuamente esclusivi)
+        // strumenti draw mode (mutuamente esclusivi): pennello, gomma, e i due strumenti di
+        // selezione pixel (rettangolo, lazo). Il QButtonGroup garantisce l'esclusività; ogni
+        // click instrada su MyView::SetDrawTool(), che scarta la selezione passando a pennello/gomma.
         QHBoxLayout *tool_row = new QHBoxLayout();
-        QPushButton *brush_btn = new QPushButton(tr("Brush"), advanced_draw_tab);
-        QPushButton *eraser_btn = new QPushButton(tr("Eraser"), advanced_draw_tab);
-        brush_btn->setCheckable(true);
-        eraser_btn->setCheckable(true);
-        brush_btn->setChecked(true);
-        tool_row->addWidget(brush_btn);
-        tool_row->addWidget(eraser_btn);
+        QButtonGroup *tool_group = new QButtonGroup(advanced_draw_tab);
+        struct { const char *label; int id; } draw_tools[] = {
+            { "Brush",  MyView::DT_BRUSH }, { "Eraser", MyView::DT_ERASER },
+            { "Select", MyView::DT_SEL_RECT }, { "Lasso", MyView::DT_SEL_LASSO } };
+        for(const auto &dt : draw_tools){
+            QPushButton *b = new QPushButton(tr(dt.label), advanced_draw_tab);
+            b->setCheckable(true);
+            if(dt.id == MyView::DT_BRUSH) b->setChecked(true);
+            tool_group->addButton(b, dt.id);
+            tool_row->addWidget(b);
+        }
         col->addLayout(tool_row);
-        connect(brush_btn, &QPushButton::clicked, this, [this, brush_btn, eraser_btn]{
-            brush_btn->setChecked(true);
-            eraser_btn->setChecked(false);
-            view->draw_eraser = false;
-        });
-        connect(eraser_btn, &QPushButton::clicked, this, [this, brush_btn, eraser_btn]{
-            eraser_btn->setChecked(true);
-            brush_btn->setChecked(false);
-            view->draw_eraser = true;
-        });
+        connect(tool_group, &QButtonGroup::idClicked, this, [this](int id){ view->SetDrawTool(id); });
 
         // dimensione
         QHBoxLayout *size_row = new QHBoxLayout();
@@ -391,15 +393,126 @@ Widget::Widget(QWidget *parent)
         col->addWidget(pressure_check);
         connect(pressure_check, &QCheckBox::toggled, this, [this](bool on){ view->draw_pressure = on; });
 
-        // lista pennelli: Phase 1 solo il tondo integrato; il caricamento .abr arriva in Phase 2
+        // cartella pennelli: la stessa registrata da CreatePaths(), accanto a Libraries/myStickFigures
+        QString brushes_path = brush_folder.path();
+
+        // selettore collezione: ogni file .abr è una "collezione" trattata come una
+        // sottocartella a sé (le sottocartelle reali compaiono come prefisso nel percorso
+        // relativo dell'etichetta). Cambiando voce si mostrano solo i suoi pennelli.
+        QHBoxLayout *folder_row = new QHBoxLayout();
+        folder_row->addWidget(new QLabel(tr("Collection"), advanced_draw_tab));
+        QComboBox *folder_combo = new QComboBox(advanced_draw_tab);
+        folder_combo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        folder_row->addWidget(folder_combo, 1);
+        col->addLayout(folder_row);
+
+        // griglia anteprime: icone in griglia che rifluisce al ridimensionamento.
+        // Ogni item porta il proprio stamp (QImage ARGB, alpha = copertura) nel UserRole,
+        // così la selezione è uniforme: draw_brush_stamp = item->data(UserRole).
         QListWidget *brush_list = new QListWidget(advanced_draw_tab);
         brush_list->setViewMode(QListView::IconMode);
-        brush_list->setIconSize(QSize(48, 48));
-        brush_list->setMaximumHeight(80);
-        QListWidgetItem *round = new QListWidgetItem(QIcon(QPixmap::fromImage(view->draw_brush_stamp)), tr("Round"));
-        brush_list->addItem(round);
-        brush_list->setCurrentItem(round);
-        col->addWidget(brush_list);
+        brush_list->setIconSize(QSize(64, 64));
+        brush_list->setGridSize(QSize(78, 86));
+        brush_list->setResizeMode(QListView::Adjust);
+        brush_list->setMovement(QListView::Static);
+        brush_list->setUniformItemSizes(true);
+        brush_list->setSpacing(4);
+        brush_list->setMinimumHeight(120);
+        connect(brush_list, &QListWidget::currentItemChanged, this,
+                [this](QListWidgetItem *cur, QListWidgetItem *){
+            if(!cur) return;
+            QImage stamp = cur->data(Qt::UserRole).value<QImage>();
+            if(!stamp.isNull())
+                view->draw_brush_stamp = stamp;
+        });
+
+        // mostra i pennelli di una collezione. collection vuota = pennello tondo integrato.
+        // round_stamp è catturato una volta (draw_brush_stamp cambia con la selezione).
+        QImage round_stamp = view->draw_brush_stamp;
+        auto populate = [this, brush_list, round_stamp](const QString &collection){
+            brush_list->clear();
+            if(collection.isEmpty()){
+                QListWidgetItem *round = new QListWidgetItem(QIcon(QPixmap::fromImage(round_stamp)), tr("Round"));
+                round->setData(Qt::UserRole, round_stamp);
+                brush_list->addItem(round);
+                brush_list->setCurrentItem(round);
+                return;
+            }
+            const QList<AbrBrush> brushes = LoadAbr(collection);
+            for(const AbrBrush &b : brushes){
+                QListWidgetItem *it = new QListWidgetItem(QIcon(QPixmap::fromImage(b.stamp)), b.name);
+                it->setData(Qt::UserRole, b.stamp);
+                brush_list->addItem(it);
+            }
+            if(brush_list->count())
+                brush_list->setCurrentRow(0);
+        };
+
+        // (ri)costruisce la combobox scandendo ricorsivamente i .abr sotto Brushes.
+        // Voce 0 = "Built-in" (tondo). Preserva la selezione corrente se ancora presente.
+        auto rescan = [this, folder_combo, brushes_path]{
+            const QString prev = folder_combo->currentData().toString();
+            folder_combo->blockSignals(true);
+            folder_combo->clear();
+            folder_combo->addItem(tr("Built-in"), QString());
+            QDir root(brushes_path);
+            QDirIterator it(brushes_path, QStringList() << "*.abr", QDir::Files,
+                            QDirIterator::Subdirectories);
+            QStringList files;
+            while(it.hasNext()){ it.next(); files << it.filePath(); }
+            files.sort(Qt::CaseInsensitive);
+            for(const QString &f : files)
+                folder_combo->addItem(root.relativeFilePath(f), f);
+            int idx = folder_combo->findData(prev);
+            folder_combo->setCurrentIndex(idx >= 0 ? idx : 0);
+            folder_combo->blockSignals(false);
+        };
+        connect(folder_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [populate, folder_combo](int){ populate(folder_combo->currentData().toString()); });
+        rescan();
+        populate(folder_combo->currentData().toString());
+
+        // import (.abr copiati in Brushes) + refresh, nel pannello inferiore dello splitter
+        QHBoxLayout *brush_btn_row = new QHBoxLayout();
+        QPushButton *import_btn = new QPushButton(tr("Import brush"), advanced_draw_tab);
+        QPushButton *refresh_btn = new QPushButton(tr("Refresh"), advanced_draw_tab);
+        brush_btn_row->addWidget(import_btn);
+        brush_btn_row->addWidget(refresh_btn);
+        connect(import_btn, &QPushButton::clicked, this,
+                [this, rescan, populate, folder_combo, brushes_path]{
+            const QStringList files = QFileDialog::getOpenFileNames(this, tr("Import brushes"),
+                                        QString(), tr("Photoshop brushes (*.abr)"));
+            QString last;
+            for(const QString &src : files){
+                QString dest = brushes_path + "/" + QFileInfo(src).fileName();
+                if(QFileInfo(src).absoluteFilePath() != QFileInfo(dest).absoluteFilePath()){
+                    QFile::remove(dest);      // sovrascrivi un omonimo esistente
+                    QFile::copy(src, dest);
+                }
+                last = dest;
+            }
+            rescan();
+            int idx = last.isEmpty() ? -1 : folder_combo->findData(last);
+            if(idx >= 0 && idx != folder_combo->currentIndex())
+                folder_combo->setCurrentIndex(idx);  // seleziona la collezione appena importata (fa populate)
+            else
+                populate(folder_combo->currentData().toString());
+        });
+        connect(refresh_btn, &QPushButton::clicked, this,
+                [rescan, populate, folder_combo]{ rescan(); populate(folder_combo->currentData().toString()); });
+
+        // griglia ridimensionabile: trascina la maniglia dello splitter per allargarla
+        QSplitter *brush_split = new QSplitter(Qt::Vertical, advanced_draw_tab);
+        brush_split->setChildrenCollapsible(false);
+        brush_split->addWidget(brush_list);
+        QWidget *brush_below = new QWidget(advanced_draw_tab);
+        QVBoxLayout *below_col = new QVBoxLayout(brush_below);
+        below_col->setContentsMargins(0, 0, 0, 0);
+        below_col->addLayout(brush_btn_row);
+        brush_split->addWidget(brush_below);
+        brush_split->setStretchFactor(0, 1);
+        brush_split->setStretchFactor(1, 0);
+        col->addWidget(brush_split, 1);
 
         // azioni: rientra in draw mode su un freehand esistente + undo/redo di sessione
         QHBoxLayout *action_row = new QHBoxLayout();
@@ -427,8 +540,7 @@ Widget::Widget(QWidget *parent)
         });
         connect(undo_btn, &QPushButton::clicked, this, [this]{ view->DrawStrokeUndo(); });
         connect(redo_btn, &QPushButton::clicked, this, [this]{ view->DrawStrokeRedo(); });
-
-        col->addStretch(1);
+        // niente addStretch finale: lo splitter con la griglia riempie lo spazio verticale
     }
 
     AddFrame();
@@ -618,6 +730,11 @@ void Widget::CreatePaths(){
     if(!lib_folder.exists()){
         qDebug("library folder created");
         lib_folder.mkpath(path+"/MarionettaPlus/Libraries");
+    }
+    brush_folder = QDir(path+"/MarionettaPlus/Brushes");
+    if(!brush_folder.exists()){
+        qDebug("brush folder created");
+        brush_folder.mkpath(path+"/MarionettaPlus/Brushes");
     }
     temp_render_folder = QDir(path+"/MarionettaPlus/temporaryRender");
     if(!temp_render_folder.exists()){

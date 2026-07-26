@@ -10,10 +10,12 @@
 #include <QTabWidget>
 #include <QTemporaryDir>
 #include <QtEndian>
+#include <QTemporaryFile>
 #include "myview.h"
 #include "uiItems.h"
 #include "framepresenter.h"
 #include "stkformat.h"
+#include "abrbrush.h"
 
 extern QGraphicsScene *scene;
 extern QGraphicsRectItem *my_rect;
@@ -380,6 +382,47 @@ private slots:
         QVERIFY(loaded.stick_img != nullptr);
         QCOMPARE(*loaded.stick_img, *drawing);           // il disegno sopravvive intatto
         QCOMPARE(loaded.stick_img->pixelColor(4, 3), QColor(10, 200, 30, 255));
+    }
+
+    // LoadAbr() decodes a Photoshop .abr v2 sampled brush into an ARGB stamp whose
+    // alpha is the coverage (255 - stored value). Builds a minimal 2x2 raw brush
+    // in memory — the crop/format math is the non-trivial part worth pinning.
+    void AbrSampledBrushParses()
+    {
+        QByteArray bytes;
+        {
+            QDataStream s(&bytes, QIODevice::WriteOnly);
+            s.setByteOrder(QDataStream::BigEndian);
+            s << (qint16)2 << (qint16)1;        // version 2, one brush
+            // --- one sampled brush block ---
+            s << (qint16)2;                     // type = sampled
+            s << (qint32)48;                    // block_size (bytes after this field)
+            s << (qint32)0;                     // misc
+            s << (qint16)25;                    // spacing
+            s << (qint32)3;                     // name: 3 UTF-16 units ("AB" + null)
+            s << (quint16)'A' << (quint16)'B' << (quint16)0;
+            s << (qint8)1;                      // antialiasing
+            for(int k = 0; k < 4; k++) s << (qint16)0;          // short_bounds (legacy)
+            s << (qint32)0 << (qint32)0 << (qint32)2 << (qint32)2; // bounds t,l,b,r -> 2x2
+            s << (qint16)8;                     // depth
+            s << (qint8)0;                      // compression = raw
+            const uchar px[4] = {0, 64, 128, 255};             // row-major grayscale
+            s.writeRawData(reinterpret_cast<const char*>(px), 4);
+        }
+
+        QTemporaryFile f;
+        QVERIFY(f.open());
+        f.write(bytes);
+        f.flush();
+
+        QList<AbrBrush> brushes = LoadAbr(f.fileName());
+        QCOMPARE(brushes.count(), 1);
+        QCOMPARE(brushes[0].name, QStringLiteral("AB"));
+        QCOMPARE(brushes[0].stamp.width(), 2);
+        QCOMPARE(brushes[0].stamp.height(), 2);
+        // coverage = value: 0->0 (none), 255->255 (full)
+        QCOMPARE(qAlpha(brushes[0].stamp.pixel(0, 0)), 0);
+        QCOMPARE(qAlpha(brushes[0].stamp.pixel(1, 1)), 255);
     }
 
     // POLYGON sticks persist their normalized-local vertex list after the shared img

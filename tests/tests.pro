@@ -16,6 +16,7 @@ DEFINES += TESTS_SOURCE_DIR=\\\"$$PWD\\\"
 SOURCES += \
     tst_characterization.cpp \
     test_globals.cpp \
+    ../abrbrush.cpp \
     ../StickFigure.cpp \
     ../advancedcirclewidget.cpp \
     ../advancedlinewidget.cpp \
@@ -32,6 +33,7 @@ SOURCES += \
     ../stkformat.cpp
 
 HEADERS += \
+    ../abrbrush.h \
     ../StickFigure.h \
     ../advancedcirclewidget.h \
     ../advancedlinewidget.h \

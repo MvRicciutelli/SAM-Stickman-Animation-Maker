@@ -14,6 +14,7 @@
 #include <animationoptions.h>
 #include <QMessageBox>
 #include <QShortcut>
+#include <QTabletEvent>
 #include "uiItems.h"
 #include "framepresenter.h"
 
@@ -328,10 +329,14 @@ void MyView::mousePressEvent(QMouseEvent *event)
     // ignorati (pan/zoom disabilitati durante il disegno)
     if(draw_mode){
         if(event->button()==Qt::LeftButton){
-            draw_stroking = true;
-            draw_last_pos = coord;
-            PaintStrokeSegment(coord, coord); // dab iniziale (click singolo = un punto)
-            // lo snapshot per l'undo si prende al RILASCIO, quando la pennellata è completa
+            if(draw_tool == DT_SEL_RECT || draw_tool == DT_SEL_LASSO){
+                DrawSelPress(coord, event->modifiers());
+            } else {
+                draw_stroking = true;
+                draw_last_pos = coord;
+                PaintStrokeSegment(coord, coord); // dab iniziale (click singolo = un punto)
+                // lo snapshot per l'undo si prende al RILASCIO, quando la pennellata è completa
+            }
         }
         return;
     }
@@ -809,6 +814,10 @@ void MyView::keyPressEvent(QKeyEvent *event)
     // draw mode: Esc/Enter escono dalla sessione. Ctrl+Z/Y sono gestiti dai QShortcut del
     // costruttore (che consumano il tasto prima di qui) e pilotano l'undo locale di sessione
     if(draw_mode){
+        if((event->modifiers() & Qt::ControlModifier) && event->key()==Qt::Key_D){
+            DiscardPixelSelection(); // scarta la selezione pixel (spec)
+            return;
+        }
         if(event->key()==Qt::Key_Escape || event->key()==Qt::Key_Return || event->key()==Qt::Key_Enter)
             ExitDrawMode();
         return;
@@ -977,6 +986,22 @@ void MyView::keyReleaseEvent(QKeyEvent *event)
         UpdateSelectionDecorations();
     }
     QGraphicsView::keyReleaseEvent(event);
+}
+
+/**
+ * @details Phase 3 pen pressure. During a draw session a stylus generates QTabletEvent
+ * *and* (because we don't accept it) a synthesized QMouseEvent that follows and does the
+ * actual painting — so this override's only job is to latch the pen's current pressure into
+ * draw_pressure_val, which StampBrush()/PaintStrokeSegment() read a moment later. Outside
+ * draw mode we ignore the tablet entirely and let the synthesized mouse path run as before.
+ * A mouse (no tablet events) never touches draw_pressure_val, which the stroke reset keeps
+ * at 1.0, so mouse input stays full-pressure.
+ */
+void MyView::tabletEvent(QTabletEvent *event)
+{
+    if(draw_mode)
+        draw_pressure_val = qBound(0.0, event->pressure(), 1.0);
+    event->ignore(); // non accettato di proposito: Qt sintetizza il QMouseEvent che disegna
 }
 
 /**
@@ -1192,7 +1217,9 @@ void MyView::StampBrush(const QPointF &canvas_px)
 {
     if(!draw_canvas)
         return;
-    int s = qMax(1, draw_brush_size);
+    // Phase 3: pen pressure scales both diameter and opacity; mouse input keeps pressure 1.0
+    double pressure = draw_pressure ? draw_pressure_val : 1.0;
+    int s = qMax(1, int(draw_brush_size * pressure + 0.5));
     QImage stamp = draw_brush_stamp.scaled(s, s, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
     QImage dab(s, s, QImage::Format_ARGB32_Premultiplied);
     dab.fill(Qt::transparent);
@@ -1203,7 +1230,7 @@ void MyView::StampBrush(const QPointF &canvas_px)
     dp.end();
 
     QPainter p(draw_canvas);
-    p.setOpacity(qBound(0, draw_brush_opacity, 100) / 100.0);
+    p.setOpacity(qBound(0.0, draw_brush_opacity * pressure / 100.0, 1.0));
     if(draw_eraser)
         p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
     p.drawImage(QPointF(canvas_px.x() - s/2.0, canvas_px.y() - s/2.0), dab);
@@ -1223,7 +1250,8 @@ void MyView::PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_sce
     QPointF a = draw_disp_inv.map(from_scene) + half;
     QPointF b = draw_disp_inv.map(to_scene)   + half;
     double dist = QLineF(a, b).length();
-    double spacing = qMax(1.0, draw_brush_size * 0.25);
+    double pressure = draw_pressure ? draw_pressure_val : 1.0;
+    double spacing = qMax(1.0, draw_brush_size * pressure * 0.25); // spacing tracks pressured size so light strokes stay continuous
     int steps = int(dist / spacing);
     for(int i = 0; i <= steps; i++){
         double t = steps ? double(i) / steps : 0.0;
@@ -1276,13 +1304,13 @@ void MyView::DrawStrokeRedo()
 /// drive the global frame undo_stack. Routing both triggers here keeps them consistent.
 void MyView::Undo()
 {
-    if(draw_mode) DrawStrokeUndo();
+    if(draw_mode){ CommitPixelFloat(); DrawStrokeUndo(); } // fondi un'eventuale trasformazione in corso
     else          undo_stack.undo();
 }
 
 void MyView::Redo()
 {
-    if(draw_mode) DrawStrokeRedo();
+    if(draw_mode){ CommitPixelFloat(); DrawStrokeRedo(); }
     else          undo_stack.redo();
 }
 
@@ -1399,6 +1427,10 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
     PushDrawUndo(); // stato iniziale della sessione
     draw_stroking = false;
     draw_eraser = false; // pennello selezionato all'ingresso (spec)
+    draw_tool = DT_BRUSH;
+    draw_selection = QRegion(); draw_sel_bounds = QRect(); // nessuna selezione pixel all'ingresso
+    draw_float_active = false; draw_float = QImage(); draw_sel_gesture = 0;
+    draw_sel_t = QPointF(); draw_sel_r = 0; draw_sel_sx = draw_sel_sy = 1;
     draw_mode = true;
     // mostra subito il pannello draw mode e rendilo il tab attivo (spec)
     my_animation->UpdateTab(StickData::FREEHAND);
@@ -1420,6 +1452,7 @@ void MyView::ExitDrawMode()
 {
     if(!draw_mode)
         return;
+    DiscardPixelSelection(); // una selezione flottante viene fusa nel canvas prima del ritaglio
     StickData *stick = draw_target;
     QImage *canvas = draw_canvas;
     // azzera lo stato PRIMA di qualunque callback, così una SetTool/ExitDrawMode rientrante
@@ -1476,6 +1509,267 @@ void MyView::ExitDrawMode()
     }
     my_animation->current_frame->UpdateIcon();
     my_animation->UpdateSelection(stick);
+}
+
+// ===== Pixel selection & free-transform (draw mode) ==================================
+
+/// @details scene <-> canvas-pixel mapping, the inverse pair used by the paint path.
+/// draw_disp maps a canvas pixel measured from the canvas centre into the scene.
+QPointF MyView::SceneToCanvas(const QPointF &scene) const
+{
+    if(!draw_canvas) return scene;
+    QPointF half(draw_canvas->width()/2.0, draw_canvas->height()/2.0);
+    return draw_disp_inv.map(scene) + half;
+}
+QPointF MyView::CanvasToScene(const QPointF &canvas) const
+{
+    if(!draw_canvas) return canvas;
+    QPointF half(draw_canvas->width()/2.0, draw_canvas->height()/2.0);
+    return draw_disp.map(canvas - half);
+}
+
+/// @details The gizmo: translate+rotate+scale about the (base) selection-box centre, so
+/// the handles and the lifted pixels share one transform. Identity when t/r=0 and s=1.
+QTransform MyView::PixelGizmo() const
+{
+    QPointF c = QRectF(draw_sel_bounds).center();
+    QTransform g;
+    g.translate(c.x() + draw_sel_t.x(), c.y() + draw_sel_t.y());
+    g.rotate(draw_sel_r);
+    g.scale(draw_sel_sx, draw_sel_sy);
+    g.translate(-c.x(), -c.y());
+    return g;
+}
+
+/// @details Handle positions (canvas px, gizmo applied): 0..3 corners TL,TR,BR,BL;
+/// 4..7 edge mids top,right,bottom,left; 8 = rotation knob above the top edge.
+void MyView::GizmoHandles(QPointF out[9]) const
+{
+    QRectF r(draw_sel_bounds);
+    QPointF base[9] = {
+        r.topLeft(), r.topRight(), r.bottomRight(), r.bottomLeft(),
+        (r.topLeft()+r.topRight())/2.0, (r.topRight()+r.bottomRight())/2.0,
+        (r.bottomRight()+r.bottomLeft())/2.0, (r.bottomLeft()+r.topLeft())/2.0,
+        QPointF(r.center().x(), r.top() - 24.0) // 24 canvas px above top-mid (scales with gizmo)
+    };
+    QTransform g = PixelGizmo();
+    for(int i = 0; i < 9; i++)
+        out[i] = g.map(base[i]);
+}
+
+int MyView::HitPixelHandle(const QPointF &scene) const
+{
+    if(draw_selection.isEmpty())
+        return -1;
+    QPointF handles[9];
+    GizmoHandles(handles);
+    float radius = const_cast<MyView*>(this)->PolyPickRadius(); // schermo-costante, come le altre maniglie
+    for(int i = 0; i < 9; i++){
+        if(QLineF(scene, CanvasToScene(handles[i])).length() <= radius)
+            return i;
+    }
+    return -1;
+}
+
+/// @details Cut the selected pixels out of the canvas into draw_float (origin =
+/// bounds.topLeft()), leaving a transparent hole — the standard "float on first transform"
+/// so a move/scale/rotate drags real pixels and reveals what was underneath.
+void MyView::LiftPixelFloat()
+{
+    if(!draw_canvas || draw_selection.isEmpty() || draw_float_active)
+        return;
+    QRect b = draw_sel_bounds;
+    QRegion local = draw_selection.translated(-b.topLeft());
+    QImage mask(b.size(), QImage::Format_ARGB32_Premultiplied);
+    mask.fill(Qt::transparent);
+    { QPainter mp(&mask); mp.setClipRegion(local); mp.fillRect(mask.rect(), Qt::black); }
+
+    draw_float = draw_canvas->copy(b);
+    { QPainter fp(&draw_float);
+      fp.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+      fp.drawImage(0, 0, mask); }                       // tieni solo i pixel dentro la regione
+
+    { QPainter cp(draw_canvas);                          // buca il canvas dove erano
+      cp.setCompositionMode(QPainter::CompositionMode_DestinationOut);
+      cp.drawImage(b.topLeft(), mask); }
+    draw_float_active = true;
+}
+
+/// @details Bake the transformed float back into the canvas and record one draw-undo step.
+/// No-op (and no undo push) when nothing is floating.
+void MyView::CommitPixelFloat()
+{
+    if(!draw_canvas || !draw_float_active)
+        return;
+    QTransform m = QTransform::fromTranslate(draw_sel_bounds.left(), draw_sel_bounds.top())
+                 * PixelGizmo();                         // float-pixel -> canvas-pixel
+    QPainter cp(draw_canvas);
+    cp.setRenderHint(QPainter::SmoothPixmapTransform);
+    cp.setTransform(m);
+    cp.drawImage(0, 0, draw_float);
+    cp.end();
+    draw_float_active = false;
+    draw_float = QImage();
+    PushDrawUndo();                                      // la trasformazione è un passo di undo locale
+}
+
+/// @details Commit any float, then forget the selection and reset the gizmo. Reached from a
+/// tool switch to brush/eraser, Ctrl+D and draw-mode exit.
+void MyView::DiscardPixelSelection()
+{
+    CommitPixelFloat();
+    draw_selection = QRegion();
+    draw_sel_bounds = QRect();
+    draw_sel_t = QPointF(); draw_sel_r = 0; draw_sel_sx = draw_sel_sy = 1;
+    draw_sel_gesture = 0;
+    draw_lasso.clear();
+    if(draw_target && draw_target->view){
+        draw_target->view->update();
+        if(viewport()) viewport()->update();
+    }
+}
+
+/// @details Apply a freshly-drawn region with the current op (replace/add/subtract), then
+/// recompute the gizmo box and reset the transform. Committing any prior float first keeps
+/// the invariant "at most one of {plain mask, floating transform}".
+void MyView::SetPixelSelection(const QRegion &r, int op)
+{
+    CommitPixelFloat();
+    if(op == 1)      draw_selection = draw_selection.united(r);
+    else if(op == 2) draw_selection = draw_selection.subtracted(r);
+    else             draw_selection = r;
+    // clampa alla tela: nulla si seleziona fuori dai pixel esistenti
+    if(draw_canvas)
+        draw_selection = draw_selection.intersected(draw_canvas->rect());
+    draw_sel_bounds = draw_selection.boundingRect();
+    draw_sel_t = QPointF(); draw_sel_r = 0; draw_sel_sx = draw_sel_sy = 1;
+}
+
+/// @details Switch draw sub-tool. Choosing a non-selection tool (brush/eraser) discards the
+/// pixel selection (spec); switching between the two selection tools keeps it so add/subtract
+/// can continue. draw_eraser stays in sync for the paint path.
+void MyView::SetDrawTool(int t)
+{
+    if((t == DT_BRUSH || t == DT_ERASER) && draw_tool != t)
+        DiscardPixelSelection();
+    draw_tool = t;
+    draw_eraser = (t == DT_ERASER);
+    if(viewport())
+        viewport()->setCursor((t == DT_SEL_RECT || t == DT_SEL_LASSO) ? Qt::CrossCursor
+                                                                      : Qt::ArrowCursor);
+}
+
+/// @details Selection-tool mouse press. With Shift/Alt held, or with no existing selection,
+/// this starts a new region gesture (rect rubber-band or lasso). Otherwise a click on a
+/// handle starts scale/rotate and a click inside the box starts a move (both lift the pixels
+/// on first drag); a click outside starts a fresh replace-selection.
+void MyView::DrawSelPress(const QPointF &scene, Qt::KeyboardModifiers mods)
+{
+    draw_sel_op = (mods & Qt::ShiftModifier) ? 1 : (mods & Qt::AltModifier) ? 2 : 0;
+    bool forced_new = (draw_sel_op != 0);
+
+    if(!forced_new && !draw_selection.isEmpty()){
+        int h = HitPixelHandle(scene);
+        if(h == 8){                                     // knob di rotazione
+            LiftPixelFloat();
+            draw_sel_gesture = 5;
+            draw_sel_r0 = draw_sel_r;
+            QPointF c = CanvasToScene(PixelGizmo().map(QRectF(draw_sel_bounds).center()));
+            draw_sel_ang0 = QLineF(c, scene).angle();
+            return;
+        }
+        if(h >= 0){                                     // maniglia di scala
+            LiftPixelFloat();
+            draw_sel_gesture = 4;
+            draw_sel_handle = h;
+            draw_sel_sx0 = draw_sel_sx; draw_sel_sy0 = draw_sel_sy;
+            return;
+        }
+        // dentro il box (post-gizmo) = spostamento
+        QPointF cp = SceneToCanvas(scene);
+        if(PixelGizmo().map(QRectF(draw_sel_bounds)).containsPoint(cp, Qt::OddEvenFill)){
+            LiftPixelFloat();
+            draw_sel_gesture = 3;
+            draw_sel_t0 = draw_sel_t;
+            draw_sel_p0 = cp;                           // ancora in canvas px
+            return;
+        }
+    }
+
+    // nuova selezione (replace, oppure add/subtract con Shift/Alt)
+    QPointF cp = SceneToCanvas(scene);
+    if(draw_tool == DT_SEL_LASSO){
+        draw_sel_gesture = 2;
+        draw_lasso.clear();
+        draw_lasso << cp;
+    } else {
+        draw_sel_gesture = 1;
+        draw_sel_p0 = cp;
+        draw_lasso.clear();
+        draw_lasso << cp << cp;                         // p0 e p1 vivi per l'anteprima del rettangolo
+    }
+}
+
+void MyView::DrawSelMove(const QPointF &scene)
+{
+    QPointF cp = SceneToCanvas(scene);
+    switch(draw_sel_gesture){
+    case 1: draw_lasso.clear(); draw_lasso << draw_sel_p0 << cp; break; // rettangolo: 2 vertici vivi
+    case 2: draw_lasso << cp; break;                                    // lazo: accumula i punti
+    case 3: // move
+        draw_sel_t = draw_sel_t0 + (cp - draw_sel_p0);
+        break;
+    case 4: { // scale about box centre (corners: entrambe le assi; spigoli: una)
+        QPointF c = QRectF(draw_sel_bounds).center();
+        // porta il puntatore nel frame ruotato-ma-non-scalato (rigido), così la scala è per-asse
+        QTransform rigid; rigid.translate(c.x()+draw_sel_t.x(), c.y()+draw_sel_t.y());
+        rigid.rotate(draw_sel_r); rigid.translate(-c.x(), -c.y());
+        QPointF u = rigid.inverted().map(cp);           // u - c = scale * (base - c)
+        QRectF r(draw_sel_bounds);
+        QPointF base[8] = { r.topLeft(), r.topRight(), r.bottomRight(), r.bottomLeft(),
+            (r.topLeft()+r.topRight())/2.0, (r.topRight()+r.bottomRight())/2.0,
+            (r.bottomRight()+r.bottomLeft())/2.0, (r.bottomLeft()+r.topLeft())/2.0 };
+        QPointF h = base[draw_sel_handle];
+        bool horiz = (draw_sel_handle != 4 && draw_sel_handle != 6); // top/bottom mid = solo Y
+        bool vert  = (draw_sel_handle != 5 && draw_sel_handle != 7); // left/right mid = solo X
+        if(horiz && qAbs(h.x() - c.x()) > 1e-3) draw_sel_sx = (u.x() - c.x()) / (h.x() - c.x());
+        if(vert  && qAbs(h.y() - c.y()) > 1e-3) draw_sel_sy = (u.y() - c.y()) / (h.y() - c.y());
+        break;
+    }
+    case 5: { // rotate about box centre
+        QPointF c = CanvasToScene(PixelGizmo().map(QRectF(draw_sel_bounds).center()));
+        double a = QLineF(c, scene).angle();
+        draw_sel_r = draw_sel_r0 - (a - draw_sel_ang0); // QLineF::angle cresce in senso antiorario
+        break;
+    }
+    default: return;
+    }
+    if(draw_target && draw_target->view){
+        draw_target->view->update();
+        if(viewport()) viewport()->update();
+    }
+}
+
+void MyView::DrawSelRelease(const QPointF &scene)
+{
+    QPointF cp = SceneToCanvas(scene);
+    if(draw_sel_gesture == 1){                          // rettangolo
+        QRect rc = QRectF(draw_sel_p0, cp).normalized().toRect().intersected(draw_canvas->rect());
+        if(rc.width() > 0 && rc.height() > 0)
+            SetPixelSelection(QRegion(rc), draw_sel_op);
+    } else if(draw_sel_gesture == 2){                   // lazo
+        draw_lasso << cp;
+        if(draw_lasso.size() >= 3)
+            SetPixelSelection(QRegion(draw_lasso.toPolygon()), draw_sel_op);
+        draw_lasso.clear();
+    }
+    // gesture 3/4/5 (move/scale/rotate): lo stato gizmo è già aggiornato; il float resta
+    // attivo finché non lo si fonde (Ctrl+D, cambio tool, uscita)
+    draw_sel_gesture = 0;
+    if(draw_target && draw_target->view){
+        draw_target->view->update();
+        if(viewport()) viewport()->update();
+    }
 }
 
 /// @details Shared predicate: the two stick types whose vertices the polygon/multiline
@@ -1689,6 +1983,65 @@ void MyView::drawForeground(QPainter *painter, const QRectF &rect)
         }
     }
     painter->restore();
+
+    // --- selezione pixel del draw mode: pixel flottanti + marquee + gizmo -------------
+    if(draw_mode && draw_canvas &&
+       (!draw_selection.isEmpty() || draw_sel_gesture == 1 || draw_sel_gesture == 2)){
+        painter->save();
+        QPointF half(draw_canvas->width()/2.0, draw_canvas->height()/2.0);
+        QTransform pix_to_scene = QTransform::fromTranslate(-half.x(), -half.y()) * draw_disp;
+
+        // 1) pixel flottanti trasformati (mostrano ciò che il gizmo sta muovendo)
+        if(draw_float_active && !draw_float.isNull()){
+            painter->save();
+            QTransform m = QTransform::fromTranslate(draw_sel_bounds.left(), draw_sel_bounds.top())
+                         * PixelGizmo() * pix_to_scene;
+            painter->setTransform(m, true);
+            painter->setRenderHint(QPainter::SmoothPixmapTransform);
+            painter->drawImage(0, 0, draw_float);
+            painter->restore();
+        }
+
+        // 2) anteprima gesture in corso (rettangolo o lazo)
+        QPen live(QColor(0, 120, 255), 1, Qt::DashLine); live.setCosmetic(true);
+        painter->setPen(live); painter->setBrush(Qt::NoBrush);
+        if(draw_sel_gesture == 1 && draw_lasso.size() == 2){
+            painter->drawRect(QRectF(CanvasToScene(draw_lasso[0]), CanvasToScene(draw_lasso[1])));
+        } else if(draw_sel_gesture == 2 && draw_lasso.size() >= 2){
+            QPolygonF poly;
+            for(const QPointF &p : draw_lasso) poly << CanvasToScene(p);
+            painter->drawPolyline(poly);
+        }
+
+        // 3) marquee della selezione (tratteggio bianco+nero per leggibilità su ogni sfondo)
+        if(!draw_selection.isEmpty()){
+            // addRegion() aggiunge OGNI rettangolo di scanline della regione come sottopercorso:
+            // per un lazo sono molte strisce e i loro bordi interni sembrano uno "scarabocchio".
+            // simplified() li fonde nel solo contorno esterno (un rettangolo resta invariato).
+            QPainterPath ants; ants.addRegion(draw_selection);
+            ants = ants.simplified();
+            ants = pix_to_scene.map(ants);
+            QPen white(Qt::white, 1); white.setCosmetic(true);
+            painter->setPen(white); painter->drawPath(ants);
+            QPen black(Qt::black, 1, Qt::DashLine); black.setCosmetic(true);
+            painter->setPen(black); painter->drawPath(ants);
+
+            // 4) box del gizmo + maniglie (8 quadretti + pomello di rotazione)
+            QPointF h[9]; GizmoHandles(h);
+            QPointF hs[9]; for(int i = 0; i < 9; i++) hs[i] = CanvasToScene(h[i]);
+            QPen box(QColor(0, 120, 255), 1); box.setCosmetic(true);
+            painter->setPen(box); painter->setBrush(Qt::NoBrush);
+            QPolygonF frame; frame << hs[0] << hs[1] << hs[2] << hs[3];
+            painter->drawPolygon(frame);
+            painter->drawLine(hs[4], hs[8]);            // stelo del pomello di rotazione
+            double hz = PolyPickRadius() * 0.6;         // mezza dimensione maniglia (schermo-costante)
+            painter->setBrush(Qt::white);
+            for(int i = 0; i < 8; i++)
+                painter->drawRect(QRectF(hs[i].x()-hz, hs[i].y()-hz, 2*hz, 2*hz));
+            painter->drawEllipse(hs[8], hz, hz);        // pomello di rotazione
+        }
+        painter->restore();
+    }
 }
 
 void MyView::ClearIkPreviewItems()
@@ -2320,9 +2673,13 @@ void MyView::mouseReleaseEvent(QMouseEvent *event)
 {
     // draw mode: chiude la pennellata corrente, niente della logica di selezione/tool sotto
     if(draw_mode){
-        if(event->button()==Qt::LeftButton && draw_stroking){
+        if(event->button()==Qt::LeftButton && (draw_tool==DT_SEL_RECT || draw_tool==DT_SEL_LASSO)){
+            if(draw_sel_gesture)
+                DrawSelRelease(coord);
+        } else if(event->button()==Qt::LeftButton && draw_stroking){
             is_pressed = false;
             draw_stroking = false;
+            draw_pressure_val = 1.0; // reset: la prossima pennellata col mouse (senza tabletEvent) resta a piena pressione
             PushDrawUndo(); // ogni pennellata/gommata COMPLETATA = un passo di undo/redo locale
         }
         QGraphicsView::mouseReleaseEvent(event);
@@ -2398,7 +2755,10 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
     MapMyCoords(coord, event->pos());
     // draw mode: trascinamento col sinistro premuto = pennellata continua (interpolata)
     if(draw_mode){
-        if(draw_stroking && (event->buttons() & Qt::LeftButton)){
+        if(draw_tool == DT_SEL_RECT || draw_tool == DT_SEL_LASSO){
+            if(draw_sel_gesture && (event->buttons() & Qt::LeftButton))
+                DrawSelMove(coord);
+        } else if(draw_stroking && (event->buttons() & Qt::LeftButton)){
             PaintStrokeSegment(draw_last_pos, coord);
             draw_last_pos = coord;
         }

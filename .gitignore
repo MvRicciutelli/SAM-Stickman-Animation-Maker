@@ -1,1 +1,11 @@
 .tokensave
+*.o
+*.moc
+*Makefile
+*.Debug
+*.txt
+*.stash
+*.log
+*.Release
+*.exe
+release/qrc_myres.cpp

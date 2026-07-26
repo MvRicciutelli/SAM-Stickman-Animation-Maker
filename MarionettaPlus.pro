@@ -17,6 +17,7 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 SOURCES += \
     StickFigure.cpp \
+    abrbrush.cpp \
     advancedcirclewidget.cpp \
     advancedlinewidget.cpp \
     advancedtab.cpp \
@@ -41,6 +42,7 @@ SOURCES += \
 
 HEADERS += \
     StickFigure.h \
+    abrbrush.h \
     advancedcirclewidget.h \
     advancedlinewidget.h \
     advancedtab.h \
