@@ -65,6 +65,7 @@ QCheckBox *hard_bottom_check = nullptr;
 AdvancedTab *advanced_rect_tab = nullptr;
 QTabWidget *my_tab_widget = nullptr;
 QWidget *advanced_img_tab = nullptr;
+QWidget *advanced_draw_tab = nullptr;    // il tab draw mode non è esercitato dai test (UpdateTab non è chiamata con FREEHAND)
 QWidget *advanced_vertex_tab = nullptr;
 QWidget *advanced_ik_tab = nullptr;      // il tab IK non è esercitato dai test (UpdateSliders lo salta se null)
 QCheckBox *ik_active_check = nullptr;

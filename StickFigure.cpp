@@ -185,7 +185,7 @@ void StickFigure::PreviewDrawing(QPointF *point)
     SetLineFromPoint(point);
     if(stick_buffer->view)
         stick_buffer->view->Refresh(1);
-    if(stick_buffer->stick_type == StickData::IMAGE ||
+    if(stick_buffer->IsImageType() ||
             stick_buffer->stick_type == StickData::RECT||
             (stick_buffer->stick_type == StickData::TRAPEZOID)||
             (stick_buffer->stick_type == StickData::CIRCLE)||
@@ -258,7 +258,7 @@ void StickFigure::EndDrawing(QPointF *point)
         }
         parent_buffer = parent_buffer->parent;
     }
-    if(stick_buffer->stick_type == StickData::IMAGE && stick_buffer->view){
+    if(stick_buffer->IsImageType() && stick_buffer->view && stick_buffer->stick_img){
         stick_buffer->view->img_rect = CalcImgRect(stick_buffer->my_line,stick_buffer->stick_img->size());
     }
     scene->clearSelection();
@@ -1345,7 +1345,7 @@ void StickFigure::Elongate(QPointF new_end_point, StickData* my_stick){
 
         }
     }
-    if(my_stick->stick_type == StickData::IMAGE || my_stick->stick_type  == StickData::RECT
+    if(my_stick->IsImageType() || my_stick->stick_type  == StickData::RECT
             || my_stick->stick_type  == StickData::TRAPEZOID || my_stick->stick_type  == StickData::TAPER){
         my_stick->img_angle= -atan2(my_stick->my_line.dx(),my_stick->my_line.dy())*180/M_PI;
     }
@@ -1734,7 +1734,7 @@ void SolveIkChain(StickData *chain_start, const QPointF &desired_target_pos)
         // img_angle direttamente per i tipi che lo usano, MAI tramite Rotate()/
         // Manipulate() — quelle cascatano sui figli con regole incompatibili col
         // posizionamento esplicito che questo solve sta già facendo
-        if(chain[i]->stick_type == StickData::IMAGE || chain[i]->stick_type == StickData::RECT
+        if(chain[i]->IsImageType() || chain[i]->stick_type == StickData::RECT
                 || chain[i]->stick_type == StickData::TRAPEZOID || chain[i]->stick_type == StickData::TAPER
                 || chain[i]->stick_type == StickData::CIRCLE || chain[i]->stick_type == StickData::POLYGON
                 || chain[i]->stick_type == StickData::MULTILINE){

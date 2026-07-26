@@ -39,6 +39,9 @@
                         ///< the path until Enter/double click (finalize) or Esc (cancel = the
                         ///< stick is deleted); on an existing multi-line it inserts a vertex at
                         ///< the middle of the nearest segment, drag adjusts, Alt+click deletes
+#define DRAWFREEHAND 24 ///< draw an invisible 2-click stick, then enter draw mode to paint a
+                        ///< raster image on it (StickData::FREEHAND); id == the stick type,
+                        ///< same tool-id==type convention DRAWIMG/IMAGE use
 #define DRAW_IK 23      ///< creates/edits inverse-kinematics chains (StickData::IK_START/
                         ///< IK_NODE/IK_TARGET_ON/IK_TARGET_OFF): first click on an eligible
                         ///< stick's start handle begins a chain, second click on a
@@ -138,6 +141,53 @@ public:
     QPen    my_pen;   ///< current pen pushed onto newly drawn sticks and applied by SetGraphics()
     QBrush  my_brush; ///< current brush, same role as my_pen; both edited from widget.cpp's panels
     StickFigureData* copy_stick_figure_buffer = nullptr; ///< owned copy-paste buffer (pure data since Phase 2b)
+
+    // ---- Freehand draw mode (myview.cpp) ---------------------------------------------
+    // A FREEHAND stick is an IMAGE-like raster stick painted interactively. Draw mode is
+    // a modal state (independent of `tool`): while active, every mouse/key event is
+    // intercepted here and the tool switch is bypassed. See EnterDrawMode()/ExitDrawMode().
+    bool draw_mode = false;                 ///< true between EnterDrawMode() and ExitDrawMode()
+    StickData *draw_target = nullptr;       ///< the FREEHAND stick being painted (nullptr outside draw mode)
+    QImage *draw_canvas = nullptr;          ///< == draw_target->stick_img during the session; painted in place (live)
+    QRectF draw_region;                     ///< scene rect the canvas covers (the enter-time visible viewport)
+    // brush state — edited live by DrawModeWidget's controls (widget.cpp):
+    bool draw_eraser = false;               ///< eraser sub-tool (composites DestinationOut)
+    bool draw_pressure = true;              ///< pressure modulation checkbox; inert in Phase 1 (mouse-only)
+    int draw_brush_size = 20;               ///< stamp diameter in scene units
+    int draw_brush_opacity = 100;           ///< 0..100
+    QColor draw_brush_color = Qt::black;     ///< brush tint
+    QImage draw_brush_stamp;                ///< grayscale-alpha stamp mask (built-in soft round in Phase 1)
+
+    /**
+     * @brief Enters draw mode on a FREEHAND stick: bakes its current transform into a
+     *        fresh viewport-sized canvas and starts the interactive paint session.
+     * @param stick the FREEHAND stick to edit.
+     * @param take_undo push a frame-undo snapshot first (true from the re-edit button;
+     *        false right after creation, where DrawCmd already snapshotted).
+     */
+    void EnterDrawMode(StickData *stick, bool take_undo);
+
+    /**
+     * @brief Leaves draw mode: crops the canvas to the painted bounds, re-anchors the
+     *        stick, and discards the draw-local undo chain. Safe to call when not in
+     *        draw mode (no-op). Reached from Esc/Enter, any tool switch, or file/frame ops.
+     */
+    void ExitDrawMode();
+
+    /**
+     * @brief Steps the draw-session-local (image-snapshot) undo/redo chain — separate
+     *        from `undo_stack`, alive only for the duration of one draw session.
+     */
+    void DrawStrokeUndo();
+    void DrawStrokeRedo();
+
+    /**
+     * @brief Undo/redo entry point for every UI trigger (toolbar buttons + Ctrl+Z/Y
+     *        shortcuts). In draw mode they drive the session-local stroke chain; otherwise
+     *        the global frame undo_stack. Single place so both triggers stay consistent.
+     */
+    void Undo();
+    void Redo();
 
     /**
      * @brief Switches the on-screen frame: clears the scene/layer list, repopulates
@@ -452,6 +502,13 @@ signals:
      */
     void  AutoSaveTrigger();
 
+    /**
+     * @brief Fired when draw mode starts (true) or ends (false), however it ends
+     *        (Esc/Enter, tool switch, or the panel button). widget.cpp uses it to keep
+     *        the draw panel's Edit/Exit button label and state in sync.
+     */
+    void DrawModeChanged(bool active);
+
 
     // QWidget interface
 protected:
@@ -690,6 +747,27 @@ private:
      * click finishes it (EndDrawing()) and files it in the frame's z-order list.
      */
     void DrawCmd(QPointF* point, int mode);
+
+    // ---- Freehand draw-mode internals ------------------------------------------------
+    QList<QImage> draw_undo;      ///< per-stroke canvas snapshots (session-local undo chain)
+    int draw_undo_idx = -1;       ///< current position in draw_undo (-1 = empty)
+    bool draw_stroking = false;   ///< true between brush press and release
+    QPointF draw_last_pos;        ///< last stamped scene position, for stroke interpolation
+    QLineF draw_orig_line;        ///< the stick's skeleton (the 2-click line) stashed on entry, restored on exit so the freehand keeps a normal-stick origin/rotation
+    QTransform draw_disp;         ///< canvas display transform, mirrors paint(): scene = draw_disp.map(pixel - canvasCenter). The canvas is painted in the stick's ROTATED frame, so the drawing is born at the stick's position/rotation and needs no re-rotation on exit
+    QTransform draw_disp_inv;     ///< inverse of draw_disp, for scene -> canvas-pixel mouse mapping
+    double draw_theta = 0;        ///< the stick's rotation (its img_angle) during the session
+
+    /** @brief Stamps one brush dab (tinted/eraser) onto draw_canvas at a canvas-pixel point. */
+    void StampBrush(const QPointF &canvas_px);
+    /** @brief Stamps the brush along a scene-space segment (interpolated by brush spacing). */
+    void PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_scene);
+    /** @brief Truncates any redo tail and pushes a copy of the current canvas onto draw_undo. */
+    void PushDrawUndo();
+    /** @brief Builds a soft round grayscale-alpha stamp of the given diameter (built-in brush). */
+    QImage MakeRoundBrush(int size) const;
+    /** @brief Tight bounding rect of the non-transparent pixels of an image (empty if none). */
+    static QRect OpaqueBounds(const QImage &img);
 
     /**
      * @brief Cleanup run when leaving a tool (called by SetTool before switching).

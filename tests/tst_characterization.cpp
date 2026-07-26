@@ -345,6 +345,43 @@ private slots:
         // no manual cleanup: ~StickData frees the images, ~stick only the handles
     }
 
+    // FREEHAND is an IMAGE-like raster stick (its painted picture lives in stick_img like
+    // an IMAGE's); the IsImageType() gates in the stream operators must serialize it the
+    // same way. Guards the freehand-draw-mode feature's persistence: a saved drawing must
+    // reload byte-identical.
+    void StickFreehandRoundTrip()
+    {
+        StickData source;
+        source.stick_type = StickData::FREEHAND;
+        source.my_line = QLineF(20, 20, 20, 60);
+        source.z = 3;
+        QImage *drawing = new QImage(12, 9, QImage::Format_ARGB32);
+        drawing->fill(Qt::transparent);
+        drawing->setPixelColor(4, 3, QColor(10, 200, 30, 255)); // un pixel dipinto
+        source.stick_img_list << drawing;
+        source.img_name_list << "freehand";
+        source.stick_img = drawing;
+        source.img_angle = 0;
+        source.img_offset = QPointF(0, 0);
+
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << source;
+        }
+        StickData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+        QCOMPARE(loaded.stick_type, (qint32)StickData::FREEHAND);
+        QVERIFY(loaded.IsImageType());
+        QCOMPARE(loaded.stick_img_list.count(), 1);
+        QVERIFY(loaded.stick_img != nullptr);
+        QCOMPARE(*loaded.stick_img, *drawing);           // il disegno sopravvive intatto
+        QCOMPARE(loaded.stick_img->pixelColor(4, 3), QColor(10, 200, 30, 255));
+    }
+
     // POLYGON sticks persist their normalized-local vertex list after the shared img
     // block; both the stream operators and Clone()/CopyFrom() must carry it
     void StickPolygonRoundTrip()

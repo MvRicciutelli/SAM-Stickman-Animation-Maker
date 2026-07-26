@@ -128,7 +128,7 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         onionSkinPen.setColor(Qt::gray);
         painter->setPen(onionSkinPen);
     }
-    if(data->stick_type == StickData::IMAGE && data->stick_img){ // stick_img nullo solo da file corrotto: non c'è nulla da dipingere
+    if(data->IsImageType() && data->stick_img){ // stick_img nullo solo da file corrotto: non c'è nulla da dipingere
         // ogni immagine la facciamo partire dal punto 0,0
         // la ruotiamo
         // la trasliamo al punto di p1
@@ -402,13 +402,17 @@ QRectF StickGraphicsItem::ConstructBr()
             m = qMax(m, w + handle_size);
         return r.adjusted(-m, -m, m, m);
     }
-    if((data->stick_type == StickData::IMAGE || data->stick_type == StickData::CIRCLE||data->stick_type ==StickData::RECT || data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::TAPER ) && data->my_line.length()>0)
+    if((data->IsImageType() || data->stick_type == StickData::CIRCLE||data->stick_type ==StickData::RECT || data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::TAPER ) && data->my_line.length()>0)
     {
         float d = 0;
 
-        if(data->stick_type == StickData::IMAGE ){
+        if(data->IsImageType() ){
             QImage scaled = CalcImg();
             d = sqrt(pow(scaled.width(),2)+pow(scaled.height(),2));
+            // l'immagine è centrata su p1 + img_offset: senza contare l'offset (grande per un
+            // freehand dipinto lontano dal 1° click) il bounding rect, centrato su p1, la
+            // taglierebbe. Aggiungi la lunghezza dell'offset al raggio così resta coperta
+            d += sqrt(pow(data->img_offset.x(),2)+pow(data->img_offset.y(),2));
         }
         else if(data->stick_type !=StickData::CIRCLE){
             d = sqrt(pow(data->img_w_scale,2)+pow(data->my_line.length()+2*data->img_h_scale,2));
@@ -568,7 +572,7 @@ void StickGraphicsItem::Rotate(QPointF *point)
         if(child->view)
             child->view->Refresh(1);
     }
-    if((data->stick_type == StickData::IMAGE ||data->stick_type == StickData::CIRCLE|| data->stick_type == StickData::RECT || data->stick_type == StickData::TAPER || data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE) && !traslationOnly){
+    if((data->IsImageType() ||data->stick_type == StickData::CIRCLE|| data->stick_type == StickData::RECT || data->stick_type == StickData::TAPER || data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE) && !traslationOnly){
         data->img_angle = angle;
     }
 
@@ -597,7 +601,7 @@ void StickGraphicsItem::Rotate(float angle){
         if(child->view)
             child->view->Refresh(1);
     }
-    if(data->stick_type == StickData::IMAGE ||data->stick_type == StickData::CIRCLE|| data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::TAPER || data->stick_type == StickData::RECT || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE){
+    if(data->IsImageType() ||data->stick_type == StickData::CIRCLE|| data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::TAPER || data->stick_type == StickData::RECT || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE){
         data->img_angle = -angle-90;
     }
 }
@@ -613,7 +617,7 @@ void StickGraphicsItem::Manipulate(QPointF *point)
         if(!(child->stepchild && this->IsMaster()) && child->parent == data){
             QPointF pfBuf = child->my_line.p2();
             child->my_line = QLineF(*point,pfBuf);
-            if(child->stick_type == StickData::IMAGE || child->stick_type == StickData::RECT
+            if(child->IsImageType() || child->stick_type == StickData::RECT
                     || child->stick_type == StickData::TRAPEZOID || child->stick_type == StickData::TAPER
                     || child->stick_type == StickData::POLYGON || child->stick_type == StickData::MULTILINE){
                 child->img_angle = -atan2(child->my_line.dx(),child->my_line.dy())*180/M_PI;
@@ -624,7 +628,7 @@ void StickGraphicsItem::Manipulate(QPointF *point)
 
     }
     // se stiamo con un immagine ruotala anche
-    if(data->stick_type == StickData::IMAGE || data->stick_type == StickData::RECT
+    if(data->IsImageType() || data->stick_type == StickData::RECT
             || data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::TAPER|| data->stick_type == StickData::CIRCLE
             || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE){
         data->img_angle= -atan2(data->my_line.dx(),data->my_line.dy())*180/M_PI;

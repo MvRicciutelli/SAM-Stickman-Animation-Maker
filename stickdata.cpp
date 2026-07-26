@@ -131,8 +131,8 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
         stream << stick_data.ik_start_idx;
         stream << stick_data.ik_target_idx;
     }
-    if ((stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::IMAGE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE)) {
-        if (stick_data.stick_type == StickData::IMAGE) {
+    if ((stick_data.stick_type == StickData::CIRCLE) || stick_data.IsImageType() || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE)) {
+        if (stick_data.IsImageType()) {
             // stick_img può essere nullo solo per un record ricostruito da un file corrotto:
             // meglio serializzare una QSize vuota che dereferenziare un puntatore nullo
             QSize imgSize = stick_data.stick_img ? stick_data.stick_img->size() : QSize();
@@ -146,7 +146,7 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
         stream << stick_data.hard_top;
         stream << stick_data.hard_bottom;
 
-        if (stick_data.stick_type == StickData::IMAGE) {
+        if (stick_data.IsImageType()) {
             stream << (qint32)stick_data.stick_img_list.length();
             stream << (qint32)stick_data.stick_img_list.indexOf(stick_data.stick_img);
             int j = 0;
@@ -203,9 +203,9 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
         // ik_start/ik_target vengono risolti dagli indici più tardi, a livello di
         // StickFigureData::operator>> (stessa fase in cui parent_idx diventa parent)
     }
-    if ((stick_data.stick_type == StickData::IMAGE) || (stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE)) {
+    if (stick_data.IsImageType() || (stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE)) {
         QSize mysize;
-        if (stick_data.stick_type == StickData::IMAGE) {
+        if (stick_data.IsImageType()) {
             stream >> mysize;
         }
         stream >> stick_data.img_angle;
@@ -215,7 +215,7 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
         stream >> stick_data.img_offset;
         stream >> stick_data.hard_top;
         stream >> stick_data.hard_bottom;
-        if (stick_data.stick_type == StickData::IMAGE) {
+        if (stick_data.IsImageType()) {
             qint32 numOfImgs;
             qint32 stickImgIdx;
             stream >> numOfImgs;

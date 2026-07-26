@@ -193,6 +193,7 @@ void MyMainWindow::on_actionload_animation_triggered()
     // ClearUndo/animation_path vanno toccati solo se l'utente conferma un file valido: annullare
     // la dialog non deve cancellare la cronologia undo o il path dell'animazione corrente
     if(QFile::exists(file_name)){
+        view->ExitDrawMode(); // caricare ricostruisce tutto: chiudi il disegno per non lasciare draw_target penzolante
         view->ClearUndo();
         animation_path = file_name;
         view->my_animation->LoadAnimation(file_name);
@@ -276,6 +277,7 @@ void MyMainWindow::ExportAvi(){
  * `exporter` pointer, and overwriting it would orphan the running thread.
  */
 void MyMainWindow::ExportImageSequence(QString path, int option){
+    view->ExitDrawMode(); // finalizza il disegno prima di renderizzare i frame (canvas ritagliato, non quello di sessione)
     // evita di avviare un secondo export mentre uno precedente è ancora in corso: altrimenti
     // il puntatore globale exporter verrebbe sovrascritto e il thread precedente resterebbe orfano
     if(exporter && exporter->isRunning()){
@@ -320,6 +322,7 @@ void MyMainWindow::on_actionNew_Blank_Animation_triggered()
                                     );
     if(ret == QMessageBox::Yes)
     {
+        view->ExitDrawMode(); // svuotare l'animazione libera tutti i frame: chiudi prima il disegno
         // senza ClearUndo() l'undo buffer terrebbe frame della vecchia animazione applicabili
         // a questa nuova; senza azzerare animation_path, "Save" sovrascriverebbe silenziosamente
         // il vecchio file salvato con la nuova animazione vuota
@@ -341,6 +344,7 @@ void MyMainWindow::GetAnimationParams(int option_val){
     W   = my_options->width;
     H   = my_options->height;
     handle_size = my_options->handle_size;
+    view->ExitDrawMode(); // SizeChange riscala/riposiziona ogni stick: chiudi prima il disegno
     view->SizeChange(option_val);
     my_widget->WriteJson();
     auto_save_interval = my_options->auto_save_interval;

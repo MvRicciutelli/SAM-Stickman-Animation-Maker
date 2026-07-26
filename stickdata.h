@@ -41,11 +41,24 @@ public:
         TAPER = 18,     ///< trapezoid with rounded (pie) ends
         POLYGON = 21,   ///< closed polygon; extra vertices live in polygon_points
                         ///< (19/20 are already taken by the ELONGATE/CLAMP tool ids)
-        MULTILINE = 22  ///< open multi-segment path: endpoints are my_line's P1/P2,
+        MULTILINE = 22, ///< open multi-segment path: endpoints are my_line's P1/P2,
                         ///< interior vertices live in polygon_points, with per-vertex
                         ///< width (taper) and corner curvature in vertex_widths/
                         ///< vertex_curvatures
+        FREEHAND = 24   ///< raster paint stick: a single stick_img painted freehand in
+                        ///< draw mode (myview.cpp). Rendered/transformed/serialized
+                        ///< exactly like IMAGE (see IsImageType()); its one image never
+                        ///< enters the image-variant list widget (23 is the DRAW_IK tool id)
     };
+
+    /**
+     * @brief True for the raster-image-backed types (IMAGE and its freehand-paint
+     *        variant FREEHAND), which share the same paint/transform/serialize path.
+     *
+     * The distinction that remains IMAGE-only is the multi-image-variant list widget:
+     * a FREEHAND stick holds exactly one image and never populates it.
+     */
+    bool IsImageType() const { return stick_type == IMAGE || stick_type == FREEHAND; }
 
     /**
      * @brief Builds an empty stick record with safe defaults (LINE type, no images).

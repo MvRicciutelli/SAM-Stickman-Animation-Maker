@@ -144,6 +144,9 @@ void Animation::UpdateTab(int t){
     if(t == StickData::IMAGE){
         my_tab_widget->insertTab(1,advanced_img_tab,"Image Editing");
     }
+    else if(t == StickData::FREEHAND){
+        my_tab_widget->insertTab(1,advanced_draw_tab,"Draw Mode");
+    }
     else if(t == StickData::RECT){
         my_tab_widget->insertTab(1,advanced_rect_tab,"Rect Editing");
     }

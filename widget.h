@@ -265,6 +265,8 @@ private slots:
 
     void on_drawTaperBtn_clicked();
 
+    void on_drawFreehandBtn_clicked();
+
     void on_drawTrapezoidBtn_clicked();
 
     void on_addImgBtn_clicked();

@@ -4,6 +4,8 @@
 #include <math.h>
 #include <QDebug>
 #include <QPainterPath>
+#include <QRadialGradient>
+#include <QTransform>
 #include <QGraphicsRotation>
 #include <frame.h>
 #include <QMessageBox>
@@ -81,11 +83,12 @@ MyView::MyView(QWidget *parent) : QGraphicsView(parent)
     });
     // Ctrl+Z / Ctrl+Y (QKeySequence::Undo/Redo — Ctrl+Y is the Redo default on Windows):
     // window-scoped shortcuts so undo/redo work from the keyboard regardless of which
-    // canvas child has focus, same targets as the undo/redo toolbar buttons (widget.cpp)
-    connect(new QShortcut(QKeySequence::Undo, this), &QShortcut::activated,
-            this, [this]{ undo_stack.undo(); });
-    connect(new QShortcut(QKeySequence::Redo, this), &QShortcut::activated,
-            this, [this]{ undo_stack.redo(); });
+    // canvas child has focus, same targets as the undo/redo toolbar buttons (widget.cpp).
+    // In draw mode they drive the session-local image undo chain instead of undo_stack —
+    // the shortcut consumes the key before keyPressEvent sees it, so the dispatch lives here.
+    connect(new QShortcut(QKeySequence::Undo, this), &QShortcut::activated, this, [this]{ Undo(); });
+    connect(new QShortcut(QKeySequence::Redo, this), &QShortcut::activated, this, [this]{ Redo(); });
+    draw_brush_stamp = MakeRoundBrush(128); // built-in soft round brush (Phase 1 default)
 }
 
 /**
@@ -123,6 +126,13 @@ MyView::~MyView()
  */
 void MyView::SetTool(int new_tool)
 {
+    // scegliere QUALSIASI tool esce da draw mode: pennello/gomma sono sotto-strumenti del
+    // pannello draw (non passano da SetTool), quindi ogni SetTool è un tool "non-draw".
+    // Qui perché draw mode può essere stato avviato col tool ancora su NOTOOL (bottone
+    // "Edit drawing"), caso che il ramo DRAWFREEHAND di ChangeTool() non coprirebbe
+    if(draw_mode)
+        ExitDrawMode();
+
     ChangeTool();
 
     tool = new_tool;
@@ -195,6 +205,8 @@ void MyView::DeleteStickFigure()
  */
 void MyView::MoveStickFigureZ(int increment, int mode)
 {
+    if(draw_mode)
+        ExitDrawMode(); // riordinare i layer chiude la sessione di disegno
     if(my_stick_figure_widget_list->count() <= 1 )
         return;
     // selezione multipla: applica lo spostamento a ogni figura selezionata, in un
@@ -311,6 +323,18 @@ void MyView::mousePressEvent(QMouseEvent *event)
 
 
     starting_coord   = coord; //buffer per il dragghing del mouse premuto
+    // draw mode intercetta ogni input a monte del tool: un click sinistro inizia una
+    // pennellata (con snapshot per l'undo di sessione), i tasti destro/centrale sono
+    // ignorati (pan/zoom disabilitati durante il disegno)
+    if(draw_mode){
+        if(event->button()==Qt::LeftButton){
+            draw_stroking = true;
+            draw_last_pos = coord;
+            PaintStrokeSegment(coord, coord); // dab iniziale (click singolo = un punto)
+            // lo snapshot per l'undo si prende al RILASCIO, quando la pennellata è completa
+        }
+        return;
+    }
     if(!is_right_pressed && !is_middle_pressed){
     switch(tool)
     {
@@ -426,6 +450,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
             case DRAWTRAPEZOID:
             case DRAWTAPER:
             case DRAWIMG:
+            case DRAWFREEHAND:
             {
                 DrawCmd(&coord,(int)tool);
                 break;
@@ -781,6 +806,13 @@ void MyView::mousePressEvent(QMouseEvent *event)
  */
 void MyView::keyPressEvent(QKeyEvent *event)
 {
+    // draw mode: Esc/Enter escono dalla sessione. Ctrl+Z/Y sono gestiti dai QShortcut del
+    // costruttore (che consumano il tasto prima di qui) e pilotano l'undo locale di sessione
+    if(draw_mode){
+        if(event->key()==Qt::Key_Escape || event->key()==Qt::Key_Return || event->key()==Qt::Key_Enter)
+            ExitDrawMode();
+        return;
+    }
     switch(event->key())
     {
         case(Qt::Key_Cancel):
@@ -848,6 +880,7 @@ void MyView::keyPressEvent(QKeyEvent *event)
             {
                 case(DRAW):
                 case DRAWCIRCLE:
+                case DRAWFREEHAND: // Esc prima del 2° click scarta l'anteprima gialla a metà
                 {
                     if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr &&
                             my_animation->CurrentFrame()->CurrentStickFigure()->draw_count==1)
@@ -1047,6 +1080,16 @@ void MyView::DrawCmd(QPointF* point, int mode)
                 new_stick->vertex_widths << my_pen.widthF() << my_pen.widthF();
                 new_stick->vertex_curvatures << 0.0f << 0.0f;
             }
+            else if(mode == DRAWFREEHAND){
+                // durante il gesto a 2 click lo stick resta una LINE dipinta in GIALLO: è
+                // solo un'anteprima per vedere dove lo si sta piazzando, come un normale
+                // stick. Al secondo click diventa un FREEHAND invisibile (vedi sotto) prima
+                // di entrare in draw mode; nessun placeholder immagine serve finché è LINE
+                QPen preview_pen(Qt::yellow);
+                preview_pen.setWidth(qMax(2, my_pen.width()));
+                preview_pen.setCapStyle(Qt::RoundCap);
+                new_stick->pen = preview_pen;
+            }
 
            qDebug("Draw 1 = %f, %f",point->x(),point->y());
         }
@@ -1069,6 +1112,16 @@ void MyView::DrawCmd(QPointF* point, int mode)
             my_animation->current_frame->total_sticks.append(my_animation->CurrentFrame()->CurrentStick());
             my_animation->UpdateSelection(my_animation->CurrentFrame()->CurrentStick());
 
+            // il freehand entra in draw mode subito dopo il secondo click (spec). Ora che
+            // la posizione è fissata, l'anteprima gialla LINE diventa un FREEHAND invisibile
+            // (NoPen); EnterDrawMode() gli assegna il canvas. La creazione ha già fatto
+            // StoreUndo() sopra, quindi non ne serve un altro
+            if(mode == DRAWFREEHAND){
+                StickData *fh = my_animation->CurrentFrame()->CurrentStick();
+                fh->stick_type = StickData::FREEHAND;
+                fh->pen.setStyle(Qt::NoPen);
+                EnterDrawMode(fh, false);
+            }
         }
     }
     else
@@ -1078,6 +1131,353 @@ void MyView::DrawCmd(QPointF* point, int mode)
 
 
 }
+
+// ===================== Freehand draw mode ============================================
+// A FREEHAND stick is an IMAGE-like raster stick. Draw mode replaces its image with a
+// live, viewport-sized canvas painted in place, then on exit crops it to the drawn area
+// and re-anchors the stick. The canvas maps 1 pixel per scene unit over the enter-time
+// visible rect (draw_region) — so mouse->pixel is a plain subtraction at any pan/zoom.
+// ponytail: 1px == 1 scene unit; screen-DPI-independent, and pan/zoom are frozen for the
+// session (the canvas is fixed to the viewport captured on entry). Wider-than-viewport
+// or re-scaled-resolution painting is out of scope for Phase 1.
+
+/// @details Soft round grayscale-alpha stamp: opaque core, feathered edge. Built once at
+/// construction and re-scaled per dab; the color is applied at stamp time, not here.
+QImage MyView::MakeRoundBrush(int size) const
+{
+    if(size < 1) size = 1;
+    QImage mask(size, size, QImage::Format_ARGB32_Premultiplied);
+    mask.fill(Qt::transparent);
+    QRadialGradient g(size/2.0, size/2.0, size/2.0);
+    g.setColorAt(0.0, QColor(0,0,0,255));
+    g.setColorAt(0.75, QColor(0,0,0,255));
+    g.setColorAt(1.0, QColor(0,0,0,0));
+    QPainter p(&mask);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(Qt::NoPen);
+    p.setBrush(g);
+    p.drawEllipse(0, 0, size, size);
+    p.end();
+    return mask;
+}
+
+/// @details Tight bounding rect of the non-transparent pixels (alpha > 0). Empty rect
+/// when the image is fully transparent — the "nothing painted" signal for ExitDrawMode().
+QRect MyView::OpaqueBounds(const QImage &img)
+{
+    if(img.isNull())
+        return QRect();
+    QImage a = img.convertToFormat(QImage::Format_ARGB32);
+    int min_x = a.width(), min_y = a.height(), max_x = -1, max_y = -1;
+    for(int y = 0; y < a.height(); y++){
+        const QRgb *row = reinterpret_cast<const QRgb*>(a.constScanLine(y));
+        for(int x = 0; x < a.width(); x++){
+            if(qAlpha(row[x]) != 0){
+                if(x < min_x) min_x = x;
+                if(x > max_x) max_x = x;
+                if(y < min_y) min_y = y;
+                if(y > max_y) max_y = y;
+            }
+        }
+    }
+    if(max_x < 0)
+        return QRect();
+    return QRect(QPoint(min_x, min_y), QPoint(max_x, max_y));
+}
+
+/// @details One brush dab centered at a canvas-pixel point. The grayscale stamp is scaled
+/// to the current size and tinted with the brush color (SourceIn keeps the stamp's alpha);
+/// the eraser clears instead of paints (DestinationOut). Opacity scales the whole dab.
+void MyView::StampBrush(const QPointF &canvas_px)
+{
+    if(!draw_canvas)
+        return;
+    int s = qMax(1, draw_brush_size);
+    QImage stamp = draw_brush_stamp.scaled(s, s, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    QImage dab(s, s, QImage::Format_ARGB32_Premultiplied);
+    dab.fill(Qt::transparent);
+    QPainter dp(&dab);
+    dp.drawImage(0, 0, stamp);
+    dp.setCompositionMode(QPainter::CompositionMode_SourceIn);
+    dp.fillRect(dab.rect(), draw_brush_color);
+    dp.end();
+
+    QPainter p(draw_canvas);
+    p.setOpacity(qBound(0, draw_brush_opacity, 100) / 100.0);
+    if(draw_eraser)
+        p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
+    p.drawImage(QPointF(canvas_px.x() - s/2.0, canvas_px.y() - s/2.0), dab);
+    p.end();
+}
+
+/// @details Stamps the brush along a scene-space segment, spaced by a fraction of the
+/// brush size so a fast drag stays continuous. Scene points map to canvas pixels through
+/// draw_disp_inv (the inverse of the same transform paint() uses), so painting happens in
+/// the stick's rotated frame: what you draw on screen lands where the cursor is, and is
+/// stored already rotated with the stick. Then repaints the view.
+void MyView::PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_scene)
+{
+    if(!draw_canvas)
+        return;
+    QPointF half(draw_canvas->width()/2.0, draw_canvas->height()/2.0);
+    QPointF a = draw_disp_inv.map(from_scene) + half;
+    QPointF b = draw_disp_inv.map(to_scene)   + half;
+    double dist = QLineF(a, b).length();
+    double spacing = qMax(1.0, draw_brush_size * 0.25);
+    int steps = int(dist / spacing);
+    for(int i = 0; i <= steps; i++){
+        double t = steps ? double(i) / steps : 0.0;
+        StampBrush(a * (1.0 - t) + b * t);
+    }
+    if(draw_target && draw_target->view){
+        draw_target->view->Refresh(0);
+        draw_target->view->update();
+    }
+}
+
+/// @details Session-local undo push: drops any redo tail, then snapshots the canvas. This
+/// chain lives only while draw_mode is active and never touches undo_stack (spec).
+void MyView::PushDrawUndo()
+{
+    if(!draw_canvas)
+        return;
+    while(draw_undo.count() > draw_undo_idx + 1)
+        draw_undo.removeLast();
+    draw_undo.append(*draw_canvas);
+    draw_undo_idx = draw_undo.count() - 1;
+}
+
+void MyView::DrawStrokeUndo()
+{
+    if(!draw_canvas || draw_undo_idx <= 0)
+        return;
+    draw_undo_idx--;
+    *draw_canvas = draw_undo[draw_undo_idx];
+    if(draw_target && draw_target->view){
+        draw_target->view->Refresh(0);
+        draw_target->view->update();
+    }
+}
+
+void MyView::DrawStrokeRedo()
+{
+    if(!draw_canvas || draw_undo_idx + 1 >= draw_undo.count())
+        return;
+    draw_undo_idx++;
+    *draw_canvas = draw_undo[draw_undo_idx];
+    if(draw_target && draw_target->view){
+        draw_target->view->Refresh(0);
+        draw_target->view->update();
+    }
+}
+
+/// @details In draw mode the toolbar Undo/Redo buttons and the Ctrl+Z/Y shortcuts drive
+/// the session-local stroke chain (the freehand image state only); outside draw mode they
+/// drive the global frame undo_stack. Routing both triggers here keeps them consistent.
+void MyView::Undo()
+{
+    if(draw_mode) DrawStrokeUndo();
+    else          undo_stack.undo();
+}
+
+void MyView::Redo()
+{
+    if(draw_mode) DrawStrokeRedo();
+    else          undo_stack.redo();
+}
+
+/**
+ * @details Bakes the stick's current transformed appearance (offset/scale/rotation) into a
+ * fresh square canvas — the spec's "collapse changes into pixels the moment draw mode is
+ * entered" — then makes that canvas the stick's live image, displayed in the stick's own
+ * rotated frame (img_angle = the line angle) covering the viewport. Because painting then
+ * happens in that frame, the drawing is born at the stick's position/rotation and needs no
+ * re-rotation on exit. Handles are hidden, the draw panel is shown with the brush selected,
+ * and the draw-local undo is seeded. take_undo pushes one frame-undo snapshot so the whole
+ * session is a single global-undo step; the freshly-created path passes false (DrawCmd
+ * already snapshotted).
+ */
+void MyView::EnterDrawMode(StickData *stick, bool take_undo)
+{
+    if(!stick)
+        return;
+    if(draw_mode)
+        ExitDrawMode();
+    if(take_undo)
+        StoreUndo();
+
+    draw_target = stick;
+    draw_orig_line = stick->my_line; // scheletro dei 2 click: origine (p1) e rotazione dello stick
+    if(draw_orig_line.length() < 1.0) // 2 click coincidenti: dai lunghezza/rotazione fittizia
+        draw_orig_line = QLineF(draw_orig_line.p1(), draw_orig_line.p1() + QPointF(0, 100));
+
+    draw_region = mapToScene(viewport()->rect()).boundingRect();
+    QPointF vc = draw_region.center(); // centro del viewport in scena
+    // canvas QUADRATO di lato = diagonale del viewport: ruotato a qualunque angolo copre
+    // comunque tutto il viewport visibile (1 px = 1 unità di scena)
+    int D = int(ceil(sqrt(draw_region.width()*draw_region.width()
+                          + draw_region.height()*draw_region.height())));
+    if(D < 1) D = 1;
+
+    // rotazione di visualizzazione = angolo della linea (stessa convenzione degli IMAGE:
+    // img_angle segue la direzione dello stick). Il canvas vive e si dipinge in questo frame
+    // ruotato, così il disegno nasce già sulla posizione+rotazione dello stick (niente
+    // ri-rotazione all'uscita) e ruota con lui
+    double theta = -atan2(draw_orig_line.dx(), draw_orig_line.dy()) * 180.0 / M_PI;
+    double len = draw_orig_line.length();
+    QPointF p1 = draw_orig_line.p1();
+    draw_theta = theta;
+
+    // img_offset tale che il CENTRO del canvas cada sul centro del viewport:
+    // paint fa  scene = p1 + R(theta)*(img_offset + (pixel - D/2)); centro pixel = D/2 →
+    // vc = p1 + R(theta)*img_offset  → img_offset = R(-theta)*(vc - p1)
+    QTransform rot; rot.rotate(theta);
+    QPointF img_offset = rot.inverted().map(vc - p1);
+
+    // trasformazione di visualizzazione del canvas, IDENTICA a quella di paint():
+    // scene = draw_disp.map(pixel - D/2)
+    QTransform disp;
+    disp.translate(p1.x(), p1.y());
+    disp.rotate(theta);
+    disp.translate(img_offset.x(), img_offset.y());
+    draw_disp = disp;
+    draw_disp_inv = disp.inverted();
+
+    // aspetto ATTUALE (per un re-edit) catturato PRIMA di modificare lo stick
+    QImage old_scaled;
+    QTransform old_disp; // pixel-locale (centrato) → scena del vecchio aspetto
+    if(stick->view && stick->stick_img && !stick->stick_img->isNull()){
+        old_scaled = stick->view->CalcImg();
+        old_disp.translate(stick->my_line.p1().x(), stick->my_line.p1().y());
+        old_disp.rotate(stick->img_angle + stick->img_angle_offset);
+        old_disp.translate(stick->img_offset.x(), stick->img_offset.y());
+    }
+
+    QImage *canvas = new QImage(D, D, QImage::Format_ARGB32_Premultiplied);
+    canvas->fill(Qt::transparent);
+    // bake: porta il vecchio aspetto (posizionato in SCENA da old_disp) nel canvas nuovo.
+    // pixel-vecchio(u,v) → scena → pixel-canvas, in un'unica QTransform composta (l'ordine
+    // A*B mappa come B.map(A.map(p))):
+    if(!old_scaled.isNull()){
+        QTransform bake =
+              QTransform::fromTranslate(-old_scaled.width()/2.0, -old_scaled.height()/2.0) // pixel raw → centrato
+            * old_disp                                                                     // → scena
+            * draw_disp_inv                                                                // → pixel-canvas centrato
+            * QTransform::fromTranslate(D/2.0, D/2.0);                                      // → pixel-canvas raw
+        QPainter cp(canvas);
+        cp.setRenderHint(QPainter::SmoothPixmapTransform);
+        cp.setTransform(bake);
+        cp.drawImage(0, 0, old_scaled);
+        cp.end();
+    }
+
+    qDeleteAll(stick->stick_img_list);
+    stick->stick_img_list.clear();
+    stick->img_name_list.clear();
+    stick->stick_img_list.append(canvas);
+    stick->img_name_list.append("freehand");
+    stick->stick_img = canvas;
+    draw_canvas = canvas;
+
+    // lo stick resta nel suo frame reale (scheletro dei 2 click); il canvas DxD copre il
+    // viewport ruotato di theta e centrato su vc
+    stick->my_line = draw_orig_line;
+    stick->img_angle = theta;
+    stick->img_angle_offset = 0;
+    stick->img_offset = img_offset;
+    stick->img_w_scale = float(D / len); // CalcImg riporta il canvas DxD a dimensione naturale
+    stick->img_h_scale = float(D / len);
+
+    if(stick->view){
+        stick->view->stick_handle[0]->hide();
+        stick->view->stick_handle[1]->hide();
+        stick->view->Refresh(0);
+        stick->view->update();
+    }
+    draw_undo.clear();
+    draw_undo_idx = -1;
+    PushDrawUndo(); // stato iniziale della sessione
+    draw_stroking = false;
+    draw_eraser = false; // pennello selezionato all'ingresso (spec)
+    draw_mode = true;
+    // mostra subito il pannello draw mode e rendilo il tab attivo (spec)
+    my_animation->UpdateTab(StickData::FREEHAND);
+    if(my_tab_widget && advanced_draw_tab)
+        my_tab_widget->setCurrentWidget(advanced_draw_tab);
+    emit DrawModeChanged(true);
+}
+
+/**
+ * @details Crops the canvas to the painted pixels (spec: "bbox optimized to actual drawing
+ * size") and re-anchors the cropped image on the stick's own skeleton at the stick's
+ * rotation (the drawing was painted in that frame, so no re-rotation is needed), then
+ * discards the session's undo chain. When nothing was painted the canvas is left a 1x1
+ * transparent placeholder
+ * (ponytail: keep an invisible degenerate stick rather than tear down a possibly-master
+ * stick and its figure; the user can delete it normally). Safe when not in draw mode.
+ */
+void MyView::ExitDrawMode()
+{
+    if(!draw_mode)
+        return;
+    StickData *stick = draw_target;
+    QImage *canvas = draw_canvas;
+    // azzera lo stato PRIMA di qualunque callback, così una SetTool/ExitDrawMode rientrante
+    // non ricorre
+    draw_mode = false;
+    draw_target = nullptr;
+    draw_canvas = nullptr;
+    draw_stroking = false;
+    draw_undo.clear();
+    draw_undo_idx = -1;
+    emit DrawModeChanged(false); // qualunque via d'uscita: tiene in sync il bottone del pannello
+
+    if(!stick || !canvas)
+        return;
+
+    QRect bounds = OpaqueBounds(*canvas);
+    // dimensioni del canvas catturate ORA: canvas == stick->stick_img_list[0], quindi il
+    // qDeleteAll sotto lo libera e ogni suo uso successivo sarebbe use-after-free
+    double canvas_half_w = canvas->width()/2.0, canvas_half_h = canvas->height()/2.0;
+    if(bounds.isEmpty())
+        bounds = QRect(int(canvas_half_w), int(canvas_half_h), 1, 1); // niente dipinto: 1x1 invisibile
+
+    QImage *cropped = new QImage(canvas->copy(bounds));
+    qDeleteAll(stick->stick_img_list);
+    stick->stick_img_list.clear();
+    stick->img_name_list.clear();
+    stick->stick_img_list.append(cropped);
+    stick->img_name_list.append("freehand");
+    stick->stick_img = cropped;
+
+    // il disegno è GIÀ nel frame ruotato dello stick: niente ri-rotazione. Basta ritagliare
+    // e riancorare l'immagine (come un IMAGE) sullo stesso scheletro/rotazione, così resta
+    // esattamente dove è stata dipinta e ruota con lo stick.
+    double bw = bounds.width(), bh = bounds.height();
+    QPointF center_px(bounds.x() + bw/2.0, bounds.y() + bh/2.0);
+    // scena del centro del ritaglio (draw_disp mappa pixel-centrato → scena)
+    QPointF crop_center_scene = draw_disp.map(center_px - QPointF(canvas_half_w, canvas_half_h));
+    double len = draw_orig_line.length();
+    QPointF p1 = draw_orig_line.p1();
+    QTransform rot; rot.rotate(draw_theta);
+    stick->my_line = draw_orig_line;                               // scheletro/origine/rotazione normali
+    stick->img_angle = draw_theta;                                // segue la linea come un IMAGE
+    stick->img_angle_offset = 0;
+    stick->img_offset = rot.inverted().map(crop_center_scene - p1);// centro immagine = crop_center_scene
+    double max_dim = qMax(bw, bh);
+    stick->img_w_scale = float(max_dim / len);                    // CalcImg → dimensione naturale (1:1)
+    stick->img_h_scale = float(max_dim / len);
+
+    if(stick->view){
+        stick->view->stick_handle[0]->show();
+        stick->view->stick_handle[1]->show();
+        stick->view->Refresh(0);
+        stick->view->update();
+    }
+    my_animation->current_frame->UpdateIcon();
+    my_animation->UpdateSelection(stick);
+}
+
 /// @details Shared predicate: the two stick types whose vertices the polygon/multiline
 /// tools and the Ctrl selection of NOTOOL can edit.
 static bool IsVertexStick(const StickData *s)
@@ -1801,6 +2201,19 @@ void MyView::ChangeTool()
         {
             break;
         }
+        case(DRAWFREEHAND):
+        {
+            // uscendo dal tool freehand: chiudi un'eventuale sessione di disegno (spec:
+            // qualunque altro tool esce da draw mode), oppure scarta una base a metà click
+            if(draw_mode)
+                ExitDrawMode();
+            else if(!my_animation->current_frame->stick_figures.isEmpty()
+                    && my_animation->CurrentFrame()->CurrentStickFigure() != nullptr
+                    && my_animation->CurrentFrame()->CurrentStickFigure()->draw_count==1){
+                my_animation->CurrentFrame()->CurrentStickFigure()->CancelDrawing();
+            }
+            break;
+        }
         case (DRAW_IK):
         {
             if(ik_drawing)
@@ -1905,6 +2318,16 @@ void MyView::wheelEvent(QWheelEvent *event)
  */
 void MyView::mouseReleaseEvent(QMouseEvent *event)
 {
+    // draw mode: chiude la pennellata corrente, niente della logica di selezione/tool sotto
+    if(draw_mode){
+        if(event->button()==Qt::LeftButton && draw_stroking){
+            is_pressed = false;
+            draw_stroking = false;
+            PushDrawUndo(); // ogni pennellata/gommata COMPLETATA = un passo di undo/redo locale
+        }
+        QGraphicsView::mouseReleaseEvent(event);
+        return;
+    }
     if(event->button()==Qt::LeftButton){
         is_pressed = false;
         poly_drag_idx = -1;      // fine di un eventuale trascinamento di vertice (DRAWPOLY)
@@ -1973,6 +2396,14 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
 {
     static QPointF prev_coord(0,0);
     MapMyCoords(coord, event->pos());
+    // draw mode: trascinamento col sinistro premuto = pennellata continua (interpolata)
+    if(draw_mode){
+        if(draw_stroking && (event->buttons() & Qt::LeftButton)){
+            PaintStrokeSegment(draw_last_pos, coord);
+            draw_last_pos = coord;
+        }
+        return;
+    }
     switch(tool)
     {
         case CLAMP:
@@ -2138,6 +2569,7 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         case DRAWTAPER:
         case DRAWTRAPEZOID:
         case DRAWIMG:
+        case DRAWFREEHAND: // anteprima gialla della linea tra 1° e 2° click, come un DRAW normale
         {
         // durante il disegno,l'estremo libero della linea segue il mouse
             if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr && my_animation->CurrentFrame()->CurrentStickFigure() != nullptr)
@@ -2478,6 +2910,11 @@ void MyView::DeleteFrame(Frame* frame){
  * skins and the frame thumbnail.
  */
 void MyView::MoveToFrame(Frame* frame){
+    // qualunque cambio frame chiude prima la sessione di disegno: finalizza sul frame
+    // CORRENTE (draw_target vive lì) prima di passare a un altro, evitando dangling.
+    // No-op se non si è in draw mode; i chiamanti UI escono già prima di StoreUndo
+    if(draw_mode)
+        ExitDrawMode();
     // il cambio frame invalida la sessione poligono e la selezione vertici (stato UI
     // del frame lasciato); i flag da soli non tengono puntatori, basta azzerarli
     poly_session_active = false;

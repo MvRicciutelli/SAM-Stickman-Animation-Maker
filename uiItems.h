@@ -47,6 +47,7 @@ extern QCheckBox* hard_bottom_check;
 extern AdvancedTab* advanced_rect_tab;
 extern QTabWidget* my_tab_widget;
 extern QWidget * advanced_img_tab;
+extern QWidget * advanced_draw_tab;     ///< freehand draw-mode panel (brush/eraser/size/opacity/color), built in Widget's ctor
 extern QWidget * advanced_vertex_tab;   ///< POLYGON/MULTILINE vertex panel (built in Widget's ctor)
 extern QWidget * advanced_ik_tab;       ///< "IK properties" panel, shown only when the selected stick has an IK role (built in Widget's ctor)
 extern QCheckBox * ik_active_check;     ///< the "Chain active" toggle inside advanced_ik_tab (IK_TARGET_ON <-> IK_TARGET_OFF)

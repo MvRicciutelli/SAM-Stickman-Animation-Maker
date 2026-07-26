@@ -28,6 +28,8 @@
 #include <algorithm>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
+#include <QPushButton>
+#include <QPixmap>
 #include "advancedtab.h"
 #include "advancedlinewidget.h"
 #include "advancedcirclewidget.h"
@@ -112,6 +114,7 @@ AdvancedTab* advanced_rect_tab;
 QTabWidget* my_tab_widget;
 QWidget * advanced_img_tab;
 QWidget * advanced_vertex_tab;
+QWidget * advanced_draw_tab; ///< freehand draw-mode panel (brush/eraser/size/opacity/color); built in Widget's ctor
 QWidget * advanced_ik_tab;
 QCheckBox * ik_active_check;
 QWidget * vertex_width_row;
@@ -319,6 +322,113 @@ Widget::Widget(QWidget *parent)
             view->UpdateIkOverlay();
             if(target->view) target->view->Refresh(0);
         });
+    }
+
+    // ---- pannello "draw mode" del freehand: strumenti di disegno (pennello/gomma,
+    // dimensione, opacità, colore, pressione) + lista pennelli. Costruito in codice come i
+    // pannelli vertici/IK; Animation::UpdateTab() lo inserisce quando è selezionato uno
+    // stick FREEHAND. I controlli scrivono direttamente lo stato pennello di MyView. ----
+    advanced_draw_tab = new QWidget();
+    {
+        QVBoxLayout *col = new QVBoxLayout(advanced_draw_tab);
+
+        // pennello / gomma (mutuamente esclusivi)
+        QHBoxLayout *tool_row = new QHBoxLayout();
+        QPushButton *brush_btn = new QPushButton(tr("Brush"), advanced_draw_tab);
+        QPushButton *eraser_btn = new QPushButton(tr("Eraser"), advanced_draw_tab);
+        brush_btn->setCheckable(true);
+        eraser_btn->setCheckable(true);
+        brush_btn->setChecked(true);
+        tool_row->addWidget(brush_btn);
+        tool_row->addWidget(eraser_btn);
+        col->addLayout(tool_row);
+        connect(brush_btn, &QPushButton::clicked, this, [this, brush_btn, eraser_btn]{
+            brush_btn->setChecked(true);
+            eraser_btn->setChecked(false);
+            view->draw_eraser = false;
+        });
+        connect(eraser_btn, &QPushButton::clicked, this, [this, brush_btn, eraser_btn]{
+            eraser_btn->setChecked(true);
+            brush_btn->setChecked(false);
+            view->draw_eraser = true;
+        });
+
+        // dimensione
+        QHBoxLayout *size_row = new QHBoxLayout();
+        size_row->addWidget(new QLabel(tr("Size"), advanced_draw_tab));
+        QSpinBox *size_spin = new QSpinBox(advanced_draw_tab);
+        size_spin->setRange(1, 500);
+        size_spin->setValue(view->draw_brush_size);
+        size_row->addWidget(size_spin);
+        col->addLayout(size_row);
+        connect(size_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int v){ view->draw_brush_size = v; });
+
+        // opacità
+        QHBoxLayout *op_row = new QHBoxLayout();
+        op_row->addWidget(new QLabel(tr("Opacity"), advanced_draw_tab));
+        QSpinBox *op_spin = new QSpinBox(advanced_draw_tab);
+        op_spin->setRange(0, 100);
+        op_spin->setValue(view->draw_brush_opacity);
+        op_row->addWidget(op_spin);
+        col->addLayout(op_row);
+        connect(op_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int v){ view->draw_brush_opacity = v; });
+
+        // colore
+        QPushButton *color_btn = new QPushButton(tr("Brush color"), advanced_draw_tab);
+        color_btn->setStyleSheet(QString("background-color: %1").arg(view->draw_brush_color.name()));
+        col->addWidget(color_btn);
+        connect(color_btn, &QPushButton::clicked, this, [this, color_btn]{
+            QColor c = QColorDialog::getColor(view->draw_brush_color, this, tr("Brush color"));
+            if(c.isValid()){
+                view->draw_brush_color = c;
+                color_btn->setStyleSheet(QString("background-color: %1").arg(c.name()));
+            }
+        });
+
+        // modulazione da pressione penna (attiva di default; inerte in Phase 1, mouse-only)
+        QCheckBox *pressure_check = new QCheckBox(tr("Pen pressure"), advanced_draw_tab);
+        pressure_check->setChecked(view->draw_pressure);
+        col->addWidget(pressure_check);
+        connect(pressure_check, &QCheckBox::toggled, this, [this](bool on){ view->draw_pressure = on; });
+
+        // lista pennelli: Phase 1 solo il tondo integrato; il caricamento .abr arriva in Phase 2
+        QListWidget *brush_list = new QListWidget(advanced_draw_tab);
+        brush_list->setViewMode(QListView::IconMode);
+        brush_list->setIconSize(QSize(48, 48));
+        brush_list->setMaximumHeight(80);
+        QListWidgetItem *round = new QListWidgetItem(QIcon(QPixmap::fromImage(view->draw_brush_stamp)), tr("Round"));
+        brush_list->addItem(round);
+        brush_list->setCurrentItem(round);
+        col->addWidget(brush_list);
+
+        // azioni: rientra in draw mode su un freehand esistente + undo/redo di sessione
+        QHBoxLayout *action_row = new QHBoxLayout();
+        QPushButton *enter_btn = new QPushButton(tr("Edit drawing"), advanced_draw_tab);
+        QPushButton *undo_btn = new QPushButton(tr("Undo"), advanced_draw_tab);
+        QPushButton *redo_btn = new QPushButton(tr("Redo"), advanced_draw_tab);
+        action_row->addWidget(enter_btn);
+        action_row->addWidget(undo_btn);
+        action_row->addWidget(redo_btn);
+        col->addLayout(action_row);
+        connect(enter_btn, &QPushButton::clicked, this, [this]{
+            // in draw mode il bottone ESCE (come Esc/Enter); fuori, RIENTRA sul freehand selezionato
+            if(view->draw_mode){
+                view->ExitDrawMode();
+                return;
+            }
+            if(view->my_animation->current_frame == nullptr) return;
+            StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
+            if(cs && cs->stick_type == StickData::FREEHAND)
+                view->EnterDrawMode(cs, true);
+        });
+        // etichetta sincronizzata con lo stato di draw mode, comunque esso cambi
+        connect(view, &MyView::DrawModeChanged, this, [enter_btn](bool active){
+            enter_btn->setText(active ? tr("Exit draw mode") : tr("Edit drawing"));
+        });
+        connect(undo_btn, &QPushButton::clicked, this, [this]{ view->DrawStrokeUndo(); });
+        connect(redo_btn, &QPushButton::clicked, this, [this]{ view->DrawStrokeRedo(); });
+
+        col->addStretch(1);
     }
 
     AddFrame();
@@ -576,6 +686,8 @@ Widget::~Widget()
     delete advanced_rect_tab;
     advanced_ik_tab->setParent(nullptr);
     delete advanced_ik_tab;
+    advanced_draw_tab->setParent(nullptr);
+    delete advanced_draw_tab;
     delete ui;
 }
 
@@ -595,6 +707,7 @@ void Widget::on_cursor_clicked()
 /// @details Snapshots undo, then delegates to AddStick() for the actual layer creation.
 void Widget::on_addStickBtn_clicked()
 {
+    view->ExitDrawMode(); // aggiungere un layer chiude la sessione di disegno (nuovo layer diventa corrente)
     view->StoreUndo();
     AddStick();
 }
@@ -618,6 +731,11 @@ void Widget::on_thicknessSpinBox_valueChanged(int arg1)
  */
 void Widget::on_stickLayerView_currentItemChanged(QListWidgetItem *current, QListWidgetItem *previous)
 {
+    // cambiare layer selezionato chiude la sessione di disegno (finalizza il freehand del
+    // layer corrente prima di spostarsi). Guardato su draw_mode così i cambi di selezione
+    // PROGRAMMATICI (ripopolamento lista) non paghino nulla fuori da draw mode
+    if(view->draw_mode)
+        view->ExitDrawMode();
     if(current != nullptr)
     {
         qDebug("layer clicked");
@@ -633,6 +751,9 @@ void Widget::on_stickLayerView_currentItemChanged(QListWidgetItem *current, QLis
 /// (or the whole multi-selection when one is active).
 void Widget::on_deleteStickFigureBtn_clicked()
 {
+    // finalizza la sessione di disegno prima di rimuovere il layer (che libererebbe lo
+    // stick del freehand → dangling / use-after-free)
+    view->ExitDrawMode();
     if(view->MultiSelectionActive()){
         view->DeleteMultiSelection();
         return;
@@ -666,16 +787,17 @@ void Widget::on_elongateBtn_clicked()
     view->SetTool(ELONGATE);
 }
 
-/// @details Steps the undo stack back one command (QUndoStack::undo()).
+/// @details In draw mode steps the draw-session stroke chain, otherwise the frame undo
+/// stack — MyView::Undo() routes it (same as the Ctrl+Z shortcut).
 void Widget::on_undoBtn_clicked()
 {
-    view->undo_stack.undo();
+    view->Undo();
 }
 
-/// @details Re-applies the most recently undone command (QUndoStack::redo()).
+/// @details Draw-mode-aware redo, mirror of on_undoBtn_clicked(); MyView::Redo() routes it.
 void Widget::on_redoBtn_clicked()
 {
-    view->undo_stack.redo();
+    view->Redo();
 }
 /// @details Delegates to AddFrame(); the undo snapshot is taken there, not here.
 void Widget::on_addFrameBtn_clicked()
@@ -717,6 +839,7 @@ Frame* Widget::SetUpFrame(int pos){
  */
 void Widget::on_copyFrame_clicked()
 {
+    view->ExitDrawMode(); // finalizza il disegno prima di duplicare il frame (snapshot pulito)
     view->StoreUndo(CMD_ADDFRAME);
     // snapshot dati del frame corrente (Phase 2b): niente stream né switchFrameFlag
     FrameData *snapshot = ExtractFrameData(*view->my_animation->CurrentFrame());
@@ -747,6 +870,10 @@ void Widget::on_onionSkinSpinBox_valueChanged(const QString &arg1)
 /// @details Refuses to delete the last remaining frame — an animation always has at least one.
 void Widget::on_deleteFrameBtn_clicked()
 {
+    // finalizza un'eventuale sessione di disegno PRIMA di cancellare il frame (che
+    // libererebbe lo stick del freehand → dangling); così lo snapshot cattura il disegno
+    // già ritagliato e non c'è use-after-free
+    view->ExitDrawMode();
     if(view->my_animation->frame_list.count()>1){
         view->StoreUndo(CMD_DELETEFRAME);
         view->DeleteFrame(view->my_animation->CurrentFrame());
@@ -757,6 +884,7 @@ void Widget::on_deleteFrameBtn_clicked()
 /// @details Switches the displayed frame to whichever row was clicked in the frame list.
 void Widget::on_frameListWidget_itemClicked(QListWidgetItem *item)
 {
+    view->ExitDrawMode(); // il cambio frame chiude la sessione di disegno (finalizza sul frame corrente)
     view->StoreUndo(CMD_MOVETOFRAME);
     QVariant  retrievedData = (item->data(Qt::UserRole));
     Frame* cs = qvariant_cast<Frame*>(retrievedData);
@@ -1452,6 +1580,7 @@ void Widget::on_HorizontalFlipBtn_clicked()
 /// @details Snapshots the current stickfigure into `view->copy_stick_figure_buffer` (replacing whatever was copied before) for on_pasteStickFigureBtn_clicked() to consume. With a multi-selection active, every selected figure is snapshotted into `view->multi_copy_buffer` instead.
 void Widget::on_copyStickFigureBtn_clicked()
 {
+    view->ExitDrawMode(); // finalizza il disegno prima di estrarre la figura (snapshot pulito)
     // la copia più recente vince: copiare svuota SEMPRE l'altro buffer
     qDeleteAll(view->multi_copy_buffer);
     view->multi_copy_buffer.clear();
@@ -1473,6 +1602,7 @@ void Widget::on_copyStickFigureBtn_clicked()
 /// @details Adds a new layer populated from the copy buffer (PopulateLiveStickFigure()); refuses with an error dialog if nothing has been copied yet this session. A multi-selection copy pastes one new layer per copied figure and selects the pasted set.
 void Widget::on_pasteStickFigureBtn_clicked()
 {
+   view->ExitDrawMode(); // il paste aggiunge/riempie layer: chiudi prima la sessione di disegno
    if(!view->multi_copy_buffer.isEmpty()){
        view->StoreUndo(CMD_SIMPLE);
        QList<StickFigure*> pasted;
@@ -1697,6 +1827,13 @@ void Widget::on_pushButton_clicked()
 void Widget::on_drawTaperBtn_clicked()
 {
     view->SetTool(DRAWTAPER);
+}
+
+/// @details Switches to the freehand tool: two clicks place an invisible FREEHAND stick,
+/// then MyView drops into draw mode (see DrawCmd()/EnterDrawMode()).
+void Widget::on_drawFreehandBtn_clicked()
+{
+    view->SetTool(DRAWFREEHAND);
 }
 
 /// @details Switches to the trapezoid-drawing tool.
@@ -1985,7 +2122,7 @@ void Widget::on_cpyFrame_clicked()
  */
 void Widget::on_pasteFrame_clicked()
 {
-
+    view->ExitDrawMode(); // il paste aggiunge layer al frame corrente: chiudi prima il disegno
     view->StoreUndo();
     // add a new stickfigure per every stickfigure in the copy buffer
     for(StickFigureData*S:frame_copy_buffer->stick_figures){

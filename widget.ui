@@ -1514,6 +1514,34 @@ QPushButton:pressed{
            </widget>
           </item>
           <item>
+           <widget class="QPushButton" name="drawFreehandBtn">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>55</width>
+              <height>55</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>50</width>
+              <height>50</height>
+             </size>
+            </property>
+            <property name="toolTip">
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Freehand stick tool:&lt;/p&gt;&lt;p&gt;Click twice to place an invisible stick, then paint on it in draw mode with brush/eraser. Esc or Enter finishes.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            </property>
+            <property name="text">
+             <string>Free</string>
+            </property>
+           </widget>
+          </item>
+          <item>
            <widget class="QPushButton" name="drawTrapezoidBtn">
             <property name="sizePolicy">
              <sizepolicy hsizetype="MinimumExpanding" vsizetype="MinimumExpanding">
