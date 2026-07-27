@@ -152,10 +152,12 @@ public:
     QRectF draw_region;                     ///< scene rect the canvas covers (the enter-time visible viewport)
     // brush state — edited live by DrawModeWidget's controls (widget.cpp):
     bool draw_eraser = false;               ///< eraser sub-tool (composites DestinationOut)
-    bool draw_pressure = true;              ///< pressure modulation checkbox (Phase 3); ignored on mouse input
+    bool draw_pressure_size = true;         ///< pen-pressure-drives-size checkbox (Phase 3); ignored on mouse input
+    bool draw_pressure_opacity = true;      ///< pen-pressure-drives-opacity checkbox (Phase 3); ignored on mouse input
     double draw_pressure_val = 1.0;         ///< live pen pressure 0..1 from tabletEvent; 1.0 on mouse (reset each stroke)
     int draw_brush_size = 20;               ///< stamp diameter in scene units
     int draw_brush_opacity = 100;           ///< 0..100
+    int draw_brush_spacing = 25;            ///< dab pitch, % of the (pressured) stamp diameter; lower = smoother/slower stroke
     QColor draw_brush_color = Qt::black;     ///< brush tint
     QImage draw_brush_stamp;                ///< grayscale-alpha stamp mask (built-in soft round in Phase 1)
 
@@ -330,9 +332,22 @@ public:
 
     /**
      * @brief Copies the current figure into the library as a data record.
+     * @param name when non-empty, overrides the copied StickFigureData's name (used by
+     *        the "Add to library" prompt); ignored for a multi-selection, where each
+     *        figure keeps its own live name. Empty by default: keeps the live figure's name.
      * @return the live source figure, or nullptr if it has no sticks.
      */
-    StickFigure *AddStickFigureToLibrary();
+    StickFigure *AddStickFigureToLibrary(const QString &name = QString());
+
+    /**
+     * @brief Saves ONE figure as a new, self-contained *.marlib file (a FrameData holding
+     * just that figure) — independent of, and without touching, the currently-open library
+     * buffer (stick_library_buffer). Used by File > Save StickFigure's "Marionetta Library"
+     * filter, so a single figure can be handed off as a ready-to-load mini-library.
+     * @param file_name destination *.marlib path.
+     * @param figure live figure to export; no-op if null or empty.
+     */
+    void SaveStickFigureAsLibrary(const QString &file_name, StickFigure *figure);
     QList<QGraphicsPixmapItem*> preview_list; ///< rendered frames shown one-by-one during playback (PreparePreview/DisplayPreview)
 
     /**
@@ -480,6 +495,20 @@ public:
      *        and the selection rectangle. Safe to call at any time.
      */
     void ClearMultiSelection();
+
+    /**
+     * @brief Commits the set of figures a drag rubber band currently encloses/touches to
+     *        the actual selection state (called every mouseMove while band_dragging).
+     * @param touched the figures the band hit this move.
+     * @details Bridges the band gesture to the two selection representations: 2+ figures →
+     *          multi-selection (transform box + pivot, via UpdateMultiSelectionUI); exactly
+     *          1 → a normal SINGLE selection (that figure becomes CurrentStickFigure with its
+     *          handle/bounding box and its layer-list row) — the missing case that made a
+     *          band enclosing one figure appear to do nothing, since multi_selection with a
+     *          single entry is not an "active" selection and was wiped on release; 0 → nothing
+     *          selected. Keyboard-modifier click add/remove is handled separately at press.
+     */
+    void ApplyBandSelection(const QList<StickFigure*> &touched);
 
     /**
      * @brief Center of the multi-selection (mean of every selected stick endpoint) —
@@ -866,6 +895,10 @@ private:
     QTransform draw_disp_inv;     ///< inverse of draw_disp, for scene -> canvas-pixel mouse mapping
     double draw_theta = 0;        ///< the stick's rotation (its img_angle) during the session
 
+    /** @brief Pressure multiplier centred on 1.0 at a "normal" (half-way) pen press: the
+     *  dialled-in brush size/opacity comes out exactly at draw_pressure_val==0.5, a harder
+     *  press scales above it (up to 2x at full pressure) and a lighter one scales below. */
+    double PressureFactor() const;
     /** @brief Stamps one brush dab (tinted/eraser) onto draw_canvas at a canvas-pixel point. */
     void StampBrush(const QPointF &canvas_px);
     /** @brief Stamps the brush along a scene-space segment (interpolated by brush spacing). */

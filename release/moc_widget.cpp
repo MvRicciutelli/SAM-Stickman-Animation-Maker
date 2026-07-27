@@ -82,6 +82,7 @@ static constexpr auto qt_meta_stringdata_CLASSWidgetENDCLASS = QtMocHelpers::str
     "current_row",
     "on_removeFromLibraryBtn_clicked",
     "on_addItemFromLibraryToSceneBtn_clicked",
+    "on_currentLibrary_itemDoubleClicked",
     "on_saveCurrentLibraryBtn_clicked",
     "on_imgHOffsetSlider_valueChanged",
     "value",
@@ -156,7 +157,7 @@ static constexpr auto qt_meta_stringdata_CLASSWidgetENDCLASS = QtMocHelpers::str
 );
 #else  // !QT_MOC_HAS_STRING_DATA
 struct qt_meta_stringdata_CLASSWidgetENDCLASS_t {
-    uint offsetsAndSizes[228];
+    uint offsetsAndSizes[230];
     char stringdata0[7];
     char stringdata1[19];
     char stringdata2[1];
@@ -200,77 +201,78 @@ struct qt_meta_stringdata_CLASSWidgetENDCLASS_t {
     char stringdata40[12];
     char stringdata41[32];
     char stringdata42[40];
-    char stringdata43[33];
+    char stringdata43[36];
     char stringdata44[33];
-    char stringdata45[6];
-    char stringdata46[32];
-    char stringdata47[27];
+    char stringdata45[33];
+    char stringdata46[6];
+    char stringdata47[32];
     char stringdata48[27];
-    char stringdata49[34];
+    char stringdata49[27];
     char stringdata50[34];
     char stringdata51[34];
-    char stringdata52[32];
-    char stringdata53[33];
-    char stringdata54[35];
-    char stringdata55[28];
-    char stringdata56[32];
-    char stringdata57[30];
-    char stringdata58[33];
-    char stringdata59[31];
+    char stringdata52[34];
+    char stringdata53[32];
+    char stringdata54[33];
+    char stringdata55[35];
+    char stringdata56[28];
+    char stringdata57[32];
+    char stringdata58[30];
+    char stringdata59[33];
     char stringdata60[31];
-    char stringdata61[28];
-    char stringdata62[25];
-    char stringdata63[33];
-    char stringdata64[34];
+    char stringdata61[31];
+    char stringdata62[28];
+    char stringdata63[25];
+    char stringdata64[33];
     char stringdata65[34];
-    char stringdata66[35];
-    char stringdata67[32];
-    char stringdata68[31];
-    char stringdata69[43];
-    char stringdata70[46];
-    char stringdata71[24];
-    char stringdata72[25];
-    char stringdata73[26];
-    char stringdata74[27];
-    char stringdata75[29];
-    char stringdata76[30];
-    char stringdata77[31];
-    char stringdata78[19];
-    char stringdata79[20];
-    char stringdata80[21];
-    char stringdata81[22];
-    char stringdata82[28];
-    char stringdata83[31];
-    char stringdata84[26];
-    char stringdata85[23];
-    char stringdata86[29];
-    char stringdata87[28];
-    char stringdata88[23];
-    char stringdata89[22];
-    char stringdata90[24];
-    char stringdata91[27];
-    char stringdata92[28];
-    char stringdata93[21];
-    char stringdata94[24];
-    char stringdata95[21];
-    char stringdata96[38];
-    char stringdata97[24];
-    char stringdata98[27];
-    char stringdata99[23];
-    char stringdata100[35];
-    char stringdata101[32];
-    char stringdata102[35];
-    char stringdata103[23];
-    char stringdata104[25];
+    char stringdata66[34];
+    char stringdata67[35];
+    char stringdata68[32];
+    char stringdata69[31];
+    char stringdata70[43];
+    char stringdata71[46];
+    char stringdata72[24];
+    char stringdata73[25];
+    char stringdata74[26];
+    char stringdata75[27];
+    char stringdata76[29];
+    char stringdata77[30];
+    char stringdata78[31];
+    char stringdata79[19];
+    char stringdata80[20];
+    char stringdata81[21];
+    char stringdata82[22];
+    char stringdata83[28];
+    char stringdata84[31];
+    char stringdata85[26];
+    char stringdata86[23];
+    char stringdata87[29];
+    char stringdata88[28];
+    char stringdata89[23];
+    char stringdata90[22];
+    char stringdata91[24];
+    char stringdata92[27];
+    char stringdata93[28];
+    char stringdata94[21];
+    char stringdata95[24];
+    char stringdata96[21];
+    char stringdata97[38];
+    char stringdata98[24];
+    char stringdata99[27];
+    char stringdata100[23];
+    char stringdata101[35];
+    char stringdata102[32];
+    char stringdata103[35];
+    char stringdata104[23];
     char stringdata105[25];
-    char stringdata106[20];
-    char stringdata107[22];
-    char stringdata108[35];
-    char stringdata109[9];
-    char stringdata110[24];
-    char stringdata111[22];
-    char stringdata112[24];
-    char stringdata113[20];
+    char stringdata106[25];
+    char stringdata107[20];
+    char stringdata108[22];
+    char stringdata109[35];
+    char stringdata110[9];
+    char stringdata111[24];
+    char stringdata112[22];
+    char stringdata113[24];
+    char stringdata114[20];
 };
 #define QT_MOC_LITERAL(ofs, len) \
     uint(sizeof(qt_meta_stringdata_CLASSWidgetENDCLASS_t::offsetsAndSizes) + ofs), len 
@@ -319,77 +321,78 @@ Q_CONSTINIT static const qt_meta_stringdata_CLASSWidgetENDCLASS_t qt_meta_string
         QT_MOC_LITERAL(946, 11),  // "current_row"
         QT_MOC_LITERAL(958, 31),  // "on_removeFromLibraryBtn_clicked"
         QT_MOC_LITERAL(990, 39),  // "on_addItemFromLibraryToSceneB..."
-        QT_MOC_LITERAL(1030, 32),  // "on_saveCurrentLibraryBtn_clicked"
-        QT_MOC_LITERAL(1063, 32),  // "on_imgHOffsetSlider_valueChanged"
-        QT_MOC_LITERAL(1096, 5),  // "value"
-        QT_MOC_LITERAL(1102, 31),  // "on_imgVOfsetSlider_valueChanged"
-        QT_MOC_LITERAL(1134, 26),  // "on_imgWSlider_valueChanged"
-        QT_MOC_LITERAL(1161, 26),  // "on_imgHSlider_valueChanged"
-        QT_MOC_LITERAL(1188, 33),  // "on_imgRotationSlider_valueCha..."
-        QT_MOC_LITERAL(1222, 33),  // "on_imgHOffsetSpinbox_valueCha..."
-        QT_MOC_LITERAL(1256, 33),  // "on_imgVOffsetSpinbox_valueCha..."
-        QT_MOC_LITERAL(1290, 31),  // "on_imgWidthSpinbox_valueChanged"
-        QT_MOC_LITERAL(1322, 32),  // "on_imgHeightSpinbox_valueChanged"
-        QT_MOC_LITERAL(1355, 34),  // "on_imgRotationSpinbox_valueCh..."
-        QT_MOC_LITERAL(1390, 27),  // "on_setStickColorBtn_clicked"
-        QT_MOC_LITERAL(1418, 31),  // "on_setAllSticksColorBtn_clicked"
-        QT_MOC_LITERAL(1450, 29),  // "on_setPenThicknessBtn_clicked"
-        QT_MOC_LITERAL(1480, 32),  // "on_setPenThicknessAllBtn_clicked"
-        QT_MOC_LITERAL(1513, 30),  // "on_selectBrushColorBtn_clicked"
-        QT_MOC_LITERAL(1544, 30),  // "on_setAllBrushColorBtn_clicked"
-        QT_MOC_LITERAL(1575, 27),  // "on_setBrushColorBtn_clicked"
-        QT_MOC_LITERAL(1603, 24),  // "on_manipulateBtn_clicked"
-        QT_MOC_LITERAL(1628, 32),  // "on_penOpacitySlider_valueChanged"
-        QT_MOC_LITERAL(1661, 33),  // "on_fillOpacitySlider_valueCha..."
-        QT_MOC_LITERAL(1695, 33),  // "on_penOpacitySpinbox_valueCha..."
-        QT_MOC_LITERAL(1729, 34),  // "on_fillOpacitySpinbox_valueCh..."
-        QT_MOC_LITERAL(1764, 31),  // "on_rotateStickFigureBtn_clicked"
-        QT_MOC_LITERAL(1796, 30),  // "on_scaleStickFigureBtn_clicked"
-        QT_MOC_LITERAL(1827, 42),  // "on_stickFigureScaleSpinbox_ed..."
-        QT_MOC_LITERAL(1870, 45),  // "on_stickFigureRotationSpinbox..."
-        QT_MOC_LITERAL(1916, 23),  // "on_moveSceneBtn_clicked"
-        QT_MOC_LITERAL(1940, 24),  // "on_scaleSceneBtn_clicked"
-        QT_MOC_LITERAL(1965, 25),  // "on_rotateSceneBtn_clicked"
-        QT_MOC_LITERAL(1991, 26),  // "on_verticalFlipBtn_clicked"
-        QT_MOC_LITERAL(2018, 28),  // "on_HorizontalFlipBtn_clicked"
-        QT_MOC_LITERAL(2047, 29),  // "on_copyStickFigureBtn_clicked"
-        QT_MOC_LITERAL(2077, 30),  // "on_pasteStickFigureBtn_clicked"
-        QT_MOC_LITERAL(2108, 18),  // "on_joinBtn_clicked"
-        QT_MOC_LITERAL(2127, 19),  // "on_splitBtn_clicked"
-        QT_MOC_LITERAL(2147, 20),  // "on_joinStick_clicked"
-        QT_MOC_LITERAL(2168, 21),  // "on_splitStick_clicked"
-        QT_MOC_LITERAL(2190, 27),  // "on_setMasterNodeBtn_clicked"
-        QT_MOC_LITERAL(2218, 30),  // "on_createNewLibraryBtn_clicked"
-        QT_MOC_LITERAL(2249, 25),  // "on_setAllDepthBtn_clicked"
-        QT_MOC_LITERAL(2275, 22),  // "on_setDepthBtn_clicked"
-        QT_MOC_LITERAL(2298, 28),  // "on_depthSpinbox_valueChanged"
-        QT_MOC_LITERAL(2327, 27),  // "on_depthSlider_valueChanged"
-        QT_MOC_LITERAL(2355, 22),  // "on_drawRectBtn_clicked"
-        QT_MOC_LITERAL(2378, 21),  // "on_pushButton_clicked"
-        QT_MOC_LITERAL(2400, 23),  // "on_drawTaperBtn_clicked"
-        QT_MOC_LITERAL(2424, 26),  // "on_drawFreehandBtn_clicked"
-        QT_MOC_LITERAL(2451, 27),  // "on_drawTrapezoidBtn_clicked"
-        QT_MOC_LITERAL(2479, 20),  // "on_addImgBtn_clicked"
-        QT_MOC_LITERAL(2500, 23),  // "on_removeImgBtn_clicked"
-        QT_MOC_LITERAL(2524, 20),  // "on_setImgBtn_clicked"
-        QT_MOC_LITERAL(2545, 37),  // "on_moveStickFigureToCenterBtn..."
-        QT_MOC_LITERAL(2583, 23),  // "on_pushToTopBtn_clicked"
-        QT_MOC_LITERAL(2607, 26),  // "on_pushToButtonBtn_clicked"
-        QT_MOC_LITERAL(2634, 22),  // "on_elongateBtn_clicked"
-        QT_MOC_LITERAL(2657, 34),  // "on_elongateSpinbox_editingFin..."
-        QT_MOC_LITERAL(2692, 31),  // "on_pushStickFigureToTop_clicked"
-        QT_MOC_LITERAL(2724, 34),  // "on_pushStickFigureToBottom_cl..."
-        QT_MOC_LITERAL(2759, 22),  // "on_moveStickUp_clicked"
-        QT_MOC_LITERAL(2782, 24),  // "on_moveStickDown_clicked"
-        QT_MOC_LITERAL(2807, 24),  // "on_deleteLibrary_clicked"
-        QT_MOC_LITERAL(2832, 19),  // "on_cpyFrame_clicked"
-        QT_MOC_LITERAL(2852, 21),  // "on_pasteFrame_clicked"
-        QT_MOC_LITERAL(2874, 34),  // "on_lineThicknessSlider_slider..."
-        QT_MOC_LITERAL(2909, 8),  // "position"
-        QT_MOC_LITERAL(2918, 23),  // "on_clampToolBtn_clicked"
-        QT_MOC_LITERAL(2942, 21),  // "on_addPolyBtn_clicked"
-        QT_MOC_LITERAL(2964, 23),  // "on_multiLineBtn_clicked"
-        QT_MOC_LITERAL(2988, 19)   // "on_addIkBtn_clicked"
+        QT_MOC_LITERAL(1030, 35),  // "on_currentLibrary_itemDoubleC..."
+        QT_MOC_LITERAL(1066, 32),  // "on_saveCurrentLibraryBtn_clicked"
+        QT_MOC_LITERAL(1099, 32),  // "on_imgHOffsetSlider_valueChanged"
+        QT_MOC_LITERAL(1132, 5),  // "value"
+        QT_MOC_LITERAL(1138, 31),  // "on_imgVOfsetSlider_valueChanged"
+        QT_MOC_LITERAL(1170, 26),  // "on_imgWSlider_valueChanged"
+        QT_MOC_LITERAL(1197, 26),  // "on_imgHSlider_valueChanged"
+        QT_MOC_LITERAL(1224, 33),  // "on_imgRotationSlider_valueCha..."
+        QT_MOC_LITERAL(1258, 33),  // "on_imgHOffsetSpinbox_valueCha..."
+        QT_MOC_LITERAL(1292, 33),  // "on_imgVOffsetSpinbox_valueCha..."
+        QT_MOC_LITERAL(1326, 31),  // "on_imgWidthSpinbox_valueChanged"
+        QT_MOC_LITERAL(1358, 32),  // "on_imgHeightSpinbox_valueChanged"
+        QT_MOC_LITERAL(1391, 34),  // "on_imgRotationSpinbox_valueCh..."
+        QT_MOC_LITERAL(1426, 27),  // "on_setStickColorBtn_clicked"
+        QT_MOC_LITERAL(1454, 31),  // "on_setAllSticksColorBtn_clicked"
+        QT_MOC_LITERAL(1486, 29),  // "on_setPenThicknessBtn_clicked"
+        QT_MOC_LITERAL(1516, 32),  // "on_setPenThicknessAllBtn_clicked"
+        QT_MOC_LITERAL(1549, 30),  // "on_selectBrushColorBtn_clicked"
+        QT_MOC_LITERAL(1580, 30),  // "on_setAllBrushColorBtn_clicked"
+        QT_MOC_LITERAL(1611, 27),  // "on_setBrushColorBtn_clicked"
+        QT_MOC_LITERAL(1639, 24),  // "on_manipulateBtn_clicked"
+        QT_MOC_LITERAL(1664, 32),  // "on_penOpacitySlider_valueChanged"
+        QT_MOC_LITERAL(1697, 33),  // "on_fillOpacitySlider_valueCha..."
+        QT_MOC_LITERAL(1731, 33),  // "on_penOpacitySpinbox_valueCha..."
+        QT_MOC_LITERAL(1765, 34),  // "on_fillOpacitySpinbox_valueCh..."
+        QT_MOC_LITERAL(1800, 31),  // "on_rotateStickFigureBtn_clicked"
+        QT_MOC_LITERAL(1832, 30),  // "on_scaleStickFigureBtn_clicked"
+        QT_MOC_LITERAL(1863, 42),  // "on_stickFigureScaleSpinbox_ed..."
+        QT_MOC_LITERAL(1906, 45),  // "on_stickFigureRotationSpinbox..."
+        QT_MOC_LITERAL(1952, 23),  // "on_moveSceneBtn_clicked"
+        QT_MOC_LITERAL(1976, 24),  // "on_scaleSceneBtn_clicked"
+        QT_MOC_LITERAL(2001, 25),  // "on_rotateSceneBtn_clicked"
+        QT_MOC_LITERAL(2027, 26),  // "on_verticalFlipBtn_clicked"
+        QT_MOC_LITERAL(2054, 28),  // "on_HorizontalFlipBtn_clicked"
+        QT_MOC_LITERAL(2083, 29),  // "on_copyStickFigureBtn_clicked"
+        QT_MOC_LITERAL(2113, 30),  // "on_pasteStickFigureBtn_clicked"
+        QT_MOC_LITERAL(2144, 18),  // "on_joinBtn_clicked"
+        QT_MOC_LITERAL(2163, 19),  // "on_splitBtn_clicked"
+        QT_MOC_LITERAL(2183, 20),  // "on_joinStick_clicked"
+        QT_MOC_LITERAL(2204, 21),  // "on_splitStick_clicked"
+        QT_MOC_LITERAL(2226, 27),  // "on_setMasterNodeBtn_clicked"
+        QT_MOC_LITERAL(2254, 30),  // "on_createNewLibraryBtn_clicked"
+        QT_MOC_LITERAL(2285, 25),  // "on_setAllDepthBtn_clicked"
+        QT_MOC_LITERAL(2311, 22),  // "on_setDepthBtn_clicked"
+        QT_MOC_LITERAL(2334, 28),  // "on_depthSpinbox_valueChanged"
+        QT_MOC_LITERAL(2363, 27),  // "on_depthSlider_valueChanged"
+        QT_MOC_LITERAL(2391, 22),  // "on_drawRectBtn_clicked"
+        QT_MOC_LITERAL(2414, 21),  // "on_pushButton_clicked"
+        QT_MOC_LITERAL(2436, 23),  // "on_drawTaperBtn_clicked"
+        QT_MOC_LITERAL(2460, 26),  // "on_drawFreehandBtn_clicked"
+        QT_MOC_LITERAL(2487, 27),  // "on_drawTrapezoidBtn_clicked"
+        QT_MOC_LITERAL(2515, 20),  // "on_addImgBtn_clicked"
+        QT_MOC_LITERAL(2536, 23),  // "on_removeImgBtn_clicked"
+        QT_MOC_LITERAL(2560, 20),  // "on_setImgBtn_clicked"
+        QT_MOC_LITERAL(2581, 37),  // "on_moveStickFigureToCenterBtn..."
+        QT_MOC_LITERAL(2619, 23),  // "on_pushToTopBtn_clicked"
+        QT_MOC_LITERAL(2643, 26),  // "on_pushToButtonBtn_clicked"
+        QT_MOC_LITERAL(2670, 22),  // "on_elongateBtn_clicked"
+        QT_MOC_LITERAL(2693, 34),  // "on_elongateSpinbox_editingFin..."
+        QT_MOC_LITERAL(2728, 31),  // "on_pushStickFigureToTop_clicked"
+        QT_MOC_LITERAL(2760, 34),  // "on_pushStickFigureToBottom_cl..."
+        QT_MOC_LITERAL(2795, 22),  // "on_moveStickUp_clicked"
+        QT_MOC_LITERAL(2818, 24),  // "on_moveStickDown_clicked"
+        QT_MOC_LITERAL(2843, 24),  // "on_deleteLibrary_clicked"
+        QT_MOC_LITERAL(2868, 19),  // "on_cpyFrame_clicked"
+        QT_MOC_LITERAL(2888, 21),  // "on_pasteFrame_clicked"
+        QT_MOC_LITERAL(2910, 34),  // "on_lineThicknessSlider_slider..."
+        QT_MOC_LITERAL(2945, 8),  // "position"
+        QT_MOC_LITERAL(2954, 23),  // "on_clampToolBtn_clicked"
+        QT_MOC_LITERAL(2978, 21),  // "on_addPolyBtn_clicked"
+        QT_MOC_LITERAL(3000, 23),  // "on_multiLineBtn_clicked"
+        QT_MOC_LITERAL(3024, 19)   // "on_addIkBtn_clicked"
     },
     "Widget",
     "on_drawBtn_clicked",
@@ -434,6 +437,7 @@ Q_CONSTINIT static const qt_meta_stringdata_CLASSWidgetENDCLASS_t qt_meta_string
     "current_row",
     "on_removeFromLibraryBtn_clicked",
     "on_addItemFromLibraryToSceneBtn_clicked",
+    "on_currentLibrary_itemDoubleClicked",
     "on_saveCurrentLibraryBtn_clicked",
     "on_imgHOffsetSlider_valueChanged",
     "value",
@@ -516,7 +520,7 @@ Q_CONSTINIT static const uint qt_meta_data_CLASSWidgetENDCLASS[] = {
       12,       // revision
        0,       // classname
        0,    0, // classinfo
-     104,   14, // methods
+     105,   14, // methods
        0,    0, // properties
        0,    0, // enums/sets
        0,    0, // constructors
@@ -524,110 +528,111 @@ Q_CONSTINIT static const uint qt_meta_data_CLASSWidgetENDCLASS[] = {
        0,       // signalCount
 
  // slots: name, argc, parameters, tag, flags, initial metatype offsets
-       1,    0,  638,    2, 0x08,    1 /* Private */,
-       3,    0,  639,    2, 0x08,    2 /* Private */,
-       4,    0,  640,    2, 0x08,    3 /* Private */,
-       5,    1,  641,    2, 0x08,    4 /* Private */,
-       7,    2,  644,    2, 0x08,    6 /* Private */,
-      11,    0,  649,    2, 0x08,    9 /* Private */,
-      12,    0,  650,    2, 0x08,   10 /* Private */,
-      13,    0,  651,    2, 0x08,   11 /* Private */,
-      14,    0,  652,    2, 0x08,   12 /* Private */,
-      15,    0,  653,    2, 0x08,   13 /* Private */,
-      16,    0,  654,    2, 0x08,   14 /* Private */,
-      17,    0,  655,    2, 0x08,   15 /* Private */,
-      18,    0,  656,    2, 0x08,   16 /* Private */,
-      19,    0,  657,    2, 0x08,   17 /* Private */,
-      20,    1,  658,    2, 0x08,   18 /* Private */,
-      21,    0,  661,    2, 0x08,   20 /* Private */,
-      22,    1,  662,    2, 0x08,   21 /* Private */,
-      24,    1,  665,    2, 0x08,   23 /* Private */,
-      25,    0,  668,    2, 0x08,   25 /* Private */,
-      26,    0,  669,    2, 0x08,   26 /* Private */,
-      27,    0,  670,    2, 0x08,   27 /* Private */,
-      28,    0,  671,    2, 0x08,   28 /* Private */,
-      29,    0,  672,    2, 0x08,   29 /* Private */,
-      30,    0,  673,    2, 0x08,   30 /* Private */,
-      31,    0,  674,    2, 0x08,   31 /* Private */,
-      32,    0,  675,    2, 0x08,   32 /* Private */,
-      33,    0,  676,    2, 0x08,   33 /* Private */,
-      34,    0,  677,    2, 0x08,   34 /* Private */,
-      35,    0,  678,    2, 0x08,   35 /* Private */,
-      36,    0,  679,    2, 0x08,   36 /* Private */,
-      37,    0,  680,    2, 0x08,   37 /* Private */,
-      38,    0,  681,    2, 0x08,   38 /* Private */,
-      39,    1,  682,    2, 0x08,   39 /* Private */,
-      41,    0,  685,    2, 0x08,   41 /* Private */,
-      42,    0,  686,    2, 0x08,   42 /* Private */,
-      43,    0,  687,    2, 0x08,   43 /* Private */,
-      44,    1,  688,    2, 0x08,   44 /* Private */,
-      46,    1,  691,    2, 0x08,   46 /* Private */,
-      47,    1,  694,    2, 0x08,   48 /* Private */,
-      48,    1,  697,    2, 0x08,   50 /* Private */,
-      49,    1,  700,    2, 0x08,   52 /* Private */,
-      50,    1,  703,    2, 0x08,   54 /* Private */,
-      51,    1,  706,    2, 0x08,   56 /* Private */,
-      52,    1,  709,    2, 0x08,   58 /* Private */,
-      53,    1,  712,    2, 0x08,   60 /* Private */,
-      54,    1,  715,    2, 0x08,   62 /* Private */,
-      55,    0,  718,    2, 0x08,   64 /* Private */,
-      56,    0,  719,    2, 0x08,   65 /* Private */,
-      57,    0,  720,    2, 0x08,   66 /* Private */,
-      58,    0,  721,    2, 0x08,   67 /* Private */,
-      59,    0,  722,    2, 0x08,   68 /* Private */,
-      60,    0,  723,    2, 0x08,   69 /* Private */,
-      61,    0,  724,    2, 0x08,   70 /* Private */,
-      62,    0,  725,    2, 0x08,   71 /* Private */,
-      63,    1,  726,    2, 0x08,   72 /* Private */,
-      64,    1,  729,    2, 0x08,   74 /* Private */,
-      65,    1,  732,    2, 0x08,   76 /* Private */,
-      66,    1,  735,    2, 0x08,   78 /* Private */,
-      67,    0,  738,    2, 0x08,   80 /* Private */,
-      68,    0,  739,    2, 0x08,   81 /* Private */,
-      69,    0,  740,    2, 0x08,   82 /* Private */,
-      70,    0,  741,    2, 0x08,   83 /* Private */,
-      71,    0,  742,    2, 0x08,   84 /* Private */,
-      72,    0,  743,    2, 0x08,   85 /* Private */,
-      73,    0,  744,    2, 0x08,   86 /* Private */,
-      74,    0,  745,    2, 0x08,   87 /* Private */,
-      75,    0,  746,    2, 0x08,   88 /* Private */,
-      76,    0,  747,    2, 0x08,   89 /* Private */,
-      77,    0,  748,    2, 0x08,   90 /* Private */,
-      78,    0,  749,    2, 0x08,   91 /* Private */,
-      79,    0,  750,    2, 0x08,   92 /* Private */,
-      80,    0,  751,    2, 0x08,   93 /* Private */,
-      81,    0,  752,    2, 0x08,   94 /* Private */,
-      82,    0,  753,    2, 0x08,   95 /* Private */,
-      83,    0,  754,    2, 0x08,   96 /* Private */,
-      84,    0,  755,    2, 0x08,   97 /* Private */,
-      85,    0,  756,    2, 0x08,   98 /* Private */,
-      86,    1,  757,    2, 0x08,   99 /* Private */,
-      87,    1,  760,    2, 0x08,  101 /* Private */,
-      88,    0,  763,    2, 0x08,  103 /* Private */,
-      89,    0,  764,    2, 0x08,  104 /* Private */,
-      90,    0,  765,    2, 0x08,  105 /* Private */,
-      91,    0,  766,    2, 0x08,  106 /* Private */,
-      92,    0,  767,    2, 0x08,  107 /* Private */,
-      93,    0,  768,    2, 0x08,  108 /* Private */,
-      94,    0,  769,    2, 0x08,  109 /* Private */,
-      95,    0,  770,    2, 0x08,  110 /* Private */,
-      96,    0,  771,    2, 0x08,  111 /* Private */,
-      97,    0,  772,    2, 0x08,  112 /* Private */,
-      98,    0,  773,    2, 0x08,  113 /* Private */,
-      99,    0,  774,    2, 0x08,  114 /* Private */,
-     100,    0,  775,    2, 0x08,  115 /* Private */,
-     101,    0,  776,    2, 0x08,  116 /* Private */,
-     102,    0,  777,    2, 0x08,  117 /* Private */,
-     103,    0,  778,    2, 0x08,  118 /* Private */,
-     104,    0,  779,    2, 0x08,  119 /* Private */,
-     105,    0,  780,    2, 0x08,  120 /* Private */,
-     106,    0,  781,    2, 0x08,  121 /* Private */,
-     107,    0,  782,    2, 0x08,  122 /* Private */,
-     108,    1,  783,    2, 0x08,  123 /* Private */,
-     110,    0,  786,    2, 0x08,  125 /* Private */,
-     111,    0,  787,    2, 0x08,  126 /* Private */,
-     112,    0,  788,    2, 0x08,  127 /* Private */,
-     113,    0,  789,    2, 0x08,  128 /* Private */,
+       1,    0,  644,    2, 0x08,    1 /* Private */,
+       3,    0,  645,    2, 0x08,    2 /* Private */,
+       4,    0,  646,    2, 0x08,    3 /* Private */,
+       5,    1,  647,    2, 0x08,    4 /* Private */,
+       7,    2,  650,    2, 0x08,    6 /* Private */,
+      11,    0,  655,    2, 0x08,    9 /* Private */,
+      12,    0,  656,    2, 0x08,   10 /* Private */,
+      13,    0,  657,    2, 0x08,   11 /* Private */,
+      14,    0,  658,    2, 0x08,   12 /* Private */,
+      15,    0,  659,    2, 0x08,   13 /* Private */,
+      16,    0,  660,    2, 0x08,   14 /* Private */,
+      17,    0,  661,    2, 0x08,   15 /* Private */,
+      18,    0,  662,    2, 0x08,   16 /* Private */,
+      19,    0,  663,    2, 0x08,   17 /* Private */,
+      20,    1,  664,    2, 0x08,   18 /* Private */,
+      21,    0,  667,    2, 0x08,   20 /* Private */,
+      22,    1,  668,    2, 0x08,   21 /* Private */,
+      24,    1,  671,    2, 0x08,   23 /* Private */,
+      25,    0,  674,    2, 0x08,   25 /* Private */,
+      26,    0,  675,    2, 0x08,   26 /* Private */,
+      27,    0,  676,    2, 0x08,   27 /* Private */,
+      28,    0,  677,    2, 0x08,   28 /* Private */,
+      29,    0,  678,    2, 0x08,   29 /* Private */,
+      30,    0,  679,    2, 0x08,   30 /* Private */,
+      31,    0,  680,    2, 0x08,   31 /* Private */,
+      32,    0,  681,    2, 0x08,   32 /* Private */,
+      33,    0,  682,    2, 0x08,   33 /* Private */,
+      34,    0,  683,    2, 0x08,   34 /* Private */,
+      35,    0,  684,    2, 0x08,   35 /* Private */,
+      36,    0,  685,    2, 0x08,   36 /* Private */,
+      37,    0,  686,    2, 0x08,   37 /* Private */,
+      38,    0,  687,    2, 0x08,   38 /* Private */,
+      39,    1,  688,    2, 0x08,   39 /* Private */,
+      41,    0,  691,    2, 0x08,   41 /* Private */,
+      42,    0,  692,    2, 0x08,   42 /* Private */,
+      43,    1,  693,    2, 0x08,   43 /* Private */,
+      44,    0,  696,    2, 0x08,   45 /* Private */,
+      45,    1,  697,    2, 0x08,   46 /* Private */,
+      47,    1,  700,    2, 0x08,   48 /* Private */,
+      48,    1,  703,    2, 0x08,   50 /* Private */,
+      49,    1,  706,    2, 0x08,   52 /* Private */,
+      50,    1,  709,    2, 0x08,   54 /* Private */,
+      51,    1,  712,    2, 0x08,   56 /* Private */,
+      52,    1,  715,    2, 0x08,   58 /* Private */,
+      53,    1,  718,    2, 0x08,   60 /* Private */,
+      54,    1,  721,    2, 0x08,   62 /* Private */,
+      55,    1,  724,    2, 0x08,   64 /* Private */,
+      56,    0,  727,    2, 0x08,   66 /* Private */,
+      57,    0,  728,    2, 0x08,   67 /* Private */,
+      58,    0,  729,    2, 0x08,   68 /* Private */,
+      59,    0,  730,    2, 0x08,   69 /* Private */,
+      60,    0,  731,    2, 0x08,   70 /* Private */,
+      61,    0,  732,    2, 0x08,   71 /* Private */,
+      62,    0,  733,    2, 0x08,   72 /* Private */,
+      63,    0,  734,    2, 0x08,   73 /* Private */,
+      64,    1,  735,    2, 0x08,   74 /* Private */,
+      65,    1,  738,    2, 0x08,   76 /* Private */,
+      66,    1,  741,    2, 0x08,   78 /* Private */,
+      67,    1,  744,    2, 0x08,   80 /* Private */,
+      68,    0,  747,    2, 0x08,   82 /* Private */,
+      69,    0,  748,    2, 0x08,   83 /* Private */,
+      70,    0,  749,    2, 0x08,   84 /* Private */,
+      71,    0,  750,    2, 0x08,   85 /* Private */,
+      72,    0,  751,    2, 0x08,   86 /* Private */,
+      73,    0,  752,    2, 0x08,   87 /* Private */,
+      74,    0,  753,    2, 0x08,   88 /* Private */,
+      75,    0,  754,    2, 0x08,   89 /* Private */,
+      76,    0,  755,    2, 0x08,   90 /* Private */,
+      77,    0,  756,    2, 0x08,   91 /* Private */,
+      78,    0,  757,    2, 0x08,   92 /* Private */,
+      79,    0,  758,    2, 0x08,   93 /* Private */,
+      80,    0,  759,    2, 0x08,   94 /* Private */,
+      81,    0,  760,    2, 0x08,   95 /* Private */,
+      82,    0,  761,    2, 0x08,   96 /* Private */,
+      83,    0,  762,    2, 0x08,   97 /* Private */,
+      84,    0,  763,    2, 0x08,   98 /* Private */,
+      85,    0,  764,    2, 0x08,   99 /* Private */,
+      86,    0,  765,    2, 0x08,  100 /* Private */,
+      87,    1,  766,    2, 0x08,  101 /* Private */,
+      88,    1,  769,    2, 0x08,  103 /* Private */,
+      89,    0,  772,    2, 0x08,  105 /* Private */,
+      90,    0,  773,    2, 0x08,  106 /* Private */,
+      91,    0,  774,    2, 0x08,  107 /* Private */,
+      92,    0,  775,    2, 0x08,  108 /* Private */,
+      93,    0,  776,    2, 0x08,  109 /* Private */,
+      94,    0,  777,    2, 0x08,  110 /* Private */,
+      95,    0,  778,    2, 0x08,  111 /* Private */,
+      96,    0,  779,    2, 0x08,  112 /* Private */,
+      97,    0,  780,    2, 0x08,  113 /* Private */,
+      98,    0,  781,    2, 0x08,  114 /* Private */,
+      99,    0,  782,    2, 0x08,  115 /* Private */,
+     100,    0,  783,    2, 0x08,  116 /* Private */,
+     101,    0,  784,    2, 0x08,  117 /* Private */,
+     102,    0,  785,    2, 0x08,  118 /* Private */,
+     103,    0,  786,    2, 0x08,  119 /* Private */,
+     104,    0,  787,    2, 0x08,  120 /* Private */,
+     105,    0,  788,    2, 0x08,  121 /* Private */,
+     106,    0,  789,    2, 0x08,  122 /* Private */,
+     107,    0,  790,    2, 0x08,  123 /* Private */,
+     108,    0,  791,    2, 0x08,  124 /* Private */,
+     109,    1,  792,    2, 0x08,  125 /* Private */,
+     111,    0,  795,    2, 0x08,  127 /* Private */,
+     112,    0,  796,    2, 0x08,  128 /* Private */,
+     113,    0,  797,    2, 0x08,  129 /* Private */,
+     114,    0,  798,    2, 0x08,  130 /* Private */,
 
  // slots: parameters
     QMetaType::Void,
@@ -665,12 +670,13 @@ Q_CONSTINIT static const uint qt_meta_data_CLASSWidgetENDCLASS[] = {
     QMetaType::Void, QMetaType::Int,   40,
     QMetaType::Void,
     QMetaType::Void,
+    QMetaType::Void, 0x80000000 | 8,   23,
     QMetaType::Void,
-    QMetaType::Void, QMetaType::Int,   45,
-    QMetaType::Void, QMetaType::Int,   45,
-    QMetaType::Void, QMetaType::Int,   45,
-    QMetaType::Void, QMetaType::Int,   45,
-    QMetaType::Void, QMetaType::Int,   45,
+    QMetaType::Void, QMetaType::Int,   46,
+    QMetaType::Void, QMetaType::Int,   46,
+    QMetaType::Void, QMetaType::Int,   46,
+    QMetaType::Void, QMetaType::Int,   46,
+    QMetaType::Void, QMetaType::Int,   46,
     QMetaType::Void, QMetaType::Int,    6,
     QMetaType::Void, QMetaType::Int,    6,
     QMetaType::Void, QMetaType::Int,    6,
@@ -684,8 +690,8 @@ Q_CONSTINIT static const uint qt_meta_data_CLASSWidgetENDCLASS[] = {
     QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void,
-    QMetaType::Void, QMetaType::Int,   45,
-    QMetaType::Void, QMetaType::Int,   45,
+    QMetaType::Void, QMetaType::Int,   46,
+    QMetaType::Void, QMetaType::Int,   46,
     QMetaType::Void, QMetaType::Int,    6,
     QMetaType::Void, QMetaType::Int,    6,
     QMetaType::Void,
@@ -708,7 +714,7 @@ Q_CONSTINIT static const uint qt_meta_data_CLASSWidgetENDCLASS[] = {
     QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void, QMetaType::Double,    6,
-    QMetaType::Void, QMetaType::Int,   45,
+    QMetaType::Void, QMetaType::Int,   46,
     QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void,
@@ -729,7 +735,7 @@ Q_CONSTINIT static const uint qt_meta_data_CLASSWidgetENDCLASS[] = {
     QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void,
-    QMetaType::Void, QMetaType::Int,  109,
+    QMetaType::Void, QMetaType::Int,  110,
     QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void,
@@ -824,6 +830,9 @@ Q_CONSTINIT const QMetaObject Widget::staticMetaObject = { {
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
         // method 'on_addItemFromLibraryToSceneBtn_clicked'
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'on_currentLibrary_itemDoubleClicked'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        QtPrivate::TypeAndForceComplete<QListWidgetItem *, std::false_type>,
         // method 'on_saveCurrentLibraryBtn_clicked'
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
         // method 'on_imgHOffsetSlider_valueChanged'
@@ -1024,75 +1033,76 @@ void Widget::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id, void
         case 32: _t->on_libraryList_currentRowChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
         case 33: _t->on_removeFromLibraryBtn_clicked(); break;
         case 34: _t->on_addItemFromLibraryToSceneBtn_clicked(); break;
-        case 35: _t->on_saveCurrentLibraryBtn_clicked(); break;
-        case 36: _t->on_imgHOffsetSlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 37: _t->on_imgVOfsetSlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 38: _t->on_imgWSlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 39: _t->on_imgHSlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 40: _t->on_imgRotationSlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 41: _t->on_imgHOffsetSpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 42: _t->on_imgVOffsetSpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 43: _t->on_imgWidthSpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 44: _t->on_imgHeightSpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 45: _t->on_imgRotationSpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 46: _t->on_setStickColorBtn_clicked(); break;
-        case 47: _t->on_setAllSticksColorBtn_clicked(); break;
-        case 48: _t->on_setPenThicknessBtn_clicked(); break;
-        case 49: _t->on_setPenThicknessAllBtn_clicked(); break;
-        case 50: _t->on_selectBrushColorBtn_clicked(); break;
-        case 51: _t->on_setAllBrushColorBtn_clicked(); break;
-        case 52: _t->on_setBrushColorBtn_clicked(); break;
-        case 53: _t->on_manipulateBtn_clicked(); break;
-        case 54: _t->on_penOpacitySlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 55: _t->on_fillOpacitySlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 56: _t->on_penOpacitySpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 57: _t->on_fillOpacitySpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 58: _t->on_rotateStickFigureBtn_clicked(); break;
-        case 59: _t->on_scaleStickFigureBtn_clicked(); break;
-        case 60: _t->on_stickFigureScaleSpinbox_editingFinished(); break;
-        case 61: _t->on_stickFigureRotationSpinbox_editingFinished(); break;
-        case 62: _t->on_moveSceneBtn_clicked(); break;
-        case 63: _t->on_scaleSceneBtn_clicked(); break;
-        case 64: _t->on_rotateSceneBtn_clicked(); break;
-        case 65: _t->on_verticalFlipBtn_clicked(); break;
-        case 66: _t->on_HorizontalFlipBtn_clicked(); break;
-        case 67: _t->on_copyStickFigureBtn_clicked(); break;
-        case 68: _t->on_pasteStickFigureBtn_clicked(); break;
-        case 69: _t->on_joinBtn_clicked(); break;
-        case 70: _t->on_splitBtn_clicked(); break;
-        case 71: _t->on_joinStick_clicked(); break;
-        case 72: _t->on_splitStick_clicked(); break;
-        case 73: _t->on_setMasterNodeBtn_clicked(); break;
-        case 74: _t->on_createNewLibraryBtn_clicked(); break;
-        case 75: _t->on_setAllDepthBtn_clicked(); break;
-        case 76: _t->on_setDepthBtn_clicked(); break;
-        case 77: _t->on_depthSpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<double>>(_a[1]))); break;
-        case 78: _t->on_depthSlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 79: _t->on_drawRectBtn_clicked(); break;
-        case 80: _t->on_pushButton_clicked(); break;
-        case 81: _t->on_drawTaperBtn_clicked(); break;
-        case 82: _t->on_drawFreehandBtn_clicked(); break;
-        case 83: _t->on_drawTrapezoidBtn_clicked(); break;
-        case 84: _t->on_addImgBtn_clicked(); break;
-        case 85: _t->on_removeImgBtn_clicked(); break;
-        case 86: _t->on_setImgBtn_clicked(); break;
-        case 87: _t->on_moveStickFigureToCenterBtn_clicked(); break;
-        case 88: _t->on_pushToTopBtn_clicked(); break;
-        case 89: _t->on_pushToButtonBtn_clicked(); break;
-        case 90: _t->on_elongateBtn_clicked(); break;
-        case 91: _t->on_elongateSpinbox_editingFinished(); break;
-        case 92: _t->on_pushStickFigureToTop_clicked(); break;
-        case 93: _t->on_pushStickFigureToBottom_clicked(); break;
-        case 94: _t->on_moveStickUp_clicked(); break;
-        case 95: _t->on_moveStickDown_clicked(); break;
-        case 96: _t->on_deleteLibrary_clicked(); break;
-        case 97: _t->on_cpyFrame_clicked(); break;
-        case 98: _t->on_pasteFrame_clicked(); break;
-        case 99: _t->on_lineThicknessSlider_sliderMoved((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
-        case 100: _t->on_clampToolBtn_clicked(); break;
-        case 101: _t->on_addPolyBtn_clicked(); break;
-        case 102: _t->on_multiLineBtn_clicked(); break;
-        case 103: _t->on_addIkBtn_clicked(); break;
+        case 35: _t->on_currentLibrary_itemDoubleClicked((*reinterpret_cast< std::add_pointer_t<QListWidgetItem*>>(_a[1]))); break;
+        case 36: _t->on_saveCurrentLibraryBtn_clicked(); break;
+        case 37: _t->on_imgHOffsetSlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 38: _t->on_imgVOfsetSlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 39: _t->on_imgWSlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 40: _t->on_imgHSlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 41: _t->on_imgRotationSlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 42: _t->on_imgHOffsetSpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 43: _t->on_imgVOffsetSpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 44: _t->on_imgWidthSpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 45: _t->on_imgHeightSpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 46: _t->on_imgRotationSpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 47: _t->on_setStickColorBtn_clicked(); break;
+        case 48: _t->on_setAllSticksColorBtn_clicked(); break;
+        case 49: _t->on_setPenThicknessBtn_clicked(); break;
+        case 50: _t->on_setPenThicknessAllBtn_clicked(); break;
+        case 51: _t->on_selectBrushColorBtn_clicked(); break;
+        case 52: _t->on_setAllBrushColorBtn_clicked(); break;
+        case 53: _t->on_setBrushColorBtn_clicked(); break;
+        case 54: _t->on_manipulateBtn_clicked(); break;
+        case 55: _t->on_penOpacitySlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 56: _t->on_fillOpacitySlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 57: _t->on_penOpacitySpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 58: _t->on_fillOpacitySpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 59: _t->on_rotateStickFigureBtn_clicked(); break;
+        case 60: _t->on_scaleStickFigureBtn_clicked(); break;
+        case 61: _t->on_stickFigureScaleSpinbox_editingFinished(); break;
+        case 62: _t->on_stickFigureRotationSpinbox_editingFinished(); break;
+        case 63: _t->on_moveSceneBtn_clicked(); break;
+        case 64: _t->on_scaleSceneBtn_clicked(); break;
+        case 65: _t->on_rotateSceneBtn_clicked(); break;
+        case 66: _t->on_verticalFlipBtn_clicked(); break;
+        case 67: _t->on_HorizontalFlipBtn_clicked(); break;
+        case 68: _t->on_copyStickFigureBtn_clicked(); break;
+        case 69: _t->on_pasteStickFigureBtn_clicked(); break;
+        case 70: _t->on_joinBtn_clicked(); break;
+        case 71: _t->on_splitBtn_clicked(); break;
+        case 72: _t->on_joinStick_clicked(); break;
+        case 73: _t->on_splitStick_clicked(); break;
+        case 74: _t->on_setMasterNodeBtn_clicked(); break;
+        case 75: _t->on_createNewLibraryBtn_clicked(); break;
+        case 76: _t->on_setAllDepthBtn_clicked(); break;
+        case 77: _t->on_setDepthBtn_clicked(); break;
+        case 78: _t->on_depthSpinbox_valueChanged((*reinterpret_cast< std::add_pointer_t<double>>(_a[1]))); break;
+        case 79: _t->on_depthSlider_valueChanged((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 80: _t->on_drawRectBtn_clicked(); break;
+        case 81: _t->on_pushButton_clicked(); break;
+        case 82: _t->on_drawTaperBtn_clicked(); break;
+        case 83: _t->on_drawFreehandBtn_clicked(); break;
+        case 84: _t->on_drawTrapezoidBtn_clicked(); break;
+        case 85: _t->on_addImgBtn_clicked(); break;
+        case 86: _t->on_removeImgBtn_clicked(); break;
+        case 87: _t->on_setImgBtn_clicked(); break;
+        case 88: _t->on_moveStickFigureToCenterBtn_clicked(); break;
+        case 89: _t->on_pushToTopBtn_clicked(); break;
+        case 90: _t->on_pushToButtonBtn_clicked(); break;
+        case 91: _t->on_elongateBtn_clicked(); break;
+        case 92: _t->on_elongateSpinbox_editingFinished(); break;
+        case 93: _t->on_pushStickFigureToTop_clicked(); break;
+        case 94: _t->on_pushStickFigureToBottom_clicked(); break;
+        case 95: _t->on_moveStickUp_clicked(); break;
+        case 96: _t->on_moveStickDown_clicked(); break;
+        case 97: _t->on_deleteLibrary_clicked(); break;
+        case 98: _t->on_cpyFrame_clicked(); break;
+        case 99: _t->on_pasteFrame_clicked(); break;
+        case 100: _t->on_lineThicknessSlider_sliderMoved((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
+        case 101: _t->on_clampToolBtn_clicked(); break;
+        case 102: _t->on_addPolyBtn_clicked(); break;
+        case 103: _t->on_multiLineBtn_clicked(); break;
+        case 104: _t->on_addIkBtn_clicked(); break;
         default: ;
         }
     }
@@ -1117,13 +1127,13 @@ int Widget::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 104)
+        if (_id < 105)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 104;
+        _id -= 105;
     } else if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
-        if (_id < 104)
+        if (_id < 105)
             *reinterpret_cast<QMetaType *>(_a[0]) = QMetaType();
-        _id -= 104;
+        _id -= 105;
     }
     return _id;
 }

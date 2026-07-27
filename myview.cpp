@@ -981,7 +981,8 @@ void MyView::keyReleaseEvent(QKeyEvent *event)
  * @details Phase 3 pen pressure. During a draw session a stylus generates QTabletEvent
  * *and* (because we don't accept it) a synthesized QMouseEvent that follows and does the
  * actual painting — so this override's only job is to latch the pen's current pressure into
- * draw_pressure_val, which StampBrush()/PaintStrokeSegment() read a moment later. Outside
+ * draw_pressure_val, which PressureFactor() (via StampBrush()/PaintStrokeSegment(), each gated
+ * by its own draw_pressure_size/draw_pressure_opacity checkbox) reads a moment later. Outside
  * draw mode we ignore the tablet entirely and let the synthesized mouse path run as before.
  * A mouse (no tablet events) never touches draw_pressure_val, which the stroke reset keeps
  * at 1.0, so mouse input stays full-pressure.
@@ -1216,16 +1217,28 @@ QRect MyView::OpaqueBounds(const QImage &img)
     return QRect(QPoint(min_x, min_y), QPoint(max_x, max_y));
 }
 
+/// @details Pen pressure (0..1 from tabletEvent) is remapped so a "normal", half-way press
+/// (0.5) reproduces the dialled-in size/opacity exactly, instead of always undershooting it
+/// (a plain 0..1 multiplier would make even a firm press cut the selected value in half).
+/// Harder than normal scales up to 2x at full pressure; softer than normal scales down toward 0.
+double MyView::PressureFactor() const
+{
+    return draw_pressure_val / 0.5;
+}
+
 /// @details One brush dab centered at a canvas-pixel point. The grayscale stamp is scaled
 /// to the current size and tinted with the brush color (SourceIn keeps the stamp's alpha);
-/// the eraser clears instead of paints (DestinationOut). Opacity scales the whole dab.
+/// the eraser clears instead of paints (DestinationOut). Opacity scales the whole dab. Size
+/// and opacity each read pen pressure only when their own checkbox (draw_pressure_size /
+/// draw_pressure_opacity) is on — the two are independent, so e.g. pressure can drive size
+/// while opacity stays fixed at the dialled-in value, or vice versa.
 void MyView::StampBrush(const QPointF &canvas_px)
 {
     if(!draw_canvas)
         return;
-    // Phase 3: pen pressure scales both diameter and opacity; mouse input keeps pressure 1.0
-    double pressure = draw_pressure ? draw_pressure_val : 1.0;
-    int s = qMax(1, int(draw_brush_size * pressure + 0.5));
+    double size_factor    = draw_pressure_size    ? PressureFactor() : 1.0;
+    double opacity_factor = draw_pressure_opacity ? PressureFactor() : 1.0;
+    int s = qMax(1, int(draw_brush_size * size_factor + 0.5));
     QImage stamp = draw_brush_stamp.scaled(s, s, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
     QImage dab(s, s, QImage::Format_ARGB32_Premultiplied);
     dab.fill(Qt::transparent);
@@ -1236,18 +1249,19 @@ void MyView::StampBrush(const QPointF &canvas_px)
     dp.end();
 
     QPainter p(draw_canvas);
-    p.setOpacity(qBound(0.0, draw_brush_opacity * pressure / 100.0, 1.0));
+    p.setOpacity(qBound(0.0, draw_brush_opacity * opacity_factor / 100.0, 1.0));
     if(draw_eraser)
         p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
     p.drawImage(QPointF(canvas_px.x() - s/2.0, canvas_px.y() - s/2.0), dab);
     p.end();
 }
 
-/// @details Stamps the brush along a scene-space segment, spaced by a fraction of the
-/// brush size so a fast drag stays continuous. Scene points map to canvas pixels through
-/// draw_disp_inv (the inverse of the same transform paint() uses), so painting happens in
-/// the stick's rotated frame: what you draw on screen lands where the cursor is, and is
-/// stored already rotated with the stick. Then repaints the view.
+/// @details Stamps the brush along a scene-space segment, spaced by draw_brush_spacing (a
+/// percentage of the current, pressure-adjusted stamp diameter) so a fast drag still lays
+/// down a continuous line rather than visibly separate dabs. Scene points map to canvas
+/// pixels through draw_disp_inv (the inverse of the same transform paint() uses), so painting
+/// happens in the stick's rotated frame: what you draw on screen lands where the cursor is,
+/// and is stored already rotated with the stick. Then repaints the view.
 void MyView::PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_scene)
 {
     if(!draw_canvas)
@@ -1256,8 +1270,9 @@ void MyView::PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_sce
     QPointF a = draw_disp_inv.map(from_scene) + half;
     QPointF b = draw_disp_inv.map(to_scene)   + half;
     double dist = QLineF(a, b).length();
-    double pressure = draw_pressure ? draw_pressure_val : 1.0;
-    double spacing = qMax(1.0, draw_brush_size * pressure * 0.25); // spacing tracks pressured size so light strokes stay continuous
+    double size_factor = draw_pressure_size ? PressureFactor() : 1.0;
+    // spacing tracks the actual (pressured) dab size, scaled by the user's spacing percentage
+    double spacing = qMax(1.0, draw_brush_size * size_factor * (draw_brush_spacing / 100.0));
     int steps = int(dist / spacing);
     for(int i = 0; i <= steps; i++){
         double t = steps ? double(i) / steps : 0.0;
@@ -2749,6 +2764,50 @@ void MyView::RemoveFromMultiSelection(StickFigure *figure)
     UpdateSelectionDecorations(true);
 }
 
+/**
+ * @details Called each mouseMove during a band drag. Two figures or more become a
+ * multi-selection (transform box + pivot). Exactly one becomes a plain single selection
+ * (that figure is promoted to CurrentStickFigure, highlighted, its layer row selected, its
+ * handle/bounding box shown) — this is the case the old inline code missed: it stored a
+ * one-element multi_selection, which MultiSelectionActive() (count > 1) rejects, so the
+ * else branch re-highlighted the OLD current figure and the release path then wiped the
+ * one-element list — the band appeared to do nothing. Zero enclosed clears the selection
+ * (CurrentStickFigure = nullptr; CurrentStick() stays null-safe, see frame.h).
+ */
+void MyView::ApplyBandSelection(const QList<StickFigure*> &touched)
+{
+    Frame *frame = my_animation->current_frame;
+    if(frame == nullptr)
+        return;
+    if(touched.count() >= 2){
+        multi_selection = touched;
+        UpdateMultiSelectionUI(true); // box + perno al baricentro della selezione
+        return;
+    }
+    // 0 o 1 figura: nessuna selezione multipla; la selezione singola (CurrentStickFigure)
+    // diventa la figura racchiusa, oppure nessuna se il band non ne racchiude alcuna
+    multi_selection.clear();
+    StickFigure *pick = touched.isEmpty() ? nullptr : touched.first();
+    for(StickFigure *S : frame->stick_figures)
+        S->Highlight(S == pick);
+    frame->CurrentStickFigure() = pick;
+    // riallinea la lista layer alla selezione singola senza rientrare dai suoi segnali
+    multi_widget_sync = true;
+    my_stick_figure_widget_list->clearSelection();
+    if(pick != nullptr){
+        if(!pick->stick_list.isEmpty())
+            frame->SelectStick(pick);
+        if(pick->linked_item){
+            pick->linked_item->setSelected(true);
+            my_stick_figure_widget_list->setCurrentRow(my_stick_figure_widget_list->row(pick->linked_item));
+        }
+    }
+    multi_widget_sync = false;
+    RemoveSelectionDecorations();      // via l'eventuale box/perno di una selezione multipla precedente
+    if(pick != nullptr)
+        UpdateSelectionDecorations(true); // maniglia + bounding box della selezione singola
+}
+
 void MyView::ClearMultiSelection()
 {
     bool had_selection = !multi_selection.isEmpty();
@@ -3057,8 +3116,10 @@ void MyView::mouseReleaseEvent(QMouseEvent *event)
             band_is_lasso = false;
             band_poly.clear();
             if(viewport()) viewport()->update(); // cancella il tracciato del lazo dal foreground
-            if(!MultiSelectionActive())
-                ClearMultiSelection();
+            // NON ripulire qui: ApplyBandSelection() ha già lasciato lo stato corretto durante
+            // il drag (multipla, singola, o nessuna). Il vecchio ClearMultiSelection() su
+            // !MultiSelectionActive() cancellava proprio la selezione SINGOLA appena creata da
+            // un band che racchiude una sola figura (maniglia/bounding box inclusi).
         }
         if(my_animation->current_frame->stick_figures.count()>0
                 && my_animation->CurrentFrame()->CurrentStickFigure() != nullptr) // può essere nullo dopo un ripristino undo/redo
@@ -3129,9 +3190,9 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         {
             if(is_pressed && band_dragging)
             {
-                // rubber band di selezione: rettangolo o lazo secondo stickfig_lasso. Entrambi
-                // usano il modello "solo estremi" — una figura entra se un estremo di uno dei
-                // suoi stick cade nel rettangolo (intersects) o dentro il poligono del lazo.
+                // rubber band di selezione: rettangolo o lazo secondo stickfig_lasso. Una figura
+                // entra se un estremo di uno dei suoi stick cade nel rettangolo (intersects) o
+                // dentro il poligono del lazo.
                 QList<StickFigure*> touched;
                 if(band_is_lasso){
                     band_poly << coord;
@@ -3159,16 +3220,7 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                 } else {
                     break;
                 }
-                multi_selection = touched;
-                if(MultiSelectionActive())
-                    UpdateMultiSelectionUI(true); // la selezione cambia: perno al baricentro
-                else{
-                    // sotto le 2 figure la maniglia sparisce (il rubber band resta attivo
-                    // fino al rilascio) e le evidenziazioni del passaggio precedente cadono
-                    for(StickFigure *S : my_animation->current_frame->stick_figures)
-                        S->Highlight(S == my_animation->CurrentFrame()->CurrentStickFigure());
-                    RemoveSelectionDecorations();
-                }
+                ApplyBandSelection(touched);
                 break;
             }
             if(is_pressed && sel_box_gesture == 2){ ApplySelectionRotate(); break; } // pomello box
@@ -3995,6 +4047,24 @@ void MyView::SaveLibrary(QString file_name){
     file.close();
 }
 /**
+ * @details Builds a throwaway one-figure FrameData (the same record type a *.marlib file
+ * holds) and writes it out — the currently-open library buffer (stick_library_buffer) is
+ * never touched, so this can't disturb whatever the Libraries tab has loaded.
+ */
+void MyView::SaveStickFigureAsLibrary(const QString &file_name, StickFigure *figure){
+    if(!figure || figure->stick_list.isEmpty())
+        return;
+    QFile file(file_name);
+    if(!file.open(QIODevice::WriteOnly)){
+        return;
+    }
+    FrameData single_figure_lib;
+    single_figure_lib.stick_figures.append(ExtractStickFigureData(*figure));
+    QDataStream out(&file);
+    out << single_figure_lib;
+    file.close();
+}
+/**
  * @details The library buffer owns plain data: replacing it is delete + new, no
  * per-figure cleanup choreography (freeLibraryFrame is gone).
  */
@@ -4035,7 +4105,7 @@ void MyView::LoadLibrary(QString file_name, int mode){
  * buffer and creates its widget entry (insert-after-current + select, as before).
  * @return the live source figure, or nullptr if it has no sticks.
  */
-StickFigure* MyView::AddStickFigureToLibrary(){
+StickFigure* MyView::AddStickFigureToLibrary(const QString &name){
     // con una selezione multipla ogni figura selezionata entra in libreria — l'unico
     // export ammesso per una selezione multipla (spec); la selezione resta attiva
     if(MultiSelectionActive()){
@@ -4060,6 +4130,8 @@ StickFigure* MyView::AddStickFigureToLibrary(){
     if(my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.count()>0)
     {
         StickFigureData *figure_data = ExtractStickFigureData(*my_animation->CurrentFrame()->CurrentStickFigure());
+        if(!name.isEmpty())
+            figure_data->name = name;
         stick_library_buffer->stick_figures.append(figure_data);
         QListWidgetItem * added_item = new QListWidgetItem();
         added_item->setData(Qt::UserRole,QVariant::fromValue(figure_data));

@@ -12,6 +12,7 @@
 #include <QDebug>
 #include <QColorDialog>
 #include <QInputDialog>
+#include <QLineEdit>
 #include <QThread>
 #include <QTimer>
 #include <QProcess>
@@ -122,6 +123,7 @@ QWidget * advanced_vertex_tab;
 QWidget * advanced_draw_tab; ///< freehand draw-mode panel (brush/eraser/size/opacity/color); built in Widget's ctor
 QWidget * advanced_ik_tab;
 QCheckBox * ik_active_check;
+QWidget * library_tab;
 QWidget * vertex_width_row;
 QSlider * vertex_width_slider;
 QSlider * vertex_curve_slider;
@@ -165,6 +167,7 @@ Widget::Widget(QWidget *parent)
     advanced_circle_tab = new AdvancedCircleWidget();
     advanced_taper_tab = new AdvancedTaperWidget();
     my_tab_widget = ui->toolsTabWidget;
+    library_tab = ui->libraryTab;
     ui->toolsTabWidget->setCurrentWidget(ui->drawingTab);
     my_stick_figure_widget_list = ui->stickLayerView;
     my_library_list_widget = ui->libraryList;
@@ -375,6 +378,17 @@ Widget::Widget(QWidget *parent)
         col->addLayout(op_row);
         connect(op_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int v){ view->draw_brush_opacity = v; });
 
+        // spaziatura (% del diametro dab tra un timbro e l'altro lungo il tratto)
+        QHBoxLayout *spacing_row = new QHBoxLayout();
+        spacing_row->addWidget(new QLabel(tr("Spacing"), advanced_draw_tab));
+        QSpinBox *spacing_spin = new QSpinBox(advanced_draw_tab);
+        spacing_spin->setRange(1, 200);
+        spacing_spin->setSuffix(tr("%"));
+        spacing_spin->setValue(view->draw_brush_spacing);
+        spacing_row->addWidget(spacing_spin);
+        col->addLayout(spacing_row);
+        connect(spacing_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int v){ view->draw_brush_spacing = v; });
+
         // colore
         QPushButton *color_btn = new QPushButton(tr("Brush color"), advanced_draw_tab);
         color_btn->setStyleSheet(QString("background-color: %1").arg(view->draw_brush_color.name()));
@@ -387,11 +401,17 @@ Widget::Widget(QWidget *parent)
             }
         });
 
-        // modulazione da pressione penna (attiva di default; inerte in Phase 1, mouse-only)
-        QCheckBox *pressure_check = new QCheckBox(tr("Pen pressure"), advanced_draw_tab);
-        pressure_check->setChecked(view->draw_pressure);
-        col->addWidget(pressure_check);
-        connect(pressure_check, &QCheckBox::toggled, this, [this](bool on){ view->draw_pressure = on; });
+        // modulazione da pressione penna: due checkbox indipendenti (dimensione/opacità),
+        // entrambe attive di default; inerti in Phase 1, mouse-only
+        QCheckBox *pressure_size_check = new QCheckBox(tr("Pen pressure drives size"), advanced_draw_tab);
+        pressure_size_check->setChecked(view->draw_pressure_size);
+        col->addWidget(pressure_size_check);
+        connect(pressure_size_check, &QCheckBox::toggled, this, [this](bool on){ view->draw_pressure_size = on; });
+
+        QCheckBox *pressure_opacity_check = new QCheckBox(tr("Pen pressure drives opacity"), advanced_draw_tab);
+        pressure_opacity_check->setChecked(view->draw_pressure_opacity);
+        col->addWidget(pressure_opacity_check);
+        connect(pressure_opacity_check, &QCheckBox::toggled, this, [this](bool on){ view->draw_pressure_opacity = on; });
 
         // cartella pennelli: la stessa registrata da CreatePaths(), accanto a Libraries/myStickFigures
         QString brushes_path = brush_folder.path();
@@ -1206,10 +1226,26 @@ void Widget::on_saveLibraryBtn_clicked()
 
 
 
-/// @details Adds the current stickfigure to the currently-open library buffer as a reusable item.
+/// @details Adds the current stickfigure (or, with a multi-selection, every selected figure)
+/// to the currently-open library buffer as a reusable item. For a single figure, prompts for
+/// a name first (defaulting to the figure's current name) and stores that as the library
+/// entry's name; a multi-selection is added unprompted, each figure keeping its own name
+/// (naming several figures at once via one shared prompt would just collide their names).
 void Widget::on_addItemToLibBtn_clicked()
 {
-    view->AddStickFigureToLibrary();
+    if(view->MultiSelectionActive()){
+        view->AddStickFigureToLibrary();
+        return;
+    }
+    StickFigure *current = view->my_animation->CurrentFrame()->CurrentStickFigure();
+    if(!current)
+        return;
+    bool ok = false;
+    QString name = QInputDialog::getText(this, tr("Add to library"), tr("Stickfigure name:"),
+                                          QLineEdit::Normal, current->name, &ok);
+    if(!ok)
+        return;
+    view->AddStickFigureToLibrary(name);
 }
 
 /// @details Replaces the current library buffer with the contents of the chosen *.marlib file.
@@ -1283,6 +1319,23 @@ void Widget::on_addItemFromLibraryToSceneBtn_clicked()
     //added->Refresh();
     //scene->update();
     //view->my_animation->CurrentFrame()->CurrentStickFigure()->LoadStickFigure(file_name)
+}
+
+/// @details Prompts for a new name and renames the double-clicked library entry: both the
+/// widget row (DisplayRole) and the underlying StickFigureData (so the new name round-trips
+/// when the library is saved back to disk).
+void Widget::on_currentLibrary_itemDoubleClicked(QListWidgetItem *item)
+{
+    StickFigureData *figure_data = qvariant_cast<StickFigureData*>(item->data(Qt::UserRole));
+    if(!figure_data)
+        return;
+    bool ok = false;
+    QString text = QInputDialog::getText(this, tr("Rename library item"), tr("Name:"),
+                                          QLineEdit::Normal, figure_data->name, &ok);
+    if(!ok || text.isEmpty())
+        return;
+    figure_data->name = text;
+    item->setData(Qt::DisplayRole, text);
 }
 
 /// @details Re-saves the open library buffer back to the *.marlib file it was loaded from.

@@ -168,6 +168,9 @@ private slots:
 
     void on_addItemFromLibraryToSceneBtn_clicked();
 
+    /** @brief Prompts for a new name and renames the double-clicked library entry. */
+    void on_currentLibrary_itemDoubleClicked(QListWidgetItem *item);
+
     void on_saveCurrentLibraryBtn_clicked();
 
     void on_imgHOffsetSlider_valueChanged(int value);

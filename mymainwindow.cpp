@@ -13,6 +13,7 @@
 #include <QMenu>
 #include <QAction>
 #include "stkformat.h"
+#include "uiItems.h"
 extern QDir program_folder;
 extern qint32 W;
 extern qint32 H;
@@ -60,11 +61,12 @@ MyMainWindow::~MyMainWindow()
 
 /**
  * @details Saves the current figure alone to a file: native .stck
- * (StickFigure::SaveStickFigure()), Pivot .stk through StkFormat::ExportStk(), or
- * Stick Nodes .nodes through StkFormat::ExportNodes() — the selected filter (not the
- * extension, which both Pivot dialects share) picks the format. Export warnings
- * about degraded features are shown once, joined.
- * No-op if the user cancels the dialog or there is no current figure.
+ * (StickFigure::SaveStickFigure()), Pivot .stk through StkFormat::ExportStk(), Stick Nodes
+ * .nodes through StkFormat::ExportNodes(), or a self-contained *.marlib holding just this
+ * one figure (MyView::SaveStickFigureAsLibrary(), so it can be dropped straight into
+ * someone else's Libraries tab) — the selected filter (not the extension, which both Pivot
+ * dialects share) picks the format. Export warnings about degraded features are shown once,
+ * joined. No-op if the user cancels the dialog or there is no current figure.
  */
 void MyMainWindow::on_actionsave_triggered()
 {
@@ -78,10 +80,16 @@ void MyMainWindow::on_actionsave_triggered()
     QString selected_filter;
     QString file_name = QFileDialog::getSaveFileName(this,tr("Save StickFigure"),
                        my_stick_figures_folder.path(),
-                       "Stickfigure (*.stck);;Pivot 5 figure (*.stk);;Pivot 2 figure - Stick Nodes compatible (*.stk);;Stick Nodes figure (*.nodes)",
+                       "Stickfigure (*.stck);;Pivot 5 figure (*.stk);;Pivot 2 figure - Stick Nodes compatible (*.stk);;Stick Nodes figure (*.nodes);;Marionetta Library (*.marlib)",
                        &selected_filter);
     if(file_name.length()<=1 || !view->my_animation->CurrentFrame()->CurrentStickFigure())
         return;
+    if(selected_filter.contains("Marionetta Library")){
+        if(!file_name.endsWith(".marlib", Qt::CaseInsensitive))
+            file_name += ".marlib";
+        view->SaveStickFigureAsLibrary(file_name, view->my_animation->CurrentFrame()->CurrentStickFigure());
+        return;
+    }
     if(selected_filter.contains("Pivot") || selected_filter.contains("Stick Nodes figure")){
         bool nodes_format = selected_filter.contains("Stick Nodes figure");
         QString extension = nodes_format ? QStringLiteral(".nodes") : QStringLiteral(".stk");
@@ -120,16 +128,25 @@ void MyMainWindow::on_actionsave_triggered()
  * StkFormat and land through the same PopulateLiveStickFigure() bridge the .stck
  * path uses. Foreign files are converted BEFORE any UI mutation, so a corrupt file
  * leaves the animation untouched; conversion warnings are shown once, joined.
+ * A *.marlib is a different kind of file (a whole library, not one figure): it replaces
+ * the open library buffer instead (MyView::LoadLibrary(), same as the Libraries tab's own
+ * "Load library" button) and switches to the Libraries tab so the loaded entries are
+ * immediately visible, rather than adding anything to the current frame.
  */
 void MyMainWindow::on_actionload_triggered()
 {
 
     QString file_name = QFileDialog::getOpenFileName(this,tr("Load StickFigure"),
                        my_stick_figures_folder.path(),
-                       "Stickfigure (*.stck);;Pivot Animator figure (*.stk);;Stick Nodes figure (*.nodes)");
+                       "Stickfigure (*.stck);;Pivot Animator figure (*.stk);;Stick Nodes figure (*.nodes);;Marionetta Library (*.marlib);;All files (*)");
     if(!QFile::exists(file_name))
         return;
     QString suffix = QFileInfo(file_name).suffix().toLower();
+    if(suffix == "marlib"){
+        view->LoadLibrary(file_name);
+        my_tab_widget->setCurrentWidget(library_tab);
+        return;
+    }
     if(suffix == "stk" || suffix == "nodes"){
         QStringList import_warnings;
         QString import_error;

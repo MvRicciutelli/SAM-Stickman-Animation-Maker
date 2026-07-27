@@ -137,10 +137,16 @@ void Animation::UpdateSelection(QPointF point)
 }
 void Animation::UpdateTab(int t){
     int idx = my_tab_widget->currentIndex();
-    // dal supporto POLYGON un tipo può portare PIÙ tab (proprietà + vertici):
-    // svuota tutto tranne il tab base invece di rimuovere solo la posizione 1
-    while(my_tab_widget->count() > 1)
-        my_tab_widget->removeTab(1);
+    // dal supporto POLYGON un tipo può portare PIÙ tab (proprietà + vertici): svuota tutto
+    // tranne il tab base (0) e la tab Libraries invece di rimuovere solo la posizione 1.
+    // Va all'indietro cosi' gli indici dei tab ancora da rimuovere non si spostano sotto di noi,
+    // e salta esplicitamente library_tab ovunque sia finito: un blind "removeTab(1)" ripetuto
+    // la cancellava a sua volta appena veniva spinta in posizione 1 da un altro insertTab(1,...).
+    for(int i = my_tab_widget->count() - 1; i >= 1; i--){
+        if(my_tab_widget->widget(i) == library_tab)
+            continue;
+        my_tab_widget->removeTab(i);
+    }
     if(t == StickData::IMAGE){
         my_tab_widget->insertTab(1,advanced_img_tab,"Image Editing");
     }

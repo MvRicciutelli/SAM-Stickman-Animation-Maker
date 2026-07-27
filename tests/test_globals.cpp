@@ -69,6 +69,7 @@ QWidget *advanced_draw_tab = nullptr;    // il tab draw mode non è esercitato d
 QWidget *advanced_vertex_tab = nullptr;
 QWidget *advanced_ik_tab = nullptr;      // il tab IK non è esercitato dai test (UpdateSliders lo salta se null)
 QCheckBox *ik_active_check = nullptr;
+QWidget *library_tab = nullptr;          // nullo nei test: la guardia in UpdateTab() confronta puntatori e non trova mai match, comportamento invariato
 QWidget *vertex_width_row = nullptr;
 QSlider *vertex_width_slider = nullptr;
 QSlider *vertex_curve_slider = nullptr;
