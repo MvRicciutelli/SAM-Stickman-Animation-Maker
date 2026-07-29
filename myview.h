@@ -164,6 +164,23 @@ public:
     int draw_brush_spacing = 25;            ///< dab pitch, % of the (pressured) stamp diameter; lower = smoother/slower stroke
     QColor draw_brush_color = Qt::black;     ///< brush tint
     QImage draw_brush_stamp;                ///< grayscale-alpha stamp mask (built-in soft round in Phase 1)
+    // built-in round tip, Photoshop-style: hardness/roundness are baked into the stamp by
+    // MakeRoundBrush() (so the panel rebuilds it when they change), angle and both jitters
+    // are applied per dab in StampBrush() and therefore work on imported .abr tips too.
+    int draw_brush_hardness = 75;           ///< % of the radius that stays fully opaque before the feathered edge
+    int draw_brush_roundness = 100;         ///< % of the tip's minor axis (100 = circle, lower = flatter ellipse)
+    int draw_brush_angle = 0;               ///< tip rotation, degrees
+    int draw_brush_size_jitter = 0;         ///< % of random per-dab size reduction (0 = every dab at the dialled size)
+    int draw_brush_angle_jitter = 0;        ///< % of random per-dab rotation (100 = anywhere in the full circle)
+
+    /** @brief Builds a soft round grayscale-alpha stamp: the built-in brush, and the panel's
+     *  preview icons. Takes hardness/roundness explicitly (rather than reading the members) so
+     *  the panel can render a preset's tip without first making it the active brush.
+     *  @param size stamp diameter in pixels.
+     *  @param hardness 0..100, % of the radius that stays fully opaque before the feather.
+     *  @param roundness 1..100, % of the tip's minor axis (100 = circle).
+     *  @return ARGB32 premultiplied mask, black with the coverage in its alpha channel. */
+    static QImage MakeRoundBrush(int size, int hardness, int roundness);
 
     bool stickfig_lasso = false;            ///< figure-selection rubber band: false=rect, true=lasso (menu checkbox)
 
@@ -926,6 +943,7 @@ private:
     int draw_undo_idx = -1;       ///< current position in draw_undo (-1 = empty)
     bool draw_stroking = false;   ///< true between brush press and release
     QPointF draw_last_pos;        ///< last stamped scene position, for stroke interpolation
+    double draw_dab_carry = 0;    ///< canvas distance walked since the last dab, carried across segments so spacing is measured along the whole stroke instead of restarting at every mouse-move
     QLineF draw_orig_line;        ///< the stick's skeleton (the 2-click line) stashed on entry, restored on exit so the freehand keeps a normal-stick origin/rotation
     QTransform draw_disp;         ///< canvas display transform, mirrors paint(): scene = draw_disp.map(pixel - canvasCenter). The canvas is painted in the stick's ROTATED frame, so the drawing is born at the stick's position/rotation and needs no re-rotation on exit
     QTransform draw_disp_inv;     ///< inverse of draw_disp, for scene -> canvas-pixel mouse mapping
@@ -941,8 +959,6 @@ private:
     void PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_scene);
     /** @brief Truncates any redo tail and pushes a copy of the current canvas onto draw_undo. */
     void PushDrawUndo();
-    /** @brief Builds a soft round grayscale-alpha stamp of the given diameter (built-in brush). */
-    QImage MakeRoundBrush(int size) const;
 
     // ---- Pixel-selection internals ---------------------------------------------------
     int     draw_sel_gesture = 0; ///< 0 none, 1 new-rect, 2 new-lasso, 3 move, 4 scale, 5 rotate

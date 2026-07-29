@@ -16,6 +16,7 @@
 #include <QMessageBox>
 #include <QShortcut>
 #include <QTabletEvent>
+#include <QRandomGenerator>
 #include "uiItems.h"
 #include "framepresenter.h"
 
@@ -90,7 +91,7 @@ MyView::MyView(QWidget *parent) : QGraphicsView(parent)
     // the shortcut consumes the key before keyPressEvent sees it, so the dispatch lives here.
     connect(new QShortcut(QKeySequence::Undo, this), &QShortcut::activated, this, [this]{ Undo(); });
     connect(new QShortcut(QKeySequence::Redo, this), &QShortcut::activated, this, [this]{ Redo(); });
-    draw_brush_stamp = MakeRoundBrush(128); // built-in soft round brush (Phase 1 default)
+    draw_brush_stamp = MakeRoundBrush(128, draw_brush_hardness, draw_brush_roundness); // punta tonda integrata
 }
 
 /**
@@ -1201,21 +1202,31 @@ void MyView::DrawCmd(QPointF* point, int mode)
 // session (the canvas is fixed to the viewport captured on entry). Wider-than-viewport
 // or re-scaled-resolution painting is out of scope for Phase 1.
 
-/// @details Soft round grayscale-alpha stamp: opaque core, feathered edge. Built once at
-/// construction and re-scaled per dab; the color is applied at stamp time, not here.
-QImage MyView::MakeRoundBrush(int size) const
+/// @details Soft round grayscale-alpha stamp: opaque core, feathered edge. Rebuilt whenever
+/// hardness or roundness change (the panel does it) and re-scaled per dab; the color is applied
+/// at stamp time, not here. Hardness is where the gradient stops being fully opaque, so 100%
+/// is a hard-edged disc and 0% feathers from the very centre. Roundness squashes the whole tip
+/// — feather included — via the painter transform, so the mask stays square and the caller's
+/// uniform scaling keeps working; the tip's rotation is NOT baked in (see StampBrush()).
+QImage MyView::MakeRoundBrush(int size, int hardness, int roundness)
 {
     if(size < 1) size = 1;
     QImage mask(size, size, QImage::Format_ARGB32_Premultiplied);
     mask.fill(Qt::transparent);
     QRadialGradient g(size/2.0, size/2.0, size/2.0);
     g.setColorAt(0.0, QColor(0,0,0,255));
-    g.setColorAt(0.75, QColor(0,0,0,255));
+    // il core deve stare SOTTO 1.0: setColorAt() sostituisce uno stop alla stessa posizione,
+    // quindi a durezza 100 mangerebbe lo stop trasparente del bordo e darebbe la punta più
+    // morbida possibile invece della più dura. A 0.99 la sfumatura è larga meno di un pixel.
+    g.setColorAt(qMin(0.99, qBound(0, hardness, 100)/100.0), QColor(0,0,0,255));
     g.setColorAt(1.0, QColor(0,0,0,0));
     QPainter p(&mask);
     p.setRenderHint(QPainter::Antialiasing);
     p.setPen(Qt::NoPen);
     p.setBrush(g);
+    p.translate(size/2.0, size/2.0);
+    p.scale(1.0, qBound(1, roundness, 100)/100.0);
+    p.translate(-size/2.0, -size/2.0);
     p.drawEllipse(0, 0, size, size);
     p.end();
     return mask;
@@ -1259,16 +1270,28 @@ double MyView::PressureFactor() const
 /// the eraser clears instead of paints (DestinationOut). Opacity scales the whole dab. Size
 /// and opacity each read pen pressure only when their own checkbox (draw_pressure_size /
 /// draw_pressure_opacity) is on — the two are independent, so e.g. pressure can drive size
-/// while opacity stays fixed at the dialled-in value, or vice versa.
+/// while opacity stays fixed at the dialled-in value, or vice versa. On top of pressure, the
+/// two jitters randomize this single dab: size jitter shrinks it by up to its percentage,
+/// angle jitter rotates it by up to that percentage of a full circle around the tip angle.
+/// Rotation happens here rather than in the mask, so it applies to imported .abr tips too.
 void MyView::StampBrush(const QPointF &canvas_px)
 {
     if(!draw_canvas)
         return;
     double size_factor    = draw_pressure_size    ? PressureFactor() : 1.0;
     double opacity_factor = draw_pressure_opacity ? PressureFactor() : 1.0;
+    if(draw_brush_size_jitter > 0)
+        size_factor *= 1.0 - qBound(0, draw_brush_size_jitter, 100)/100.0
+                             * QRandomGenerator::global()->generateDouble();
+    double angle = draw_brush_angle;
+    if(draw_brush_angle_jitter > 0)
+        angle += (QRandomGenerator::global()->generateDouble()*2.0 - 1.0)
+                 * qBound(0, draw_brush_angle_jitter, 100) * 1.8; // 100% = ±180°, l'intero cerchio
     int s = qMax(1, int(draw_brush_size * size_factor + 0.5));
     QImage stamp = draw_brush_stamp.scaled(s, s, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-    QImage dab(s, s, QImage::Format_ARGB32_Premultiplied);
+    if(fmod(angle, 360.0) != 0.0)
+        stamp = stamp.transformed(QTransform().rotate(angle), Qt::SmoothTransformation);
+    QImage dab(stamp.size(), QImage::Format_ARGB32_Premultiplied);
     dab.fill(Qt::transparent);
     QPainter dp(&dab);
     dp.drawImage(0, 0, stamp);
@@ -1280,7 +1303,8 @@ void MyView::StampBrush(const QPointF &canvas_px)
     p.setOpacity(qBound(0.0, draw_brush_opacity * opacity_factor / 100.0, 1.0));
     if(draw_eraser)
         p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
-    p.drawImage(QPointF(canvas_px.x() - s/2.0, canvas_px.y() - s/2.0), dab);
+    // il dab ruotato è più grande di s: centralo sulle sue dimensioni effettive, non su s
+    p.drawImage(QPointF(canvas_px.x() - dab.width()/2.0, canvas_px.y() - dab.height()/2.0), dab);
     p.end();
 }
 
@@ -1290,6 +1314,12 @@ void MyView::StampBrush(const QPointF &canvas_px)
 /// pixels through draw_disp_inv (the inverse of the same transform paint() uses), so painting
 /// happens in the stick's rotated frame: what you draw on screen lands where the cursor is,
 /// and is stored already rotated with the stick. Then repaints the view.
+///
+/// The pitch is measured along the WHOLE stroke, not per segment: draw_dab_carry remembers how
+/// far the cursor travelled past the last dab, so the leftover is consumed by the next segment.
+/// Without it every mouse-move stamped a dab at its own start point (moves are only a few pixels
+/// apart), which silently capped the effective spacing at "one dab per event" — a spacing above
+/// ~100% looked identical to a much lower one.
 void MyView::PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_scene)
 {
     if(!draw_canvas)
@@ -1301,10 +1331,13 @@ void MyView::PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_sce
     double size_factor = draw_pressure_size ? PressureFactor() : 1.0;
     // spacing tracks the actual (pressured) dab size, scaled by the user's spacing percentage
     double spacing = qMax(1.0, draw_brush_size * size_factor * (draw_brush_spacing / 100.0));
-    int steps = int(dist / spacing);
-    for(int i = 0; i <= steps; i++){
-        double t = steps ? double(i) / steps : 0.0;
-        StampBrush(a * (1.0 - t) + b * t);
+    if(dist <= 0.0){
+        StampBrush(a);          // inizio pennellata (click singolo): primo dab, la corsa riparte da qui
+        draw_dab_carry = 0.0;
+    } else {
+        for(double d = spacing - draw_dab_carry; d <= dist; d += spacing)
+            StampBrush(a + (b - a) * (d / dist));
+        draw_dab_carry = fmod(draw_dab_carry + dist, spacing);
     }
     if(draw_target && draw_target->view){
         draw_target->view->Refresh(0);

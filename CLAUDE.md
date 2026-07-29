@@ -404,7 +404,7 @@ need the historical uninitialized-`.scene` care; freeing one is a plain
 ## Tests
 
 `tests/tests.pro` is a standalone qmake QtTest project (characterization
-suite, REFACTOR_PLAN.md Phase 0, 85 tests as of the text stick). Note the slots share
+suite, REFACTOR_PLAN.md Phase 0, 87 tests as of the brush presets). Note the slots share
 ONE animation and run in declaration order: a test that leaves the current
 frame somewhere other than the last one breaks every later test that
 assumes `AddFrame()` appends (see the closing `MoveToFrame()` in

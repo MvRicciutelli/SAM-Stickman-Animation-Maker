@@ -32,6 +32,8 @@
 #include <QPushButton>
 #include <QButtonGroup>
 #include <QPixmap>
+#include <QPainter>
+#include <QSignalBlocker>
 #include <QComboBox>
 #include <QFontComboBox>
 #include <QTextEdit>
@@ -564,16 +566,72 @@ Widget::Widget(QWidget *parent)
         col->addLayout(op_row);
         connect(op_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int v){ view->draw_brush_opacity = v; });
 
-        // spaziatura (% del diametro dab tra un timbro e l'altro lungo il tratto)
+        // spaziatura (% del diametro dab tra un timbro e l'altro lungo il tratto). Oltre il
+        // 100% i dab si staccano: la scala arriva a 1000% per i tratti punteggiati
         QHBoxLayout *spacing_row = new QHBoxLayout();
         spacing_row->addWidget(new QLabel(tr("Spacing"), advanced_draw_tab));
         QSpinBox *spacing_spin = new QSpinBox(advanced_draw_tab);
-        spacing_spin->setRange(1, 200);
+        spacing_spin->setRange(1, 1000);
         spacing_spin->setSuffix(tr("%"));
         spacing_spin->setValue(view->draw_brush_spacing);
         spacing_row->addWidget(spacing_spin);
         col->addLayout(spacing_row);
         connect(spacing_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int v){ view->draw_brush_spacing = v; });
+
+        // punta tonda integrata, parametri "alla Photoshop": durezza e rotondità sono cotte
+        // nello stamp (le connect stanno più sotto, dove esiste rebuild_round() che lo
+        // rigenera), l'angolo è applicato al timbro e vale anche sui pennelli .abr importati
+        QHBoxLayout *tip_row = new QHBoxLayout();
+        tip_row->addWidget(new QLabel(tr("Hardness"), advanced_draw_tab));
+        QSpinBox *hard_spin = new QSpinBox(advanced_draw_tab);
+        hard_spin->setRange(0, 100);
+        hard_spin->setSuffix(tr("%"));
+        hard_spin->setValue(view->draw_brush_hardness);
+        hard_spin->setToolTip(tr("Built-in round brush: 100% = hard edge, 0% = fully feathered"));
+        tip_row->addWidget(hard_spin);
+        tip_row->addWidget(new QLabel(tr("Roundness"), advanced_draw_tab));
+        QSpinBox *roundness_spin = new QSpinBox(advanced_draw_tab);
+        roundness_spin->setRange(1, 100);
+        roundness_spin->setSuffix(tr("%"));
+        roundness_spin->setValue(view->draw_brush_roundness);
+        roundness_spin->setToolTip(tr("Built-in round brush: 100% = circle, lower = flatter ellipse"));
+        tip_row->addWidget(roundness_spin);
+        col->addLayout(tip_row);
+
+        // angolo della punta e i due jitter (dimensione e angolo, indipendenti) per ogni dab:
+        // una riga a testa, le etichette accorpate su una sola non si leggevano
+        QHBoxLayout *angle_row = new QHBoxLayout();
+        angle_row->addWidget(new QLabel(tr("Angle"), advanced_draw_tab));
+        QSpinBox *angle_spin = new QSpinBox(advanced_draw_tab);
+        angle_spin->setRange(-180, 180);
+        angle_spin->setSuffix(QString(QChar(0xB0))); // il grado, senza dipendere dall'encoding del sorgente
+        angle_spin->setValue(view->draw_brush_angle);
+        angle_spin->setToolTip(tr("Tip rotation"));
+        angle_row->addWidget(angle_spin);
+        col->addLayout(angle_row);
+
+        QHBoxLayout *size_jitter_row = new QHBoxLayout();
+        size_jitter_row->addWidget(new QLabel(tr("Size jitter"), advanced_draw_tab));
+        QSpinBox *size_jitter_spin = new QSpinBox(advanced_draw_tab);
+        size_jitter_spin->setRange(0, 100);
+        size_jitter_spin->setSuffix(tr("%"));
+        size_jitter_spin->setValue(view->draw_brush_size_jitter);
+        size_jitter_spin->setToolTip(tr("Random per-dab size reduction (0% = every dab at the set size)"));
+        size_jitter_row->addWidget(size_jitter_spin);
+        col->addLayout(size_jitter_row);
+
+        QHBoxLayout *angle_jitter_row = new QHBoxLayout();
+        angle_jitter_row->addWidget(new QLabel(tr("Angle jitter"), advanced_draw_tab));
+        QSpinBox *angle_jitter_spin = new QSpinBox(advanced_draw_tab);
+        angle_jitter_spin->setRange(0, 100);
+        angle_jitter_spin->setSuffix(tr("%"));
+        angle_jitter_spin->setValue(view->draw_brush_angle_jitter);
+        angle_jitter_spin->setToolTip(tr("Random per-dab rotation (100% = anywhere in the full circle)"));
+        angle_jitter_row->addWidget(angle_jitter_spin);
+        col->addLayout(angle_jitter_row);
+        connect(angle_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int v){ view->draw_brush_angle = v; });
+        connect(size_jitter_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int v){ view->draw_brush_size_jitter = v; });
+        connect(angle_jitter_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int v){ view->draw_brush_angle_jitter = v; });
 
         // colore
         QPushButton *color_btn = new QPushButton(tr("Brush color"), advanced_draw_tab);
@@ -612,9 +670,56 @@ Widget::Widget(QWidget *parent)
         folder_row->addWidget(folder_combo, 1);
         col->addLayout(folder_row);
 
+        // riporta lo stato pennello di MyView nei controlli (dopo un preset), senza far
+        // ripartire le loro connect — una rigenerazione della punta a metà della
+        // currentItemChanged cancellerebbe l'item che l'ha appena scatenata
+        auto sync_controls = [this, size_spin, op_spin, spacing_spin, hard_spin, roundness_spin,
+                              angle_spin, size_jitter_spin, angle_jitter_spin]{
+            const QList<QPair<QSpinBox*, int>> controls = {
+                { size_spin,         view->draw_brush_size },
+                { op_spin,           view->draw_brush_opacity },
+                { spacing_spin,      view->draw_brush_spacing },
+                { hard_spin,         view->draw_brush_hardness },
+                { roundness_spin,    view->draw_brush_roundness },
+                { angle_spin,        view->draw_brush_angle },
+                { size_jitter_spin,  view->draw_brush_size_jitter },
+                { angle_jitter_spin, view->draw_brush_angle_jitter } };
+            for(const auto &c : controls){
+                QSignalBlocker mute(c.first);
+                c.first->setValue(c.second);
+            }
+        };
+
+        // preset della punta integrata: solo parametri, nessuna texture — le matite si
+        // distinguono per durezza/opacità/spessore, con la punta un po' ovale e ruotata a caso
+        // dab per dab (angle jitter) che dà il bordo irregolare della grafite
+        struct BrushPreset { const char *name; int size, opacity, spacing, hardness, roundness, size_jitter, angle_jitter; };
+        static const BrushPreset brush_presets[] = {
+            { "Round",       20, 100, 25,  75, 100,  0,   0 },
+            { "Pencil 3H",    4,  35, 10, 100,  80, 20, 100 },
+            { "Pencil H/B",   6,  60, 12,  95,  80, 25, 100 },
+            { "Pencil B2",    9,  80, 14,  85,  75, 35, 100 },
+            { "Pencil B6",   14, 100, 18,  70,  70, 45, 100 },
+            { "Aerograph",   60,  12,  5,   0, 100,  0,   0 },
+            { "Ink pen",      6, 100,  6, 100, 100,  0,   0 } };
+
+        // anteprima di una punta: lo stamp reso allo spessore e all'opacità con cui verrà
+        // usato, altrimenti le sette punte integrate sono sette cerchi neri identici
+        auto tip_preview = [](const QImage &stamp, int size, int opacity){
+            QImage preview(128, 128, QImage::Format_ARGB32_Premultiplied);
+            preview.fill(Qt::transparent);
+            QPainter pp(&preview);
+            pp.setOpacity(qBound(0, opacity, 100)/100.0);
+            double d = qBound(24.0, size*4.0, 128.0); // relativo, ma leggibile anche per la 3H
+            pp.drawImage(QRectF((128-d)/2.0, (128-d)/2.0, d, d), stamp);
+            pp.end();
+            return preview;
+        };
+
         // griglia anteprime: icone in griglia che rifluisce al ridimensionamento.
         // Ogni item porta il proprio stamp (QImage ARGB, alpha = copertura) nel UserRole,
-        // così la selezione è uniforme: draw_brush_stamp = item->data(UserRole).
+        // così la selezione è uniforme: draw_brush_stamp = item->data(UserRole). I built-in
+        // portano anche il loro indice di preset in UserRole+1, che ne applica tutti i parametri.
         QListWidget *brush_list = new QListWidget(advanced_draw_tab);
         brush_list->setViewMode(QListView::IconMode);
         brush_list->setIconSize(QSize(64, 64));
@@ -623,25 +728,42 @@ Widget::Widget(QWidget *parent)
         brush_list->setMovement(QListView::Static);
         brush_list->setUniformItemSizes(true);
         brush_list->setSpacing(4);
-        brush_list->setMinimumHeight(120);
+        brush_list->setMinimumHeight(80); // le righe dei jitter mangiano lo spazio da qui
         connect(brush_list, &QListWidget::currentItemChanged, this,
-                [this](QListWidgetItem *cur, QListWidgetItem *){
+                [this, sync_controls](QListWidgetItem *cur, QListWidgetItem *){
             if(!cur) return;
             QImage stamp = cur->data(Qt::UserRole).value<QImage>();
             if(!stamp.isNull())
                 view->draw_brush_stamp = stamp;
+            QVariant preset_idx = cur->data(Qt::UserRole + 1);
+            if(!preset_idx.isValid())
+                return; // pennello .abr: solo lo stamp, i parametri restano quelli impostati a mano
+            const BrushPreset &p = brush_presets[preset_idx.toInt()];
+            view->draw_brush_size = p.size;
+            view->draw_brush_opacity = p.opacity;
+            view->draw_brush_spacing = p.spacing;
+            view->draw_brush_hardness = p.hardness;
+            view->draw_brush_roundness = p.roundness;
+            view->draw_brush_size_jitter = p.size_jitter;
+            view->draw_brush_angle_jitter = p.angle_jitter;
+            sync_controls();
         });
 
-        // mostra i pennelli di una collezione. collection vuota = pennello tondo integrato.
-        // round_stamp è catturato una volta (draw_brush_stamp cambia con la selezione).
-        QImage round_stamp = view->draw_brush_stamp;
-        auto populate = [this, brush_list, round_stamp](const QString &collection){
+        // mostra i pennelli di una collezione. collection vuota = punte integrate (un item
+        // per preset, con l'anteprima resa al suo spessore e alla sua opacità).
+        auto populate = [brush_list, tip_preview](const QString &collection){
             brush_list->clear();
             if(collection.isEmpty()){
-                QListWidgetItem *round = new QListWidgetItem(QIcon(QPixmap::fromImage(round_stamp)), tr("Round"));
-                round->setData(Qt::UserRole, round_stamp);
-                brush_list->addItem(round);
-                brush_list->setCurrentItem(round);
+                for(int i = 0; i < int(std::size(brush_presets)); i++){
+                    const BrushPreset &p = brush_presets[i];
+                    QImage stamp = MyView::MakeRoundBrush(128, p.hardness, p.roundness);
+                    QImage preview = tip_preview(stamp, p.size, p.opacity);
+                    QListWidgetItem *it = new QListWidgetItem(QIcon(QPixmap::fromImage(preview)), tr(p.name));
+                    it->setData(Qt::UserRole, stamp);
+                    it->setData(Qt::UserRole + 1, i);
+                    brush_list->addItem(it);
+                }
+                brush_list->setCurrentRow(0);
                 return;
             }
             const QList<AbrBrush> brushes = LoadAbr(collection);
@@ -653,6 +775,27 @@ Widget::Widget(QWidget *parent)
             if(brush_list->count())
                 brush_list->setCurrentRow(0);
         };
+
+        // durezza/rotondità: rigenerano la punta selezionata sul posto (stamp + anteprima),
+        // senza ripopolare la lista — altrimenti ritoccare la durezza di un preset avrebbe
+        // riportato la selezione su "Round". Sulle collezioni .abr non c'è nulla da
+        // rigenerare: lo stamp è quello del file.
+        auto rebuild_round = [this, brush_list, folder_combo, tip_preview]{
+            if(!folder_combo->currentData().toString().isEmpty())
+                return;
+            QListWidgetItem *cur = brush_list->currentItem();
+            if(!cur)
+                return;
+            QImage stamp = MyView::MakeRoundBrush(128, view->draw_brush_hardness, view->draw_brush_roundness);
+            cur->setData(Qt::UserRole, stamp);
+            cur->setIcon(QIcon(QPixmap::fromImage(tip_preview(stamp, view->draw_brush_size,
+                                                              view->draw_brush_opacity))));
+            view->draw_brush_stamp = stamp;
+        };
+        connect(hard_spin, QOverload<int>::of(&QSpinBox::valueChanged), this,
+                [this, rebuild_round](int v){ view->draw_brush_hardness = v; rebuild_round(); });
+        connect(roundness_spin, QOverload<int>::of(&QSpinBox::valueChanged), this,
+                [this, rebuild_round](int v){ view->draw_brush_roundness = v; rebuild_round(); });
 
         // (ri)costruisce la combobox scandendo ricorsivamente i .abr sotto Brushes.
         // Voce 0 = "Built-in" (tondo). Preserva la selezione corrente se ancora presente.

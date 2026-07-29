@@ -3644,9 +3644,6 @@ public:
         drawTextBtn->setText(QCoreApplication::translate("Widget", "Txt", nullptr));
         groupBox_9->setTitle(QString());
 #if QT_CONFIG(tooltip)
-        toolsTabWidget->setToolTip(QCoreApplication::translate("Widget", "<html><head/><body><p><br/></p></body></html>", nullptr));
-#endif // QT_CONFIG(tooltip)
-#if QT_CONFIG(tooltip)
         drawingTab->setToolTip(QCoreApplication::translate("Widget", "<html><head/><body><p>Draw and edit your stickfigure with multiple tools</p></body></html>", nullptr));
 #endif // QT_CONFIG(tooltip)
         groupBox_11->setTitle(QString());

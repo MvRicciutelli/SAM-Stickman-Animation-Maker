@@ -3199,6 +3199,69 @@ private slots:
             bomb[12 + 51 + i] = char((quint32(1000000) >> (8 * (3 - i))) & 0xFF);
         QVERIFY(!StkFormat::ImportNodes(WriteTempFile(bomb), QPointF(0, 0), &warnings, &error));
     }
+
+    // Draw-mode brush spacing is measured along the WHOLE stroke, not per mouse-move event:
+    // painting the same drag at 400% spacing must cover visibly less than at 25%. Before
+    // MyView::draw_dab_carry every mouse-move stamped a dab at its own start point (moves are
+    // only a few pixels apart), so any spacing above ~100% painted the same stroke as a much
+    // lower one — the spinbox went over 100% but nothing changed.
+    void BrushSpacingScalesDabCountAlongStroke()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        // painted (non-transparent) canvas pixels left by one identical drag at a given spacing;
+        // a fresh stick per run, since ExitDrawMode() bakes the stroke into the stick's image
+        auto paint = [this](int spacing)->int{
+            StickData *stick = DrawStick(QPointF(100, 100), QPointF(100, 200));
+            view->EnterDrawMode(stick, false);
+            view->draw_brush_size = 10;
+            view->draw_brush_hardness = 100;   // hard edge: coverage is the dab count, not the feather
+            view->draw_brush_spacing = spacing;
+            QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                              view->mapFromScene(QPointF(200, 300)));
+            for (int x = 205; x <= 400; x += 5)
+                QTest::mouseMove(view->viewport(), view->mapFromScene(QPointF(x, 300)));
+            QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                                view->mapFromScene(QPointF(400, 300)));
+            int painted = 0;
+            const QImage &canvas = *view->draw_canvas;
+            for (int y = 0; y < canvas.height(); y++)
+                for (int x = 0; x < canvas.width(); x++)
+                    if (qAlpha(canvas.pixel(x, y)) != 0)
+                        painted++;
+            view->ExitDrawMode();
+            return painted;
+        };
+
+        int dense = paint(25);
+        int sparse = paint(400);
+        QVERIFY2(dense > 0, "the drag painted nothing at all");
+        QVERIFY2(sparse * 2 < dense, qPrintable(QStringLiteral("spacing ignored: %1 px at 400% vs "
+                                                              "%2 px at 25%").arg(sparse).arg(dense)));
+        view->draw_brush_spacing = 25;
+        view->SetTool(NOTOOL);
+    }
+
+    // The built-in tip's two shape knobs, which every draw-panel preset (pencils, aerograph,
+    // ink pen) is just a parameter set over: hardness is the fully opaque core radius,
+    // roundness squashes the tip vertically inside a mask that stays square (so StampBrush()'s
+    // per-dab scaling stays uniform). Hardness 100 in particular used to come out as the
+    // SOFTEST tip: its gradient stop landed on 1.0 and QGradient::setColorAt() replaces a stop
+    // at an existing position, so it overwrote the transparent rim.
+    void RoundBrushHardnessAndRoundnessShapeTheTip()
+    {
+        QImage hard = MyView::MakeRoundBrush(64, 100, 100);
+        QImage soft = MyView::MakeRoundBrush(64, 0, 100);
+        QCOMPARE(qAlpha(hard.pixel(32, 32)), 255);  // both solid in the middle (the soft one's
+        QVERIFY(qAlpha(soft.pixel(32, 32)) > 240);  // centre pixel samples half a pixel off it)
+        QCOMPARE(qAlpha(hard.pixel(32, 5)), 255);   // near the rim: still solid at 100% hardness
+        QVERIFY(qAlpha(soft.pixel(32, 5)) < 64);    // feathered from the centre out at 0%
+
+        QImage flat = MyView::MakeRoundBrush(64, 100, 50);
+        QCOMPARE(flat.size(), hard.size());         // square mask: uniform dab scaling still holds
+        QCOMPARE(qAlpha(flat.pixel(32, 5)), 0);     // squashed to half height: top rim is empty
+        QCOMPARE(qAlpha(flat.pixel(5, 32)), 255);   // ...while the width is untouched
+    }
 };
 
 QTEST_MAIN(TestCharacterization)
