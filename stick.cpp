@@ -1,6 +1,7 @@
 #include "stick.h"
 #include <QGraphicsItem>
 #include <QPainterPath>
+#include <QTextLayout>
 #include <QVector>
 #include <QListWidget>
 #include <StickFigure.h>
@@ -113,6 +114,56 @@ static QPainterPath CurvedPath(const QPolygonF &verts, const QList<float> &curva
         path.lineTo(verts[n-1]);
     }
     return path;
+}
+
+/// @details Local frame of a TEXT stick: origin on p1, x axis ALONG the stick (hence the
+/// +90: img_angle == 0 means the stick points down the scene's +y, see StickFigure.cpp's
+/// -atan2(dx,dy) convention), then the user's h/v offset, then the vertical stretch (the
+/// one text property QFont has no equivalent for — the horizontal one is
+/// QFont::setStretch()). Scaling last keeps the offset itself unstretched. Shared by
+/// paint() and ConstructBr() so the drawn text and its bounding rect can't drift apart.
+static QTransform TextFrame(const StickData *d)
+{
+    QTransform t;
+    t.translate(d->my_line.p1().x(), d->my_line.p1().y());
+    t.rotate(d->img_angle + d->img_angle_offset + 90);
+    t.translate(d->img_offset.x(), d->img_offset.y());
+    t.scale(1.0, qMax(1, d->text_v_stretch) / 100.0);
+    return t;
+}
+/// @details Lays the paragraph out in that local frame, wrapping at the stick's length
+/// (so the text block follows the stick's scale for free) and spacing the lines by
+/// text_line_spacing. QTextLayout only breaks on QChar::LineSeparator, so the '\n' the
+/// user types are translated here.
+/// @return the block's bounding rect in local coordinates.
+///
+/// ponytail: the WRAP WIDTH follows the stick's length, the FONT SIZE doesn't — scaling a
+/// figure re-flows the paragraph instead of growing the glyphs. Make the point size a
+/// multiple of my_line.length() if type that scales with the figure is ever wanted.
+static QRectF LayoutText(const StickData *d, QTextLayout &layout)
+{
+    QString paragraph = d->text;
+    paragraph.replace('\n', QChar::LineSeparator);
+    QTextOption option(Qt::Alignment(d->text_align));
+    option.setWrapMode(d->text_word_wrap ? QTextOption::WrapAtWordBoundaryOrAnywhere
+                                         : QTextOption::NoWrap);
+    layout.setText(paragraph);
+    layout.setFont(d->text_font);
+    layout.setTextOption(option);
+    qreal width = qMax(1.0, d->my_line.length());
+    qreal spacing = qMax(0.1f, d->text_line_spacing);
+    qreal y = 0;
+    layout.beginLayout();
+    forever {
+        QTextLine line = layout.createLine();
+        if(!line.isValid())
+            break;
+        line.setLineWidth(width);
+        line.setPosition(QPointF(0, y));
+        y += line.height() * spacing;
+    }
+    layout.endLayout();
+    return layout.boundingRect();
 }
 
 void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
@@ -308,6 +359,25 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         }
         PaintVertexSquares(painter, chain);
     }
+    else if(data->stick_type == StickData::TEXT){
+        // testo vuoto = scheletro nudo: è l'anteprima dei due click di disegno (e la sola
+        // presa visibile se l'utente svuota il testo di uno stick già creato)
+        if(data->text.isEmpty()){
+            painter->drawLine(data->my_line.x1(),data->my_line.y1(),data->my_line.x2(),data->my_line.y2());
+        }
+        else{
+            QTextLayout layout;
+            LayoutText(data, layout);
+            painter->save();
+            painter->setTransform(TextFrame(data), true);
+            // il colore del testo È il colore dello stick; penna solida esplicita perché
+            // uno stick con penna NoPen (o l'onion render, già ingrigito sopra) non deve
+            // rendere il testo invisibile
+            painter->setPen(QPen(painter->pen().color()));
+            layout.draw(painter, QPointF(0, 0));
+            painter->restore();
+        }
+    }
     else if(data->stick_type == StickData::LINE){
         painter->drawLine(data->my_line.x1(),data->my_line.y1(),data->my_line.x2(),data->my_line.y2());
     }
@@ -391,6 +461,17 @@ QImage StickGraphicsItem::CalcImg(){
  */
 QRectF StickGraphicsItem::ConstructBr()
 {
+    if(data->stick_type == StickData::TEXT){
+        // il blocco di testo può uscire ampiamente dal cerchio della linea base (righe
+        // lunghe, offset, corpo grande): unisci l'ingombro reale del testo, mappato nel
+        // frame in cui è dipinto, con quello della spina
+        QTextLayout layout;
+        QRectF local = LayoutText(data, layout);
+        QRectF r = QRectF(data->my_line.p1(), data->my_line.p2()).normalized()
+                 | TextFrame(data).mapRect(local);
+        float m = data->pen.widthF() + handle_size;
+        return r.adjusted(-m, -m, m, m);
+    }
     if(data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE){
         // i vertici possono estendersi ben oltre il cerchio della linea base: unisci i
         // due estenti e lascia un margine per penna (o larghezza massima dei vertici)
@@ -572,7 +653,7 @@ void StickGraphicsItem::Rotate(QPointF *point)
         if(child->view)
             child->view->Refresh(1);
     }
-    if((data->IsImageType() ||data->stick_type == StickData::CIRCLE|| data->stick_type == StickData::RECT || data->stick_type == StickData::TAPER || data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE) && !traslationOnly){
+    if((data->IsImageType() ||data->stick_type == StickData::CIRCLE|| data->stick_type == StickData::RECT || data->stick_type == StickData::TAPER || data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE || data->stick_type == StickData::TEXT) && !traslationOnly){
         data->img_angle = angle;
     }
 
@@ -601,7 +682,7 @@ void StickGraphicsItem::Rotate(float angle){
         if(child->view)
             child->view->Refresh(1);
     }
-    if(data->IsImageType() ||data->stick_type == StickData::CIRCLE|| data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::TAPER || data->stick_type == StickData::RECT || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE){
+    if(data->IsImageType() ||data->stick_type == StickData::CIRCLE|| data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::TAPER || data->stick_type == StickData::RECT || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE || data->stick_type == StickData::TEXT){
         data->img_angle = -angle-90;
     }
 }
@@ -619,7 +700,8 @@ void StickGraphicsItem::Manipulate(QPointF *point)
             child->my_line = QLineF(*point,pfBuf);
             if(child->IsImageType() || child->stick_type == StickData::RECT
                     || child->stick_type == StickData::TRAPEZOID || child->stick_type == StickData::TAPER
-                    || child->stick_type == StickData::POLYGON || child->stick_type == StickData::MULTILINE){
+                    || child->stick_type == StickData::POLYGON || child->stick_type == StickData::MULTILINE
+                    || child->stick_type == StickData::TEXT){
                 child->img_angle = -atan2(child->my_line.dx(),child->my_line.dy())*180/M_PI;
             }
             if(child->view)
@@ -630,7 +712,8 @@ void StickGraphicsItem::Manipulate(QPointF *point)
     // se stiamo con un immagine ruotala anche
     if(data->IsImageType() || data->stick_type == StickData::RECT
             || data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::TAPER|| data->stick_type == StickData::CIRCLE
-            || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE){
+            || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE
+            || data->stick_type == StickData::TEXT){
         data->img_angle= -atan2(data->my_line.dx(),data->my_line.dy())*180/M_PI;
     }
     Refresh(0);

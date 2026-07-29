@@ -5,6 +5,7 @@
 // "behavior changed", not necessarily "behavior is wrong".
 #include <QtTest>
 #include <cmath>
+#include <QFontDatabase>
 #include <QGraphicsScene>
 #include <QGraphicsRectItem>
 #include <QTabWidget>
@@ -176,6 +177,7 @@ private slots:
         my_library_list_widget = new QListWidget;
         my_current_library_widget = new QListWidget;
         img_list_widget = new QListWidget;
+        img_buttons_row = new QWidget;  // nell'app è il frame dei bottoni immagine (widget.cpp)
         onion_skin_sb = new QSpinBox;   // value 0 -> UpdateOnionSkins() is a no-op
         fps_spin_box = new QSpinBox;
         img_rotation_slider = new QSlider;
@@ -382,6 +384,164 @@ private slots:
         QVERIFY(loaded.stick_img != nullptr);
         QCOMPARE(*loaded.stick_img, *drawing);           // il disegno sopravvive intatto
         QCOMPARE(loaded.stick_img->pixelColor(4, 3), QColor(10, 200, 30, 255));
+    }
+
+    // TEXT stick: content/font/justification/spacing/wrap must survive a save-load (and a
+    // Clone(), which copy/paste and undo go through), and a font this system doesn't have
+    // must come back as Arial with the missing family reported in missing_text_fonts —
+    // the only branch in the text feature that isn't plain field copying.
+    void StickTextRoundTripAndFontFallback()
+    {
+        // svuota SUBITO: un residuo farebbe scattare il prompt (modale!) dentro il primo
+        // MyView::LoadLibrary() dei test successivi
+        missing_text_fonts.clear();
+        // una famiglia davvero installata: in un ambiente headless il font DB è ridotto,
+        // quindi la si chiede al sistema invece di codificarne una
+        const QStringList installed = QFontDatabase::families();
+        const QString real_family = installed.isEmpty() ? QString("Arial") : installed.first();
+
+        StickData source;
+        source.stick_type = StickData::TEXT;
+        source.my_line = QLineF(100, 100, 300, 100);
+        source.text = "first line\nsecond line";
+        source.text_font = QFont(real_family, 21);
+        // grassetto/corsivo/spaziatura lettere/stretch orizzontale viaggiano DENTRO il
+        // QFont (il motivo per cui il campo è un QFont e non una stringa + un corpo)
+        source.text_font.setBold(true);
+        source.text_font.setItalic(true);
+        source.text_font.setUnderline(true);
+        source.text_font.setStrikeOut(true);
+        source.text_font.setLetterSpacing(QFont::PercentageSpacing, 130);
+        source.text_font.setStretch(150);
+        source.text_align = Qt::AlignJustify;
+        source.text_line_spacing = 1.75f;
+        source.text_v_stretch = 175;           // stretch verticale: campo a sé (QFont non l'ha)
+        source.text_word_wrap = false;
+        source.img_offset = QPointF(-8, 12);   // posizionamento: campi dell'immagine riusati
+        source.img_angle_offset = 30;
+
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << source;
+        }
+        StickData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+        QCOMPARE(loaded.stick_type, (qint32)StickData::TEXT);
+        QCOMPARE(loaded.text, source.text);
+        QCOMPARE(loaded.text_font.family(), source.text_font.family());
+        QCOMPARE(loaded.text_font.pointSize(), 21);
+        QVERIFY(loaded.text_font.bold());
+        QVERIFY(loaded.text_font.italic());
+        QVERIFY(loaded.text_font.underline());
+        QVERIFY(loaded.text_font.strikeOut());
+        QCOMPARE(loaded.text_font.letterSpacingType(), QFont::PercentageSpacing);
+        QCOMPARE(loaded.text_font.letterSpacing(), 130.0);
+        QCOMPARE(loaded.text_font.stretch(), 150);
+        QCOMPARE(loaded.text_align, source.text_align);
+        QCOMPARE(loaded.text_line_spacing, source.text_line_spacing);
+        QCOMPARE(loaded.text_v_stretch, source.text_v_stretch);
+        QCOMPARE(loaded.text_word_wrap, false);
+        QCOMPARE(loaded.img_offset, source.img_offset);
+        QCOMPARE(loaded.img_angle_offset, source.img_angle_offset);
+
+        StickData *clone = source.Clone();
+        QCOMPARE(clone->text, source.text);
+        QCOMPARE(clone->text_font, source.text_font);
+        QCOMPARE(clone->text_align, source.text_align);
+        QCOMPARE(clone->text_line_spacing, source.text_line_spacing);
+        QCOMPARE(clone->text_v_stretch, source.text_v_stretch);
+        QCOMPARE(clone->text_word_wrap, source.text_word_wrap);
+        delete clone;
+
+        // un record salvato prima che lo stretch verticale esistesse (version 2) resta
+        // leggibile: il campo non è nel flusso e conserva il suo default
+        StickData old_record;
+        old_record.CopyFrom(source);
+        old_record.version = 2;
+        QByteArray old_bytes;
+        {
+            QDataStream out(&old_bytes, QIODevice::WriteOnly);
+            out << old_record;
+        }
+        StickData old_loaded;
+        {
+            QDataStream in(&old_bytes, QIODevice::ReadOnly);
+            in >> old_loaded;
+        }
+        QCOMPARE(old_loaded.version, qint32(2));
+        QCOMPARE(old_loaded.text, source.text);
+        QCOMPARE(old_loaded.text_v_stretch, qint32(100)); // default, non letto dal file
+
+        // font inesistente: fallback ad Arial + segnalazione per il prompt (solo se il font
+        // DB è utilizzabile: senza font installati la sostituzione è disattivata per scelta)
+        QVERIFY(missing_text_fonts.isEmpty()); // la famiglia reale non ha segnalato nulla
+        if(installed.isEmpty())
+            return;
+        StickData missing;
+        missing.stick_type = StickData::TEXT;
+        missing.text = "x";
+        missing.text_font = QFont("NoSuchFontFamily_1234", 14);
+        QByteArray missing_bytes;
+        {
+            QDataStream out(&missing_bytes, QIODevice::WriteOnly);
+            out << missing;
+        }
+        StickData substituted;
+        {
+            QDataStream in(&missing_bytes, QIODevice::ReadOnly);
+            in >> substituted;
+        }
+        QCOMPARE(substituted.text_font.family(), QString("Arial"));
+        QCOMPARE(substituted.text_font.pointSize(), 14); // il corpo NON viene toccato
+        QVERIFY(missing_text_fonts.contains("NoSuchFontFamily_1234"));
+        missing_text_fonts.clear();
+    }
+
+    // The TEXT paint path (stick.cpp): the paragraph is laid out along the stick and lands
+    // on the side the local frame points to, the bounding rect grows to cover it, and an
+    // EMPTY text stick paints its bare skeleton instead — the rule the 2-click drawing
+    // preview relies on. Rendered offscreen the way Frame::UpdateIcon() does.
+    void TextStickRendersTextAndPreviewSkeleton()
+    {
+        if(QFontDatabase::families().isEmpty())
+            QSKIP("no font installed: nothing to lay out");
+        StickData text_stick;
+        text_stick.stick_type = StickData::TEXT;
+        text_stick.my_line = QLineF(10, 40, 210, 40); // orizzontale
+        text_stick.img_angle = -90;                   // convenzione -atan2(dx,dy) per questa direzione
+        text_stick.pen = QPen(Qt::black);
+        text_stick.text_font = QFont(QFontDatabase::families().first(), 20);
+
+        // pixel non bianchi sotto la spina: il testo corre lungo lo stick, dal lato +y locale
+        auto ink_below_line = [](StickData *data){
+            QGraphicsScene render_scene;
+            render_scene.setSceneRect(0, 0, 300, 200);
+            render_scene.addItem(new StickGraphicsItem(data)); // la scena possiede la view
+            QImage img(300, 200, QImage::Format_ARGB32);
+            img.fill(Qt::white);
+            QPainter painter(&img);
+            render_scene.render(&painter);
+            painter.end();
+            int painted = 0;
+            for(int y = 46; y < img.height(); y++)
+                for(int x = 0; x < img.width(); x++)
+                    if(img.pixelColor(x, y) != QColor(Qt::white))
+                        painted++;
+            return painted;
+        };
+
+        StickGraphicsItem measure(&text_stick); // solo per boundingRect (nessuna scena serve)
+        QRectF skeleton_br = measure.boundingRect();
+        QCOMPARE(ink_below_line(&text_stick), 0); // testo vuoto: solo la spina, niente sotto
+
+        text_stick.text = "the quick brown fox jumps over the lazy dog";
+        measure.Refresh(0);
+        QVERIFY(measure.boundingRect().height() > skeleton_br.height()); // il testo entra nel br
+        QVERIFY(ink_below_line(&text_stick) > 0);                        // ed è davvero dipinto
     }
 
     // LoadAbr() decodes a Photoshop .abr v2 sampled brush into an ARGB stamp whose

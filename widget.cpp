@@ -33,6 +33,8 @@
 #include <QButtonGroup>
 #include <QPixmap>
 #include <QComboBox>
+#include <QFontComboBox>
+#include <QTextEdit>
 #include <QSplitter>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -108,6 +110,7 @@ QListWidget * my_frame_widget_list;
 QListWidget * my_library_list_widget ;
 QListWidget * my_current_library_widget;
 QListWidget * img_list_widget;
+QWidget * img_buttons_row;
 QLabel * dbg_lbl;
 QSlider* img_h_offset_slider;
 QSlider* img_v_offset_slider;
@@ -123,6 +126,8 @@ AdvancedTab* advanced_rect_tab;
 QTabWidget* my_tab_widget;
 QWidget * advanced_img_tab;
 QWidget * advanced_vertex_tab;
+QWidget * advanced_text_tab; ///< pannello dei TEXT stick; costruito nel ctor di Widget
+std::function<void(StickData *)> refresh_text_panel; ///< vedi uiItems.h
 QWidget * advanced_draw_tab; ///< freehand draw-mode panel (brush/eraser/size/opacity/color); built in Widget's ctor
 QWidget * advanced_ik_tab;
 QCheckBox * ik_active_check;
@@ -199,6 +204,7 @@ Widget::Widget(QWidget *parent)
     depth_spinbox = ui->depthSpinbox;
     depth_slider = ui->depthSlider;
     img_list_widget = ui->imgListWidget;
+    img_buttons_row = ui->frame_44; // scambia/aggiungi/rimuovi immagine: si abilitano insieme
     advanced_rect_tab = new AdvancedTab();
 
     // ---- pannello "vertici" per POLYGON/MULTILINE (costruito in codice: due sole ----
@@ -333,6 +339,183 @@ Widget::Widget(QWidget *parent)
             view->UpdateIkOverlay();
             if(target->view) target->view->Refresh(0);
         });
+    }
+
+    // ---- pannello "testo" per i TEXT stick (costruito in codice come i pannelli --------
+    // ---- vertici/IK/draw). Offset e rotazione NON sono qui: sono gli stessi campi ------
+    // ---- img_offset/img_angle_offset dell'immagine, quindi Animation::UpdateTab() ------
+    // ---- affianca a questo il pannello immagine ("Text Placement"), come per i POLYGON -
+    advanced_text_tab = new QWidget();
+    {
+        QVBoxLayout *col = new QVBoxLayout(advanced_text_tab);
+        QTextEdit *content = new QTextEdit(advanced_text_tab);
+        content->setAcceptRichText(false); // il testo è puro: la formattazione è nel QFont
+        content->setMinimumHeight(80);
+        col->addWidget(content, 1);
+
+        QHBoxLayout *font_row = new QHBoxLayout();
+        QFontComboBox *font_combo = new QFontComboBox(advanced_text_tab); // font installati nel sistema
+        QSpinBox *size_spin = new QSpinBox(advanced_text_tab);
+        size_spin->setRange(1, 400);
+        size_spin->setValue(QFont().pointSize() > 0 ? QFont().pointSize() : 12);
+        font_row->addWidget(font_combo, 1);
+        font_row->addWidget(size_spin);
+        col->addLayout(font_row);
+
+        QHBoxLayout *style_row = new QHBoxLayout();
+        QCheckBox *bold_check = new QCheckBox(tr("Bold"), advanced_text_tab);
+        QCheckBox *italic_check = new QCheckBox(tr("Italic"), advanced_text_tab);
+        QCheckBox *underline_check = new QCheckBox(tr("Underline"), advanced_text_tab);
+        QCheckBox *strikeout_check = new QCheckBox(tr("Strikeout"), advanced_text_tab);
+        style_row->addWidget(bold_check);
+        style_row->addWidget(italic_check);
+        style_row->addWidget(underline_check);
+        style_row->addWidget(strikeout_check);
+        style_row->addStretch(1);
+        col->addLayout(style_row);
+
+        QHBoxLayout *align_row = new QHBoxLayout();
+        align_row->addWidget(new QLabel(tr("Justification"), advanced_text_tab));
+        QComboBox *align_combo = new QComboBox(advanced_text_tab);
+        align_combo->addItem(tr("Left"), int(Qt::AlignLeft));
+        align_combo->addItem(tr("Center"), int(Qt::AlignHCenter));
+        align_combo->addItem(tr("Right"), int(Qt::AlignRight));
+        align_combo->addItem(tr("Justified"), int(Qt::AlignJustify));
+        align_row->addWidget(align_combo, 1);
+        col->addLayout(align_row);
+
+        // spaziatura: verticale = interlinea (moltiplicatore), orizzontale = spaziatura fra
+        // le lettere in percento (QFont::setLetterSpacing, 100 = normale)
+        QHBoxLayout *spacing_row = new QHBoxLayout();
+        spacing_row->addWidget(new QLabel(tr("Spacing V/H"), advanced_text_tab));
+        QDoubleSpinBox *spacing_spin = new QDoubleSpinBox(advanced_text_tab);
+        spacing_spin->setRange(0.5, 5.0);
+        spacing_spin->setSingleStep(0.1);
+        spacing_spin->setValue(1.0);
+        spacing_spin->setToolTip(tr("Vertical spacing: line height multiplier"));
+        QSpinBox *letter_spin = new QSpinBox(advanced_text_tab);
+        letter_spin->setRange(10, 500);
+        letter_spin->setSuffix(tr("%"));
+        letter_spin->setValue(100);
+        letter_spin->setToolTip(tr("Horizontal spacing: space between letters (100% = normal)"));
+        spacing_row->addWidget(spacing_spin, 1);
+        spacing_row->addWidget(letter_spin, 1);
+        col->addLayout(spacing_row);
+
+        // stretch dei glifi: orizzontale via QFont::setStretch (rientra nella riga di testo,
+        // quindi cambia anche il ritorno a capo), verticale via la scala y di TextFrame()
+        QHBoxLayout *stretch_row = new QHBoxLayout();
+        stretch_row->addWidget(new QLabel(tr("Stretch H/V"), advanced_text_tab));
+        QSpinBox *stretch_h_spin = new QSpinBox(advanced_text_tab);
+        stretch_h_spin->setRange(10, 400);
+        stretch_h_spin->setSuffix(tr("%"));
+        stretch_h_spin->setValue(100);
+        stretch_h_spin->setToolTip(tr("Horizontal glyph stretch (100% = unstretched)"));
+        QSpinBox *stretch_v_spin = new QSpinBox(advanced_text_tab);
+        stretch_v_spin->setRange(10, 400);
+        stretch_v_spin->setSuffix(tr("%"));
+        stretch_v_spin->setValue(100);
+        stretch_v_spin->setToolTip(tr("Vertical glyph stretch (100% = unstretched)"));
+        stretch_row->addWidget(stretch_h_spin, 1);
+        stretch_row->addWidget(stretch_v_spin, 1);
+        col->addLayout(stretch_row);
+
+        QCheckBox *wrap_check = new QCheckBox(tr("Word wrap at the stick's length"), advanced_text_tab);
+        wrap_check->setChecked(true);
+        col->addWidget(wrap_check);
+
+        // ogni controllo scrive sullo stick corrente; text_panel_sync distingue l'eco di
+        // refresh_text_panel (selezione cambiata) dall'input dell'utente, come il
+        // blockSignals della casella IK
+        auto edit = [this](std::function<void(StickData *)> mutate, bool coalesce){
+            if(text_panel_sync)
+                return;
+            StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
+            if(cs == nullptr || cs->stick_type != StickData::TEXT)
+                return;
+            // coalesce: un'intera digitazione sullo stesso stick = un solo snapshot
+            // (altrimenti ogni tasto ne spingerebbe uno); reso a zero da ogni eco
+            if(!coalesce || !text_undo_taken){
+                view->StoreUndo(CMD_SIMPLE);
+                text_undo_taken = true;
+            }
+            mutate(cs);
+            view->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
+            view->my_animation->current_frame->UpdateIcon();
+        };
+        connect(content, &QTextEdit::textChanged, this, [this, content, edit](){
+            edit([content](StickData *cs){ cs->text = content->toPlainText(); }, true);
+        });
+        connect(font_combo, &QFontComboBox::currentFontChanged, this, [edit](const QFont &f){
+            edit([f](StickData *cs){ cs->text_font.setFamily(f.family()); }, false);
+        });
+        connect(size_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [edit](int v){
+            edit([v](StickData *cs){ cs->text_font.setPointSize(v); }, false);
+        });
+        connect(bold_check, &QCheckBox::toggled, this, [edit](bool on){
+            edit([on](StickData *cs){ cs->text_font.setBold(on); }, false);
+        });
+        connect(italic_check, &QCheckBox::toggled, this, [edit](bool on){
+            edit([on](StickData *cs){ cs->text_font.setItalic(on); }, false);
+        });
+        connect(underline_check, &QCheckBox::toggled, this, [edit](bool on){
+            edit([on](StickData *cs){ cs->text_font.setUnderline(on); }, false);
+        });
+        connect(strikeout_check, &QCheckBox::toggled, this, [edit](bool on){
+            edit([on](StickData *cs){ cs->text_font.setStrikeOut(on); }, false);
+        });
+        connect(letter_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [edit](int v){
+            edit([v](StickData *cs){
+                cs->text_font.setLetterSpacing(QFont::PercentageSpacing, v);
+            }, false);
+        });
+        connect(stretch_h_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [edit](int v){
+            edit([v](StickData *cs){ cs->text_font.setStretch(v); }, false);
+        });
+        connect(stretch_v_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [edit](int v){
+            edit([v](StickData *cs){ cs->text_v_stretch = v; }, false);
+        });
+        connect(align_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [edit, align_combo](int){
+            int a = align_combo->currentData().toInt();
+            edit([a](StickData *cs){ cs->text_align = a; }, false);
+        });
+        connect(spacing_spin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [edit](double v){
+            edit([v](StickData *cs){ cs->text_line_spacing = float(v); }, false);
+        });
+        connect(wrap_check, &QCheckBox::toggled, this, [edit](bool on){
+            edit([on](StickData *cs){ cs->text_word_wrap = on; }, false);
+        });
+
+        // eco: Animation::UpdateSliders() chiama questa a ogni cambio di selezione
+        refresh_text_panel = [this, content, font_combo, size_spin, bold_check, italic_check,
+                              underline_check, strikeout_check, align_combo, spacing_spin,
+                              letter_spin, stretch_h_spin, stretch_v_spin, wrap_check](StickData *cs){
+            if(cs == nullptr || cs->stick_type != StickData::TEXT)
+                return;
+            text_panel_sync = true;
+            if(content->toPlainText() != cs->text) // preserva il cursore mentre si digita
+                content->setPlainText(cs->text);
+            font_combo->setCurrentFont(cs->text_font);
+            size_spin->setValue(cs->text_font.pointSize() > 0 ? cs->text_font.pointSize() : 12);
+            bold_check->setChecked(cs->text_font.bold());
+            italic_check->setChecked(cs->text_font.italic());
+            underline_check->setChecked(cs->text_font.underline());
+            strikeout_check->setChecked(cs->text_font.strikeOut());
+            int align_idx = align_combo->findData(cs->text_align);
+            align_combo->setCurrentIndex(align_idx >= 0 ? align_idx : 0);
+            spacing_spin->setValue(cs->text_line_spacing);
+            // un QFont che non ha mai avuto spaziatura/stretch impostati riporta 0
+            // (AnyStretch / nessuna spaziatura): mostralo come il 100% di default
+            int letter = qRound(cs->text_font.letterSpacing());
+            letter_spin->setValue(cs->text_font.letterSpacingType() == QFont::PercentageSpacing
+                                  && letter > 0 ? letter : 100);
+            stretch_h_spin->setValue(cs->text_font.stretch() > 0 ? cs->text_font.stretch() : 100);
+            stretch_v_spin->setValue(cs->text_v_stretch);
+            wrap_check->setChecked(cs->text_word_wrap);
+            text_panel_sync = false;
+            text_undo_taken = false; // altro stick (o ri-selezione): la prossima modifica apre un nuovo undo
+        };
     }
 
     // ---- pannello "draw mode" del freehand: strumenti di disegno (pennello/gomma,
@@ -1451,8 +1634,9 @@ void Widget::on_imgHOffsetSlider_valueChanged(int value)
     if(cs == nullptr)
         return;
     else{
-        // il POLYGON riusa l'offset dell'immagine per traslare in blocco i suoi vertici
-        if(cs->stick_type == StickData::IMAGE || cs->stick_type == StickData::POLYGON){
+        // il POLYGON riusa l'offset dell'immagine per traslare in blocco i suoi vertici,
+        // il TEXT per spostare il blocco di testo rispetto alla spina
+        if(cs->stick_type == StickData::IMAGE || cs->stick_type == StickData::POLYGON || cs->stick_type == StickData::TEXT){
             if(!sliderFlags.sliderHOffset){
                 view->StoreUndo(CMD_SIMPLE);
                 sliderFlags.sliderHOffset = true;
@@ -1474,8 +1658,8 @@ void Widget::on_imgVOfsetSlider_valueChanged(int value)
     if(cs == nullptr)
         return;
     else{
-        // vedi on_imgHOffsetSlider_valueChanged(): vale anche per i POLYGON
-        if(cs->stick_type == StickData::IMAGE || cs->stick_type == StickData::POLYGON){
+        // vedi on_imgHOffsetSlider_valueChanged(): vale anche per POLYGON e TEXT
+        if(cs->stick_type == StickData::IMAGE || cs->stick_type == StickData::POLYGON || cs->stick_type == StickData::TEXT){
             float val = 0;
             if(!sliderFlags.sliderVOffset){
                 view->StoreUndo(CMD_SIMPLE);
@@ -1538,8 +1722,9 @@ void Widget::on_imgRotationSlider_valueChanged(int value)
     if(cs == nullptr)
         return;
     else{
-        // vedi on_imgHOffsetSlider_valueChanged(): il POLYGON ruota i vertici attorno a P1
-        if(cs->stick_type == StickData::IMAGE || cs->stick_type == StickData::POLYGON){
+        // vedi on_imgHOffsetSlider_valueChanged(): il POLYGON ruota i vertici attorno a P1,
+        // il TEXT ruota il blocco di testo attorno allo stesso punto
+        if(cs->stick_type == StickData::IMAGE || cs->stick_type == StickData::POLYGON || cs->stick_type == StickData::TEXT){
             if(!sliderFlags.sliderRot){
                 view->StoreUndo(CMD_SIMPLE);
                 sliderFlags.sliderRot = true;
@@ -2430,5 +2615,11 @@ void Widget::on_multiLineBtn_clicked()
 void Widget::on_addIkBtn_clicked()
 {
     view->SetTool(DRAW_IK);
+}
+
+///@brief switches to the text stick tool
+void Widget::on_drawTextBtn_clicked()
+{
+    view->SetTool(DRAWTEXT);
 }
 

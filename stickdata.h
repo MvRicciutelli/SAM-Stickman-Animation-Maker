@@ -2,12 +2,14 @@
 #define STICKDATA_H
 #include <QBrush>
 #include <QDataStream>
+#include <QFont>
 #include <QImage>
 #include <QLineF>
 #include <QList>
 #include <QPen>
 #include <QPointF>
 #include <QString>
+#include <QStringList>
 #include <QTransform>
 
 class StickGraphicsItem; // defined in stick.h; forward-declared to avoid a header cycle
@@ -45,10 +47,14 @@ public:
                         ///< interior vertices live in polygon_points, with per-vertex
                         ///< width (taper) and corner curvature in vertex_widths/
                         ///< vertex_curvatures
-        FREEHAND = 24   ///< raster paint stick: a single stick_img painted freehand in
+        FREEHAND = 24,  ///< raster paint stick: a single stick_img painted freehand in
                         ///< draw mode (myview.cpp). Rendered/transformed/serialized
                         ///< exactly like IMAGE (see IsImageType()); its one image never
                         ///< enters the image-variant list widget (23 is the DRAW_IK tool id)
+        TEXT = 25       ///< paragraph of text laid out along the stick; the skeleton is
+                        ///< invisible (drawn only while `text` is empty, i.e. during the
+                        ///< 2-click drawing preview). Content/font/layout live in the
+                        ///< text_* fields below, placement in img_offset/img_angle_offset
     };
 
     /**
@@ -117,9 +123,10 @@ public:
 
     // ------- persistent fields (exactly what operator<</operator>> read and write) ------
 
-    qint32 version = 2;              ///< serialization format version of this record; 2 adds the
-                                     ///< IK fields below, gated in operator<</operator>> so files
-                                     ///< saved before IK existed (version 1) still load correctly
+    qint32 version = 3;              ///< serialization format version of this record; 2 adds the
+                                     ///< IK fields below, 3 adds TEXT's text_v_stretch — both
+                                     ///< gated in operator<</operator>> so files saved before
+                                     ///< those fields existed still load correctly
     qint32 stick_type = StickType::LINE;///< StickType value; drives painting and serialization
     /**
      * @brief True only for the invisible bridge stick MergeStickFigures() creates to
@@ -183,6 +190,43 @@ public:
      */
     QList<float> vertex_curvatures;
 
+    // ------- TEXT only. Placement reuses the IMAGE fields (img_offset for the h/v -----
+    // ------- offset, img_angle_offset for the extra rotation), so the offset panel ----
+    // ------- and InterpolateStickData() work on a text stick unchanged. -------------
+
+    /**
+     * @brief The paragraph content; '\\n' separates paragraphs (stick.cpp maps them to
+     *        QChar::LineSeparator for QTextLayout). Empty means "not written yet": the
+     *        stick paints its bare skeleton line instead, which is what makes the 2-click
+     *        drawing preview visible before the text is typed.
+     */
+    QString text;
+
+    /**
+     * @brief Everything about the typeface: family, point size, bold, italic, HORIZONTAL
+     *        letter spacing (QFont::setLetterSpacing, PercentageSpacing) and HORIZONTAL
+     *        stretch (QFont::setStretch, percent).
+     *
+     * Stored as a whole QFont on purpose: QDataStream serializes all of those natively,
+     * so the bold/italic/letter-spacing/stretch controls needed no extra fields and no
+     * format change. Only the VERTICAL stretch has no QFont equivalent and lives in its
+     * own field below. On load a family that is not installed is replaced with Arial and
+     * reported through missing_text_fonts (see operator>>).
+     */
+    QFont text_font;
+
+    qint32 text_align = 0x0001;      ///< Qt::AlignLeft/AlignRight/AlignHCenter/AlignJustify (stored as int so the format doesn't depend on Qt's enum type)
+    float text_line_spacing = 1.0f;   ///< VERTICAL spacing: line height multiplier (1 = the font's own leading). The horizontal (letter) spacing lives in text_font
+    /**
+     * @brief VERTICAL stretch of the glyphs, in percent (100 = unstretched).
+     *
+     * QFont::stretch() is horizontal only, so this one is applied as a y-scale inside
+     * stick.cpp's TextFrame() — which means it stretches the line pitch along with the
+     * glyphs, i.e. the whole text block. Serialized only from record version 3 on.
+     */
+    qint32 text_v_stretch = 100;
+    bool text_word_wrap = true;      ///< wrap the paragraph at the stick's length; false lets lines run past it
+
     /**
      * @brief Maps a normalized polygon_points entry to scene coordinates.
      * @return the local→scene transform; invert it to map a click back to a vertex.
@@ -235,6 +279,15 @@ public:
      */
     StickData *ik_start = nullptr;
 };
+
+/**
+ * @brief Families of TEXT sticks that a load found missing on this system and replaced
+ *        with Arial, accumulated by operator>> (data layer: it cannot prompt).
+ *
+ * Drained by MyView::ReportMissingTextFonts(), which every file-load entry point calls
+ * once the load is done.
+ */
+extern QStringList missing_text_fonts;
 
 /**
  * @brief Serializes one stick record (used by every save/copy/undo path).

@@ -85,6 +85,7 @@ public:
     QPushButton *drawBtn;
     QPushButton *addPolyBtn;
     QPushButton *multiLineBtn;
+    QPushButton *drawTextBtn;
     QSpacerItem *horizontalSpacer;
     QFrame *bottomframe;
     QHBoxLayout *horizontalLayout_4;
@@ -1368,6 +1369,15 @@ public:
 ""));
 
         horizontalLayout_11->addWidget(multiLineBtn);
+
+        drawTextBtn = new QPushButton(drawtools);
+        drawTextBtn->setObjectName("drawTextBtn");
+        sizePolicy5.setHeightForWidth(drawTextBtn->sizePolicy().hasHeightForWidth());
+        drawTextBtn->setSizePolicy(sizePolicy5);
+        drawTextBtn->setMinimumSize(QSize(50, 50));
+        drawTextBtn->setMaximumSize(QSize(50, 50));
+
+        horizontalLayout_11->addWidget(drawTextBtn);
 
         horizontalSpacer = new QSpacerItem(40, 20, QSizePolicy::Expanding, QSizePolicy::Minimum);
 
@@ -3628,6 +3638,10 @@ public:
         multiLineBtn->setToolTip(QCoreApplication::translate("Widget", "<html><head/><body><p>Multi-line tool:</p><p>Every click adds a point to the path. Finish with Enter or a double click, Esc cancels. Click a multi-line's segment (or hold Ctrl) to insert a point at its middle and drag it; Alt+click deletes a point. With the select tool, Ctrl(+Shift)-click vertices and use the taper sliders to set per-vertex width and curvature.</p></body></html>", nullptr));
 #endif // QT_CONFIG(tooltip)
         multiLineBtn->setText(QString());
+#if QT_CONFIG(tooltip)
+        drawTextBtn->setToolTip(QCoreApplication::translate("Widget", "<html><head/><body><p>Text stick tool:</p><p>Click twice to place the stick the text runs along, then type the paragraph in the prompt. The stick itself stays invisible; edit content, font, justification, spacing, wrapping and offsets in the Text Editing / Text Placement tabs. The stick color is the text color.</p></body></html>", nullptr));
+#endif // QT_CONFIG(tooltip)
+        drawTextBtn->setText(QCoreApplication::translate("Widget", "Txt", nullptr));
         groupBox_9->setTitle(QString());
 #if QT_CONFIG(tooltip)
         toolsTabWidget->setToolTip(QCoreApplication::translate("Widget", "<html><head/><body><p><br/></p></body></html>", nullptr));

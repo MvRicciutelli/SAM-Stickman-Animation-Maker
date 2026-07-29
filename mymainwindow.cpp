@@ -175,6 +175,7 @@ void MyMainWindow::on_actionload_triggered()
     view->StoreUndo();
     central_w->AddStick();
     view->my_animation->CurrentFrame()->CurrentStickFigure()->LoadStickFigure(file_name);
+    view->ReportMissingTextFonts(); // font dei text stick assenti su questa macchina
     for(StickData*s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
         view->my_animation->CurrentFrame()->total_sticks.append(s);
     }
@@ -217,6 +218,7 @@ void MyMainWindow::on_actionload_animation_triggered()
         view->ClearUndo();
         animation_path = file_name;
         view->my_animation->LoadAnimation(file_name);
+        view->ReportMissingTextFonts(); // font dei text stick assenti su questa macchina
         // Animation::operator>> gia' applica W/H/my_rect dal file caricato; se il file e'
         // corrotto puo' interrompersi lasciando frame_list vuota, quindi va controllata qui
         if(!view->my_animation->frame_list.isEmpty()){

@@ -184,6 +184,13 @@ void Animation::UpdateTab(int t){
         my_tab_widget->insertTab(1,advanced_vertex_tab,"Multiline Editing");
         vertex_width_row->show();
     }
+    else if(t == StickData::TEXT){
+        // pannello testo (contenuto/font/giustificazione/interlinea/word wrap) + pannello
+        // immagine per offset e rotazione, come fa il POLYGON: sono le stesse tre
+        // proprietà (img_offset/img_angle_offset), riusate invece di duplicarle
+        my_tab_widget->insertTab(1,advanced_text_tab,"Text Editing");
+        my_tab_widget->insertTab(2,advanced_img_tab,"Text Placement");
+    }
     my_tab_widget->setCurrentIndex(idx);
 }
 void Animation::UpdateSelection(StickData* s)
@@ -246,6 +253,24 @@ void Animation::UpdateSliders(){
     StickData *cs = current_frame->CurrentStick();
     if(current_frame->CurrentStick() == nullptr)
         return;
+    // Il pannello immagine è condiviso (IMAGE, POLYGON, TEXT), ma per un TEXT una parte dei
+    // suoi controlli non ha nulla su cui agire: gli slider di scala scrivono img_w_scale/
+    // img_h_scale, che nessuno legge per il testo (né il corpo del font né la larghezza di
+    // ritorno a capo dipendono da loro), e la lista immagini con i suoi bottoni (scambia/
+    // aggiungi/rimuovi) riguarda le varianti immagine, che un TEXT non ha — la lista
+    // mostrerebbe anzi le righe rimaste dall'ultimo IMAGE selezionato, dato che
+    // PopulateImageListWidget() la ripopola solo per gli IMAGE. Disabilitati invece di
+    // lasciarli sembrare guasti, e riabilitati per ogni altro tipo. Sta qui e non in
+    // UpdateTab() perché questa gira a OGNI cambio di selezione, non solo di tipo.
+    {
+        bool image_controls = (cs->stick_type != StickData::TEXT);
+        img_width_slider->setEnabled(image_controls);
+        img_width_spinbox->setEnabled(image_controls);
+        img_height_slider->setEnabled(image_controls);
+        img_height_spinbox->setEnabled(image_controls);
+        img_list_widget->setEnabled(image_controls);
+        img_buttons_row->setEnabled(image_controls);
+    }
     if(cs->stick_type == StickData::IMAGE){
         //aggiorna gli slider di modifica alla scala e all'offset
         if(cs->img_w_scale>=1){
@@ -287,6 +312,15 @@ void Animation::UpdateSliders(){
         img_v_offset_slider->setValue(cs->img_offset.y());
         img_h_offset_slider->setValue(cs->img_offset.x());
         img_rotation_slider->setValue(cs->img_angle_offset);
+    }
+    else if(cs->stick_type == StickData::TEXT){
+        img_v_offset_slider->setValue(cs->img_offset.y());
+        img_h_offset_slider->setValue(cs->img_offset.x());
+        img_rotation_slider->setValue(cs->img_angle_offset);
+        // il pannello testo vive in widget.cpp: l'eco dei suoi controlli passa da qui
+        // (nullo nei test, dove il pannello non esiste)
+        if(refresh_text_panel)
+            refresh_text_panel(cs);
     }
     edit_line_thickness_slider->setValue(cs->pen.width());
     elongate_spinbox->setValue(  current_frame->CurrentStick()->my_line.length());

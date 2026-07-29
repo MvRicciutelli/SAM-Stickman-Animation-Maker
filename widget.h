@@ -322,8 +322,24 @@ private slots:
 
     void on_addIkBtn_clicked();
 
+    void on_drawTextBtn_clicked();
+
 private:
     Ui::Widget *ui;
+
+    /**
+     * @brief Raised while refresh_text_panel() is pushing a stick's properties into the
+     *        text panel, so the controls' own handlers can tell that echo from real user
+     *        input (same role blockSignals() plays for the IK checkbox).
+     */
+    bool text_panel_sync = false;
+
+    /**
+     * @brief True once the current text-panel editing session has taken its undo
+     *        snapshot: typing in the content box coalesces into ONE undo entry instead of
+     *        one per keystroke. Reset by every panel refresh (i.e. every selection change).
+     */
+    bool text_undo_taken = false;
 
     /**
      * @brief Per-slider "drag in progress" latches: the first valueChanged() of a drag

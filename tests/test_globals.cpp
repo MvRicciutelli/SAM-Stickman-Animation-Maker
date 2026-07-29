@@ -51,6 +51,7 @@ QListWidget *my_frame_widget_list = nullptr;
 QListWidget *my_library_list_widget = nullptr;
 QListWidget *my_current_library_widget = nullptr;
 QListWidget *img_list_widget = nullptr;
+QWidget *img_buttons_row = nullptr;      // istanziato dalla fixture: UpdateSliders() lo abilita/disabilita
 QLabel *dbg_lbl = nullptr;
 QSlider *img_h_offset_slider = nullptr;
 QSlider *img_v_offset_slider = nullptr;
@@ -67,6 +68,8 @@ QTabWidget *my_tab_widget = nullptr;
 QWidget *advanced_img_tab = nullptr;
 QWidget *advanced_draw_tab = nullptr;    // il tab draw mode non è esercitato dai test (UpdateTab non è chiamata con FREEHAND)
 QWidget *advanced_vertex_tab = nullptr;
+QWidget *advanced_text_tab = nullptr;     // il pannello testo non è esercitato dai test
+std::function<void(StickData *)> refresh_text_panel; // nullo: UpdateSliders() lo salta
 QWidget *advanced_ik_tab = nullptr;      // il tab IK non è esercitato dai test (UpdateSliders lo salta se null)
 QCheckBox *ik_active_check = nullptr;
 QWidget *library_tab = nullptr;          // nullo nei test: la guardia in UpdateTab() confronta puntatori e non trova mai match, comportamento invariato

@@ -191,7 +191,8 @@ void StickFigure::PreviewDrawing(QPointF *point)
             (stick_buffer->stick_type == StickData::CIRCLE)||
             (stick_buffer->stick_type == StickData::TAPER)||
             (stick_buffer->stick_type == StickData::POLYGON)||
-            (stick_buffer->stick_type == StickData::MULTILINE)){
+            (stick_buffer->stick_type == StickData::MULTILINE)||
+            (stick_buffer->stick_type == StickData::TEXT)){
         stick_buffer->img_angle= -atan2(stick_buffer->my_line.dx(),stick_buffer->my_line.dy())*180/M_PI;
     }
 }
@@ -1346,7 +1347,8 @@ void StickFigure::Elongate(QPointF new_end_point, StickData* my_stick){
         }
     }
     if(my_stick->IsImageType() || my_stick->stick_type  == StickData::RECT
-            || my_stick->stick_type  == StickData::TRAPEZOID || my_stick->stick_type  == StickData::TAPER){
+            || my_stick->stick_type  == StickData::TRAPEZOID || my_stick->stick_type  == StickData::TAPER
+            || my_stick->stick_type  == StickData::TEXT){ // il testo segue la direzione della spina
         my_stick->img_angle= -atan2(my_stick->my_line.dx(),my_stick->my_line.dy())*180/M_PI;
     }
     Refresh(0);

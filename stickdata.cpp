@@ -1,5 +1,10 @@
 #include "stickdata.h"
+#include <QFontDatabase>
 #include <QtMath>
+
+/// @details Filled by operator>> when a TEXT stick names a font this system doesn't have;
+/// emptied by MyView::ReportMissingTextFonts() after it has shown the prompt.
+QStringList missing_text_fonts;
 
 /**
  * @details All defaults live as in-class initializers in stickdata.h so they are visible
@@ -50,6 +55,12 @@ void StickData::CopyFrom(const StickData &source)
     polygon_points = source.polygon_points;
     vertex_widths = source.vertex_widths;
     vertex_curvatures = source.vertex_curvatures;
+    text = source.text;
+    text_font = source.text_font;
+    text_align = source.text_align;
+    text_line_spacing = source.text_line_spacing;
+    text_v_stretch = source.text_v_stretch;
+    text_word_wrap = source.text_word_wrap;
     ik_role = source.ik_role;
     ik_start_idx = source.ik_start_idx;
     ik_target_idx = source.ik_target_idx;
@@ -199,7 +210,7 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
         stream << stick_data.ik_start_idx;
         stream << stick_data.ik_target_idx;
     }
-    if ((stick_data.stick_type == StickData::CIRCLE) || stick_data.IsImageType() || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE)) {
+    if ((stick_data.stick_type == StickData::CIRCLE) || stick_data.IsImageType() || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE) || (stick_data.stick_type == StickData::TEXT)) {
         if (stick_data.IsImageType()) {
             // stick_img può essere nullo solo per un record ricostruito da un file corrotto:
             // meglio serializzare una QSize vuota che dereferenziare un puntatore nullo
@@ -239,6 +250,17 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
             for (float w : stick_data.vertex_widths)
                 stream << w;
         }
+        if (stick_data.stick_type == StickData::TEXT) {
+            // QFont ha i suoi operatori di stream: famiglia, corpo, grassetto, corsivo,
+            // spaziatura fra le lettere e stretch orizzontale viaggiano in un colpo solo
+            stream << stick_data.text;
+            stream << stick_data.text_font;
+            stream << stick_data.text_align;
+            stream << stick_data.text_line_spacing;
+            stream << stick_data.text_word_wrap;
+            if (stick_data.version >= 3)
+                stream << stick_data.text_v_stretch; // lo stretch verticale non è nel QFont
+        }
     }
 
     return stream;
@@ -271,7 +293,7 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
         // ik_start/ik_target vengono risolti dagli indici più tardi, a livello di
         // StickFigureData::operator>> (stessa fase in cui parent_idx diventa parent)
     }
-    if (stick_data.IsImageType() || (stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE)) {
+    if (stick_data.IsImageType() || (stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE) || (stick_data.stick_type == StickData::TEXT)) {
         QSize mysize;
         if (stick_data.IsImageType()) {
             stream >> mysize;
@@ -334,6 +356,28 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
                 if (stream.status() != QDataStream::Ok)
                     break;
                 stick_data.vertex_widths.append(w);
+            }
+        }
+        if (stick_data.stick_type == StickData::TEXT) {
+            stream >> stick_data.text;
+            stream >> stick_data.text_font;
+            stream >> stick_data.text_align;
+            stream >> stick_data.text_line_spacing;
+            stream >> stick_data.text_word_wrap;
+            if (stick_data.version >= 3)
+                stream >> stick_data.text_v_stretch;
+            // font non installato su questa macchina: ripiega su Arial e registra la
+            // famiglia mancante. Il prompt lo mostra chi ha avviato il caricamento
+            // (MyView::ReportMissingTextFonts()): qui siamo nel layer dati, senza UI
+            const QString family = stick_data.text_font.family();
+            static const QStringList installed = QFontDatabase::families();
+            // installed vuota = font DB non utilizzabile (piattaforma headless senza font):
+            // "non lo so" non è "manca", altrimenti riscriveremmo ad Arial ogni text stick
+            if (!installed.isEmpty() && !family.isEmpty()
+                    && !installed.contains(family, Qt::CaseInsensitive)) {
+                if (!missing_text_fonts.contains(family))
+                    missing_text_fonts.append(family);
+                stick_data.text_font.setFamily("Arial");
             }
         }
     }

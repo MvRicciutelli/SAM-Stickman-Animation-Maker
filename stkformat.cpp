@@ -678,6 +678,7 @@ bool ResolveExportSegments(const StickFigureData &figure, QList<ExportSegment> *
             seg.color = pen_color;
             break;
         case StickData::IMAGE:
+        case StickData::TEXT: // il formato non ha testo: esce come stick normale (spec)
         default:
             seg.type = 0;
             seg.thickness = pen_width;
@@ -1629,6 +1630,9 @@ bool StkFormat::ExportNodes(const QString &path, const StickFigureData &figure,
             node.type = 0;
             node.thickness = rounded_thickness((stick->vertex_widths.value(0, pen_width)
                                                 + stick->vertex_widths.value(1, pen_width)) / 2.0);
+            break;
+        case StickData::TEXT: // il formato non ha testo: esce come stick normale (spec)
+            node.type = 0;
             break;
         case StickData::IMAGE:
         default:

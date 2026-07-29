@@ -74,6 +74,53 @@ file (`my_animation->...` inside `MyView`'s own methods,
 reachability, but as real, symbol-searchable, compiler-checked calls
 instead of blind text substitution.
 
+### The TEXT stick
+
+`StickData::TEXT` (tool `DRAWTEXT`, both 25 — the tool-id == stick-type
+convention) is a paragraph of text laid out along its stick. Drawing takes
+three steps: origin click, free-end click, then a `QInputDialog`
+multi-line prompt in `MyView::DrawCmd()` (cancel/empty deletes the stick
+again through `DeleteWholeStick()`). That prompt runs BEFORE the
+`UpdateIcon()`/`UpdateTab()`/`UpdateSelection()` trio at the end of the
+second click, since those are what mirror the stick into the properties
+panel — with the text set afterwards the box echoed an empty string.
+Its own fields are `text`/`text_font`/`text_align`/`text_line_spacing`
+(vertical)/`text_v_stretch`/`text_word_wrap` (`stickdata.h`); **bold,
+italic, underline, strikeout, horizontal letter spacing
+(`QFont::setLetterSpacing`, PercentageSpacing) and horizontal stretch
+(`QFont::setStretch`) ride
+inside `text_font` itself** — QFont streams them all, which is why the
+field is a QFont and not a family+size pair. The VERTICAL stretch is the
+one QFont has no equivalent for: it's a percent field applied as the
+y-scale of `TextFrame()` (so it stretches the line pitch with the glyphs)
+and is gated on record `version >= 3`, the same way version 2 gates the IK
+fields. **Placement reuses the IMAGE fields**, `img_offset` for
+the h/v offset and `img_angle_offset` for the extra rotation, so the
+offset panel, `InterpolateStickData()` and the undo/clone paths needed no
+new plumbing (same trick POLYGON already uses). The skeleton is painted
+only while `text` is empty, which is exactly what makes the 2-click
+preview visible; the text colour IS the stick's pen colour, and the wrap
+width IS `my_line.length()` (the font size does not scale with the
+figure). `stick.cpp`'s `TextFrame()`/`LayoutText()` are the single source
+of truth shared by `paint()` and `ConstructBr()`. Selecting one shows two
+tabs (`Animation::UpdateTab()`): the code-built `advanced_text_tab`
+(content, font, size, bold/italic/underline/strikeout, justification, V/H
+spacing, H/V stretch, wrap — wired in `Widget`'s
+ctor, echoed back by `refresh_text_panel` — one `std::function` global in
+`uiItems.h` instead of an extern per control) plus `advanced_img_tab` as
+"Text Placement", of which `Animation::UpdateSliders()` disables the parts
+a text stick has nothing to act on — the width/height SCALE controls (they
+write `img_w_scale`/`img_h_scale`, which nothing reads for text) and the
+image-variant list plus its swap/add/remove buttons (`img_list_widget` /
+`img_buttons_row`, the latter being `ui->frame_44`, the one frame holding
+all three) — re-enabling them for every other type. That lives in
+UpdateSliders(), not UpdateTab(), because only the former runs on every
+selection change rather than only on a type change. A font missing on load is replaced with Arial by
+`StickData::operator>>`, which records the family in the
+`missing_text_fonts` list that `MyView::ReportMissingTextFonts()` (called
+by every load path) turns into one prompt. The foreign `.stk`/`.nodes`
+exporters have no text: a TEXT stick leaves as a plain segment.
+
 ## The flag-guard system (read this before touching lifetime/serialization code)
 
 Historically, six global booleans gated whether a `StickFigure`/`Frame`/
@@ -357,7 +404,7 @@ need the historical uninitialized-`.scene` care; freeing one is a plain
 ## Tests
 
 `tests/tests.pro` is a standalone qmake QtTest project (characterization
-suite, REFACTOR_PLAN.md Phase 0, 83 tests as of the inbetween feature). Note the slots share
+suite, REFACTOR_PLAN.md Phase 0, 85 tests as of the text stick). Note the slots share
 ONE animation and run in declaration order: a test that leaves the current
 frame somewhere other than the last one breaks every later test that
 assumes `AddFrame()` appends (see the closing `MoveToFrame()` in
@@ -382,6 +429,20 @@ build dir):
 qmake <repo>/tests/tests.pro && mingw32-make
 release/tst_characterization.exe
 ```
+
+**When you ADD a test slot, run the moc target first** — qmake writes the
+`.moc` prerequisite of `tst_characterization.o` with a wrong relative path
+(`../tests/release/...`), so a plain `mingw32-make` recompiles the .cpp
+against the STALE metaobject and the new slot silently never runs (the
+totals just don't grow):
+
+```
+mingw32-make -f Makefile.Release compiler_moc_source_make_all && mingw32-make -f Makefile.Release
+```
+
+Running with `QT_QPA_PLATFORM=offscreen` works, but that platform has an
+empty `QFontDatabase::families()` — anything font-dependent must skip
+(see `TextStickRendersTextAndPreviewSkeleton`) or it fails only headlessly.
 
 ## Known unresolved items
 

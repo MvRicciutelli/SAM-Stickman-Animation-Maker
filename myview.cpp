@@ -12,6 +12,7 @@
 #include <QSpinBox>
 #include <QCheckBox>
 #include <animationoptions.h>
+#include <QInputDialog>
 #include <QMessageBox>
 #include <QShortcut>
 #include <QTabletEvent>
@@ -474,6 +475,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
             case DRAWTAPER:
             case DRAWIMG:
             case DRAWFREEHAND:
+            case DRAWTEXT:
             {
                 DrawCmd(&coord,(int)tool);
                 break;
@@ -879,6 +881,7 @@ void MyView::keyPressEvent(QKeyEvent *event)
                 case(DRAW):
                 case DRAWCIRCLE:
                 case DRAWFREEHAND: // Esc prima del 2° click scarta l'anteprima gialla a metà
+                case DRAWTEXT:     // idem per il testo (dopo il 2° click c'è il prompt, non un Esc)
                 {
                     if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr &&
                             my_animation->CurrentFrame()->CurrentStickFigure()->draw_count==1)
@@ -1095,6 +1098,11 @@ void MyView::DrawCmd(QPointF* point, int mode)
                 new_stick->vertex_widths << my_pen.widthF() << my_pen.widthF();
                 new_stick->vertex_curvatures << 0.0f << 0.0f;
             }
+            else if(mode == DRAWTEXT){
+                // il testo arriva al 3° passo (dopo il 2° click, sotto): finché è vuoto lo
+                // stick dipinge la sua spina, che è esattamente l'anteprima del gesto
+                new_stick->stick_type = StickData::TEXT;
+            }
             else if(mode == DRAWFREEHAND){
                 // durante il gesto a 2 click lo stick resta una LINE dipinta in GIALLO: è
                 // solo un'anteprima per vedere dove lo si sta piazzando, come un normale
@@ -1121,6 +1129,26 @@ void MyView::DrawCmd(QPointF* point, int mode)
                 my_animation->CurrentFrame()->CurrentStick()->view->stick_handle[0]->setZValue(101);
             }
             qDebug("Draw 2 = %f, %f",point->x(),point->y());
+            // 3° passo del testo: inserimento del contenuto. Va PRIMA di UpdateIcon/
+            // UpdateTab/UpdateSelection qui sotto: sono loro a rispecchiare lo stick nel
+            // pannello (Animation::UpdateSliders -> refresh_text_panel) e a ridisegnare
+            // l'anteprima del frame, quindi il testo deve già esserci. Annullare (o
+            // confermare a vuoto) scarta lo stick appena creato, come un Esc a metà
+            // disegno: lo StoreUndo() del 1° click copre già l'intera operazione, e
+            // DeleteWholeStick() aggiorna da sé le icone di figura e frame
+            if(mode == DRAWTEXT){
+                StickData *ts = my_animation->CurrentFrame()->CurrentStick();
+                bool confirmed = false;
+                QString typed = QInputDialog::getMultiLineText(this, tr("Text stick"),
+                                                               tr("Text:"), QString(),
+                                                               &confirmed);
+                if(!confirmed || typed.isEmpty()){
+                    DeleteWholeStick(ts);
+                    return;
+                }
+                ts->text = typed;
+                if(ts->view) ts->view->Refresh(0);
+            }
             my_animation->current_frame->UpdateIcon();
             my_animation->UpdateTab(my_animation->CurrentFrame()->CurrentStick()->stick_type);
             // add it to the total scene list
@@ -2942,6 +2970,7 @@ void MyView::ChangeTool()
         case(DRAWTAPER):
         case(DRAWTRAPEZOID):
         case(DRAWIMG):
+        case(DRAWTEXT):
         {
             my_animation->UpdateTab(tool); // updates ui panels
             if(!my_animation->current_frame->stick_figures.isEmpty()
@@ -3360,6 +3389,7 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         case DRAWTRAPEZOID:
         case DRAWIMG:
         case DRAWFREEHAND: // anteprima gialla della linea tra 1° e 2° click, come un DRAW normale
+        case DRAWTEXT:     // idem: la spina segue il mouse finché il testo è vuoto
         {
         // durante il disegno,l'estremo libero della linea segue il mouse
             if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr && my_animation->CurrentFrame()->CurrentStickFigure() != nullptr)
@@ -4190,6 +4220,21 @@ void MyView::SaveStickFigureAsLibrary(const QString &file_name, StickFigure *fig
     file.close();
 }
 /**
+ * @details One prompt per load, not per stick: StickData::operator>> has already applied
+ * the Arial fallback to every TEXT stick whose font is missing and collected the family
+ * names, so this only reports and resets. Called by every load path (see myview.h).
+ */
+void MyView::ReportMissingTextFonts()
+{
+    if(missing_text_fonts.isEmpty())
+        return;
+    QMessageBox::warning(this, tr("Missing fonts"),
+                         tr("These fonts of the imported text sticks are not installed on "
+                            "this system and were replaced with Arial:\n\n%1")
+                         .arg(missing_text_fonts.join(", ")));
+    missing_text_fonts.clear();
+}
+/**
  * @details The library buffer owns plain data: replacing it is delete + new, no
  * per-figure cleanup choreography (freeLibraryFrame is gone).
  */
@@ -4214,6 +4259,7 @@ void MyView::LoadLibrary(QString file_name, int mode){
     stick_library_buffer = new FrameData();
     in >> *stick_library_buffer;
     file.close();
+    ReportMissingTextFonts();
     if(mode)
         return;
     // aggiungi tutti gli stickfigure della libreria alla lista del widget

@@ -42,6 +42,10 @@
 #define DRAWFREEHAND 24 ///< draw an invisible 2-click stick, then enter draw mode to paint a
                         ///< raster image on it (StickData::FREEHAND); id == the stick type,
                         ///< same tool-id==type convention DRAWIMG/IMAGE use
+#define DRAWTEXT 25     ///< draw a text stick (StickData::TEXT): 3 steps — origin click,
+                        ///< free-end click, then a prompt for the paragraph. The skeleton
+                        ///< is only visible during the 2-click preview; id == the stick
+                        ///< type, same convention as DRAWIMG/DRAWFREEHAND
 #define DRAW_IK 23      ///< creates/edits inverse-kinematics chains (StickData::IK_START/
                         ///< IK_NODE/IK_TARGET_ON/IK_TARGET_OFF): first click on an eligible
                         ///< stick's start handle begins a chain, second click on a
@@ -342,6 +346,17 @@ public:
      * a different animation.
      */
     void ClearUndo();
+
+    /**
+     * @brief Shows (once) the prompt listing the TEXT-stick fonts a load didn't find on
+     *        this system and replaced with Arial, then clears the list.
+     *
+     * StickData::operator>> does the substitution and fills `missing_text_fonts`
+     * (stickdata.h) — it has no UI to prompt from. Every load entry point calls this
+     * when it's done: LoadLibrary() here, LoadAnimation()/LoadStickFigure() from their
+     * callers in mymainwindow.cpp. No-op when nothing was missing.
+     */
+    void ReportMissingTextFonts();
 
     /**
      * @brief Loads a stick-figure library file into the buffer and its list widget.
