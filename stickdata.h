@@ -252,4 +252,24 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data);
  */
 QDataStream &operator>>(QDataStream &stream, StickData &stick_data);
 
+/**
+ * @brief Linearly interpolates the animatable pose of a stick between two poses.
+ * @param target record that receives the interpolated pose; every field that cannot be
+ *        blended (stick_type, images, is_linker/stepchild, the IK role, the tree links)
+ *        keeps whatever it already holds — callers seed it with a Clone() of one of the
+ *        two poses.
+ * @param start pose reached at t == 0.
+ * @param end pose reached at t == 1.
+ * @param t normalized position between the two poses (0 = start, 1 = end).
+ *
+ * Written for MyView::GenerateInbetweens() (myview.cpp), which fills the frames it
+ * creates between two keyframes stick by stick. Blended fields: my_line (hence
+ * img_angle, recomputed from it), z, pen width/colour, brush colour, img_offset,
+ * img_w_scale/img_h_scale, img_angle_offset and — only when the two poses agree on the
+ * vertex count — polygon_points/vertex_widths/vertex_curvatures. A raster image cannot
+ * be blended, so an IMAGE/FREEHAND stick keeps the target's picture and only its
+ * placement moves.
+ */
+void InterpolateStickData(StickData &target, const StickData &start, const StickData &end, float t);
+
 #endif // STICKDATA_H

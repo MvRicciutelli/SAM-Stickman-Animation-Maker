@@ -228,6 +228,22 @@ around it — see "The flag-guard system" above for how `undoFlag` (the
 last of the original six) was eliminated by fixing the double-ownership
 it guarded, rather than guarding it more carefully.
 
+**The one exception to the `StoreUndo()` shape** is
+`InbetweenUndoCommand` (`myview.cpp`, the second and only other
+`QUndoCommand` in the project), pushed by
+`MyView::GenerateInbetweens(start_index, count)` — the "generate
+inbetweens" button. `FrameUndoCommand` snapshots exactly ONE frame, so it
+cannot express "N frames appeared at once"; this command instead owns the
+N ready-made `FrameData` snapshots and is a textbook `QUndoCommand`: its
+`redo()` is what actually creates the frames (`QUndoStack::push()` calls
+it), `undo()` deletes them again, and neither direction touches the two
+keyframes. So `GenerateInbetweens()` does NOT call `StoreUndo()` and does
+NOT mutate anything inline — it validates, builds the snapshots, and
+pushes. It also passes `attach_to_scene = false` to `PopulateLiveFrame()`
+(like the file-load path) because attaching would put every generated
+frame's sticks on the scene at once, while `MoveToFrame()` only ever
+removes one frame's worth.
+
 ## Serialization
 
 Since refactor Phase 1a/2a/2b/2c, every layer's persistent state lives in a
@@ -256,6 +272,27 @@ guaranteed by the language), with `StickData::z` streamed as an explicit
 locally. Every remaining `int`/`>>`/`<<` pair in a `*Data` operator was
 audited for the same class of bug during that pass — if you add a new
 serialized field, use `qint32`/explicit `double`, not `int`/`qreal`.
+
+**Frame names are the one field that is NOT streamed by its own `*Data`
+class.** `Frame::name`/`FrameData::name` (set by double-clicking a frame
+row, shown by `Frame::UpdateLabel()`) travels through `Clone()`/
+`ExtractFrameData()`/`PopulateLiveFrame()` like every other field, but
+`FrameData::operator<<` deliberately ignores it: the names are written as
+a trailer at the END of `Animation::operator<<` instead, gated on the new
+animation format `version = 2`. A trailer is ignorable, so every existing
+version-1 `.mAnim` (and every `.marlib`, which never carries names) still
+loads unchanged. `Animation::operator>>` resets `version` to 2 after
+reading, so re-saving a v1 file writes a complete v2 one rather than a v1
+header with v2 content.
+
+`Frame::UpdateLabel()` exists because the frame number is *baked into the
+thumbnail* (`UpdateIcon()` blanks the item's own `DisplayRole` label,
+since it didn't render reliably in the frame list's layout). Anything that
+renumbers frames — `Animation::SetupFrame()`'s shift loop,
+`MyView::DeleteFrame()`'s renumber loop — must therefore repaint the band,
+not just set `DisplayRole`; both now call `UpdateLabel()` (cheap: no scene
+re-render, unlike `UpdateIcon()`). Its band is painted fully opaque
+precisely so repeated calls overwrite the previous label.
 
 The `operator>>` side of all three classes is also hardened against
 corrupt/truncated files: `StickData::stick_img` indexing and
@@ -320,7 +357,11 @@ need the historical uninitialized-`.scene` care; freeing one is a plain
 ## Tests
 
 `tests/tests.pro` is a standalone qmake QtTest project (characterization
-suite, REFACTOR_PLAN.md Phase 0, 28 tests as of the safety-sweep pass). It links the
+suite, REFACTOR_PLAN.md Phase 0, 83 tests as of the inbetween feature). Note the slots share
+ONE animation and run in declaration order: a test that leaves the current
+frame somewhere other than the last one breaks every later test that
+assumes `AddFrame()` appends (see the closing `MoveToFrame()` in
+`GenerateInbetweensInterpolatesAndIsOneUndoStep`). It links the
 model/undo/serialization sources directly and does NOT link
 `widget.cpp`/`mymainwindow.cpp` — the globals those files own are
 re-defined in `tests/test_globals.cpp`, and the fixture in

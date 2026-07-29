@@ -3623,7 +3623,7 @@ void MyView::DeleteFrame(Frame* frame){
     for(Frame *f: my_animation->frame_list){
         if(f->frame_number>frame_num){
             f->frame_number--;
-            f->linked_item->setData(Qt::DisplayRole, QString::number(f->frame_number));
+            f->UpdateLabel(); // il numero è cotto nell'anteprima, vedi Frame::UpdateLabel()
         }
     }
     if(my_animation->current_frame != nullptr) // cancellato l'ultimo frame: niente da selezionare
@@ -3878,6 +3878,64 @@ private:
 };
 
 /**
+ * @brief Undo entry for a whole inbetween generation: the N frames
+ *        MyView::GenerateInbetweens() inserts between two keyframes, as ONE step.
+ *
+ * @details FrameUndoCommand above covers exactly one frame, so it cannot express this
+ * batch; this command owns the N ready-made FrameData snapshots instead and is a
+ * textbook QUndoCommand (unlike FrameUndoCommand, the mutation is NOT performed inline
+ * by the caller): `QUndoStack::push()` calls redo() and that is what actually creates the
+ * frames, so undo/redo are perfectly symmetric — undo() removes the N frames it created,
+ * redo() rebuilds them from the very same snapshots. The two keyframes are never touched
+ * by either direction.
+ */
+class InbetweenUndoCommand : public QUndoCommand
+{
+public:
+    /**
+     * @param view the canvas whose animation is edited.
+     * @param insert_at index the first generated frame takes (== start keyframe + 1).
+     * @param snapshots one snapshot per frame to create, in order; taken over by this
+     *        command and freed in its destructor.
+     */
+    InbetweenUndoCommand(MyView *view, int insert_at, const QList<FrameData*> &snapshots)
+        : view_(view), insert_at_(insert_at), snapshots_(snapshots)
+    {
+    }
+    ~InbetweenUndoCommand() override
+    {
+        qDeleteAll(snapshots_);
+    }
+    void redo() override
+    {
+        for(int i = 0; i < snapshots_.count(); i++){
+            Frame *added = view_->SetUpFrame(insert_at_ + i);
+            // attach_to_scene = false di proposito: con true gli stick di TUTTI i frame
+            // generati finirebbero insieme sulla scena, e MoveToFrame() ne rimuove solo
+            // quelli di UN frame. Stesso schema del load da file: le view le crea
+            // MoveToFrame() (FramePresenter::AttachView) per il solo frame mostrato
+            PopulateLiveFrame(added, *snapshots_[i], false, false);
+            added->UpdateIcon(); // l'anteprima invece serve subito: il frame non passa da MoveToFrame
+        }
+        // mostra il primo frame generato, così l'effetto dell'operazione è visibile
+        view_->MoveToFrame(view_->my_animation->frame_list[insert_at_]);
+    }
+    void undo() override
+    {
+        // dall'ultimo al primo: cancellare un frame più avanti non sposta gli indici di
+        // quelli prima, quindi insert_at_+i resta valido a ogni giro
+        for(int i = snapshots_.count()-1; i >= 0; i--)
+            view_->DeleteFrame(view_->my_animation->frame_list[insert_at_ + i]);
+        // insert_at_ >= 1 per costruzione (è l'indice del frame iniziale + 1)
+        view_->MoveToFrame(view_->my_animation->frame_list[insert_at_ - 1]);
+    }
+private:
+    MyView *view_;
+    int insert_at_;
+    QList<FrameData*> snapshots_;
+};
+
+/**
  * @details Replaces the pre-Phase-4 `undoRedo()`'s dispatch body verbatim, just
  * driven by a QUndoCommand's before/after snapshot instead of a popped buffer entry.
  * No flag needed here anymore: `Frame::ClearFrame()` and `~StickFigure()` each own
@@ -3945,6 +4003,73 @@ void MyView::StoreUndo(int command){
     }
     UpdateFrameOrder(my_animation->CurrentFrame());
     undo_stack.push(new FrameUndoCommand(this, command));
+}
+
+/**
+ * @details Validates first and modifies nothing until every check passes (the caller only
+ * gets a message back), then builds the N snapshots and hands them to
+ * InbetweenUndoCommand, whose redo() — run by `undo_stack.push()` — is what actually
+ * inserts the frames. Each snapshot starts as a Clone() of the base frame, so everything
+ * that cannot be interpolated (stick types, images, IK roles, layer names, z-order) comes
+ * from a real frame, and only the pose of each stick is rewritten by
+ * InterpolateStickData() at t = i/(N+1) — t never reaches 0 or 1, so no generated frame
+ * duplicates a keyframe. frame_number is pre-set on each snapshot because
+ * PopulateLiveFrame() copies it onto the live frame (the same reason
+ * Widget::on_copyFrame_clicked() fixes it up by hand).
+ */
+QString MyView::GenerateInbetweens(int start_index, int count)
+{
+    QList<Frame*> &frames = my_animation->frame_list;
+    if(count < 1)
+        return tr("The number of inbetweens to generate must be at least 1.");
+    if(start_index < 0 || start_index + 1 >= frames.count())
+        return tr("Both frames must exist: there is no frame on that side of the selected one.");
+    Frame *start_frame = frames[start_index];
+    Frame *end_frame = frames[start_index + 1];
+    if(start_frame->stick_figures.count() != end_frame->stick_figures.count()){
+        return tr("Frames %1 and %2 have a different number of stickfigures (%3 and %4).")
+                .arg(start_frame->frame_number).arg(end_frame->frame_number)
+                .arg(start_frame->stick_figures.count()).arg(end_frame->stick_figures.count());
+    }
+    for(int f = 0; f < start_frame->stick_figures.count(); f++){
+        StickFigure *from_figure = start_frame->stick_figures[f];
+        StickFigure *to_figure = end_frame->stick_figures[f];
+        if(from_figure->stick_list.count() != to_figure->stick_list.count()){
+            return tr("Stickfigure %1 has a different number of sticks in the two frames (%2 and %3).")
+                    .arg(f).arg(from_figure->stick_list.count()).arg(to_figure->stick_list.count());
+        }
+        for(int s = 0; s < from_figure->stick_list.count(); s++){
+            if(from_figure->stick_list[s]->stick_type != to_figure->stick_list[s]->stick_type){
+                return tr("Stick %1 of stickfigure %2 is not of the same type in the two frames.")
+                        .arg(s).arg(f);
+            }
+        }
+    }
+    ExitDrawMode(); // la sessione di disegno vive sul frame corrente: finalizzala prima
+    UpdateFrameOrder(my_animation->CurrentFrame()); // l'ordine z del base deve essere una permutazione valida
+    // "una copia del frame corrente" (spec): dalla UI il corrente è sempre uno dei due
+    // estremi; il ripiego sul frame iniziale copre un chiamante che passasse altri indici,
+    // ed è comunque strutturalmente identico all'altro estremo per i controlli qui sopra
+    Frame *base_frame = (my_animation->CurrentFrame() == end_frame) ? end_frame : start_frame;
+    FrameData *base = ExtractFrameData(*base_frame);
+    QList<FrameData*> snapshots;
+    for(int i = 1; i <= count; i++){
+        FrameData *inbetween = base->Clone();
+        inbetween->frame_number = start_index + i;
+        inbetween->name.clear(); // i frame generati nascono senza nome, non col nome del base
+        float t = float(i)/float(count + 1);
+        for(int f = 0; f < inbetween->stick_figures.count(); f++){
+            for(int s = 0; s < inbetween->stick_figures[f]->stick_list.count(); s++){
+                InterpolateStickData(*inbetween->stick_figures[f]->stick_list[s],
+                                     *start_frame->stick_figures[f]->stick_list[s],
+                                     *end_frame->stick_figures[f]->stick_list[s], t);
+            }
+        }
+        snapshots.append(inbetween);
+    }
+    delete base;
+    undo_stack.push(new InbetweenUndoCommand(this, start_index + 1, snapshots));
+    return QString();
 }
 /**
  * @details Renumbers the z-order `order` field of every stick in the current frame to

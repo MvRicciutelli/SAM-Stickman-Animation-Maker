@@ -304,6 +304,27 @@ public:
     Frame *SetUpFrame(int pos);
 
     /**
+     * @brief Fills the gap between two adjacent frames with linearly interpolated ones.
+     * @param start_index index in Animation::frame_list of the FIRST of the two frames;
+     *        the second is always `start_index + 1` (the UI only offers the current frame
+     *        paired with its previous or its next one).
+     * @param count how many frames to generate (N >= 1).
+     * @return an empty string on success, or the reason the two frames cannot be
+     *         interpolated — the caller (Widget::on_generateInbetweenBtn_clicked()) shows
+     *         it to the user. Nothing is modified when a check fails.
+     *
+     * Both frames must exist and must match structurally: same number of stickfigures,
+     * same number of sticks in each corresponding figure, and the same StickData::stick_type
+     * for each corresponding stick — without that there is no pairwise correspondence to
+     * interpolate. The two frames themselves are left untouched; the generated frames are
+     * inserted between them, each a copy of the CURRENT frame whose sticks are then moved
+     * to their interpolated pose (InterpolateStickData(), stickdata.h) at t = i/(N+1).
+     * The whole batch is ONE undo step: undoing removes all N frames, redoing rebuilds
+     * them from the same snapshots.
+     */
+    QString GenerateInbetweens(int start_index, int count);
+
+    /**
      * @brief Converts a viewport point to scene coordinates, clamped to the canvas.
      * @param my_coord in/out: the point to clamp (kept within my_rect + a 10% margin).
      * @param starting_point raw viewport position from the mouse event.

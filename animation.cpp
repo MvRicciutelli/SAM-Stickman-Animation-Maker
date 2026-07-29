@@ -324,7 +324,10 @@ Frame* Animation::SetupFrame(int pos){
     for(Frame* f: frame_list){
         if(f->frame_number>=pos){
             f->frame_number++;
-            f->linked_item->setData(Qt::DisplayRole,QString::number(f->frame_number));
+            // il numero è cotto nell'anteprima, non nell'etichetta nativa dell'item: senza
+            // ripassare dalla fascia, ogni frame spostato dall'inserimento continuava a
+            // mostrare il numero vecchio (evidentissimo generando N inbetween in un colpo)
+            f->UpdateLabel();
         }
     }
     my_frame_widget_list->insertItem(pos,addedItem);
@@ -350,11 +353,21 @@ QDataStream &operator<<(QDataStream& stream, const Animation& my_animation){
     for(Frame* f: my_animation.frame_list){
         stream<<*f;
     }
+    // v2: i nomi dei frame in coda al file. Stanno QUI e non in FrameData::operator<<
+    // perché in coda sono ignorabili: un lettore v1 non li vedrebbe mai, e soprattutto
+    // un file v1 (che non li ha) resta leggibile senza toccare il layout dei frame
+    for(Frame* f: my_animation.frame_list){
+        stream<<f->name;
+    }
     return stream;
 }
 QDataStream &operator>>(QDataStream& stream,Animation& my_animation){
     qint32 frameNum = 0;
-    stream>>my_animation.version;
+    qint32 file_version = 0;
+    stream>>file_version;
+    // in memoria si tiene sempre il formato corrente: un salvataggio successivo a un load
+    // di un file v1 deve scrivere un v2 completo, non un header v1 con contenuto v2
+    my_animation.version = 2;
     stream>>frameNum;
     stream>>my_animation.width;
     stream>>my_animation.height;
@@ -384,6 +397,16 @@ QDataStream &operator>>(QDataStream& stream,Animation& my_animation){
             break;
         }
         addedFrame->UpdateIcon();
+    }
+    // trailer dei nomi (solo v2): l'iterazione è su frame_list, quindi un file troncato
+    // a metà frame ne ha semplicemente meno da nominare
+    if(file_version >= 2){
+        for(Frame* f: my_animation.frame_list){
+            if(stream.status() != QDataStream::Ok)
+                break;
+            stream>>f->name;
+            f->UpdateLabel(); // il nome entra nella fascia dell'anteprima già renderizzata sopra
+        }
     }
     return stream;
 }

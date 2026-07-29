@@ -34,6 +34,9 @@
 #include <QPixmap>
 #include <QComboBox>
 #include <QSplitter>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QRadioButton>
 #include "advancedtab.h"
 #include "advancedlinewidget.h"
 #include "advancedcirclewidget.h"
@@ -1029,6 +1032,84 @@ void Widget::on_frameListWidget_itemClicked(QListWidgetItem *item)
     Frame* cs = qvariant_cast<Frame*>(retrievedData);
 
     view->MoveToFrame(cs);
+}
+
+/**
+ * @details Frame names are optional labels shown next to the frame number in the
+ * thumbnail (Frame::UpdateLabel() bakes both into the icon, since the list's native item
+ * label is not used). itemClicked fires first on a double click, so the frame being
+ * renamed is already the current one. Not undoable, exactly like the layer rename in
+ * on_stickLayerView_itemDoubleClicked() — but Cancel keeps the previous name instead of
+ * clearing it.
+ */
+void Widget::on_frameListWidget_itemDoubleClicked(QListWidgetItem *item)
+{
+    Frame *frame = qvariant_cast<Frame*>(item->data(Qt::UserRole));
+    if(frame == nullptr)
+        return;
+    bool confirmed = false;
+    QString text = QInputDialog::getText(this, tr("Rename frame"), tr("Frame name"),
+                                         QLineEdit::Normal, frame->name, &confirmed);
+    if(!confirmed)
+        return;
+    frame->name = text;
+    frame->UpdateLabel();
+}
+
+/**
+ * @details Builds the prompt in code (a spinbox for N and the two direction radios are
+ * smaller here than a dedicated .ui, same reasoning as the vertex panel in the
+ * constructor). Each direction is offered only if the neighbour frame exists — previous
+ * needs a frame before the current one, next a frame after it — and the pair is always
+ * passed to MyView::GenerateInbetweens() as (first frame index, N), the first of the two
+ * being the start of the interpolation. Every structural check lives there, so a refusal
+ * comes back as text and is shown as-is.
+ */
+void Widget::on_generateInbetweenBtn_clicked()
+{
+    view->ExitDrawMode();
+    if(view->my_animation->CurrentFrame() == nullptr)
+        return;
+    int current_index = view->my_animation->CurrentFrame()->frame_number;
+    bool has_previous = current_index >= 1;
+    bool has_next = current_index + 1 < view->my_animation->frame_list.count();
+    if(!has_previous && !has_next){
+        QMessageBox::warning(this, tr("Generate inbetweens"),
+                             tr("Interpolation needs a second frame: add a frame before or after this one."));
+        return;
+    }
+
+    QDialog prompt(this);
+    prompt.setWindowTitle(tr("Generate inbetweens"));
+    QVBoxLayout *rows = new QVBoxLayout(&prompt);
+    QHBoxLayout *count_row = new QHBoxLayout();
+    count_row->addWidget(new QLabel(tr("Frames to generate"), &prompt));
+    QSpinBox *count_spinbox = new QSpinBox(&prompt);
+    count_spinbox->setRange(1, 100);
+    count_spinbox->setValue(1);
+    count_row->addWidget(count_spinbox);
+    rows->addLayout(count_row);
+    QRadioButton *previous_radio = new QRadioButton(tr("Between the previous frame and this one"), &prompt);
+    QRadioButton *next_radio = new QRadioButton(tr("Between this frame and the next one"), &prompt);
+    previous_radio->setEnabled(has_previous);
+    next_radio->setEnabled(has_next);
+    previous_radio->setChecked(has_previous); // default da spec, se il frame precedente esiste
+    next_radio->setChecked(!has_previous);
+    rows->addWidget(previous_radio);
+    rows->addWidget(next_radio);
+    QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel, &prompt);
+    connect(buttons, &QDialogButtonBox::accepted, &prompt, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &prompt, &QDialog::reject);
+    rows->addWidget(buttons);
+    if(prompt.exec() != QDialog::Accepted)
+        return;
+
+    // l'ordine dei due frame determina inizio e fine: col precedente si parte da lui,
+    // col successivo si parte dal frame corrente
+    int start_index = previous_radio->isChecked() ? current_index - 1 : current_index;
+    QString refusal = view->GenerateInbetweens(start_index, count_spinbox->value());
+    if(!refusal.isEmpty())
+        QMessageBox::warning(this, tr("Generate inbetweens"), refusal);
 }
 
 /// @details Prompts for a new name and renames the double-clicked layer row.

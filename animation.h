@@ -7,7 +7,15 @@ class Animation
 {
 public:
     Animation();
-    qint32 version = 1;
+    /**
+     * @brief On-disk format version of the whole animation file, always the CURRENT one:
+     *        operator>> resets it after reading, so re-saving a version-1 file writes
+     *        version 2 rather than a v1 header with v2 content.
+     *
+     * 2 appends the per-frame names (Frame::name) after the frame blocks — a version-1
+     * file simply has no such trailer and still loads.
+     */
+    qint32 version = 2;
     QList<Frame*> frame_list;
     Frame *frame_buffer = nullptr;
     Frame * AddFrame(QListWidgetItem* item, int pos);

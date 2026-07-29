@@ -62,6 +62,7 @@ public:
     QPushButton *PlayButton;
     QSpinBox *fpsSpinBox;
     QPushButton *pasteFrame;
+    QPushButton *generateInbetweenBtn;
     QListWidget *frameListWidget;
     QFrame *viewPortEditFrame;
     QVBoxLayout *verticalLayout_4;
@@ -1038,6 +1039,22 @@ public:
 ""));
 
         horizontalLayout_46->addWidget(pasteFrame);
+
+        generateInbetweenBtn = new QPushButton(frame_40);
+        generateInbetweenBtn->setObjectName("generateInbetweenBtn");
+        generateInbetweenBtn->setMinimumSize(QSize(50, 50));
+        generateInbetweenBtn->setMaximumSize(QSize(50, 50));
+        generateInbetweenBtn->setStyleSheet(QString::fromUtf8("QPushButton {\n"
+"	border: 0px solid #5A5A5A;\n"
+"	color: rgb(200, 200, 200);\n"
+"	font: bold 14px;\n"
+"}\n"
+"QPushButton:hover{\n"
+"	background-color: rgb(25, 25, 25)\n"
+"}\n"
+""));
+
+        horizontalLayout_46->addWidget(generateInbetweenBtn);
 
 
         verticalLayout_22->addWidget(frame_40);
@@ -3567,6 +3584,10 @@ public:
 #endif // QT_CONFIG(tooltip)
         PlayButton->setText(QString());
         pasteFrame->setText(QString());
+#if QT_CONFIG(tooltip)
+        generateInbetweenBtn->setToolTip(QCoreApplication::translate("Widget", "<html><head/><body><p><span style=\" font-weight:600;\">Generate Inbetween Frames</span></p></body></html>", nullptr));
+#endif // QT_CONFIG(tooltip)
+        generateInbetweenBtn->setText(QCoreApplication::translate("Widget", ">|<", nullptr));
 #if QT_CONFIG(tooltip)
         frameListWidget->setToolTip(QCoreApplication::translate("Widget", "<html><head/><body><p><span style=\" font-weight:600;\">Current Animation Frames List</span></p></body></html>", nullptr));
 #endif // QT_CONFIG(tooltip)

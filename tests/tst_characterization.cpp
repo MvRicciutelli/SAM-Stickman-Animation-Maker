@@ -923,6 +923,65 @@ private slots:
         QCOMPARE(CurrentFrame()->frame_number, origin_number);
     }
 
+    // MyView::GenerateInbetweens(): N frames appear between the two keyframes with every
+    // stick at its linearly interpolated pose, the keyframes themselves are untouched, and
+    // the whole batch is ONE undo step (InbetweenUndoCommand, myview.cpp).
+    void GenerateInbetweensInterpolatesAndIsOneUndoStep()
+    {
+        AddFrame();
+        StickData *start_stick = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        Frame *start_frame = CurrentFrame();
+        AddFrame(); // secondo keyframe: stessa struttura (1 figura, 1 stick), posa diversa
+        StickData *end_stick = DrawStick(QPointF(200, 100), QPointF(200, 300));
+        int start_index = start_frame->frame_number;
+        QCOMPARE(view->my_animation->frame_list[start_index + 1], CurrentFrame()); // adiacenti
+        int frames_before = view->my_animation->frame_list.count();
+
+        QCOMPARE(view->GenerateInbetweens(start_index, 3), QString()); // nessun rifiuto
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before + 3);
+
+        // il secondo dei tre frame generati sta a t = 2/4, cioè esattamente a metà strada
+        Frame *middle = view->my_animation->frame_list[start_index + 2];
+        StickData *middle_stick = middle->stick_figures[0]->stick_list[0];
+        QCOMPARE(middle_stick->my_line, QLineF(150, 100, 150, 250));
+        QCOMPARE(middle->frame_number, start_index + 2);
+        // i due keyframe restano intatti
+        QCOMPARE(start_stick->my_line, QLineF(100, 100, 100, 200));
+        QCOMPARE(end_stick->my_line, QLineF(200, 100, 200, 300));
+
+        view->undo_stack.undo(); // un solo passo deve togliere tutti e tre
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before);
+        QCOMPARE(CurrentFrame()->frame_number, start_index);
+        view->undo_stack.redo();
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before + 3);
+        QCOMPARE(view->my_animation->frame_list[start_index + 2]
+                 ->stick_figures[0]->stick_list[0]->my_line, QLineF(150, 100, 150, 250));
+
+        // i test slot condividono una sola animazione e i successivi danno per scontato che
+        // AddFrame() aggiunga in coda (cioè che il frame corrente sia l'ultimo): qui il
+        // corrente è un frame generato, che di frame dopo di sé ne ha ancora
+        view->MoveToFrame(view->my_animation->frame_list.last());
+    }
+
+    // structural mismatch between the two keyframes: nothing is generated and the reason
+    // comes back as text (Widget::on_generateInbetweenBtn_clicked() shows it)
+    void GenerateInbetweensRefusesMismatchedFrames()
+    {
+        AddFrame();
+        DrawStick(QPointF(10, 10), QPointF(10, 60));
+        Frame *start_frame = CurrentFrame();
+        AddFrame();
+        DrawStick(QPointF(20, 10), QPointF(20, 60));
+        DrawStick(QPointF(20, 60), QPointF(60, 60)); // un secondo stick: 1 contro 2
+        int frames_before = view->my_animation->frame_list.count();
+
+        QVERIFY(!view->GenerateInbetweens(start_frame->frame_number, 2).isEmpty());
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before); // niente è cambiato
+        // e nemmeno un frame inesistente oltre l'ultimo
+        QVERIFY(!view->GenerateInbetweens(view->my_animation->frame_list.count() - 1, 1).isEmpty());
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before);
+    }
+
     void ChopAndWeld()
     {
         AddFrame();
@@ -1100,6 +1159,9 @@ private slots:
             sticks_per_frame << sticks;
         }
         int frame_count = view->my_animation->frame_list.count();
+        // i nomi dei frame stanno nel trailer del formato v2 (Animation::operator<<)
+        QString frame_name = "keyframe A";
+        view->my_animation->frame_list[frame_count - 1]->name = frame_name;
 
         QString path = QDir::temp().filePath("marionetta_phase0_test.mAnim");
         view->my_animation->SaveAnimation(path);
@@ -1120,6 +1182,7 @@ private slots:
         }
         Frame *last_frame = view->my_animation->frame_list[frame_count - 1];
         QCOMPARE(last_frame->stick_figures.last()->stick_list[0]->my_line, drawn_line);
+        QCOMPARE(last_frame->name, frame_name);
 
         QFile::remove(path);
     }

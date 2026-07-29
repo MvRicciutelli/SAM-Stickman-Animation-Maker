@@ -1,4 +1,5 @@
 #include "stickdata.h"
+#include <QtMath>
 
 /**
  * @details All defaults live as in-class initializers in stickdata.h so they are visible
@@ -100,6 +101,73 @@ StickData *StickData::Clone() const
     StickData *copy = new StickData();
     copy->CopyFrom(*this);
     return copy;
+}
+
+namespace {
+/// @brief Linear blend of two scalars.
+inline qreal Mix(qreal from, qreal to, float t) { return from + (to - from) * t; }
+
+/// @brief Linear blend of two points, component by component.
+inline QPointF MixPoint(const QPointF &from, const QPointF &to, float t)
+{
+    return QPointF(Mix(from.x(), to.x(), t), Mix(from.y(), to.y(), t));
+}
+
+/// @brief Linear blend of two colours, RGBA channel by channel (alpha included, so a
+/// fade in/out between two keyframes interpolates as well).
+inline QColor MixColor(const QColor &from, const QColor &to, float t)
+{
+    return QColor(qRound(Mix(from.red(), to.red(), t)),
+                  qRound(Mix(from.green(), to.green(), t)),
+                  qRound(Mix(from.blue(), to.blue(), t)),
+                  qRound(Mix(from.alpha(), to.alpha(), t)));
+}
+
+/// @brief Element-wise blend of a per-vertex float list (vertex_widths /
+/// vertex_curvatures). No-op unless all three lists agree on the vertex count: two poses
+/// with a different number of vertices have no pairwise correspondence to blend, so the
+/// target keeps the list its Clone() came with.
+inline void MixFloatList(QList<float> &target, const QList<float> &start, const QList<float> &end, float t)
+{
+    if (start.count() != end.count() || target.count() != start.count())
+        return;
+    for (int i = 0; i < target.count(); i++)
+        target[i] = float(Mix(start[i], end[i], t));
+}
+}
+
+/**
+ * @details Pure geometry/appearance blend, no scene or view involvement — it runs on the
+ * pure-data records MyView::GenerateInbetweens() clones for the frames it creates, before
+ * any of them is ever attached to the scene. img_angle is deliberately NOT blended from
+ * the two stored values but recomputed from the interpolated segment with the codebase's
+ * one convention (-atan2(dx, dy) in degrees, see StickFigure.cpp:50 and every drawing/
+ * manipulation path): blending the stored angle would spin the long way round whenever the
+ * two poses straddle the ±180° wrap, and would drift out of sync with the segment it is
+ * supposed to track.
+ */
+void InterpolateStickData(StickData &target, const StickData &start, const StickData &end, float t)
+{
+    target.my_line = QLineF(MixPoint(start.my_line.p1(), end.my_line.p1(), t),
+                            MixPoint(start.my_line.p2(), end.my_line.p2(), t));
+    target.img_angle = float(-qAtan2(target.my_line.dx(), target.my_line.dy()) * 180.0 / M_PI);
+    target.z = Mix(start.z, end.z, t);
+    target.img_offset = MixPoint(start.img_offset, end.img_offset, t);
+    target.img_w_scale = float(Mix(start.img_w_scale, end.img_w_scale, t));
+    target.img_h_scale = float(Mix(start.img_h_scale, end.img_h_scale, t));
+    target.img_angle_offset = qRound(Mix(start.img_angle_offset, end.img_angle_offset, t));
+    target.pen.setWidthF(Mix(start.pen.widthF(), end.pen.widthF(), t));
+    target.pen.setColor(MixColor(start.pen.color(), end.pen.color(), t));
+    target.brush.setColor(MixColor(start.brush.color(), end.brush.color(), t));
+    // vertici di POLYGON/MULTILINE: normalizzati nel frame locale dello stick
+    // (StickData::PolygonTransform), quindi interpolabili direttamente
+    if (start.polygon_points.count() == end.polygon_points.count()
+            && target.polygon_points.count() == start.polygon_points.count()) {
+        for (int i = 0; i < target.polygon_points.count(); i++)
+            target.polygon_points[i] = MixPoint(start.polygon_points[i], end.polygon_points[i], t);
+    }
+    MixFloatList(target.vertex_widths, start.vertex_widths, end.vertex_widths, t);
+    MixFloatList(target.vertex_curvatures, start.vertex_curvatures, end.vertex_curvatures, t);
 }
 
 /**

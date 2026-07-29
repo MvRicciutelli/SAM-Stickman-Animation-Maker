@@ -48,8 +48,26 @@ public:
     //QImage * render_img;
     QGraphicsScene * scene = nullptr;
     int frame_number = 0;
+    /**
+     * @brief Optional user-given frame name, empty by default. Shown next to the frame
+     *        number in the thumbnail's label band (UpdateLabel()) and set by
+     *        double-clicking the row (Widget::on_frameListWidget_itemDoubleClicked).
+     *        Travels through undo/copy as FrameData::name.
+     */
+    QString name;
     QListWidgetItem * linked_item = nullptr;
     void UpdateIcon();
+
+    /**
+     * @brief Repaints just the thumbnail's label band ("<number> <name>") and pushes the
+     *        result back onto `linked_item`, without re-rendering the frame content.
+     *
+     * Split out of UpdateIcon() because the label changes far more often than the picture:
+     * a rename, and every renumbering of the frames after an insertion/deletion
+     * (Animation::SetupFrame(), MyView::DeleteFrame()) — a full UpdateIcon() per shifted
+     * frame would re-render the whole scene for each of them.
+     */
+    void UpdateLabel();
     QList <StickData*> total_sticks;
     StickFigure *AddStickFigure( QListWidget *my_list_widget, QString name = "");
     void UpdateRender();

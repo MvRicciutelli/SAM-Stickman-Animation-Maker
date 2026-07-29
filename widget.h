@@ -131,6 +131,15 @@ private slots:
 
     void on_frameListWidget_itemClicked(QListWidgetItem *item);
 
+    /** @brief Prompts for a name and stores it on the double-clicked frame. */
+    void on_frameListWidget_itemDoubleClicked(QListWidgetItem *item);
+
+    /**
+     * @brief Asks how many inbetweens to generate and against which neighbour frame,
+     *        then runs MyView::GenerateInbetweens() and reports any refusal.
+     */
+    void on_generateInbetweenBtn_clicked();
+
     void on_stickLayerView_itemDoubleClicked(QListWidgetItem *item);
 
     void on_PlayButton_clicked();

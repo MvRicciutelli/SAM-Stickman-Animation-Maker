@@ -144,6 +144,7 @@ FrameData *ExtractFrameData(const Frame &source_frame)
     FrameData *data = new FrameData();
     data->frame_number = source_frame.frame_number;
     data->num_of_items = source_frame.num_of_items;
+    data->name = source_frame.name;
     QHash<const StickData*, StickData*> live_to_data;
     for (StickFigure *figure : source_frame.stick_figures) {
         StickFigureData *figure_data = ExtractStickFigureData(*figure);
@@ -174,6 +175,7 @@ void PopulateLiveFrame(Frame *target_frame, const FrameData &source_data,
 {
     target_frame->num_of_items = source_data.num_of_items;
     target_frame->frame_number = source_data.frame_number;
+    target_frame->name = source_data.name;
     target_frame->total_sticks.clear();
     for (StickFigureData *figure_data : source_data.stick_figures) {
         QListWidgetItem *added_item = new QListWidgetItem();
@@ -338,25 +340,41 @@ void Frame::UpdateIcon()
     StickGraphicsItem::offscreen_render = true;
     icoScene.render(&painter);
     StickGraphicsItem::offscreen_render = false;
-    // disegna il numero del frame direttamente sull'iconea (fascia scura semi-trasparente in basso,
-    // testo bianco sopra): affidarsi all'etichetta nativa della QListWidgetItem in IconMode non
-    // mostrava il numero in modo affidabile, quindi lo "cuociamo" nell'immagine stessa
-    QRectF numberBand(0, icon_img->height()-14, icon_img->width(), 14);
-    painter.fillRect(numberBand, QColor(0,0,0,160));
+    painter.end();
+    // etichetta (numero + eventuale nome) e aggiornamento dell'item: vedi UpdateLabel()
+    UpdateLabel();
+    icoScene.clear();
+    qDeleteAll(renderClones);
+}
+
+/**
+ * @details Draws the label band directly onto the rendered thumbnail (dark strip at the
+ * bottom, white text over it) instead of relying on the QListWidgetItem's own label, which
+ * did not show reliably with the frame list's icon layout. The band is painted FULLY
+ * OPAQUE so this function can be called repeatedly on the same pixmap (a rename, a
+ * renumbering) and overwrite the previous label instead of letting it show through. The
+ * text is elided to the thumbnail width, so a long name cannot widen the list rows.
+ */
+void Frame::UpdateLabel()
+{
+    if(linked_item == nullptr)
+        return;
+    QPainter painter(icon_img);
+    QRectF label_band(0, icon_img->height()-14, icon_img->width(), 14);
+    painter.fillRect(label_band, QColor(0,0,0));
     painter.setPen(Qt::white);
-    QFont numberFont = painter.font();
-    numberFont.setPointSize(8);
-    painter.setFont(numberFont);
-    painter.drawText(numberBand, Qt::AlignCenter, QString::number(frame_number));
-    // imposta l'iconea
+    QFont label_font = painter.font();
+    label_font.setPointSize(8);
+    painter.setFont(label_font);
+    QString label = name.isEmpty() ? QString::number(frame_number)
+                                   : QString::number(frame_number) + " " + name;
+    painter.drawText(label_band, Qt::AlignCenter,
+                     painter.fontMetrics().elidedText(label, Qt::ElideRight, int(label_band.width())));
+    painter.end();
     delete frame_icon;
     frame_icon = new QIcon(*icon_img);
     linked_item->setIcon(*frame_icon);
-    linked_item->setData(Qt::DisplayRole, QString()); // il numero è già nell'iconea: evita di mostrarlo due volte
-
-    painter.end();
-    icoScene.clear();
-    qDeleteAll(renderClones);
+    linked_item->setData(Qt::DisplayRole, QString()); // numero e nome sono già nell'iconea: evita di mostrarli due volte
 }
 
 void Frame::UpdateRender(){

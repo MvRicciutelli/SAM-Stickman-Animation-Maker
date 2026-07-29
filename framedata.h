@@ -37,6 +37,16 @@ public:
     StickFigureData *current_stick_figure = nullptr; ///< remembered selection; points into stick_figures
     qint32 frame_number = 0;                         ///< position of the frame in the animation
     qint32 num_of_items = 0;                          ///< count of sticks meant to be on scene (legacy semantics)
+    /**
+     * @brief Optional user-visible frame name (set by double-clicking the frame list row,
+     *        Widget::on_frameListWidget_itemDoubleClicked), mirror of Frame::name.
+     *
+     * Carried by Clone()/ExtractFrameData()/PopulateLiveFrame() so undo, copy and paste
+     * keep it, but deliberately NOT written by this class's operator<</operator>>: it is
+     * persisted at the end of the animation file instead (Animation::operator<<, format
+     * version 2), which keeps every version-1 .mAnim/.marlib file loadable as-is.
+     */
+    QString name;
 };
 
 /**

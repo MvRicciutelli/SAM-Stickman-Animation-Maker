@@ -27,6 +27,7 @@ FrameData *FrameData::Clone() const
     FrameData *copy = new FrameData();
     copy->frame_number = frame_number;
     copy->num_of_items = num_of_items;
+    copy->name = name;
     for (StickFigureData *figure : stick_figures)
         copy->stick_figures.append(figure->Clone());
     // rimappa la lista di z-order sui cloni cercando (figura, indice stick) dell'originale
