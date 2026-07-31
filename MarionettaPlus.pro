@@ -24,20 +24,24 @@ SOURCES += \
     advancedtaperwidget.cpp \
     animation.cpp \
     animationoptions.cpp \
+    brushpicker.cpp \
     checkupdate.cpp \
     ffmpegexport.cpp \
     frame.cpp \
     framedata.cpp \
     framepresenter.cpp \
+    gradientdialog.cpp \
     imageexport.cpp \
     main.cpp \
     mymainwindow.cpp \
     myview.cpp \
+    patternlibrary.cpp \
     sleeper.cpp \
     stick.cpp \
     stickdata.cpp \
     stickfiguredata.cpp \
     stkformat.cpp \
+    textureoptionsdialog.cpp \
     widget.cpp
 
 HEADERS += \
@@ -49,20 +53,24 @@ HEADERS += \
     advancedtaperwidget.h \
     animation.h \
     animationoptions.h \
+    brushpicker.h \
     checkupdate.h \
     ffmpegexport.h \
     frame.h \
     framedata.h \
     framepresenter.h \
+    gradientdialog.h \
     imageexport.h \
     mymainwindow.h \
     myview.h \
+    patternlibrary.h \
     sleeper.h \
     stick.h \
     stickdata.h \
     stickfiguredata.h \
     stkformat.h \
     style.h \
+    textureoptionsdialog.h \
     uiItems.h \
     widget.h
 

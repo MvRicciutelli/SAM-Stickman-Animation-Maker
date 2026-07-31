@@ -414,6 +414,21 @@ void MyView::mousePressEvent(QMouseEvent *event)
                         if(bh == 8){ BeginSelectionRotate(); sel_box_gesture = 2; break; }
                         if(bh >= 0){ BeginSelectionScale();  sel_box_gesture = 1; break; }
                     }
+                    // frecce della texture: la priorità PIÙ BASSA (spec), quindi dopo le
+                    // maniglie del box — HitTextureArrow() rinuncia da sé anche su una
+                    // maniglia di stick, così la rotazione normale resta intoccata
+                    if(event->modifiers() == Qt::NoModifier){
+                        bool arrow_fill = true, arrow_tip = true;
+                        if(HitTextureArrow(coord, &arrow_fill, &arrow_tip)){
+                            StoreUndo(); // un solo passo di undo per tutto il trascinamento
+                            texture_arrow_is_fill = arrow_fill;
+                            texture_arrow_gesture = arrow_tip ? 2 : 1;
+                            QPointF tail, tip;
+                            if(TextureArrowPoints(arrow_fill, &tail, &tip))
+                                texture_arrow_tail = tail;
+                            break;
+                        }
+                    }
                     StickFigure *hit_figure = FigureAtPoint(coord);
                     if((event->modifiers() & Qt::ShiftModifier) && hit_figure != nullptr){
                         AddToMultiSelection(hit_figure); // Shift+click: aggiungi alla selezione
@@ -1063,6 +1078,9 @@ void MyView::DrawCmd(QPointF* point, int mode)
             new_stick->hard_top = hard_top_check->isChecked();
             new_stick->hard_bottom = hard_bottom_check->isChecked();
             new_stick->pen = my_pen;
+            new_stick->brush_follows_stick = my_brush_follows_stick; // come pen/brush: si eredita dallo stato corrente
+            new_stick->texture_tiled = my_texture_tiled;
+            new_stick->stroke_brush = my_stroke_brush;
             // se stiamo usando il tool per generare cerchi cambiamo il tipo dello stick
             if(mode == DRAWCIRCLE){
                 new_stick->stick_type = StickData::CIRCLE;
@@ -1265,42 +1283,42 @@ double MyView::PressureFactor() const
     return draw_pressure_val / 0.5;
 }
 
-/// @details One brush dab centered at a canvas-pixel point. The grayscale stamp is scaled
-/// to the current size and tinted with the brush color (SourceIn keeps the stamp's alpha);
-/// the eraser clears instead of paints (DestinationOut). Opacity scales the whole dab. Size
-/// and opacity each read pen pressure only when their own checkbox (draw_pressure_size /
+/// @details The loose draw_brush_* fields as the one struct that describes a brush, so draw mode
+/// and a stick's brush BORDER stamp through the same BrushDab(). They stay loose fields because
+/// each is wired to its own control in the draw-mode panel; this is the assembly point.
+BrushStroke MyView::DrawBrush() const
+{
+    BrushStroke brush;
+    brush.stamp = draw_brush_stamp;
+    brush.color = draw_brush_color;
+    brush.size = draw_brush_size;
+    brush.opacity = qBound(0, draw_brush_opacity, 100)/100.0;
+    brush.spacing = draw_brush_spacing;
+    brush.angle = draw_brush_angle;
+    brush.size_jitter = draw_brush_size_jitter;
+    brush.angle_jitter = draw_brush_angle_jitter;
+    return brush;
+}
+
+/// @details One brush dab centered at a canvas-pixel point, built by BrushDab() (abrbrush.cpp)
+/// and composited here: the eraser clears instead of painting (DestinationOut). Size and opacity
+/// each read pen pressure only when their own checkbox (draw_pressure_size /
 /// draw_pressure_opacity) is on — the two are independent, so e.g. pressure can drive size
-/// while opacity stays fixed at the dialled-in value, or vice versa. On top of pressure, the
-/// two jitters randomize this single dab: size jitter shrinks it by up to its percentage,
-/// angle jitter rotates it by up to that percentage of a full circle around the tip angle.
-/// Rotation happens here rather than in the mask, so it applies to imported .abr tips too.
+/// while opacity stays fixed at the dialled-in value, or vice versa.
 void MyView::StampBrush(const QPointF &canvas_px)
 {
     if(!draw_canvas)
         return;
-    double size_factor    = draw_pressure_size    ? PressureFactor() : 1.0;
-    double opacity_factor = draw_pressure_opacity ? PressureFactor() : 1.0;
-    if(draw_brush_size_jitter > 0)
-        size_factor *= 1.0 - qBound(0, draw_brush_size_jitter, 100)/100.0
-                             * QRandomGenerator::global()->generateDouble();
-    double angle = draw_brush_angle;
-    if(draw_brush_angle_jitter > 0)
-        angle += (QRandomGenerator::global()->generateDouble()*2.0 - 1.0)
-                 * qBound(0, draw_brush_angle_jitter, 100) * 1.8; // 100% = ±180°, l'intero cerchio
-    int s = qMax(1, int(draw_brush_size * size_factor + 0.5));
-    QImage stamp = draw_brush_stamp.scaled(s, s, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-    if(fmod(angle, 360.0) != 0.0)
-        stamp = stamp.transformed(QTransform().rotate(angle), Qt::SmoothTransformation);
-    QImage dab(stamp.size(), QImage::Format_ARGB32_Premultiplied);
-    dab.fill(Qt::transparent);
-    QPainter dp(&dab);
-    dp.drawImage(0, 0, stamp);
-    dp.setCompositionMode(QPainter::CompositionMode_SourceIn);
-    dp.fillRect(dab.rect(), draw_brush_color);
-    dp.end();
+    qreal dab_opacity = 1.0;
+    const QImage dab = BrushDab(DrawBrush(),
+                                draw_pressure_size    ? PressureFactor() : 1.0,
+                                draw_pressure_opacity ? PressureFactor() : 1.0,
+                                &dab_opacity);
+    if(dab.isNull())
+        return;
 
     QPainter p(draw_canvas);
-    p.setOpacity(qBound(0.0, draw_brush_opacity * opacity_factor / 100.0, 1.0));
+    p.setOpacity(dab_opacity);
     if(draw_eraser)
         p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
     // il dab ruotato è più grande di s: centralo sulle sue dimensioni effettive, non su s
@@ -2249,6 +2267,38 @@ void MyView::drawForeground(QPainter *painter, const QRectF &rect)
             }
         painter->restore();
     }
+
+    // --- frecce della texture: fino a due (riempimento e contorno), disegnate per ULTIME così
+    // restano sopra la transformation box, coerentemente col fatto che si afferrano per ultime.
+    // Colori distinti perché le due frecce si sovrappongono esattamente finché le rispettive
+    // texture hanno la stessa trasformazione.
+    for(bool for_fill : { true, false }){
+        QPointF tail, tip;
+        if(!TextureArrowPoints(for_fill, &tail, &tip))
+            continue;
+        painter->save();
+        const QColor color = for_fill ? QColor(230, 130, 0) : QColor(150, 60, 200);
+        QPen shaft(color, 2); shaft.setCosmetic(true); // spessore costante a ogni zoom
+        painter->setPen(shaft);
+        painter->setBrush(Qt::NoBrush);
+        painter->drawLine(tail, tip);
+        const double hz = PolyPickRadius() * 0.7;
+        // coda: cerchietto vuoto (= l'offset, si trascina per spostare la texture)
+        painter->drawEllipse(tail, hz, hz);
+        // punta: triangolo pieno orientato come la freccia (= angolo e scala insieme)
+        QLineF axis(tail, tip);
+        if(axis.length() > 1e-6){
+            const QPointF dir = (tip - tail) / axis.length();
+            const QPointF normal(-dir.y(), dir.x());
+            QPolygonF head;
+            head << tip
+                 << tip - dir * (hz * 3.0) + normal * hz
+                 << tip - dir * (hz * 3.0) - normal * hz;
+            painter->setBrush(color);
+            painter->drawPolygon(head);
+        }
+        painter->restore();
+    }
 }
 
 void MyView::ClearIkPreviewItems()
@@ -2674,6 +2724,216 @@ void MyView::DrawTransformHandles(QPainter *painter, const QPointF pts[9], bool 
     for(int i = 0; i < 8; i++)
         painter->drawRect(QRectF(pts[i].x()-hz, pts[i].y()-hz, 2*hz, 2*hz));
     painter->drawEllipse(pts[8], hz, hz);       // pomello di rotazione
+}
+
+/// @details `CurrentStick()` is safe on a frame with no current figure (it returns a null
+/// placeholder), so only the frame itself has to be checked here.
+StickData *MyView::TextureArrowStick() const
+{
+    if(my_animation == nullptr || my_animation->current_frame == nullptr)
+        return nullptr;
+    return const_cast<MyView*>(this)->my_animation->CurrentFrame()->CurrentStick();
+}
+
+QBrush MyView::CurrentTextureBrush(bool for_fill) const
+{
+    StickData *stick = TextureArrowStick();
+    if(stick == nullptr)
+        return QBrush(Qt::NoBrush);
+    if(for_fill)
+        return stick->brush;
+    return stick->pen.style() == Qt::NoPen ? QBrush(Qt::NoBrush) : stick->pen.brush();
+}
+
+/// @details What one unit of the brush's own placement measures on the canvas — the conversion
+/// that lets one arrow drive both brush kinds. For a TEXTURE it is the tile's longer side, so the
+/// arrow's length reads directly as "one tile is this big" and a scale of 1 draws an arrow exactly
+/// one tile long. For a GRADIENT, whose coordinates are 0..1 of the box it is anchored to, it is
+/// the size of that box: the shape (approximated by the stick's own length) when the gradient
+/// follows the stick, the CANVAS when it doesn't — because an unanchored gradient really does span
+/// the scene rect (see SceneAnchoredGradient()), and measuring it against the stick instead would
+/// make the arrow wildly oversensitive, moving the fill a whole canvas per stick-length dragged.
+qreal MyView::ArrowUnit(const QBrush &brush) const
+{
+    if(brush.style() == Qt::TexturePattern && !brush.textureImage().isNull())
+        return qMax(1, qMax(brush.textureImage().width(), brush.textureImage().height()));
+    StickData *stick = TextureArrowStick();
+    if(stick != nullptr && !stick->brush_follows_stick && scene() != nullptr){
+        const QRectF box = scene()->sceneRect();
+        return qMax(1.0, qMin(box.width(), box.height()));
+    }
+    return qMax(40.0, stick == nullptr ? 0.0 : stick->my_line.length());
+}
+
+/// @details How far the brush's own placement frame is turned from the scene's, which everything
+/// stored in that frame has to be rotated by to be talked about in scene terms. Zero unless the
+/// paint is anchored to the stick — StickGraphicsItem::BrushFrameAngle() is the single source of
+/// truth, shared with the paint path so the arrow cannot point somewhere the fill isn't.
+qreal MyView::ArrowFrameAngle() const
+{
+    StickData *stick = TextureArrowStick();
+    return stick == nullptr ? 0.0 : StickGraphicsItem::BrushFrameAngle(stick);
+}
+
+/// @details Reads whichever placement this brush kind keeps and converts it to scene units AND
+/// scene axes, so everything downstream — the drawing, the hit test, the drag — is written once
+/// instead of twice.
+///
+/// The axes are the half that was missing: a stick-anchored placement is stored in the stick's own
+/// frame (a texture's offset is a translation the local frame then rotates, an ObjectMode
+/// gradient's is a displacement inside a box ObjectGradientTurn() turns), so reading it as if it
+/// were scene coordinates made a drag move the paint off along the stick's angle instead of along
+/// the drag — backwards for a stick pointing the other way.
+MyView::ArrowXf MyView::ReadArrow(const QBrush &brush) const
+{
+    const qreal unit = ArrowUnit(brush);
+    const bool is_gradient = (brush.gradient() != nullptr);
+    const TextureXf xf = is_gradient ? ReadGradientXf(brush) : ReadTextureXf(brush);
+    const qreal turn = ArrowFrameAngle();
+    ArrowXf out;
+    out.angle = xf.angle + turn;
+    // un gradiente tiene ENTRAMBI in frazioni del box; una texture tiene l'offset già in unità
+    // di lunghezza (del suo frame), e come scala un fattore sui pixel della tile
+    out.offset = QTransform().rotate(turn).map(is_gradient ? xf.offset * unit : xf.offset);
+    out.length = xf.scale * unit;
+    return out;
+}
+
+/// @details The exact inverse of ReadArrow(), so a drag that lands the arrow where the user let go
+/// reads back as the arrow they see.
+void MyView::WriteArrow(QBrush *brush, const ArrowXf &arrow) const
+{
+    const qreal unit = ArrowUnit(*brush);
+    const bool is_gradient = (brush->gradient() != nullptr);
+    const qreal turn = ArrowFrameAngle();
+    const QPointF offset = QTransform().rotate(-turn).map(arrow.offset);
+    TextureXf xf;
+    xf.angle = arrow.angle - turn;
+    xf.scale = qMax(1e-3, arrow.length / unit);
+    xf.offset = is_gradient ? offset / unit : offset;
+    if(is_gradient)
+        WriteGradientXf(brush, xf);
+    else
+        WriteTextureXf(brush, xf);
+}
+
+/// @details Anchored beside the stick (TextureArrowAnchor()) rather than on the scene origin:
+/// the arrow has to stay next to the stick it belongs to at any zoom or position, and the offset
+/// it shows is meaningful relative to the stick anyway. Everything else is the polar form of the
+/// texture's own transform — see TextureXf.
+bool MyView::TextureArrowPoints(bool for_fill, QPointF *tail, QPointF *tip) const
+{
+    if(for_fill ? !show_fill_texture_arrow : !show_stroke_texture_arrow)
+        return false;
+    StickData *stick = TextureArrowStick();
+    if(stick == nullptr || stick->view == nullptr)
+        return false;
+    // un tipo che non passa il pennello al painter non ha un riempimento (o un contorno) da
+    // puntare, per quanta geometria il pennello contenga: la freccia sarebbe una maniglia su
+    // qualcosa che non si vede. Stessi predicati con cui UpdateSliders() spegne i selettori
+    if(for_fill ? !stick->PaintsFill() : !stick->PaintsStroke())
+        return false;
+    const QBrush brush = CurrentTextureBrush(for_fill);
+    // una tinta unita e il vuoto non hanno una geometria da mostrare, come per AlignBrush().
+    // Texture e gradiente sì, ognuno la propria: ReadArrow() le porta entrambe in unità di scena
+    const bool has_tile = (brush.style() == Qt::TexturePattern && !brush.textureImage().isNull());
+    if(!has_tile && brush.gradient() == nullptr)
+        return false;
+    const ArrowXf arrow = ReadArrow(brush);
+    *tail = TextureArrowAnchor(stick, arrow.angle) + arrow.offset;
+    *tip = *tail + QLineF::fromPolar(arrow.length, -arrow.angle).p2();
+    return true;
+}
+
+/// @details The stand-off is what makes the arrow reachable at all, and it has to be measured in
+/// GRAB radii rather than in scene units: everything it must not collide with — the stick's own
+/// endpoint handles and the transformation box's — is picked within PolyPickRadius() or half a
+/// handle, so clearing the larger of those twice over is clear by construction at any zoom and
+/// for any stick length. Pushing it out along the stick's NORMAL is what clears the box's side
+/// mid-handles, which for a single straight stick (whose bounding box is a degenerate line) sit
+/// exactly on the stick itself.
+///
+/// The SIDE is chosen by where the arrow points, so that the arrow leads away from the stick
+/// rather than back across it. Without that the whole stand-off is defeatable by one particular
+/// arrow length — the one that lands the tip back on the stick — and since the length is the
+/// texture's scale, that length is a value the user can perfectly well be sitting on.
+QPointF MyView::TextureArrowAnchor(const StickData *stick, qreal angle) const
+{
+    const QPointF middle = stick->my_line.pointAt(0.5);
+    QLineF axis = stick->my_line;
+    if(axis.length() < 1e-6)
+        axis = QLineF(middle, middle + QPointF(1, 0)); // stick di lunghezza nulla: normale arbitraria
+    QPointF normal(-axis.dy() / axis.length(), axis.dx() / axis.length());
+    const QPointF direction = QLineF::fromPolar(1.0, -angle).p2();
+    if(QPointF::dotProduct(normal, direction) < 0)
+        normal = -normal;
+    const qreal stand_off = qMax(const_cast<MyView*>(this)->PolyPickRadius() * 2.5f,
+                                 handle_size * 1.5f);
+    return middle + normal * stand_off;
+}
+
+/// @details The priority rules of the spec, in the order they are checked: a transformation-box
+/// handle wins, then any stick endpoint handle of the selection, then the arrows. The stick-
+/// handle guard is the same test (and the same radius) HitSelectionHandle() uses for the mirror
+/// rule one level up, so the three pickable things agree on what "on a handle" means.
+bool MyView::HitTextureArrow(const QPointF &scene, bool *for_fill, bool *on_tip) const
+{
+    if(SelectionHandlesActive() && HitSelectionHandle(scene) >= 0)
+        return false;
+    const float radius = const_cast<MyView*>(this)->PolyPickRadius();
+    const float handle_r = qMax(radius, float(handle_size) / 2.0f);
+    for(StickFigure *S : SelectedFigures())
+        for(StickData *s : S->stick_list){
+            if(QLineF(scene, s->my_line.p1()).length() <= handle_r) return false;
+            if(QLineF(scene, s->my_line.p2()).length() <= handle_r) return false;
+        }
+    // la punta prima della coda, e il riempimento prima del contorno: due frecce con la stessa
+    // trasformazione si sovrappongono esattamente, e senza un ordine fisso quale delle due si
+    // afferra dipenderebbe dal caso
+    for(int pass = 0; pass < 2; pass++)
+        for(bool fill : { true, false }){
+            QPointF tail, tip;
+            if(!TextureArrowPoints(fill, &tail, &tip))
+                continue;
+            if(QLineF(scene, pass == 0 ? tip : tail).length() <= radius * 1.2f){
+                *for_fill = fill;
+                *on_tip = (pass == 0);
+                return true;
+            }
+        }
+    return false;
+}
+
+/// @details Writes straight onto the live StickData, like every other drag in this view: the
+/// undo snapshot for the whole gesture was pushed once at press.
+void MyView::DragTextureArrow(const QPointF &scene)
+{
+    StickData *stick = TextureArrowStick();
+    if(stick == nullptr)
+        return;
+    const bool for_fill = texture_arrow_is_fill;
+    QBrush brush = CurrentTextureBrush(for_fill);
+    if(brush.style() != Qt::TexturePattern && brush.gradient() == nullptr)
+        return;
+    ArrowXf arrow = ReadArrow(brush);
+    if(texture_arrow_gesture == 1){
+        arrow.offset = scene - TextureArrowAnchor(stick, arrow.angle);
+    }
+    else{
+        const QLineF shaft(texture_arrow_tail, scene); // coda bloccata al press: vedi il campo
+        arrow.angle = -shaft.angle();       // QLineF conta in senso antiorario, QTransform in orario
+        arrow.length = qMax(1.0, shaft.length());
+    }
+    WriteArrow(&brush, arrow);
+    if(for_fill){
+        stick->brush = brush;
+    }
+    else{
+        stick->pen.setBrush(brush);
+    }
+    if(stick->view)
+        stick->view->Refresh(0);
+    if(viewport()) viewport()->update(); // la freccia stessa è disegnata nel foreground
 }
 
 /// @details La transformation box è attiva/afferrabile solo col tool di selezione
@@ -3167,6 +3427,7 @@ void MyView::mouseReleaseEvent(QMouseEvent *event)
         multi_dragging = false;
         pivot_dragging = false;
         sel_box_gesture = 0; // fine di un eventuale drag di una maniglia della transformation box
+        texture_arrow_gesture = 0; // fine di un eventuale drag di una freccia della texture
         if(band_dragging){
             band_dragging = false;
             // il rubber band sparisce sempre al rilascio del mouse (la selezione resta)
@@ -3287,6 +3548,7 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
             }
             if(is_pressed && sel_box_gesture == 2){ ApplySelectionRotate(); break; } // pomello box
             if(is_pressed && sel_box_gesture == 1){ ApplySelectionScale();  break; } // maniglia scala box
+            if(is_pressed && texture_arrow_gesture){ DragTextureArrow(coord); break; } // freccia texture
             if(space_dragging && HasActiveSelection())
             {
                 // Spazio tenuto premuto: la selezione segue il cursore, trascinata dai
@@ -4082,6 +4344,11 @@ void MyView::StoreUndo(int command){
  */
 QString MyView::GenerateInbetweens(int start_index, int count)
 {
+    // PRIMA di validare: ExitDrawMode() finalizza (e può cancellare, se non si è dipinto
+    // niente) lo stick freehand del frame corrente, che è uno dei due keyframe. Chiuderla
+    // dopo i controlli li renderebbe stantii, e le due liste di stick verrebbero appaiate
+    // per indice dopo una rimozione a monte
+    ExitDrawMode();
     QList<Frame*> &frames = my_animation->frame_list;
     if(count < 1)
         return tr("The number of inbetweens to generate must be at least 1.");
@@ -4108,7 +4375,6 @@ QString MyView::GenerateInbetweens(int start_index, int count)
             }
         }
     }
-    ExitDrawMode(); // la sessione di disegno vive sul frame corrente: finalizzala prima
     UpdateFrameOrder(my_animation->CurrentFrame()); // l'ordine z del base deve essere una permutazione valida
     // "una copia del frame corrente" (spec): dalla UI il corrente è sempre uno dei due
     // estremi; il ripiego sul frame iniziale copre un chiamante che passasse altri indici,
@@ -4369,11 +4635,41 @@ void MyView::RemoveFromLibrary(){
     delete to_remove;
 }
 /**
- * @details Copies one attribute (pen colour/width or brush colour, per `attribute`)
- * from my_pen/my_brush — the values the colour/width controls in widget.cpp keep in
- * sync — onto either the current stick (`all==false`) or every stick in the current
- * figure (`all==true`), refreshing the touched views and the figure icon. Snapshotted
- * with StoreUndo() first so a colour change is undoable.
+ * @brief Copies the "what it is painted with" half of one pen onto another.
+ * @param target pen to modify; its width, cap and join style are left untouched.
+ * @param source pen to copy the paint from.
+ *
+ * @details The paint of a pen is its whole QBrush, not just a colour: since the stroke
+ * type combo box can make it a gradient or a tile, ATTRIBUTE_PENCOLOR cannot use
+ * QPen::setColor() any more — that call REPLACES the brush with a flat one and would
+ * silently drop the gradient it was asked to apply. Qt::NoPen ("no stroke") is a pen style
+ * rather than a brush, so it is carried across separately, and leaving it restores a solid
+ * line without disturbing any other line style.
+ */
+static void CopyPenPaint(QPen *target, const QPen &source)
+{
+    if(source.style() == Qt::NoPen){
+        target->setStyle(Qt::NoPen);
+        return;
+    }
+    if(target->style() == Qt::NoPen)
+        target->setStyle(Qt::SolidLine);
+    target->setBrush(source.brush());
+}
+
+/**
+ * @details Copies one attribute (pen paint/width or brush, per `attribute`) from
+ * my_pen/my_brush — the values the Style column's controls in widget.cpp keep in sync —
+ * onto either the current stick (`all==false`) or every stick in the current figure
+ * (`all==true`), refreshing the touched views and the figure icon. Snapshotted with
+ * StoreUndo() first so the change is undoable.
+ *
+ * @note ATTRIBUTE_BRUSHCOLOR assigns the WHOLE brush (and ATTRIBUTE_PENCOLOR the whole pen
+ * paint, through CopyPenPaint()), where both used to assign only a colour. That is what
+ * makes the pattern/gradient/image fills applicable at all — a QBrush::setColor() call is
+ * a documented no-op on a gradient or a texture brush. The visible consequence is that
+ * applying a fill to a stick that had none now gives it one: "no fill" is the type combo's
+ * None entry, not something the Apply buttons preserve.
  */
 void MyView::SetGraphics(bool all, int attribute){
     // guardie prima dello StoreUndo, così un click a vuoto (nessuna figura/stick corrente,
@@ -4388,23 +4684,33 @@ void MyView::SetGraphics(bool all, int attribute){
     if(all && MultiSelectionActive()){
         for(StickFigure *S : multi_selection){
             for(StickData *s : S->stick_list){
-                if(attribute == ATTRIBUTE_PENCOLOR)
-                    s->pen.setColor(my_pen.color());
+                if(attribute == ATTRIBUTE_PENCOLOR){
+                    CopyPenPaint(&s->pen, my_pen);
+                    s->brush_follows_stick = my_brush_follows_stick;
+                    s->stroke_brush = my_stroke_brush;
+                }
                 else if(attribute == ATTRIBUTE_PENWIDTH)
                     s->pen.setWidth(my_pen.width());
-                else if(attribute == ATTRIBUTE_BRUSHCOLOR)
-                    s->brush.setColor(my_brush.color());
+                else if(attribute == ATTRIBUTE_BRUSHCOLOR){
+                    s->brush = my_brush;
+                    s->brush_follows_stick = my_brush_follows_stick;
+                    s->texture_tiled = my_texture_tiled;
+                }
                 if(s->view)
                     s->view->Refresh(0);
             }
             S->UpdateIcon();
         }
+        my_animation->current_frame->UpdateIcon();  // vedi le note in coda a questo metodo
+        my_animation->UpdateStyleControls();
         return;
     }
     if(!all){
         if(attribute == ATTRIBUTE_PENCOLOR)
         {
-            my_animation->CurrentFrame()->CurrentStick()->pen.setColor(my_pen.color());
+            CopyPenPaint(&my_animation->CurrentFrame()->CurrentStick()->pen, my_pen);
+            my_animation->CurrentFrame()->CurrentStick()->brush_follows_stick = my_brush_follows_stick;
+            my_animation->CurrentFrame()->CurrentStick()->stroke_brush = my_stroke_brush;
         }
         else if(attribute== ATTRIBUTE_PENWIDTH)
         {
@@ -4412,25 +4718,43 @@ void MyView::SetGraphics(bool all, int attribute){
         }
         else if(attribute== ATTRIBUTE_BRUSHCOLOR)
         {
-            my_animation->CurrentFrame()->CurrentStick()->brush.setColor(my_brush.color());
+            my_animation->CurrentFrame()->CurrentStick()->brush = my_brush;
+            my_animation->CurrentFrame()->CurrentStick()->brush_follows_stick = my_brush_follows_stick;
+            my_animation->CurrentFrame()->CurrentStick()->texture_tiled = my_texture_tiled;
         }
         if(my_animation->CurrentFrame()->CurrentStick()->view)
             my_animation->CurrentFrame()->CurrentStick()->view->Refresh(0);
     }
     else{
         for(StickData * s:my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
-            if(attribute == ATTRIBUTE_PENCOLOR)
-                s->pen.setColor(my_pen.color());
+            if(attribute == ATTRIBUTE_PENCOLOR){
+                CopyPenPaint(&s->pen, my_pen);
+                s->brush_follows_stick = my_brush_follows_stick;
+                s->stroke_brush = my_stroke_brush;
+            }
             else if(attribute== ATTRIBUTE_PENWIDTH)
                 s->pen.setWidth(my_pen.width());
-            else if(attribute== ATTRIBUTE_BRUSHCOLOR)
-                s->brush.setColor(my_brush.color());
+            else if(attribute== ATTRIBUTE_BRUSHCOLOR){
+                s->brush = my_brush;
+                s->brush_follows_stick = my_brush_follows_stick;
+                s->texture_tiled = my_texture_tiled;
+            }
             if(s->view)
                 s->view->Refresh(0);
         }
     }
 
     my_animation->CurrentFrame()->CurrentStickFigure()->UpdateIcon();
+    // ...e la miniatura del FRAME, che StickFigure::UpdateIcon() non tocca: senza questa la
+    // striscia dei frame continua a mostrare il riempimento PRECEDENTE finché non si trascina
+    // qualcosa sulla tela (mouseReleaseEvent la ridisegna). Vale per ogni Apply, non solo per i
+    // riempimenti: un cambio di colore o di spessore lasciava la stessa miniatura vecchia.
+    my_animation->current_frame->UpdateIcon();
+    // il tipo di riempimento/contorno dello stick può essere appena cambiato (una tinta unita
+    // diventata gradiente o texture) senza che la SELEZIONE sia cambiata, e UpdateSliders() gira
+    // solo sulla selezione: le caselle e gli slider che dipendono da cosa è dipinto lo stick
+    // vanno rivalutati qui, o restano come per il riempimento precedente
+    my_animation->UpdateStyleControls();
 }
 /**
  * @details Breaks the current figure at the selected stick: that stick and its subtree

@@ -524,6 +524,62 @@ struct ExportPolyfill
 };
 
 /**
+ * @brief True when a brush is already a single colour, i.e. needs no flattening on export.
+ * @param brush the fill (or a pen's paint) to classify.
+ * @return true for Qt::SolidPattern and Qt::NoBrush, false for a gradient or a texture.
+ *
+ * Used only to count how many sticks the export had to simplify, so the user gets one
+ * warning instead of silence.
+ */
+bool IsFlatPaint(const QBrush &brush)
+{
+    return brush.style() == Qt::NoBrush || brush.style() == Qt::SolidPattern;
+}
+
+/**
+ * @brief Reduces any brush to the one colour the foreign formats can carry.
+ * @param brush the fill (or a pen's paint) to flatten.
+ * @return a representative colour: a gradient's FIRST stop, a texture's average pixel, or
+ *         the brush's own colour for a solid or a hatch pattern.
+ *
+ * @details Neither .stk (Pivot) nor .nodes has any notion of a fill beyond a flat colour,
+ * so the pattern/gradient/image fills have to be dropped on the way out. They are dropped
+ * to something recognizable rather than to QBrush::color(), which for a gradient or a
+ * texture brush is an unset default (black) and would turn every gradient-filled figure
+ * into a black one. The native formats (.mAnim, .stck, .marlib) keep the real brush — see
+ * StickData::brush.
+ *
+ * ponytail: first stop / box-filter average. Both are approximations of "what colour is
+ * this, roughly", which is all the target formats can express; a perceptual average or a
+ * mid-stop sample would be more code for a lossy field either way.
+ */
+QColor FlattenFill(const QBrush &brush)
+{
+    switch (brush.style()) {
+    case Qt::LinearGradientPattern:
+    case Qt::RadialGradientPattern:
+    case Qt::ConicalGradientPattern: {
+        // il brush arriva anche da file: non dare per scontato che il gradiente ci sia
+        const QGradient *gradient = brush.gradient();
+        if (!gradient)
+            return brush.color();
+        const QGradientStops stops = gradient->stops();
+        return stops.isEmpty() ? brush.color() : stops.first().second;
+    }
+    case Qt::TexturePattern: {
+        const QImage tile = brush.textureImage();
+        if (tile.isNull())
+            return brush.color();
+        // scalare a 1x1 con lo smooth scale di Qt (filtro a media) dà il colore medio
+        return QColor::fromRgba(tile.scaled(1, 1, Qt::IgnoreAspectRatio,
+                                            Qt::SmoothTransformation).pixel(0, 0));
+    }
+    default:
+        return brush.color(); // tinta unita, retini (Dense*/Cross/...), NoBrush
+    }
+}
+
+/**
  * @brief Orders the figure's sticks parent-before-child, preferring lower z among the
  *        ready ones (plan §5: preserves draw order without a section C), and resolves
  *        each to STK fields via the §5.1 mapping table.
@@ -570,6 +626,7 @@ bool ResolveExportSegments(const StickFigureData &figure, QList<ExportSegment> *
 
     int approximated = 0;
     int multilines = 0;
+    int flattened_paints = 0; // sticks whose pattern/gradient/image paint had to be flattened
     bool curvature_warned = false;
     bool geometry_warned = false;
     bool ellipse_warned = false;
@@ -598,8 +655,13 @@ bool ResolveExportSegments(const StickFigureData &figure, QList<ExportSegment> *
             }
         }
 
-        QColor pen_color = stick->pen.color();
-        QColor brush_color = (stick->brush.style() != Qt::NoBrush) ? stick->brush.color() : pen_color;
+        // il formato porta un solo colore per segmento: pattern, gradienti e immagini
+        // escono appiattiti (e contati, per l'avviso in coda)
+        if (!IsFlatPaint(stick->pen.brush()) || !IsFlatPaint(stick->brush))
+            flattened_paints++;
+        QColor pen_color = FlattenFill(stick->pen.brush());
+        QColor brush_color = (stick->brush.style() != Qt::NoBrush) ? FlattenFill(stick->brush)
+                                                                  : pen_color;
         double pen_width = (stick->pen.style() == Qt::NoPen) ? 0.0 : stick->pen.widthF();
 
         // MULTILINE: la catena sostituisce il singolo segmento dello stick
@@ -643,8 +705,10 @@ bool ResolveExportSegments(const StickFigureData &figure, QList<ExportSegment> *
             seg.color = pen_color;
             break;
         case StickData::CIRCLE:
+            // brush_color, non brush.color(): un gradiente/tile bianco deve pesare come
+            // bianco (tipo 1) e non come il nero di default di QBrush::color()
             seg.type = (stick->brush.style() == Qt::NoBrush) ? 4
-                     : (stick->brush.color() == QColor(Qt::white)) ? 1 : 3;
+                     : (brush_color == QColor(Qt::white)) ? 1 : 3;
             seg.thickness = pen_width;
             seg.color = (seg.type == 3) ? brush_color : pen_color;
             if (!qFuzzyCompare(stick->img_w_scale, 1.0f) && !ellipse_warned) {
@@ -692,6 +756,9 @@ bool ResolveExportSegments(const StickFigureData &figure, QList<ExportSegment> *
     if (multilines > 0)
         warnings->append(QObject::tr("%1 multi-line stick(s) exported as chains of welded segments.")
                          .arg(multilines));
+    if (flattened_paints > 0)
+        warnings->append(QObject::tr("%1 stick(s): pattern/gradient/image fill or stroke exported as a flat color.")
+                         .arg(flattened_paints));
 
     // POLYGON sticks → one invisible carrier segment per vertex + a section-B polyfill
     // referencing their joints; the Pivot 2 caller passes no polyfill list (the format
@@ -704,8 +771,8 @@ bool ResolveExportSegments(const StickFigureData &figure, QList<ExportSegment> *
         if (!polyfills)
             continue;
         ExportPolyfill poly;
-        poly.color = (stick->brush.style() != Qt::NoBrush) ? stick->brush.color()
-                                                           : stick->pen.color();
+        poly.color = FlattenFill((stick->brush.style() != Qt::NoBrush) ? stick->brush
+                                                                      : stick->pen.brush());
         poly.after_file_id = joint_of.value(stick) - 1;
         QTransform t = stick->PolygonTransform();
         QPointF base = stick->my_line.p2(); // il joint dello scheletro porta i carrier
@@ -1503,6 +1570,7 @@ bool StkFormat::ExportNodes(const QString &path, const StickFigureData &figure,
 
     QPointF origin = master->my_line.p1();
     int images = 0, ellipses = 0, subpixel = 0, multilines = 0;
+    int flattened_paints = 0; // come in ResolveExportSegments(): .nodes ha un solo colore per nodo
     bool orphan_warned = false, curvature_warned = false;
 
     for (int i = 0; i < sticks.count(); i++) {
@@ -1535,8 +1603,11 @@ bool StkFormat::ExportNodes(const QString &path, const StickFigureData &figure,
         node.global_angle_deg = (node.length > 0)
                 ? NormalizeDegrees(qAtan2(offset.y(), offset.x()) * 180.0 / M_PI) : 0.0;
 
-        QColor pen_color = stick->pen.color();
-        QColor brush_color = (stick->brush.style() != Qt::NoBrush) ? stick->brush.color() : pen_color;
+        if (!IsFlatPaint(stick->pen.brush()) || !IsFlatPaint(stick->brush))
+            flattened_paints++;
+        QColor pen_color = FlattenFill(stick->pen.brush());
+        QColor brush_color = (stick->brush.style() != Qt::NoBrush) ? FlattenFill(stick->brush)
+                                                                  : pen_color;
         double pen_width = (stick->pen.style() == Qt::NoPen) ? 0.0 : stick->pen.widthF();
         auto rounded_thickness = [&subpixel](double width) -> qint32 {
             if (width <= 0.0)
@@ -1660,8 +1731,8 @@ bool StkFormat::ExportNodes(const QString &path, const StickFigureData &figure,
         polygons++;
         NodesPolyfill poly;
         poly.anchor_draw = draw_rank[i];
-        poly.color = (stick->brush.style() != Qt::NoBrush) ? stick->brush.color()
-                                                           : stick->pen.color();
+        poly.color = FlattenFill((stick->brush.style() != Qt::NoBrush) ? stick->brush
+                                                                      : stick->pen.brush());
         QTransform t = stick->PolygonTransform();
         QPointF base = stick->my_line.p2(); // posizione del nodo dello scheletro
         for (const QPointF &pt : stick->polygon_points) {
@@ -1757,6 +1828,9 @@ bool StkFormat::ExportNodes(const QString &path, const StickFigureData &figure,
         warnings->append(QObject::tr("Squashed circles (ellipses) were exported as plain circles."));
     if (subpixel > 0)
         warnings->append(QObject::tr("%1 sub-pixel line width(s) rounded up to 1 (.nodes thickness is integer).").arg(subpixel));
+    if (flattened_paints > 0)
+        warnings->append(QObject::tr("%1 stick(s): pattern/gradient/image fill or stroke exported as a flat color.")
+                         .arg(flattened_paints));
 
     // the .nodes container is the bare zlib stream, no marker byte
     QByteArray bytes = CompressZlib(writer.out);

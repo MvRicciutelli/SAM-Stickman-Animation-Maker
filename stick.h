@@ -218,6 +218,149 @@ public:
      */
     QPolygonF ScenePolygon() const;
 
+    /**
+     * @brief Re-anchors a pattern/gradient/image brush so it honours
+     *        StickData::brush_follows_stick, whatever coordinate frame this stick type
+     *        paints in.
+     * @param source the brush as stored on the record (fill, or a pen's paint).
+     * @return the same brush with its transform adjusted; @p source unchanged when there
+     *         is nothing to re-anchor.
+     *
+     * A brush paints in the painter's CURRENT logical frame, and the stick types disagree
+     * about what that is: RECT/CIRCLE/TRAPEZOID/TAPER/TEXT/IMAGE fill inside the stick's
+     * own translated+rotated frame, so a texture or gradient follows the stick for free,
+     * while LINE/POLYGON/MULTILINE draw straight in scene coordinates, where it does not.
+     * This is why a gradient-stroked LINE looked pinned to the scene while a gradient-filled
+     * RECT rotated correctly.
+     *
+     * Both directions are a single pre-multiplication of the brush transform by the stick's
+     * local frame, or by its inverse. How much of that frame goes in depends on the brush,
+     * and the difference is not cosmetic:
+     * - a **texture** lives in logical coordinates, so it needs the WHOLE frame
+     *   (translation included) to move and turn with the stick;
+     * - a **QGradient::ObjectMode gradient** that must FOLLOW the stick is already anchored to
+     *   the shape's bounding box, so it needs the ROTATION ONLY, and taken **about the centre
+     *   of that box**. Composing the translation as well slides the gradient off the shape and
+     *   the fill collapses to one flat colour; rotating about the box's ORIGIN instead of its
+     *   centre is the same mistake in miniature — the transform of an ObjectMode gradient acts
+     *   in the box's own 0..1 space, whose origin is its top-left CORNER, so a corner-pivoted
+     *   rotation swings the gradient axis partly (or, at -90°, entirely) outside the shape.
+     *   Both were measured, not reasoned about.
+     * - a **QGradient::ObjectMode gradient that must NOT follow the stick** cannot be handled
+     *   by a transform at all, in either direction: ObjectMode *means* "relative to the painted
+     *   shape's bounding box", so the box travels with the stick and the gradient with it no
+     *   matter what is composed. Compensating the rotation fixes the gradient's DIRECTION and
+     *   leaves its POSITION riding along, which is exactly how the bug looked. Such a gradient
+     *   is therefore REBUILT as a LogicalMode one anchored to the scene rect — see
+     *   SceneAnchoredGradient() in stick.cpp. The returned brush is then a different brush from
+     *   @p source, not merely a re-transformed one; it is the only case where that happens.
+     *
+     * A solid colour and Qt::NoBrush are returned untouched: they have no geometry to anchor.
+     */
+    QBrush AlignBrush(const QBrush &source) const;
+
+    /**
+     * @brief Where a texture brush's tile lands, mapped from the tile's own pixels to scene
+     *        coordinates.
+     * @param source the brush as stored on the record (fill, or a pen's paint).
+     * @return the full tile-pixel -> scene mapping, i.e. the brush transform composed with
+     *         whatever part of the stick's frame AlignBrush() decided the brush paints in.
+     *
+     * The one place that knows where a texture actually ends up on the canvas. Two callers
+     * need that, for opposite reasons: SingleInstanceClip() maps the tile's rectangle FORWARD
+     * to find the one instance it must keep, and MyView's texture arrow handle maps the
+     * user's drag BACK to figure out which scale/angle/offset it asks for.
+     */
+    QTransform TextureToScene(const QBrush &source) const;
+
+    /**
+     * @brief How much a brush's own placement frame is turned relative to the SCENE, in degrees
+     *        (QTransform's clockwise-positive convention).
+     * @param data the stick record the brush belongs to.
+     * @return the stick's frame rotation when the paint is anchored to the stick, 0 when it is
+     *         anchored to the scene.
+     *
+     * The angle half of what TextureToScene() answers for a texture's position, and the piece a
+     * GRADIENT has no TextureToScene() to ask (its numbers are in a normalized box, not in tile
+     * pixels). One value serves both, because AlignBrush() ends up applying the same rotation to
+     * either: the whole local frame for a texture, and its rotation about the box centre for an
+     * ObjectMode gradient (ObjectGradientTurn()) — and for the types that fill in scene
+     * coordinates it is the box itself that is already unturned. So anything that has to convert
+     * between a brush's stored placement and the canvas — MyView::ReadArrow()/WriteArrow(), i.e.
+     * the texture arrow handle — needs exactly this and nothing else.
+     */
+    static qreal BrushFrameAngle(const StickData *data);
+
+    /**
+     * @brief The single tile instance a non-tiling texture fill paints, in SCENE coordinates.
+     * @param source the fill brush.
+     * @return the tile's rectangle mapped through TextureToScene(), or an EMPTY path when the
+     *         brush tiles, isn't a texture, or has no tile — i.e. when there is nothing to clip.
+     *
+     * Qt has no non-repeating brush style, so StickData::texture_tiled is enforced by clipping
+     * rather than by the brush: the shape is still filled with the ordinary tiling brush and
+     * every repeat except the one the texture transform places is clipped away. Returns the path
+     * instead of touching the painter so the caller can decide the painter state in one place
+     * (and so it can be tested without one).
+     */
+    QPainterPath SingleInstancePath(const QBrush &source) const;
+
+    /**
+     * @brief How opaque a fill should be painted, over and above whatever alpha its own paint
+     *        carries.
+     * @param source the fill brush.
+     * @return 1.0 for everything except a texture, whose opacity is the alpha of
+     *         QBrush::color().
+     *
+     * A texture brush ignores its QBrush::color() when rendering — Qt documents setColor() as
+     * having no effect on one — which leaves that colour's ALPHA as a field the brush already
+     * has, already streams, and otherwise never uses. So the opacity sliders write there for a
+     * texture exactly as they write into the colour itself for a solid fill, and there is one
+     * opacity concept rather than two: **the brush colour's alpha is the paint's opacity** — for
+     * a solid it IS the colour, for a texture it multiplies the tile.
+     *
+     * A gradient is excluded because it needs nothing here: its opacity is in its stops (see
+     * ReadPaintOpacity(), stickdata.h), which Qt already honours when it renders one — fading it a
+     * second time with the painter would square it.
+     */
+    static qreal FillOpacity(const QBrush &source);
+
+    /**
+     * @brief Paints a shape with a fill and an outline, splitting the two into separate passes
+     *        when they must not share the painter's state.
+     * @param painter the painter, in SCENE coordinates (the clip is stored in device space at
+     *        the setClipPath() call, so the local frame installed below cannot disturb it); its
+     *        pen is already the stick's and is left as it was found.
+     * @param fill the fill brush, as stored on the record.
+     * @param shape the shape to paint, in the frame this stick type paints in — the stick's own
+     *        translated+rotated one for RECT/CIRCLE/TRAPEZOID/TAPER, scene coordinates for
+     *        POLYGON. Which of the two it is comes from the type, not from an argument, so the
+     *        answer cannot drift from the one AlignBrush() uses.
+     *
+     * A single Qt draw call paints a shape's fill and its outline together, so anything applied
+     * for the fill's sake — the single-instance clip, a fill opacity — lands on the outline too:
+     * the clip chops it into a fragment, the opacity fades it. Hence two passes when (and only
+     * when) either is in force: the fill clipped/faded and penless, then the outline plain and
+     * brushless. Every other case is one pass, exactly as before.
+     *
+     * A shape rather than a callable because the outline is now also something to be WALKED, not
+     * only drawn: a brush border (StickData::stroke_brush) stamps a tip along this very path.
+     */
+    void FillAndStroke(QPainter *painter, const QBrush &fill, const QPainterPath &shape) const;
+
+    /**
+     * @brief Draws the outline of @p shape the way this stick's record asks for it: stamped with
+     *        the border brush when it has one, traced by the pen otherwise.
+     * @param painter the painter, in SCENE coordinates.
+     * @param shape the outline, in the same frame FillAndStroke() takes it.
+     * @return true when the brush border painted it, false when the caller must draw it itself.
+     *
+     * Called by FillAndStroke() for the shape types and directly by paint()'s LINE and MULTILINE
+     * branches, which have an outline but no fill to go with it. Never stamps during an onion
+     * render — a ghost frame is flat grey by definition.
+     */
+    bool StrokeWithBrush(QPainter *painter, const QPainterPath &shape) const;
+
     //-------- variables----------//
     /**
      * @brief True while MyView::UpdateOnionSkins() is rendering ghost frames: paint()

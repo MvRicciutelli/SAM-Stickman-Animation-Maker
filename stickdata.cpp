@@ -44,6 +44,9 @@ void StickData::CopyFrom(const StickData &source)
     parent_idx = source.parent_idx;
     pen = source.pen;
     brush = source.brush;
+    brush_follows_stick = source.brush_follows_stick;
+    texture_tiled = source.texture_tiled;
+    stroke_brush = source.stroke_brush;
     order = source.order;
     img_angle = source.img_angle;
     img_w_scale = source.img_w_scale;
@@ -82,6 +85,21 @@ void StickData::CopyFrom(const StickData &source)
         if (image == source.stick_img)
             stick_img = copy;
     }
+}
+
+/**
+ * @details Fills in the three derived numbers of the stored BrushStroke. `pen.brush().color()`
+ * rather than `pen.color()` because the two disagree for a pen whose paint is not solid, and the
+ * brush's is the one an opacity slider has been writing into (see ReadPaintOpacity()). The width
+ * floor keeps a hairline pen (width 0, "one device pixel") from asking for a zero-size dab.
+ */
+BrushStroke StickData::StrokeBrush() const
+{
+    BrushStroke brush = stroke_brush;
+    brush.color = pen.brush().color();
+    brush.size = qMax(1.0, pen.widthF());
+    brush.opacity = ReadPaintOpacity(pen.brush());
+    return brush;
 }
 
 /**
@@ -145,6 +163,16 @@ inline void MixFloatList(QList<float> &target, const QList<float> &start, const 
     for (int i = 0; i < target.count(); i++)
         target[i] = float(Mix(start[i], end[i], t));
 }
+
+/// @brief True when a fill/stroke is a plain colour, i.e. the only case where blending its
+/// colour is meaningful. A pattern, an image tile or a gradient (see Widget::StyleKind)
+/// carries its appearance in the brush's texture/stops, which have no linear midpoint —
+/// and `QPen::setColor()` would REPLACE such a pen brush with a solid colour, silently
+/// flattening a gradient stroke in every generated frame.
+inline bool IsSolidFill(const QBrush &brush)
+{
+    return brush.style() == Qt::SolidPattern || brush.style() == Qt::NoBrush;
+}
 }
 
 /**
@@ -155,8 +183,158 @@ inline void MixFloatList(QList<float> &target, const QList<float> &start, const 
  * one convention (-atan2(dx, dy) in degrees, see StickFigure.cpp:50 and every drawing/
  * manipulation path): blending the stored angle would spin the long way round whenever the
  * two poses straddle the ±180° wrap, and would drift out of sync with the segment it is
- * supposed to track.
+ * supposed to track. Nothing here allocates or frees: images, gradient stops and pattern
+ * tiles are left exactly as the caller's Clone() produced them (see IsSolidFill()).
  */
+/// @details Built to match ComposeTextureXf()'s call order exactly: the scale is the length of
+/// the matrix's first basis vector, the angle its direction, the offset its translation. Lossless
+/// for every brush this app produces (all similarity transforms) — a sheared transform, which
+/// nothing here creates, would read back as its nearest rotation.
+TextureXf ReadTextureXf(const QBrush &brush)
+{
+    const QTransform t = brush.transform();
+    TextureXf xf;
+    xf.scale = std::hypot(t.m11(), t.m12());
+    if(xf.scale <= 0.0)
+        xf.scale = 1.0; // matrice degenere (o brush senza transform): riparti dall'identità
+    xf.angle = qRadiansToDegrees(qAtan2(t.m12(), t.m11()));
+    xf.offset = QPointF(t.dx(), t.dy());
+    return xf;
+}
+
+/// @details The inverse of ReadTextureXf(). Order matters and is the QTransform/QPainter one:
+/// the calls read outermost-first, so a point is scaled, then rotated, then translated.
+void WriteTextureXf(QBrush *brush, const TextureXf &xf)
+{
+    // il floor tiene la matrice INVERTIBILE, non solo diversa da zero: il determinante è
+    // scale^2, e Qt considera nullo (QTransform::isInvertible) tutto ciò che sta sotto 1e-12
+    const qreal scale = qMax(xf.scale, 1e-3);
+    QTransform t;
+    t.translate(xf.offset.x(), xf.offset.y());
+    t.rotate(xf.angle);
+    t.scale(scale, scale);
+    brush->setTransform(t);
+}
+
+/// @details QLineF::angle() reports in [0, 360), so negating it for QTransform's clockwise
+/// convention turns a +33 degree gradient into -327 — the same direction, but a value the options
+/// dialog would display and a round-trip comparison would fail on. ReadTextureXf() has no such
+/// problem: qAtan2() already answers in (-180, 180], which is what this brings the other path to.
+static qreal NormalizeDegrees(qreal degrees)
+{
+    while(degrees > 180.0)   degrees -= 360.0;
+    while(degrees <= -180.0) degrees += 360.0;
+    return degrees;
+}
+
+/// @details Angles come out in QTransform's clockwise convention (hence the negated
+/// QLineF::angle(), which counts anticlockwise) so that a caller can treat a gradient's
+/// placement and a texture's identically.
+TextureXf ReadGradientXf(const QBrush &brush)
+{
+    TextureXf xf;
+    const QGradient *gradient = brush.gradient();
+    if(gradient == nullptr)
+        return xf;
+    if(gradient->type() == QGradient::LinearGradient){
+        const QLinearGradient *linear = static_cast<const QLinearGradient*>(gradient);
+        const QLineF axis(linear->start(), linear->finalStop());
+        xf.offset = axis.center() - QPointF(0.5, 0.5);
+        xf.angle = -axis.angle();
+        xf.scale = axis.length();
+    }
+    else if(gradient->type() == QGradient::RadialGradient){
+        const QRadialGradient *radial = static_cast<const QRadialGradient*>(gradient);
+        xf.offset = radial->center() - QPointF(0.5, 0.5);
+        xf.scale = 2.0 * radial->centerRadius(); // diametro: confrontabile con l'asse lineare
+        xf.angle = -QLineF(radial->center(), radial->focalPoint()).angle();
+    }
+    if(xf.scale <= 0.0)
+        xf.scale = 1.0; // geometria degenere: riparti da un box pieno
+    xf.angle = NormalizeDegrees(xf.angle);
+    return xf;
+}
+
+/// @details The gradient is rebuilt rather than mutated because QBrush only ever hands out a
+/// const QGradient*. Everything that is not geometry is copied across explicitly — losing the
+/// coordinate mode in particular would silently un-anchor the fill (see
+/// StickGraphicsItem::AlignBrush()).
+void WriteGradientXf(QBrush *brush, const TextureXf &xf)
+{
+    const QGradient *gradient = brush->gradient();
+    if(gradient == nullptr)
+        return;
+    const QPointF centre = QPointF(0.5, 0.5) + xf.offset;
+    const qreal length = qMax(xf.scale, 1e-3); // una lunghezza nulla non ha una direzione
+    const QPointF half = QLineF::fromPolar(length / 2.0, -xf.angle).p2();
+    const QTransform keep_transform = brush->transform();
+
+    if(gradient->type() == QGradient::LinearGradient){
+        QLinearGradient rebuilt(centre - half, centre + half);
+        rebuilt.setStops(gradient->stops());
+        rebuilt.setSpread(gradient->spread());
+        rebuilt.setCoordinateMode(gradient->coordinateMode());
+        *brush = QBrush(rebuilt);
+    }
+    else if(gradient->type() == QGradient::RadialGradient){
+        const QRadialGradient *radial = static_cast<const QRadialGradient*>(gradient);
+        // il fuoco viene ri-puntato, non ri-avvicinato: mantiene la sua distanza dal centro
+        const qreal focal_distance = QLineF(radial->center(), radial->focalPoint()).length();
+        const QPointF focus = centre + QLineF::fromPolar(focal_distance, -xf.angle).p2();
+        QRadialGradient rebuilt(centre, length / 2.0, focus, radial->focalRadius());
+        rebuilt.setStops(gradient->stops());
+        rebuilt.setSpread(gradient->spread());
+        rebuilt.setCoordinateMode(gradient->coordinateMode());
+        *brush = QBrush(rebuilt);
+    }
+    else{
+        return; // conico o altro: nessuna geometria che queste tre cifre descrivano
+    }
+    brush->setTransform(keep_transform);
+}
+
+/// @details See the header for why a gradient reads its opacity somewhere else than the other two
+/// kinds of paint. The peak stop and not the average: it is the value the slider has to show, and
+/// only the peak can be brought back up to 1.0 without inventing alpha the user never asked for.
+qreal ReadPaintOpacity(const QBrush &brush)
+{
+    const QGradient *gradient = brush.gradient();
+    if(gradient == nullptr)
+        return qBound(0.0, brush.color().alphaF(), 1.0);
+    qreal peak = 0.0;
+    for(const QGradientStop &stop : gradient->stops())
+        peak = qMax(peak, stop.second.alphaF());
+    return qBound(0.0, peak, 1.0);
+}
+
+/// @details The gradient is rebuilt for the same reason WriteGradientXf() rebuilds it (QBrush hands
+/// out only a const QGradient*), and everything that is not a stop — geometry, spread, coordinate
+/// mode, the brush transform — comes across untouched. A gradient whose every stop is fully
+/// transparent has no ratios left to preserve, so there the value is written flat.
+void WritePaintOpacity(QBrush *brush, qreal opacity)
+{
+    opacity = qBound(0.0, opacity, 1.0);
+    const QGradient *gradient = brush->gradient();
+    if(gradient == nullptr){
+        QColor tint = brush->color();
+        tint.setAlphaF(opacity);
+        brush->setColor(tint);
+        return;
+    }
+    const qreal peak = ReadPaintOpacity(*brush);
+    QGradientStops stops = gradient->stops();
+    for(QGradientStop &stop : stops){
+        QColor tint = stop.second;
+        tint.setAlphaF(peak > 0.0 ? qBound(0.0, tint.alphaF() * opacity / peak, 1.0) : opacity);
+        stop.second = tint;
+    }
+    QGradient rebuilt = *gradient;   // copia di valore: tipo, geometria, spread e modo restano
+    rebuilt.setStops(stops);
+    const QTransform keep_transform = brush->transform();
+    *brush = QBrush(rebuilt);
+    brush->setTransform(keep_transform);
+}
+
 void InterpolateStickData(StickData &target, const StickData &start, const StickData &end, float t)
 {
     target.my_line = QLineF(MixPoint(start.my_line.p1(), end.my_line.p1(), t),
@@ -168,8 +346,11 @@ void InterpolateStickData(StickData &target, const StickData &start, const Stick
     target.img_h_scale = float(Mix(start.img_h_scale, end.img_h_scale, t));
     target.img_angle_offset = qRound(Mix(start.img_angle_offset, end.img_angle_offset, t));
     target.pen.setWidthF(Mix(start.pen.widthF(), end.pen.widthF(), t));
-    target.pen.setColor(MixColor(start.pen.color(), end.pen.color(), t));
-    target.brush.setColor(MixColor(start.brush.color(), end.brush.color(), t));
+    // la larghezza si interpola sempre, il COLORE solo fra due tinte piatte: vedi IsSolidFill()
+    if (IsSolidFill(start.pen.brush()) && IsSolidFill(end.pen.brush()))
+        target.pen.setColor(MixColor(start.pen.color(), end.pen.color(), t));
+    if (IsSolidFill(start.brush) && IsSolidFill(end.brush))
+        target.brush.setColor(MixColor(start.brush.color(), end.brush.color(), t));
     // vertici di POLYGON/MULTILINE: normalizzati nel frame locale dello stick
     // (StickData::PolygonTransform), quindi interpolabili direttamente
     if (start.polygon_points.count() == end.polygon_points.count()
@@ -200,6 +381,25 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
     stream << stick_data.pen;
     stream << stick_data.brush;
     stream << stick_data.order;
+    if (stick_data.version >= 4) {
+        // ancoraggio della texture/gradiente: come l'IK sotto, ortogonale allo stick_type
+        // e quindi fuori dal blocco type-gated, e version-gated perché un file salvato
+        // prima che l'opzione esistesse deve leggere il default (true)
+        stream << stick_data.brush_follows_stick;
+    }
+    if (stick_data.version >= 5) {
+        stream << stick_data.texture_tiled;
+    }
+    if (stick_data.version >= 6) {
+        // il pennello del contorno: solo la metà MEMORIZZATA di BrushStroke — colore, diametro
+        // e opacità sono quelli della penna, che è già qui sopra, e StrokeBrush() li rimette
+        stream << stick_data.stroke_brush.stamp;
+        stream << stick_data.stroke_brush.spacing;
+        stream << stick_data.stroke_brush.angle;
+        stream << stick_data.stroke_brush.size_jitter;
+        stream << stick_data.stroke_brush.angle_jitter;
+        stream << stick_data.stroke_brush.opacity_jitter;
+    }
     if (stick_data.version >= 2) {
         // ruolo IK: ortogonale allo stick_type, quindi fuori dal blocco type-gated sotto;
         // version-gated così un file salvato prima che l'IK esistesse (version 1) resta
@@ -286,6 +486,20 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
     stream >> stick_data.pen;
     stream >> stick_data.brush;
     stream >> stick_data.order;
+    if (stick_data.version >= 4) {
+        stream >> stick_data.brush_follows_stick;
+    }
+    if (stick_data.version >= 5) {
+        stream >> stick_data.texture_tiled;
+    }
+    if (stick_data.version >= 6) {
+        stream >> stick_data.stroke_brush.stamp;
+        stream >> stick_data.stroke_brush.spacing;
+        stream >> stick_data.stroke_brush.angle;
+        stream >> stick_data.stroke_brush.size_jitter;
+        stream >> stick_data.stroke_brush.angle_jitter;
+        stream >> stick_data.stroke_brush.opacity_jitter;
+    }
     if (stick_data.version >= 2) {
         stream >> stick_data.ik_role;
         stream >> stick_data.ik_start_idx;

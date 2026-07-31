@@ -48,6 +48,10 @@
 #include "uiItems.h"
 #include "imageexport.h"
 #include "abrbrush.h"
+#include "brushpicker.h"
+#include "gradientdialog.h"
+#include "patternlibrary.h"
+#include "textureoptionsdialog.h"
 #define DEFAULTWIDTH 720
 #define DEFAULTHEIGHT 480
 #define DEFAULTFPS 24
@@ -84,11 +88,18 @@ QPointF onion_offset;
 QDir program_folder;
 QDir lib_folder;
 QDir brush_folder; ///< cartella pennelli .abr, accanto a Libraries/myStickFigures (creata in CreatePaths)
+QDir pattern_folder; ///< cartella pattern .pat, gemella di Brushes: il suo path è l'unico argomento di PatternLibrary (creata in CreatePaths)
 QDir temp_render_folder;
 QDir my_animations_folder;
 QDir my_stick_figures_folder;
 QDir my_video_export_folder;
 // -----------------
+QComboBox * fill_type_combo = nullptr;   ///< vedi uiItems.h: la costruisce BuildStyleCombos(), la disabilita UpdateSliders()
+QComboBox * stroke_type_combo = nullptr; ///< idem, per il contorno
+QCheckBox * brush_follows_check = nullptr; ///< idem: l'ancoraggio della texture allo stick
+QCheckBox * texture_tiled_check = nullptr; ///< idem: la ripetizione della tile nel riempimento
+QCheckBox * fill_texture_arrow_check = nullptr;   ///< idem: accende la freccia della texture di riempimento
+QCheckBox * stroke_texture_arrow_check = nullptr; ///< idem, per quella del contorno
 QSpinBox* fps_spin_box;
 QSlider* img_rotation_slider;
 QSpinBox * onion_skin_sb;
@@ -657,18 +668,12 @@ Widget::Widget(QWidget *parent)
         col->addWidget(pressure_opacity_check);
         connect(pressure_opacity_check, &QCheckBox::toggled, this, [this](bool on){ view->draw_pressure_opacity = on; });
 
-        // cartella pennelli: la stessa registrata da CreatePaths(), accanto a Libraries/myStickFigures
-        QString brushes_path = brush_folder.path();
-
-        // selettore collezione: ogni file .abr è una "collezione" trattata come una
-        // sottocartella a sé (le sottocartelle reali compaiono come prefisso nel percorso
-        // relativo dell'etichetta). Cambiando voce si mostrano solo i suoi pennelli.
-        QHBoxLayout *folder_row = new QHBoxLayout();
-        folder_row->addWidget(new QLabel(tr("Collection"), advanced_draw_tab));
-        QComboBox *folder_combo = new QComboBox(advanced_draw_tab);
-        folder_combo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        folder_row->addWidget(folder_combo, 1);
-        col->addLayout(folder_row);
+        // cartella pennelli: la stessa registrata da CreatePaths(), accanto a Libraries/myStickFigures.
+        // La griglia (collezioni .abr, anteprime, import) è BrushPicker, condivisa con il bordo a
+        // pennello della colonna Style: qui restano solo i controlli che scrivono lo stato di
+        // disegno di MyView, che un bordo non ha.
+        BrushPicker *brush_picker = new BrushPicker(brush_folder.path(), advanced_draw_tab);
+        col->addWidget(brush_picker, 1);
 
         // riporta lo stato pennello di MyView nei controlli (dopo un preset), senza far
         // ripartire le loro connect — una rigenerazione della punta a metà della
@@ -689,56 +694,14 @@ Widget::Widget(QWidget *parent)
                 c.first->setValue(c.second);
             }
         };
-
-        // preset della punta integrata: solo parametri, nessuna texture — le matite si
-        // distinguono per durezza/opacità/spessore, con la punta un po' ovale e ruotata a caso
-        // dab per dab (angle jitter) che dà il bordo irregolare della grafite
-        struct BrushPreset { const char *name; int size, opacity, spacing, hardness, roundness, size_jitter, angle_jitter; };
-        static const BrushPreset brush_presets[] = {
-            { "Round",       20, 100, 25,  75, 100,  0,   0 },
-            { "Pencil 3H",    4,  35, 10, 100,  80, 20, 100 },
-            { "Pencil H/B",   6,  60, 12,  95,  80, 25, 100 },
-            { "Pencil B2",    9,  80, 14,  85,  75, 35, 100 },
-            { "Pencil B6",   14, 100, 18,  70,  70, 45, 100 },
-            { "Aerograph",   60,  12,  5,   0, 100,  0,   0 },
-            { "Ink pen",      6, 100,  6, 100, 100,  0,   0 } };
-
-        // anteprima di una punta: lo stamp reso allo spessore e all'opacità con cui verrà
-        // usato, altrimenti le sette punte integrate sono sette cerchi neri identici
-        auto tip_preview = [](const QImage &stamp, int size, int opacity){
-            QImage preview(128, 128, QImage::Format_ARGB32_Premultiplied);
-            preview.fill(Qt::transparent);
-            QPainter pp(&preview);
-            pp.setOpacity(qBound(0, opacity, 100)/100.0);
-            double d = qBound(24.0, size*4.0, 128.0); // relativo, ma leggibile anche per la 3H
-            pp.drawImage(QRectF((128-d)/2.0, (128-d)/2.0, d, d), stamp);
-            pp.end();
-            return preview;
-        };
-
-        // griglia anteprime: icone in griglia che rifluisce al ridimensionamento.
-        // Ogni item porta il proprio stamp (QImage ARGB, alpha = copertura) nel UserRole,
-        // così la selezione è uniforme: draw_brush_stamp = item->data(UserRole). I built-in
-        // portano anche il loro indice di preset in UserRole+1, che ne applica tutti i parametri.
-        QListWidget *brush_list = new QListWidget(advanced_draw_tab);
-        brush_list->setViewMode(QListView::IconMode);
-        brush_list->setIconSize(QSize(64, 64));
-        brush_list->setGridSize(QSize(78, 86));
-        brush_list->setResizeMode(QListView::Adjust);
-        brush_list->setMovement(QListView::Static);
-        brush_list->setUniformItemSizes(true);
-        brush_list->setSpacing(4);
-        brush_list->setMinimumHeight(80); // le righe dei jitter mangiano lo spazio da qui
-        connect(brush_list, &QListWidget::currentItemChanged, this,
-                [this, sync_controls](QListWidgetItem *cur, QListWidgetItem *){
-            if(!cur) return;
-            QImage stamp = cur->data(Qt::UserRole).value<QImage>();
-            if(!stamp.isNull())
-                view->draw_brush_stamp = stamp;
-            QVariant preset_idx = cur->data(Qt::UserRole + 1);
-            if(!preset_idx.isValid())
-                return; // pennello .abr: solo lo stamp, i parametri restano quelli impostati a mano
-            const BrushPreset &p = brush_presets[preset_idx.toInt()];
+        connect(brush_picker, &BrushPicker::brushChosen, this,
+                [this](const QImage &stamp){ view->draw_brush_stamp = stamp; });
+        // la griglia si popola nel proprio costruttore, quindi il brushChosen della selezione
+        // iniziale è già partito prima di questa connect: prendi la punta corrente a mano,
+        // altrimenti resterebbe quella messa dal costruttore di MyView finché non si clicca
+        view->draw_brush_stamp = brush_picker->CurrentStamp();
+        connect(brush_picker, &BrushPicker::presetChosen, this,
+                [this, sync_controls](const BrushPreset &p){
             view->draw_brush_size = p.size;
             view->draw_brush_opacity = p.opacity;
             view->draw_brush_spacing = p.spacing;
@@ -749,119 +712,18 @@ Widget::Widget(QWidget *parent)
             sync_controls();
         });
 
-        // mostra i pennelli di una collezione. collection vuota = punte integrate (un item
-        // per preset, con l'anteprima resa al suo spessore e alla sua opacità).
-        auto populate = [brush_list, tip_preview](const QString &collection){
-            brush_list->clear();
-            if(collection.isEmpty()){
-                for(int i = 0; i < int(std::size(brush_presets)); i++){
-                    const BrushPreset &p = brush_presets[i];
-                    QImage stamp = MyView::MakeRoundBrush(128, p.hardness, p.roundness);
-                    QImage preview = tip_preview(stamp, p.size, p.opacity);
-                    QListWidgetItem *it = new QListWidgetItem(QIcon(QPixmap::fromImage(preview)), tr(p.name));
-                    it->setData(Qt::UserRole, stamp);
-                    it->setData(Qt::UserRole + 1, i);
-                    brush_list->addItem(it);
-                }
-                brush_list->setCurrentRow(0);
-                return;
-            }
-            const QList<AbrBrush> brushes = LoadAbr(collection);
-            for(const AbrBrush &b : brushes){
-                QListWidgetItem *it = new QListWidgetItem(QIcon(QPixmap::fromImage(b.stamp)), b.name);
-                it->setData(Qt::UserRole, b.stamp);
-                brush_list->addItem(it);
-            }
-            if(brush_list->count())
-                brush_list->setCurrentRow(0);
-        };
-
         // durezza/rotondità: rigenerano la punta selezionata sul posto (stamp + anteprima),
         // senza ripopolare la lista — altrimenti ritoccare la durezza di un preset avrebbe
         // riportato la selezione su "Round". Sulle collezioni .abr non c'è nulla da
         // rigenerare: lo stamp è quello del file.
-        auto rebuild_round = [this, brush_list, folder_combo, tip_preview]{
-            if(!folder_combo->currentData().toString().isEmpty())
-                return;
-            QListWidgetItem *cur = brush_list->currentItem();
-            if(!cur)
-                return;
-            QImage stamp = MyView::MakeRoundBrush(128, view->draw_brush_hardness, view->draw_brush_roundness);
-            cur->setData(Qt::UserRole, stamp);
-            cur->setIcon(QIcon(QPixmap::fromImage(tip_preview(stamp, view->draw_brush_size,
-                                                              view->draw_brush_opacity))));
-            view->draw_brush_stamp = stamp;
+        auto rebuild_round = [this, brush_picker]{
+            brush_picker->RebuildBuiltIn(view->draw_brush_hardness, view->draw_brush_roundness,
+                                         view->draw_brush_size, view->draw_brush_opacity);
         };
         connect(hard_spin, QOverload<int>::of(&QSpinBox::valueChanged), this,
                 [this, rebuild_round](int v){ view->draw_brush_hardness = v; rebuild_round(); });
         connect(roundness_spin, QOverload<int>::of(&QSpinBox::valueChanged), this,
                 [this, rebuild_round](int v){ view->draw_brush_roundness = v; rebuild_round(); });
-
-        // (ri)costruisce la combobox scandendo ricorsivamente i .abr sotto Brushes.
-        // Voce 0 = "Built-in" (tondo). Preserva la selezione corrente se ancora presente.
-        auto rescan = [this, folder_combo, brushes_path]{
-            const QString prev = folder_combo->currentData().toString();
-            folder_combo->blockSignals(true);
-            folder_combo->clear();
-            folder_combo->addItem(tr("Built-in"), QString());
-            QDir root(brushes_path);
-            QDirIterator it(brushes_path, QStringList() << "*.abr", QDir::Files,
-                            QDirIterator::Subdirectories);
-            QStringList files;
-            while(it.hasNext()){ it.next(); files << it.filePath(); }
-            files.sort(Qt::CaseInsensitive);
-            for(const QString &f : files)
-                folder_combo->addItem(root.relativeFilePath(f), f);
-            int idx = folder_combo->findData(prev);
-            folder_combo->setCurrentIndex(idx >= 0 ? idx : 0);
-            folder_combo->blockSignals(false);
-        };
-        connect(folder_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
-                [populate, folder_combo](int){ populate(folder_combo->currentData().toString()); });
-        rescan();
-        populate(folder_combo->currentData().toString());
-
-        // import (.abr copiati in Brushes) + refresh, nel pannello inferiore dello splitter
-        QHBoxLayout *brush_btn_row = new QHBoxLayout();
-        QPushButton *import_btn = new QPushButton(tr("Import brush"), advanced_draw_tab);
-        QPushButton *refresh_btn = new QPushButton(tr("Refresh"), advanced_draw_tab);
-        brush_btn_row->addWidget(import_btn);
-        brush_btn_row->addWidget(refresh_btn);
-        connect(import_btn, &QPushButton::clicked, this,
-                [this, rescan, populate, folder_combo, brushes_path]{
-            const QStringList files = QFileDialog::getOpenFileNames(this, tr("Import brushes"),
-                                        QString(), tr("Photoshop brushes (*.abr)"));
-            QString last;
-            for(const QString &src : files){
-                QString dest = brushes_path + "/" + QFileInfo(src).fileName();
-                if(QFileInfo(src).absoluteFilePath() != QFileInfo(dest).absoluteFilePath()){
-                    QFile::remove(dest);      // sovrascrivi un omonimo esistente
-                    QFile::copy(src, dest);
-                }
-                last = dest;
-            }
-            rescan();
-            int idx = last.isEmpty() ? -1 : folder_combo->findData(last);
-            if(idx >= 0 && idx != folder_combo->currentIndex())
-                folder_combo->setCurrentIndex(idx);  // seleziona la collezione appena importata (fa populate)
-            else
-                populate(folder_combo->currentData().toString());
-        });
-        connect(refresh_btn, &QPushButton::clicked, this,
-                [rescan, populate, folder_combo]{ rescan(); populate(folder_combo->currentData().toString()); });
-
-        // griglia ridimensionabile: trascina la maniglia dello splitter per allargarla
-        QSplitter *brush_split = new QSplitter(Qt::Vertical, advanced_draw_tab);
-        brush_split->setChildrenCollapsible(false);
-        brush_split->addWidget(brush_list);
-        QWidget *brush_below = new QWidget(advanced_draw_tab);
-        QVBoxLayout *below_col = new QVBoxLayout(brush_below);
-        below_col->setContentsMargins(0, 0, 0, 0);
-        below_col->addLayout(brush_btn_row);
-        brush_split->addWidget(brush_below);
-        brush_split->setStretchFactor(0, 1);
-        brush_split->setStretchFactor(1, 0);
-        col->addWidget(brush_split, 1);
 
         // azioni: rientra in draw mode su un freehand esistente + undo/redo di sessione
         QHBoxLayout *action_row = new QHBoxLayout();
@@ -891,6 +753,9 @@ Widget::Widget(QWidget *parent)
         connect(redo_btn, &QPushButton::clicked, this, [this]{ view->DrawStrokeRedo(); });
         // niente addStretch finale: lo splitter con la griglia riempie lo spazio verticale
     }
+
+    BuildStyleCombos(); // dopo che view esiste: legge my_brush/my_pen per i due segnacolore
+    BuildStyleTabs();   // e subito dopo: raggruppa le caselle che BuildStyleCombos() ha creato
 
     AddFrame();
     num = scene->items();
@@ -946,6 +811,13 @@ Widget::Widget(QWidget *parent)
     my_rect->setPen(Qt::NoPen);
     scene->addItem(my_rect);
     scene->setSceneRect(limit_rect->rect());
+    // la finestra all'avvio può essere più piccola della tela: senza questo la view parte con
+    // le barre a zero, cioè sull'angolo della scena (che sta un 10% FUORI dal foglio) invece
+    // che sul foglio. centerOn() qui basta perché fissa lastCenterPoint: AnchorViewCenter lo
+    // riapplica al primo show e a ogni ridimensionamento successivo, e una panoramica
+    // dell'utente lo aggiorna, quindi non riporta la vista indietro
+    view->setResizeAnchor(QGraphicsView::AnchorViewCenter);
+    view->centerOn(my_rect->sceneBoundingRect().center());
     num = scene->items();
     // adjust image editing offset sliders according to max size of scene
     img_v_offset_slider->setRange(-my_rect->rect().height(), my_rect->rect().height());
@@ -1060,7 +932,7 @@ void Widget::CreateJson(QString path ){
     file.close();
 }
 /**
- * @details Each of the six per-user folders (program root, libraries, temp render,
+ * @details Each per-user folder (program root, libraries, brushes, patterns, temp render,
  * animations, stick figures, video export) is created independently if missing — a
  * fresh install has none of them yet, but a folder deleted by hand later should also be
  * silently recreated rather than causing every subsequent file operation to fail.
@@ -1084,6 +956,11 @@ void Widget::CreatePaths(){
     if(!brush_folder.exists()){
         qDebug("brush folder created");
         brush_folder.mkpath(path+"/MarionettaPlus/Brushes");
+    }
+    pattern_folder = QDir(path+"/MarionettaPlus/myPatterns");
+    if(!pattern_folder.exists()){
+        qDebug("pattern folder created");
+        pattern_folder.mkpath(path+"/MarionettaPlus/myPatterns");
     }
     temp_render_folder = QDir(path+"/MarionettaPlus/temporaryRender");
     if(!temp_render_folder.exists()){
@@ -1914,16 +1791,419 @@ void Widget::on_imgRotationSpinbox_valueChanged(int arg1)
 {
     img_rotation_slider->setValue(img_rotation_spinbox->value());
 }
-/// @details Opens a color picker and sets it as the pen color for future drawing (and updates the swatch button's background to match).
+namespace {
+
+/**
+ * @details Which Widget::StyleKind an existing brush reads as, used to keep a type combo
+ * showing what the current fill/stroke actually is even when the choice came from the two
+ * historical colour buttons or from the asynchronous pattern picker. Qt has one texture
+ * style for both a .pat tile and an imported image, so either reads back as STYLE_PATTERN
+ * — the distinction only ever mattered for choosing which chooser to open.
+ */
+int KindOfBrush(const QBrush &brush)
+{
+    switch(brush.style()){
+    case Qt::NoBrush:                return Widget::STYLE_NONE;
+    case Qt::TexturePattern:         return Widget::STYLE_PATTERN;
+    case Qt::LinearGradientPattern:  return Widget::STYLE_LINEAR;
+    case Qt::RadialGradientPattern:  return Widget::STYLE_RADIAL;
+    default:                         return Widget::STYLE_SOLID;
+    }
+}
+
+/**
+ * @details A Qt::TexturePattern brush whose tile paints @p tile_size scene pixels along its
+ * longer side, via the brush TRANSFORM rather than by resampling the QImage: the transform
+ * is part of what QDataStream writes for a QBrush, so the size survives save/load with no
+ * new field, and the tile keeps its full resolution for when the figure is scaled up or the
+ * animation is exported at a larger size.
+ *
+ * The scaling exists because the two sources of a texture — a Photoshop .pat pack and an
+ * arbitrary image file — are both authored at sizes one or two orders of magnitude larger
+ * than a stick. Painted 1:1 they show one flat crop of themselves, which reads as a plain
+ * colour rather than as a pattern.
+ */
+QBrush TextureBrush(const QImage &tile, int tile_size)
+{
+    QBrush brush(tile);
+    const int longest = qMax(tile.width(), tile.height());
+    if(longest > 0 && tile_size > 0)
+        brush.setTransform(QTransform::fromScale(qreal(tile_size)/longest,
+                                                 qreal(tile_size)/longest));
+    return brush;
+}
+
+} // namespace
+
+/**
+ * @details The entries are identical for the two groups because the target is identical: a
+ * QBrush, whether it ends up in StickData::brush or inside StickData::pen. Both combos are
+ * inserted at position 0 of their group's existing layout — verticalLayout_16 for "Fill",
+ * verticalLayout_15 for "Border" — so the type reads above the swatch that shows it.
+ */
+void Widget::BuildStyleCombos()
+{
+    const QList<QPair<QString, int>> entries = {
+        { tr("Solid"),           STYLE_SOLID   },
+        { tr("Pattern"),         STYLE_PATTERN },
+        { tr("Linear gradient"), STYLE_LINEAR  },
+        { tr("Radial gradient"), STYLE_RADIAL  },
+        { tr("Image"),           STYLE_IMAGE   },
+        { tr("None"),            STYLE_NONE    } };
+
+    fill_type_combo = new QComboBox(ui->groupBox_4);
+    stroke_type_combo = new QComboBox(ui->groupBox);
+    for(QComboBox *combo : { fill_type_combo, stroke_type_combo }){
+        for(const QPair<QString, int> &entry : entries)
+            combo->addItem(entry.first, entry.second);
+        combo->setToolTip(tr("What this is painted with. Pattern opens the pattern library, "
+                             "the gradients open the gradient editor, Image loads a file."));
+    }
+    // solo il CONTORNO: un pennello si timbra lungo un percorso, e un riempimento non ne ha uno
+    stroke_type_combo->insertItem(stroke_type_combo->count() - 1, tr("Brush"), STYLE_BRUSH);
+    stroke_type_combo->setToolTip(stroke_type_combo->toolTip() + tr(" Brush stamps a brush tip "
+                                  "along the outline, using the same library as freehand draw."));
+    ui->verticalLayout_16->insertWidget(0, fill_type_combo);
+    ui->verticalLayout_15->insertWidget(0, stroke_type_combo);
+
+    // una casella per gruppo (spec): la freccia del riempimento e quella del contorno si
+    // accendono separatamente, perché con entrambe accese si sovrappongono e a volte se ne
+    // vuole muovere una sola
+    fill_texture_arrow_check = new QCheckBox(tr("Show texture handle"), ui->groupBox_4);
+    stroke_texture_arrow_check = new QCheckBox(tr("Show texture handle"), ui->groupBox);
+    for(QCheckBox *box : { fill_texture_arrow_check, stroke_texture_arrow_check })
+        box->setToolTip(tr("Draws an arrow on the selected stick for this texture: drag its "
+                           "tail to move the texture, its tip to rotate and scale it."));
+    ui->verticalLayout_16->insertWidget(1, fill_texture_arrow_check);
+    ui->verticalLayout_15->insertWidget(1, stroke_texture_arrow_check);
+    connect(fill_texture_arrow_check, &QCheckBox::toggled, this, [this](bool on){
+        view->show_fill_texture_arrow = on;
+        if(view->viewport()) view->viewport()->update(); // le frecce vivono nel foreground
+    });
+    connect(stroke_texture_arrow_check, &QCheckBox::toggled, this, [this](bool on){
+        view->show_stroke_texture_arrow = on;
+        if(view->viewport()) view->viewport()->update();
+    });
+
+    // un solo interruttore per riempimento E contorno, perché StickData::brush_follows_stick
+    // è un solo campo: sta sopra i due gruppi, non dentro uno dei due
+    brush_follows_check = new QCheckBox(tr("Texture follows stick"), ui->groupBox_3);
+    brush_follows_check->setChecked(view->my_brush_follows_stick);
+    brush_follows_check->setToolTip(tr("On: a pattern, gradient or image rotates, moves and "
+                                      "stretches with the stick. Off: it stays put in the "
+                                      "scene and the stick moves over it."));
+    ui->verticalLayout_20->insertWidget(0, brush_follows_check);
+    // si applica subito allo stick selezionato (come gli altri controlli per-stick), e resta
+    // come stato corrente per i prossimi stick disegnati e per i bottoni "applica"
+    connect(brush_follows_check, &QCheckBox::toggled, this, [this](bool on){
+        view->my_brush_follows_stick = on;
+        if(view->my_animation->current_frame == nullptr)
+            return;
+        StickData *current = view->my_animation->CurrentFrame()->CurrentStick();
+        if(current == nullptr || current->brush_follows_stick == on)
+            return;
+        view->StoreUndo(CMD_SIMPLE);
+        current->brush_follows_stick = on;
+        if(current->view)
+            current->view->Refresh(0);
+        if(view->my_animation->CurrentFrame()->CurrentStickFigure())
+            view->my_animation->CurrentFrame()->CurrentStickFigure()->UpdateIcon();
+    });
+
+    // la ripetizione della tile, accanto all'ancoraggio: stessa forma, stesso motivo per cui è
+    // qui e non solo dentro TextureOptionsDialog — il flag è per-stick e appiccicoso, e da lì
+    // finiva addosso a ogni riempimento successivo (un pattern preso dalla libreria compreso,
+    // che non aveva alcun controllo per rimetterlo a posto)
+    texture_tiled_check = new QCheckBox(tr("Tile texture"), ui->groupBox_3);
+    texture_tiled_check->setChecked(view->my_texture_tiled);
+    texture_tiled_check->setToolTip(tr("On: the tile repeats to cover the shape. Off: one single "
+                                       "instance is painted, wherever its scale, angle and offset "
+                                       "put it. Fill only — a stroke always repeats."));
+    ui->verticalLayout_20->insertWidget(1, texture_tiled_check);
+    connect(texture_tiled_check, &QCheckBox::toggled, this, [this](bool on){
+        view->my_texture_tiled = on;
+        if(view->my_animation->current_frame == nullptr)
+            return;
+        StickData *current = view->my_animation->CurrentFrame()->CurrentStick();
+        if(current == nullptr || current->texture_tiled == on)
+            return;
+        view->StoreUndo(CMD_SIMPLE);
+        current->texture_tiled = on;
+        if(current->view)
+            current->view->Refresh(0);
+        if(view->my_animation->CurrentFrame()->CurrentStickFigure())
+            view->my_animation->CurrentFrame()->CurrentStickFigure()->UpdateIcon();
+    });
+
+    // activated e non currentIndexChanged: il selettore si apre solo su scelta dell'utente,
+    // non quando ApplyStyleBrush() riallinea la combo a un brush appena impostato
+    // replace=true: scegliere un tipo dalla combo È assegnare un riempimento nuovo, che
+    // sostituisce il precedente per intero (vedi ChooseStyle())
+    connect(fill_type_combo, &QComboBox::activated, this,
+            [this](int){ ChooseStyle(true, fill_type_combo->currentData().toInt(), true); });
+    connect(stroke_type_combo, &QComboBox::activated, this,
+            [this](int){ ChooseStyle(false, stroke_type_combo->currentData().toInt(), true); });
+
+    RefreshStyleSwatch(true);
+    RefreshStyleSwatch(false);
+}
+
+/**
+ * @details Two rearrangements of widgets that already exist, so every signal, tooltip and
+ * per-stick enablement path (Animation::UpdateSliders()/UpdateStyleControls()) is untouched.
+ * The four texture check boxes sat in three different layouts although they are one thing —
+ * how the paint is displayed — hence one "Display options" group, in the same tab as the two
+ * groups they act on. "Depth" moves into a tab of its own because its 250 px sat UNDER Fill
+ * and Border: the column was taller than a small screen and the rest of it fell off the
+ * window. In a tab it costs the height of the taller page instead of the sum.
+ */
+void Widget::BuildStyleTabs()
+{
+    QGroupBox *display_group = new QGroupBox(tr("Display options"), ui->groupBox_3);
+    QVBoxLayout *display_col = new QVBoxLayout(display_group);
+    display_col->setContentsMargins(4, 10, 4, 4);
+    display_col->setSpacing(2);
+    // due caselle omonime nello stesso gruppo non si distinguerebbero più: finora il gruppo
+    // che le conteneva diceva a quale delle due frecce si riferissero
+    fill_texture_arrow_check->setText(tr("Fill texture handle"));
+    stroke_texture_arrow_check->setText(tr("Border texture handle"));
+    for(QCheckBox *box : { brush_follows_check, texture_tiled_check,
+                           fill_texture_arrow_check, stroke_texture_arrow_check })
+        display_col->addWidget(box); // riparenta, e questo le toglie dal layout precedente
+
+    QTabWidget *style_tabs = new QTabWidget(ui->groupBox_3);
+    QWidget *paint_tab = new QWidget(style_tabs);
+    QVBoxLayout *paint_col = new QVBoxLayout(paint_tab);
+    paint_col->setContentsMargins(0, 0, 0, 0);
+    paint_col->addWidget(ui->groupBox_4); // "Fill"
+    paint_col->addWidget(ui->groupBox);   // "Border"
+    paint_col->addWidget(display_group);
+    paint_col->addStretch(); // come il vecchio spacer di coda: i gruppi restano alti quanto serve
+    QWidget *depth_tab = new QWidget(style_tabs);
+    QVBoxLayout *depth_col = new QVBoxLayout(depth_tab);
+    depth_col->setContentsMargins(0, 0, 0, 0);
+    depth_col->addWidget(ui->groupBox_13); // "Depth"
+    depth_col->addStretch();
+    // etichette corte: la colonna è larga 150 px, con nomi più lunghi la barra delle tab
+    // passerebbe alle frecce di scorrimento
+    style_tabs->addTab(paint_tab, tr("Paint"));
+    style_tabs->addTab(depth_tab, tr("Depth"));
+    style_tabs->setTabToolTip(0, tr("Fill and border"));
+    ui->verticalLayout_20->insertWidget(0, style_tabs);
+}
+
+/// @details See the header. Every branch either applies a brush through ApplyStyleBrush()
+/// or leaves the current one alone (a cancelled dialog must not change anything) — and since
+/// ApplyStyleBrush() ASSIGNS the brush, one fill (or one stroke) at a time is all a stick can
+/// have: picking a gradient over a pattern drops the tile, its placement and its tiling with it.
+void Widget::ChooseStyle(bool for_fill, int kind, bool replace)
+{
+    switch(kind){
+    case STYLE_NONE:
+        ApplyStyleBrush(for_fill, QBrush(Qt::NoBrush));
+        break;
+
+    case STYLE_BRUSH: {
+        if(for_fill)
+            break;              // non è nella combo del riempimento: nulla da timbrare lungo
+        if(!brush_stroke_dialog)
+            brush_stroke_dialog = new BrushStrokeDialog(brush_folder.path(), this);
+        // il pennello parte da quello dello stick selezionato, non dall'ultimo scelto: la
+        // finestra è un editor del contorno che c'è, non un ricordo di quello di prima
+        StickData *current = view->my_animation->current_frame == nullptr ? nullptr
+                           : view->my_animation->CurrentFrame()->CurrentStick();
+        BrushStroke seed = current != nullptr ? current->StrokeBrush() : view->my_stroke_brush;
+        if(current == nullptr){
+            // niente stick da cui leggere colore/spessore/opacità: quelli della penna corrente
+            seed.color = view->my_pen.brush().color();
+            seed.size = qMax(1.0, view->my_pen.widthF());
+            seed.opacity = ReadPaintOpacity(view->my_pen.brush());
+        }
+        brush_stroke_dialog->Seed(seed);
+        if(brush_stroke_dialog->exec() != QDialog::Accepted)
+            break;
+        view->my_stroke_brush = brush_stroke_dialog->Brush();
+        if(view->my_stroke_brush.stamp.isNull())
+            break;              // libreria vuota: non c'è alcuna punta da adottare
+        // i dab sono tinti con il COLORE della penna, quindi la penna diventa la tinta unita che
+        // la finestra ha scelto: un gradiente o una tile lì sotto non verrebbe più tracciato da
+        // nessuno, e il colore deve poter cambiare senza passare da "Solid" (che butta il pennello)
+        ApplyStyleBrush(false, QBrush(view->my_stroke_brush.color), STYLE_BRUSH);
+        break;
+    }
+
+    case STYLE_SOLID: {
+        const QBrush current = for_fill ? view->my_brush : view->my_pen.brush();
+        QColor color = QColorDialog::getColor(current.color(), this,
+                                             for_fill ? tr("Fill color") : tr("Stroke color"),
+                                             QColorDialog::ShowAlphaChannel);
+        if(!color.isValid())
+            break;
+        // l'opacità resta quella dello slider, come nei due handler storici che questo
+        // ramo ha sostituito
+        color.setAlphaF((for_fill ? brush_opacity_slider->value()
+                                  : pen_opacity_slider->value()) / 100.0);
+        ApplyStyleBrush(for_fill, QBrush(color));
+        break;
+    }
+
+    case STYLE_LINEAR:
+    case STYLE_RADIAL: {
+        // una finestra per tipo, tenuta in vita: riaprirla riparte dall'ultimo gradiente
+        GradientDialog *&dialog = (kind == STYLE_LINEAR) ? linear_gradient_dialog
+                                                         : radial_gradient_dialog;
+        if(!dialog)
+            dialog = new GradientDialog(kind == STYLE_LINEAR ? GradientDialog::LINEAR
+                                                             : GradientDialog::RADIAL, this);
+        if(dialog->exec() == QDialog::Accepted)
+            ApplyStyleBrush(for_fill, QBrush(dialog->Gradient()));
+        break;
+    }
+
+    case STYLE_IMAGE: {
+        QBrush current = for_fill ? view->my_brush : view->my_pen.brush();
+        // replace: la scelta viene dalla combo, quindi è un riempimento NUOVO e va chiesta
+        // l'immagine anche se una texture c'è già (un pattern è una texture come le altre: senza
+        // questo, "Immagine" scivolava nelle opzioni della tile precedente senza sostituirla).
+        // Il bottone della campionatura passa false e resta la strada per rivedere le opzioni.
+        if(replace || current.style() != Qt::TexturePattern){
+            // la prima cosa da chiedere è QUALE immagine, non come sistemarla — le opzioni
+            // arrivano subito dopo, sull'immagine appena scelta
+            const QString path = QFileDialog::getOpenFileName(this, tr("Fill image"), QString(),
+                                     tr("Images (*.png *.jpg *.jpeg *.bmp *.gif *.tif *.tiff *.webp)"));
+            if(path.isEmpty())
+                break;
+            const QImage image(path);
+            if(image.isNull()){
+                QMessageBox::warning(this, tr("Fill image"), tr("Cannot read %1.").arg(path));
+                break;
+            }
+            // stessa scala dei pattern, e con lo stesso motivo: un'immagine da file è grande
+            // uno o due ordini di grandezza più di uno stick
+            current = TextureBrush(image, texture_tile_size);
+        }
+        if(!texture_options_dialog)
+            texture_options_dialog = new TextureOptionsDialog(this);
+        // il ritaglio a istanza singola vale solo per il RIEMPIMENTO: un contorno ritagliato a
+        // una tile sarebbe un frammento di contorno, non un contorno
+        texture_options_dialog->Seed(current, view->my_texture_tiled, for_fill);
+        if(texture_options_dialog->exec() != QDialog::Accepted)
+            break;
+        const QBrush chosen = texture_options_dialog->Texture();
+        if(chosen.style() != Qt::TexturePattern)
+            break; // nessuna immagine: non c'è niente da applicare
+        if(for_fill)
+            view->my_texture_tiled = texture_options_dialog->Tiled();
+        ApplyStyleBrush(for_fill, chosen, STYLE_IMAGE);
+        break;
+    }
+
+    case STYLE_PATTERN:
+        // l'unico ramo asincrono: la finestra resta aperta e richiama ApplyStyleBrush() a
+        // ogni click, quindi il bersaglio va ricordato adesso
+        pattern_target_is_fill = for_fill;
+        if(!pattern_library){
+            pattern_library = new PatternLibrary(pattern_folder.path(), this);
+            connect(pattern_library, &PatternLibrary::patternChosen, this,
+                    [this](const QImage &tile, int tile_size){
+                texture_tile_size = tile_size; // vale anche per il prossimo riempimento a immagine
+                ApplyStyleBrush(pattern_target_is_fill, TextureBrush(tile, tile_size));
+            });
+            // doppio click / "Apply to stick": porta il brush corrente SULLO stick, la stessa
+            // strada dei bottoni "applica" della colonna Style (undo incluso)
+            connect(pattern_library, &PatternLibrary::patternApplied, this, [this]{
+                view->SetGraphics(false, pattern_target_is_fill ? ATTRIBUTE_BRUSHCOLOR
+                                                                : ATTRIBUTE_PENCOLOR);
+            });
+        }
+        pattern_library->show();
+        pattern_library->raise();
+        break;
+    }
+}
+
+/**
+ * @details "No stroke" is stored as Qt::NoPen rather than as a pen holding an empty brush:
+ * that is the form every paint engine and both foreign exporters already recognize
+ * (StkFormat reads pen.style() == Qt::NoPen as thickness 0). Coming back out of NoPen
+ * restores a solid line without touching any other pen style, in case one is ever added.
+ */
+void Widget::ApplyStyleBrush(bool for_fill, const QBrush &brush, int kind)
+{
+    if(for_fill){
+        view->my_brush = brush;
+    } else if(brush.style() == Qt::NoBrush){
+        view->my_pen.setStyle(Qt::NoPen);
+    } else {
+        if(view->my_pen.style() == Qt::NoPen)
+            view->my_pen.setStyle(Qt::SolidLine);
+        view->my_pen.setBrush(brush);
+    }
+    // un contorno alla volta, come un riempimento alla volta: scegliere qualunque altro tipo di
+    // bordo butta via il pennello, altrimenti i dab resterebbero sopra la nuova penna e la scelta
+    // sembrerebbe non aver fatto nulla. Un contorno a pennello passa STYLE_BRUSH esplicito perché
+    // la sua penna È una tinta unita e il brush da solo non potrebbe mai dirlo.
+    if(!for_fill && kind != STYLE_BRUSH)
+        view->my_stroke_brush.stamp = QImage();
+    // una texture appena scelta arriva opaca (QBrush(tile) parte da un colore nero pieno): dalle
+    // subito l'opacità che lo slider mostra già, altrimenti il cursore starebbe a metà e il
+    // riempimento sarebbe pieno finché non lo si tocca
+    // live=false: qui si sta ADOTTANDO un pennello, non modificando lo stick — a portarlo sullo
+    // stick ci pensano i bottoni Apply (o il doppio click della libreria pattern)
+    if(brush.style() == Qt::TexturePattern)
+        SetPaintOpacity(for_fill, for_fill ? brush_opacity_slider->value()
+                                           : pen_opacity_slider->value(), false);
+    QComboBox *combo = for_fill ? fill_type_combo : stroke_type_combo;
+    const int index = combo->findData(kind < 0 ? KindOfBrush(brush) : kind);
+    if(index >= 0){
+        QSignalBlocker mute(combo); // activated() non scatta da codice, currentIndexChanged sì
+        combo->setCurrentIndex(index);
+    }
+    RefreshStyleSwatch(for_fill);
+}
+
+/// @details The two buttons are a fixed 20x20 in widget.ui, so a 14x14 icon leaves their
+/// frame visible. The old `background-color` stylesheet is cleared because it would paint
+/// over the icon — and it could only ever show a flat colour anyway.
+void Widget::RefreshStyleSwatch(bool for_fill)
+{
+    QPushButton *button = for_fill ? ui->currentBrushColorBtn : ui->currentColorBtn;
+    const QBrush brush = for_fill ? view->my_brush
+                                  : (view->my_pen.style() == Qt::NoPen ? QBrush(Qt::NoBrush)
+                                                                       : view->my_pen.brush());
+    QPixmap swatch(14, 14);
+    swatch.fill(Qt::transparent);
+    QPainter painter(&swatch);
+    if(brush.style() == Qt::NoBrush){
+        // scatola vuota con la diagonale: la convenzione grafica per "nessun colore"
+        painter.setPen(QPen(Qt::gray));
+        painter.drawRect(0, 0, swatch.width()-1, swatch.height()-1);
+        painter.drawLine(0, swatch.height()-1, swatch.width()-1, 0);
+    } else {
+        painter.setPen(Qt::NoPen);
+        // una texture porta la sua opacità nell'alpha del colore del brush, che Qt non usa per
+        // dipingerla: applicala qui come fa StickGraphicsItem::FillAndStroke(), sennò il
+        // campione resta pieno mentre il disegno sbiadisce
+        painter.setOpacity(StickGraphicsItem::FillOpacity(brush));
+        painter.setBrush(brush);
+        painter.drawRect(swatch.rect());
+    }
+    painter.end();
+    button->setStyleSheet(QString());
+    button->setIcon(QIcon(swatch));
+    button->setIconSize(swatch.size());
+}
+
+/**
+ * @details Re-opens the chooser for whatever the Border type combo currently says, rather
+ * than always the colour picker: this is the button that used to BE the colour picker, so
+ * it stays the one place to go back and edit the current stroke — the gradient's stops, the
+ * pattern library, another image file — instead of the type having to be re-picked from the
+ * combo to get its options back.
+ */
 void Widget::on_chooseColorBtn_clicked()
 {
-    QColor color = QColorDialog::getColor(Qt::yellow, this );
-    view->my_pen.setColor(color);
-    // aggiorna il colore del segnacolore
-    if(color.isValid()) {
-       QString qss = QString("background-color: %1").arg(color.name());
-       ui->currentColorBtn->setStyleSheet(qss);
-    }
+    ChooseStyle(false, stroke_type_combo->currentData().toInt());
 }
 /**
  * @details `SetGraphics(all, attribute)`'s first argument is the actual difference
@@ -1953,18 +2233,11 @@ void Widget::on_setPenThicknessAllBtn_clicked()
     view->SetGraphics(true, ATTRIBUTE_PENWIDTH);
 }
 
-/// @details Opens a color picker for the fill/brush color, applying the current fill-opacity slider value as alpha.
+/// @details Fill twin of on_chooseColorBtn_clicked() — see its doc: it re-opens the options
+/// of the fill's CURRENT type, which for a solid fill is the colour picker as always.
 void Widget::on_selectBrushColorBtn_clicked()
 {
-    QColor color = QColorDialog::getColor(Qt::yellow, this );
-    color.setAlphaF((float)brush_opacity_slider->value()/100);
-    view->my_brush.setColor(color);
-    // aggiorna il colore del segnacolore
-    if(color.isValid()) {
-       QString qss = QString("background-color: %1").arg(color.name());
-       ui->currentBrushColorBtn->setStyleSheet(qss);
-    }
-    //view->SetGraphics(true,ATTRIBUTE_PENCOLOR);
+    ChooseStyle(true, fill_type_combo->currentData().toInt());
 }
 
 /// @details All-sticks brush-color counterpart — see on_setStickColorBtn_clicked()'s doc.
@@ -1987,22 +2260,105 @@ void Widget::on_manipulateBtn_clicked()
 
 
 
-/// @details Applies the slider's value as alpha on the current pen color, mirroring it onto the numeric spinbox.
+/**
+ * @details Applies the slider's value as alpha on the current pen paint, mirroring it onto the
+ * numeric spinbox. Handled by SetPaintOpacity() so the stroke and the fill cannot drift apart.
+ */
 void Widget::on_penOpacitySlider_valueChanged(int value)
 {
-    QColor c = view->my_pen.color();
-    c.setAlphaF((float)pen_opacity_slider->value()/100);
-    view->my_pen.setColor(c);
+    Q_UNUSED(value)
+    SetPaintOpacity(false, pen_opacity_slider->value());
     pen_opacity_spinbox->setValue(pen_opacity_slider->value());
 }
 
-/// @details Brush-opacity counterpart of on_penOpacitySlider_valueChanged().
+/// @details Fill counterpart of on_penOpacitySlider_valueChanged().
 void Widget::on_fillOpacitySlider_valueChanged(int value)
 {
-    QColor c = view->my_brush.color();
-    c.setAlphaF((float)brush_opacity_slider->value()/100);
-    view->my_brush.setColor(c);
+    Q_UNUSED(value)
+    SetPaintOpacity(true, brush_opacity_slider->value());
     brush_opacity_spinbox->setValue(brush_opacity_slider->value());
+}
+
+/**
+ * @details One place for both sliders, and for the two brush kinds the alpha means something
+ * different for:
+ * - a **solid colour** — the alpha IS the colour's, which is what these sliders always wrote;
+ * - a **texture** — the alpha of a texture brush's QBrush::color() is unused by Qt's rendering
+ *   (setColor() is documented as having no effect on one), so it is free to carry the tile's
+ *   opacity, which StickGraphicsItem::FillOpacity() reads back at paint time. Absolute, not
+ *   compounding, and it persists with the brush: nothing new to serialize.
+ *
+ * The stroke goes through `setBrush()` rather than `setColor()`, because QPen::setColor()
+ * REPLACES the pen's brush with a flat one — it would turn a textured stroke into a plain colour.
+ *
+ * It writes to the SELECTED STICK as well as to the current paint (@p live). The sliders used to
+ * change only the current paint, so nothing happened until an Apply button was pressed — which,
+ * next to the controls that do act at once (the type combos apply on Apply, but the anchoring and
+ * tiling boxes are immediate), read as the opacity simply being ignored. Now they behave like
+ * every other per-stick slider in the panel: one StoreUndo() at the start of a drag, coalesced by
+ * a sliderFlags latch, so the whole drag is one undo step.
+ *
+ * - a **gradient** — its opacity is its stops', scaled relative to the most opaque one, so the
+ *   transparency dialled per stop keeps its ratios and the slider still reads one number. That is
+ *   also the only place it CAN live: QDataStream restores a QBrush's colour for a solid and a
+ *   texture but not for a gradient (measured), so an alpha parked there would vanish on save.
+ *
+ * All three go through ReadPaintOpacity()/WritePaintOpacity() (stickdata.h), which is what keeps
+ * this slider, its echo in Animation::UpdateStyleControls() and the paint path from disagreeing
+ * about where a given kind of brush keeps the number.
+ */
+void Widget::SetPaintOpacity(bool for_fill, int percent, bool live)
+{
+    auto tinted = [percent](QBrush brush) {
+        WritePaintOpacity(&brush, percent / 100.0);
+        return brush;
+    };
+    auto fadeable = [](const QBrush &brush) {
+        return brush.style() != Qt::NoBrush; // solo il vuoto non ha niente da sbiadire
+    };
+    // il pennello corrente: quel che erediteranno i prossimi stick e gli Apply
+    if(fadeable(for_fill ? view->my_brush : view->my_pen.brush())){
+        if(for_fill)
+            view->my_brush = tinted(view->my_brush);
+        else
+            view->my_pen.setBrush(tinted(view->my_pen.brush()));
+        RefreshStyleSwatch(for_fill);
+    }
+    if(!live || view->my_animation->current_frame == nullptr)
+        return;
+    // ...e lo stick selezionato, subito
+    StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
+    if(cs == nullptr)
+        return;
+    if(for_fill ? !fadeable(cs->brush)
+                : (cs->pen.style() == Qt::NoPen || !fadeable(cs->pen.brush())))
+        return;
+    bool &latch = for_fill ? sliderFlags.fillOpacity : sliderFlags.penOpacity;
+    if(!latch){
+        view->StoreUndo(CMD_SIMPLE); // un solo passo di undo per tutto il trascinamento
+        latch = true;
+    }
+    if(for_fill)
+        cs->brush = tinted(cs->brush);
+    else
+        cs->pen.setBrush(tinted(cs->pen.brush()));
+    if(cs->view)
+        cs->view->Refresh(0);
+    if(view->my_animation->CurrentFrame()->CurrentStickFigure())
+        view->my_animation->CurrentFrame()->CurrentStickFigure()->UpdateIcon();
+}
+
+/// @details Lowers the drag latch so the NEXT drag starts a fresh undo entry — the same
+/// coalescing pattern as on_imgWSlider_sliderReleased() and friends.
+void Widget::on_penOpacitySlider_sliderReleased()
+{
+    sliderFlags.penOpacity = false;
+}
+
+/// @details Fill counterpart of on_penOpacitySlider_sliderReleased().
+void Widget::on_fillOpacitySlider_sliderReleased()
+{
+    sliderFlags.fillOpacity = false;
 }
 
 /// @details Numeric-entry twin of the pen-opacity slider — mirrors onto it.

@@ -13,6 +13,7 @@
 #include <QtEndian>
 #include <QTemporaryFile>
 #include "myview.h"
+#include "gradientdialog.h"
 #include "uiItems.h"
 #include "framepresenter.h"
 #include "stkformat.h"
@@ -585,6 +586,837 @@ private slots:
         QCOMPARE(qAlpha(brushes[0].stamp.pixel(1, 1)), 255);
     }
 
+    // LoadPat() decodes a Photoshop .pat tile: one 8-bit plane per channel, each in its own
+    // Virtual Memory Array, interleaved back into an ARGB32 image. Built here to match the
+    // framing REAL packs use, which is what the first cut of the reader got wrong:
+    //   - the '8BPT' signature and an int16 (not int32) version
+    //   - a VMA "channels" field of 24, which is Photoshop's channel CAPACITY and not the
+    //     number of planes that follow, so the arrays must be read to the list's end
+    //   - RGB and CMYK records side by side (packs are full of CMYK)
+    // Mirrors AbrSampledBrushParses() for the sibling format.
+    void PatPatternParses()
+    {
+        // one Virtual Memory Array holding a 2x1 8-bit plane, uncompressed
+        auto write_plane = [](QDataStream &s, uchar a, uchar b){
+            s << (qint32)1;                 // is_written
+            s << (qint32)(23 + 2);          // length: the 23-byte header + 2 samples
+            s << (qint32)8;                 // depth
+            s << (qint32)0 << (qint32)0 << (qint32)1 << (qint32)2; // bounds t,l,b,r -> 2x1
+            s << (qint16)8;                 // pixel_depth
+            s << (qint8)0;                  // compression = raw
+            const uchar px[2] = {a, b};
+            s.writeRawData(reinterpret_cast<const char*>(px), 2);
+        };
+        // record header + VMA list wrapper around a body built by the caller
+        auto write_record = [](QDataStream &s, qint32 mode, const QString &name,
+                               const QByteArray &vma_body){
+            s << (qint32)1;                 // record version 1 (nessun prefisso di lunghezza)
+            s << mode;
+            s << (qint16)1 << (qint16)2;    // point height, width
+            s << (qint32)(name.length() + 1); // nome: unità UTF-16, terminatore incluso
+            for(QChar c : name)
+                s << (quint16)c.unicode();
+            s << (quint16)0;
+            s << (quint8)0;                 // pattern id: pascal string vuota
+            s << (qint32)3;                 // VMA list version 3
+            s << (qint32)vma_body.size();
+            s.writeRawData(vma_body.constData(), vma_body.size());
+        };
+
+        QByteArray rgb_body;
+        {
+            QDataStream s(&rgb_body, QIODevice::WriteOnly);
+            s.setByteOrder(QDataStream::BigEndian);
+            s << (qint32)0 << (qint32)0 << (qint32)1 << (qint32)2; // rettangolo del tile
+            s << (qint32)24;                // CAPACITÀ, non conteggio: come i file veri
+            write_plane(s, 255, 0);         // R
+            write_plane(s, 0, 128);         // G
+            write_plane(s, 0, 0);           // B
+            for(int slot = 0; slot < 21; slot++)
+                s << (qint32)0;             // gli slot restanti, non scritti
+        }
+        QByteArray cmyk_body;
+        {
+            QDataStream s(&cmyk_body, QIODevice::WriteOnly);
+            s.setByteOrder(QDataStream::BigEndian);
+            s << (qint32)0 << (qint32)0 << (qint32)1 << (qint32)2;
+            s << (qint32)24;
+            // CMYK memorizzato INVERTITO: 255 = nessun inchiostro
+            write_plane(s, 255, 0);         // C: pixel 0 senza ciano, pixel 1 ciano pieno
+            write_plane(s, 255, 255);       // M: niente
+            write_plane(s, 255, 255);       // Y: niente
+            write_plane(s, 255, 255);       // K: niente
+            for(int slot = 0; slot < 20; slot++)
+                s << (qint32)0;
+        }
+
+        QByteArray bytes;
+        {
+            QDataStream s(&bytes, QIODevice::WriteOnly);
+            s.setByteOrder(QDataStream::BigEndian);
+            s.writeRawData("8BPT", 4);      // firma del contenitore
+            s << (qint16)1;                 // version, a 16 bit
+            s << (qint32)2;                 // due pattern
+            write_record(s, 3, QStringLiteral("AB"), rgb_body);   // RGB
+            write_record(s, 4, QStringLiteral("CM"), cmyk_body);  // CMYK
+        }
+
+        QTemporaryFile f;
+        QVERIFY(f.open());
+        f.write(bytes);
+        f.flush();
+
+        QList<PatPattern> patterns = LoadPat(f.fileName());
+        QCOMPARE(patterns.count(), 2);
+        QCOMPARE(patterns[0].name, QStringLiteral("AB"));
+        QCOMPARE(patterns[0].tile.width(), 2);
+        QCOMPARE(patterns[0].tile.height(), 1);
+        // i piani si reinterlacciano nell'ordine R,G,B; nessun alpha scritto -> opaco
+        QCOMPARE(patterns[0].tile.pixel(0, 0), qRgba(255, 0, 0, 255));
+        QCOMPARE(patterns[0].tile.pixel(1, 0), qRgba(0, 128, 0, 255));
+        // CMYK: senza inchiostro è bianco, ciano pieno è (0,255,255)
+        QCOMPARE(patterns[1].name, QStringLiteral("CM"));
+        QCOMPARE(patterns[1].tile.pixel(0, 0), qRgba(255, 255, 255, 255));
+        QCOMPARE(patterns[1].tile.pixel(1, 0), qRgba(0, 255, 255, 255));
+
+        // un contenitore senza la firma non è un .pat: nessun tile, nessun crash
+        QByteArray unsigned_bytes = bytes;
+        unsigned_bytes.replace(0, 4, "XXXX");
+        QTemporaryFile bad;
+        QVERIFY(bad.open());
+        bad.write(unsigned_bytes);
+        bad.flush();
+        QVERIFY(LoadPat(bad.fileName()).isEmpty());
+    }
+
+    // The pattern/gradient/image fills need no StickData field and no serialization code of
+    // their own: they live inside the QPen/QBrush that operator<</operator>> already write
+    // whole. This pins that — if the fill ever grows a hand-rolled format, this test says so.
+    void GradientAndTextureFillsRoundTrip()
+    {
+        QImage tile(2, 2, QImage::Format_ARGB32);
+        tile.fill(qRgba(10, 20, 30, 255));
+        tile.setPixel(1, 1, qRgba(200, 100, 50, 128));
+
+        QLinearGradient gradient(QPointF(0, 0), QPointF(1, 1));
+        gradient.setCoordinateMode(QGradient::ObjectMode); // come lo costruisce GradientDialog
+        gradient.setSpread(QGradient::ReflectSpread);
+        gradient.setStops({ QGradientStop(0.0, QColor(255, 0, 0)),
+                            QGradientStop(0.4, QColor(0, 255, 0, 90)),
+                            QGradientStop(1.0, QColor(0, 0, 255)) });
+
+        StickData source;
+        source.stick_type = StickData::RECT;
+        source.my_line = QLineF(0, 0, 0, 100);
+        source.brush = QBrush(gradient);        // riempimento: gradiente
+        source.pen = QPen(QBrush(tile), 5.0);   // contorno: tile (pattern/immagine)
+
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << source;
+        }
+        StickData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+
+        QCOMPARE(loaded.brush.style(), Qt::LinearGradientPattern);
+        QVERIFY(loaded.brush.gradient() != nullptr);
+        QCOMPARE(loaded.brush.gradient()->stops(), gradient.stops());
+        QCOMPARE(loaded.brush.gradient()->spread(), QGradient::ReflectSpread);
+        QCOMPARE(loaded.brush.gradient()->coordinateMode(), QGradient::ObjectMode);
+        QCOMPARE(loaded.pen.brush().style(), Qt::TexturePattern);
+        QCOMPARE(loaded.pen.brush().textureImage().size(), tile.size());
+        QCOMPARE(loaded.pen.brush().textureImage().pixel(1, 1), tile.pixel(1, 1));
+        QCOMPARE(loaded.pen.widthF(), 5.0);
+
+        // Clone() deep-copies the same fields with no stream involved
+        StickData *clone = source.Clone();
+        QCOMPARE(clone->brush.style(), Qt::LinearGradientPattern);
+        QCOMPARE(clone->brush.gradient()->stops(), gradient.stops());
+        QCOMPARE(clone->pen.brush().style(), Qt::TexturePattern);
+        delete clone;
+    }
+
+    // StickData::brush_follows_stick anchors a texture/gradient to the stick or to the scene.
+    // What it has to compensate for differs per stick type AND per brush style, which is the
+    // part worth pinning:
+    //   - LINE/POLYGON/MULTILINE paint in scene coordinates, the rest inside the stick's own
+    //     rotated frame, so the two families need OPPOSITE corrections;
+    //   - a texture needs the whole frame, while an ObjectMode gradient is already anchored
+    //     to the shape's bounding box and needs the rotation ONLY — composing the
+    //     translation too slides it off the shape and the fill goes flat — taken about the
+    //     CENTRE of that box, since the transform of an ObjectMode gradient acts in the box's
+    //     own 0..1 space whose origin is its top-left corner (a corner-pivoted rotation swings
+    //     the axis off the shape: that was the "gradient turns the wrong way" bug).
+    void BrushAnchoringCompensatesPerTypeAndStyle()
+    {
+        QLinearGradient gradient(QPointF(0, 0), QPointF(1, 0));
+        gradient.setCoordinateMode(QGradient::ObjectMode);
+        gradient.setStops({ QGradientStop(0.0, Qt::red), QGradientStop(1.0, Qt::blue) });
+        QImage tile(4, 4, QImage::Format_ARGB32);
+        tile.fill(Qt::green);
+
+        // --- LINE: dipinge in coordinate di scena, quindi "segue" richiede una correzione
+        StickData line;
+        line.stick_type = StickData::LINE;
+        line.my_line = QLineF(30, 40, 30, 140);
+        line.img_angle = 25;
+        StickGraphicsItem line_view(&line);
+
+        line.brush_follows_stick = true;
+        QTransform textured = line_view.AlignBrush(QBrush(tile)).transform();
+        QVERIFY(!textured.isIdentity());
+        QCOMPARE(textured.dx(), 30.0);          // la texture porta anche la traslazione
+        QCOMPARE(textured.dy(), 40.0);
+        QTransform graded = line_view.AlignBrush(QBrush(gradient)).transform();
+        QVERIFY(!graded.isIdentity());
+        // il gradiente ObjectMode prende SOLO la rotazione, e attorno al centro del box 0..1:
+        // (0.5,0.5) resta fermo...
+        QPointF box_centre = graded.map(QPointF(0.5, 0.5));
+        QVERIFY(qAbs(box_centre.x() - 0.5) < 1e-9);
+        QVERIFY(qAbs(box_centre.y() - 0.5) < 1e-9);
+        // ...mentre un punto sull'asse del gradiente gira per davvero
+        QVERIFY(QLineF(graded.map(QPointF(1.0, 0.5)), QPointF(1.0, 0.5)).length() > 0.1);
+        // e la traslazione dello stick NON entra: sarebbe il difetto che appiattisce il fill
+        QVERIFY(qAbs(graded.dx()) < 1.0);
+        QVERIFY(qAbs(graded.dy()) < 1.0);
+
+        line.brush_follows_stick = false;       // la texture è già ancorata alla scena
+        QVERIFY(line_view.AlignBrush(QBrush(tile)).transform().isIdentity());
+        // il gradiente NO: un ObjectMode è ancorato al bounding box della FORMA per
+        // definizione, quindi non seguire lo stick richiede di riesprimerlo in LogicalMode
+        // (nessuna scena qui -> il rettangolo di ancoraggio è il quadrato unitario, quindi il
+        // transform resta l'identità, ma il coordinateMode è la prova del cambio)
+        const QBrush unpinned = line_view.AlignBrush(QBrush(gradient));
+        QVERIFY(unpinned.gradient() != nullptr);
+        QCOMPARE(unpinned.gradient()->coordinateMode(), QGradient::LogicalMode);
+        QCOMPARE(unpinned.gradient()->stops(), gradient.stops()); // stessi colori, altro ancoraggio
+
+        // --- RECT: il painter è già nel frame locale, quindi il caso è esattamente opposto
+        StickData rect;
+        rect.stick_type = StickData::RECT;
+        rect.my_line = QLineF(30, 40, 30, 140);
+        rect.img_angle = 25;
+        StickGraphicsItem rect_view(&rect);
+
+        rect.brush_follows_stick = true;        // segue per costruzione
+        QVERIFY(rect_view.AlignBrush(QBrush(tile)).transform().isIdentity());
+        QVERIFY(rect_view.AlignBrush(QBrush(gradient)).transform().isIdentity());
+        QCOMPARE(rect_view.AlignBrush(QBrush(gradient)).gradient()->coordinateMode(),
+                 QGradient::ObjectMode);        // e resta ObjectMode: è ciò che lo fa seguire
+        rect.brush_follows_stick = false;
+        QVERIFY(!rect_view.AlignBrush(QBrush(tile)).transform().isIdentity());
+        QVERIFY(!rect_view.AlignBrush(QBrush(gradient)).transform().isIdentity());
+        QCOMPARE(rect_view.AlignBrush(QBrush(gradient)).gradient()->coordinateMode(),
+                 QGradient::LogicalMode);
+
+        // --- una tinta unita non ha geometria da ancorare: mai toccata, in nessun caso
+        QVERIFY(rect_view.AlignBrush(QBrush(Qt::green)).transform().isIdentity());
+        QVERIFY(line_view.AlignBrush(QBrush(Qt::NoBrush)).transform().isIdentity());
+
+        // --- e il flag è persistente (record version 4)
+        StickData source;
+        source.stick_type = StickData::RECT;
+        source.brush = QBrush(gradient);
+        source.brush_follows_stick = false;
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << source;
+        }
+        StickData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+        QCOMPARE(loaded.brush_follows_stick, false);
+        StickData *clone = source.Clone();
+        QCOMPARE(clone->brush_follows_stick, false);
+        delete clone;
+    }
+
+    // A texture's scale/angle/offset live in QBrush::transform() and nowhere else — no
+    // StickData field, so they persist for free. TextureXf is the editable form of that
+    // matrix, and the numeric options dialog and the on-canvas arrow handle BOTH go through
+    // it, so a lossy conversion would silently corrupt a texture on every edit.
+    void TextureTransformRoundTripsThroughTextureXf()
+    {
+        QImage tile(8, 4, QImage::Format_ARGB32);
+        tile.fill(Qt::magenta);
+
+        TextureXf source;
+        source.scale = 0.375;
+        source.angle = -117.5;
+        source.offset = QPointF(-23.5, 61.25);
+
+        QBrush brush(tile);
+        WriteTextureXf(&brush, source);
+        const TextureXf back = ReadTextureXf(brush);
+        QVERIFY(qAbs(back.scale - source.scale) < 1e-9);
+        QVERIFY(qAbs(back.angle - source.angle) < 1e-9);
+        QCOMPARE(back.offset, source.offset);
+
+        // uno scale zero renderebbe la matrice singolare (Qt non disegnerebbe nulla, e
+        // l'angolo non sarebbe più recuperabile): va clampato, non accettato
+        TextureXf degenerate;
+        degenerate.scale = 0;
+        degenerate.angle = 40;
+        QBrush clamped(tile);
+        WriteTextureXf(&clamped, degenerate);
+        QVERIFY(clamped.transform().isInvertible());
+        QVERIFY(qAbs(ReadTextureXf(clamped).angle - 40.0) < 1e-6);
+
+        // un brush senza transform legge l'identità, non una matrice degenere
+        const TextureXf plain = ReadTextureXf(QBrush(tile));
+        QCOMPARE(plain.scale, 1.0);
+        QCOMPARE(plain.angle, 0.0);
+        QCOMPARE(plain.offset, QPointF(0, 0));
+
+        // il transform viaggia col brush attraverso lo stream, senza codice dedicato
+        StickData stick;
+        stick.stick_type = StickData::RECT;
+        stick.brush = brush;
+        stick.texture_tiled = false;      // questo invece è un campo (record version 5)
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << stick;
+        }
+        StickData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+        QCOMPARE(loaded.texture_tiled, false);
+        const TextureXf streamed = ReadTextureXf(loaded.brush);
+        QVERIFY(qAbs(streamed.scale - source.scale) < 1e-9);
+        QVERIFY(qAbs(streamed.angle - source.angle) < 1e-9);
+        QCOMPARE(streamed.offset, source.offset);
+        StickData *cloned = stick.Clone();
+        QCOMPARE(cloned->texture_tiled, false);
+        QVERIFY(qAbs(ReadTextureXf(cloned->brush).angle - source.angle) < 1e-9);
+        delete cloned;
+    }
+
+    // The three Style-column check boxes depend on what the SELECTED STICK is painted with, and
+    // that changes with no selection change at all: an Apply button swaps a solid fill for a
+    // gradient while the same stick stays selected. UpdateSliders() only runs on a selection
+    // change, so they kept the enablement computed while the fill was still solid and stayed
+    // greyed out — which reads exactly like a check box that ignores clicks. Pins the refresh.
+    void ApplyingAGradientEnablesTheStyleCheckBoxes()
+    {
+        AddFrame();
+        DrawStick(QPointF(200, 100), QPointF(200, 200));
+        StickData *stick = CurrentStickFigure()->stick_list.last();
+        stick->stick_type = StickData::RECT;
+        stick->brush = QBrush(Qt::green);      // tinta unita: niente da ancorare né da puntare
+        stick->pen = QPen(Qt::black, 2);
+        CurrentStickFigure()->current_stick = stick;
+
+        // il binario di test non linka widget.cpp, quindi le caselle sono nulle: creale qui, che
+        // è l'unico modo di verificare l'abilitazione senza la UI vera. I globali vanno rimessi a
+        // nullptr da un DISTRUTTORE e non a mano in fondo: un QVERIFY che fallisce ritorna
+        // subito, e le caselle sono sullo stack — lasciarli appesi faceva segfaultare ogni test
+        // successivo (UpdateSliders() li dereferenzia), mascherando l'errore vero
+        QCheckBox follows, fill_arrow, stroke_arrow;
+        struct Restore {
+            ~Restore(){
+                brush_follows_check = nullptr;
+                fill_texture_arrow_check = nullptr;
+                stroke_texture_arrow_check = nullptr;
+            }
+        } restore_globals;
+        brush_follows_check = &follows;
+        fill_texture_arrow_check = &fill_arrow;
+        stroke_texture_arrow_check = &stroke_arrow;
+
+        view->my_animation->UpdateStyleControls();
+        QVERIFY(!follows.isEnabled());         // tinta unita da entrambi i lati
+        QVERIFY(!fill_arrow.isEnabled());
+        QVERIFY(!stroke_arrow.isEnabled());
+
+        // scegli un gradiente come pennello CORRENTE e premi Apply, senza toccare la selezione:
+        // è la sequenza che lasciava le caselle spente
+        QLinearGradient gradient(QPointF(0, 0), QPointF(1, 0));
+        gradient.setCoordinateMode(QGradient::ObjectMode);
+        gradient.setStops({ QGradientStop(0.0, Qt::red), QGradientStop(1.0, Qt::blue) });
+        view->my_brush = QBrush(gradient);
+        view->SetGraphics(false, ATTRIBUTE_BRUSHCOLOR); // copia call site: on_setBrushColorBtn_clicked()
+
+        QCOMPARE(CurrentFrame()->CurrentStick()->brush.style(), Qt::LinearGradientPattern);
+        QVERIFY(follows.isEnabled());          // il riempimento ha una geometria da ancorare
+        QVERIFY(fill_arrow.isEnabled());
+        QVERIFY(!stroke_arrow.isEnabled());    // il contorno è ancora una tinta unita
+
+        // e la freccia esiste per davvero, non solo la casella: un gradiente non tiene la sua
+        // collocazione in QBrush::transform() ma nella propria geometria
+        view->show_fill_texture_arrow = true;
+        QPointF tail, tip;
+        QVERIFY(view->TextureArrowPoints(true, &tail, &tip));
+        QVERIFY(QLineF(tail, tip).length() > 1.0);
+        view->show_fill_texture_arrow = false;
+    }
+
+    // The arrow handle drives BOTH brush kinds, through completely different fields: a texture's
+    // placement is QBrush::transform(), a gradient's is its own geometry (start/finalStop, or
+    // centre/radius/focus). Editing a gradient through its transform is not an option — for an
+    // ObjectMode gradient that transform acts in the 0..1 box space, so a scene-unit offset would
+    // mean that many whole bounding boxes. This pins the gradient half round-tripping.
+    void GradientPlacementRoundTripsThroughTextureXf()
+    {
+        QLinearGradient linear(QPointF(0.2, 0.5), QPointF(0.8, 0.5)); // asse orizzontale centrato
+        linear.setCoordinateMode(QGradient::ObjectMode);
+        linear.setSpread(QGradient::ReflectSpread);
+        linear.setStops({ QGradientStop(0.0, Qt::red), QGradientStop(1.0, Qt::blue) });
+
+        // l'asse parte centrato: offset nullo, angolo 0, lunghezza 0.6
+        const TextureXf read_linear = ReadGradientXf(QBrush(linear));
+        QVERIFY(qAbs(read_linear.offset.x()) < 1e-9);
+        QVERIFY(qAbs(read_linear.offset.y()) < 1e-9);
+        QVERIFY(qAbs(read_linear.angle) < 1e-9);
+        QVERIFY(qAbs(read_linear.scale - 0.6) < 1e-9);
+
+        TextureXf moved;
+        moved.offset = QPointF(0.15, -0.05);
+        moved.angle = 33.0;
+        moved.scale = 0.4;
+        QBrush brush(linear);
+        WriteGradientXf(&brush, moved);
+        const TextureXf back = ReadGradientXf(brush);
+        QVERIFY(QLineF(back.offset, moved.offset).length() < 1e-9);
+        QVERIFY(qAbs(back.angle - moved.angle) < 1e-9);
+        QVERIFY(qAbs(back.scale - moved.scale) < 1e-9);
+        // e tutto ciò che NON è geometria sopravvive alla ricostruzione: perdere il
+        // coordinateMode sgancerebbe di nascosto il riempimento (vedi AlignBrush)
+        QVERIFY(brush.gradient() != nullptr);
+        QCOMPARE(brush.gradient()->coordinateMode(), QGradient::ObjectMode);
+        QCOMPARE(brush.gradient()->spread(), QGradient::ReflectSpread);
+        QCOMPARE(brush.gradient()->stops(), linear.stops());
+
+        // radiale: la scala è il DIAMETRO, e l'angolo ri-PUNTA il fuoco senza avvicinarlo
+        QRadialGradient radial(QPointF(0.5, 0.5), 0.25, QPointF(0.6, 0.5), 0.0);
+        radial.setCoordinateMode(QGradient::ObjectMode);
+        radial.setStops({ QGradientStop(0.0, Qt::white), QGradientStop(1.0, Qt::black) });
+        QBrush radial_brush(radial);
+        QVERIFY(qAbs(ReadGradientXf(radial_brush).scale - 0.5) < 1e-9);
+        TextureXf aimed;
+        aimed.angle = 90.0;
+        aimed.scale = 0.5;
+        WriteGradientXf(&radial_brush, aimed);
+        const QRadialGradient *turned =
+                static_cast<const QRadialGradient*>(radial_brush.gradient());
+        QVERIFY(qAbs(turned->centerRadius() - 0.25) < 1e-9);
+        // distanza del fuoco invariata (0.1), direzione ora a 90 gradi in senso orario
+        QVERIFY(qAbs(QLineF(turned->center(), turned->focalPoint()).length() - 0.1) < 1e-9);
+        QVERIFY(qAbs(turned->focalPoint().y() - (turned->center().y() + 0.1)) < 1e-9);
+
+        // una tinta unita non ha un gradiente: entrambe le direzioni sono inerti
+        QBrush solid(Qt::green);
+        WriteGradientXf(&solid, moved);
+        QCOMPARE(solid.style(), Qt::SolidPattern);
+        QCOMPARE(ReadGradientXf(solid).scale, 1.0);
+    }
+
+    // A texture brush ignores its QBrush::color() when rendering, which leaves that colour's
+    // ALPHA as a field the brush already has, already streams, and otherwise never uses — so the
+    // opacity sliders write the texture's opacity there, exactly as they write the colour itself
+    // for a solid fill. Rendered, because the claim is that it reaches the canvas; and the
+    // OUTLINE must not fade with it, which is the reason FillAndStroke() splits the passes.
+    void TextureFillHonoursOpacityWithoutFadingTheOutline()
+    {
+        QImage tile(4, 4, QImage::Format_ARGB32);
+        tile.fill(Qt::blue);
+
+        StickData rect;
+        rect.stick_type = StickData::RECT;
+        rect.my_line = QLineF(100, 60, 100, 140);
+        rect.img_w_scale = 60;
+        rect.pen = QPen(Qt::black, 4);
+        rect.brush = QBrush(tile);
+
+        // il riempimento al centro, il contorno sul bordo destro della forma (100+30 = 130)
+        auto sample = [](StickData *data, const QPoint &at){
+            QGraphicsScene render_scene;
+            render_scene.setSceneRect(0, 0, 200, 200);
+            render_scene.addItem(new StickGraphicsItem(data)); // la scena possiede la view
+            QImage img(200, 200, QImage::Format_ARGB32);
+            img.fill(Qt::white);
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 200, 200), QRectF(0, 0, 200, 200));
+            painter.end();
+            return img.pixelColor(at);
+        };
+        const QPoint inside(100, 100), on_outline(130, 100);
+
+        QCOMPARE(StickGraphicsItem::FillOpacity(rect.brush), 1.0); // QBrush(tile) nasce opaco
+        const QColor opaque_fill = sample(&rect, inside);
+        const QColor opaque_edge = sample(&rect, on_outline);
+        QCOMPARE(opaque_fill, QColor(Qt::blue));
+        QCOMPARE(opaque_edge, QColor(Qt::black));
+
+        // mezza opacità, scritta dove la scrivono gli slider: l'alpha del colore del brush
+        QColor tint = rect.brush.color();
+        tint.setAlphaF(0.5);
+        rect.brush.setColor(tint);
+        QVERIFY(qAbs(StickGraphicsItem::FillOpacity(rect.brush) - 0.5) < 0.01);
+        const QColor faded_fill = sample(&rect, inside);
+        // blu al 50% su bianco: schiarito verso il bianco, ma ancora blu
+        QVERIFY(faded_fill != QColor(Qt::blue));
+        QVERIFY(faded_fill.blue() > faded_fill.red());
+        QVERIFY(faded_fill.red() > 80);
+        // ...e il contorno è rimasto nero pieno: FillAndStroke lo disegna fuori dal passaggio
+        // sbiadito, altrimenti sarebbe grigio
+        QCOMPARE(sample(&rect, on_outline), opaque_edge);
+
+        // l'alpha viaggia col brush attraverso lo stream, come tutto il resto di un QBrush
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << rect;
+        }
+        StickData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+        QVERIFY(qAbs(StickGraphicsItem::FillOpacity(loaded.brush) - 0.5) < 0.01);
+        // una tinta unita e un gradiente non passano da qui: la loro trasparenza è nel colore
+        // e nei singoli stop
+        QCOMPARE(StickGraphicsItem::FillOpacity(QBrush(QColor(0, 0, 0, 10))), 1.0);
+    }
+
+    // Two pieces of Style-column state that used to survive a change of fill and quietly apply to
+    // the next one: the opacity, which the sliders wrote only into the CURRENT paint (so nothing
+    // happened to the selected stick until an Apply press — indistinguishable from the opacity
+    // being ignored), and StickData::texture_tiled, which only the image dialog could set and
+    // which then rode along onto every later fill, a library pattern included.
+    void OpacityAndTilingApplyToTheSelectedStickAndDoNotLeak()
+    {
+        AddFrame();
+        DrawStick(QPointF(250, 120), QPointF(250, 220));
+        StickData *stick = CurrentStickFigure()->stick_list.last();
+        stick->stick_type = StickData::RECT;
+        stick->img_w_scale = 40;
+        QImage tile(8, 8, QImage::Format_ARGB32);
+        tile.fill(Qt::darkCyan);
+        stick->brush = QBrush(tile);
+        stick->pen = QPen(Qt::black, 2);
+        CurrentStickFigure()->current_stick = stick;
+
+        // --- l'opacità arriva sullo stick, non solo sul pennello corrente. Replica di
+        // Widget::SetPaintOpacity(true, percent, true) (widget.cpp), il corpo dello slider.
+        auto set_fill_opacity = [this](int percent, bool &latch){
+            StickData *cs = CurrentFrame()->CurrentStick();
+            QVERIFY(cs != nullptr);
+            QVERIFY(cs->brush.style() == Qt::TexturePattern);
+            if(!latch){
+                view->StoreUndo(CMD_SIMPLE); // un solo passo per tutto il trascinamento
+                latch = true;
+            }
+            QColor tint = cs->brush.color();
+            tint.setAlphaF(percent / 100.0);
+            cs->brush.setColor(tint);
+        };
+        bool drag_latch = false;
+        const int undo_before = view->undo_stack.index();
+        for(int percent : { 90, 70, 40 })   // un trascinamento: tre valueChanged di fila
+            set_fill_opacity(percent, drag_latch);
+        drag_latch = false;                // sliderReleased
+
+        stick = CurrentFrame()->CurrentStick();
+        QVERIFY(qAbs(StickGraphicsItem::FillOpacity(stick->brush) - 0.4) < 0.01);
+        QCOMPARE(view->undo_stack.index(), undo_before + 1); // UN solo passo, non tre
+        view->undo_stack.undo();
+        QVERIFY(qAbs(StickGraphicsItem::FillOpacity(CurrentFrame()->CurrentStick()->brush) - 1.0)
+                < 0.01);
+        view->undo_stack.redo();
+
+        // --- e il tiling non cola sul riempimento successivo. Il flag è per-stick, ma
+        // SetGraphics() lo copia da my_texture_tiled: dopo un'immagine non ripetuta, un pattern
+        // applicato dopo veniva ritagliato a una sola tile senza che nulla lo dicesse.
+        stick = CurrentFrame()->CurrentStick();
+        view->my_texture_tiled = false;              // com'era dopo un'immagine con Tile spento
+        view->my_brush = QBrush(tile);
+        view->SetGraphics(false, ATTRIBUTE_BRUSHCOLOR);
+        QCOMPARE(CurrentFrame()->CurrentStick()->texture_tiled, false);
+
+        // "il riempimento viene ritagliato a una sola istanza" si legge da SingleInstancePath().
+        // Su una COPIA dei soli campi che le servono: avvolgere lo stick vivo in una seconda
+        // StickGraphicsItem gli ruberebbe il back-pointer view (vedi CLAUDE.md)
+        auto clips_to_one_tile = [](const StickData *from){
+            StickData probe;
+            probe.stick_type = from->stick_type;
+            probe.my_line = from->my_line;
+            probe.img_angle = from->img_angle;
+            probe.brush_follows_stick = from->brush_follows_stick;
+            probe.texture_tiled = from->texture_tiled;
+            StickGraphicsItem probe_view(&probe);
+            return !probe_view.SingleInstancePath(from->brush).isEmpty();
+        };
+        QVERIFY(clips_to_one_tile(CurrentFrame()->CurrentStick()));
+
+        // la casella della colonna Style è la via per rimetterlo: replica del suo slot
+        // (Widget::BuildStyleCombos()), che è ciò che prima non esisteva per un pattern
+        view->my_texture_tiled = true;
+        StickData *current = CurrentFrame()->CurrentStick();
+        view->StoreUndo(CMD_SIMPLE);
+        current->texture_tiled = true;
+        QVERIFY(!clips_to_one_tile(current)); // niente da ritagliare: la tile ripete
+    }
+
+    // The opacity sliders used to be DISABLED for a gradient, on the grounds that its transparency
+    // belongs per stop. It does — but that is where the number can live, not a reason there cannot
+    // be one: WritePaintOpacity() scales the stops relative to the most opaque, so the ratios the
+    // user dialled survive and the slider still reads one value. It has to be the stops and not
+    // QBrush::color(), which is where a solid and a texture keep it: QDataStream restores that
+    // colour for those two but rebuilds a gradient from its stops and drops it, so an alpha parked
+    // there would vanish on save. That is the half this pins hardest.
+    void GradientOpacityLivesInTheStopsAndTheSliderIsEnabled()
+    {
+        QLinearGradient gradient(QPointF(0, 0), QPointF(1, 0));
+        gradient.setCoordinateMode(QGradient::ObjectMode);
+        gradient.setSpread(QGradient::ReflectSpread);
+        // due stop già non uniformi: il rapporto 255:128 è quel che deve sopravvivere
+        gradient.setStops({ QGradientStop(0.0, QColor(255, 0, 0, 255)),
+                            QGradientStop(1.0, QColor(0, 0, 255, 128)) });
+        QBrush brush(gradient);
+        QCOMPARE(ReadPaintOpacity(brush), 1.0);       // il picco è pieno
+
+        WritePaintOpacity(&brush, 0.5);
+        QVERIFY(qAbs(ReadPaintOpacity(brush) - 0.5) < 0.01);
+        QVERIFY(brush.gradient() != nullptr);
+        const QGradientStops faded = brush.gradient()->stops();
+        QCOMPARE(faded.size(), 2);
+        QVERIFY(qAbs(faded[0].second.alphaF() - 0.5) < 0.01);
+        QVERIFY(qAbs(faded[1].second.alphaF() - 0.25) < 0.02); // metà di metà: rapporto invariato
+        // e nulla che non sia un alpha è cambiato
+        QCOMPARE(brush.gradient()->coordinateMode(), QGradient::ObjectMode);
+        QCOMPARE(brush.gradient()->spread(), QGradient::ReflectSpread);
+        QCOMPARE(faded[0].second.red(), 255);
+        // assoluta, non composta: riscrivere lo stesso valore non sbiadisce due volte
+        WritePaintOpacity(&brush, 0.5);
+        QVERIFY(qAbs(brush.gradient()->stops()[1].second.alphaF() - 0.25) < 0.02);
+
+        // il salvataggio: è qui che l'alpha del COLORE del brush si perdeva
+        StickData rect;
+        rect.stick_type = StickData::RECT;
+        rect.my_line = QLineF(100, 60, 100, 140);
+        rect.brush = brush;
+        QColor decoy = rect.brush.color();            // la strada vecchia, per contrasto
+        decoy.setAlphaF(0.5);
+        rect.brush.setColor(decoy);
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << rect;
+        }
+        StickData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+        QVERIFY(qAbs(ReadPaintOpacity(loaded.brush) - 0.5) < 0.02);  // gli stop ci sono ancora
+        QCOMPARE(loaded.brush.color().alphaF(), 1.0);                // il colore no: era una via cieca
+
+        // ...mentre una tinta unita e una texture tengono l'opacità nel colore, e lo stesso
+        // accessore le legge: un solo concetto per tutti e tre i tipi di pennello
+        QBrush solid(QColor(0, 200, 0));
+        WritePaintOpacity(&solid, 0.3);
+        QVERIFY(qAbs(ReadPaintOpacity(solid) - 0.3) < 0.01);
+        QCOMPARE(solid.color().green(), 200);
+        QImage tile(4, 4, QImage::Format_ARGB32);
+        tile.fill(Qt::blue);
+        QBrush texture(tile);
+        WritePaintOpacity(&texture, 0.3);
+        QVERIFY(qAbs(ReadPaintOpacity(texture) - 0.3) < 0.01);
+        QVERIFY(qAbs(StickGraphicsItem::FillOpacity(texture) - 0.3) < 0.01);
+        // un gradiente non passa dall'opacità del painter: Qt legge già l'alpha degli stop, e
+        // sbiadirlo una seconda volta lo eleverebbe al quadrato
+        QCOMPARE(StickGraphicsItem::FillOpacity(brush), 1.0);
+
+        // e lo slider non è più spento su un gradiente. Le caselle/slider sono nulli nel binario
+        // di test (non linka widget.cpp): creali qui e rimettili a nullptr da un DISTRUTTORE, o un
+        // QVERIFY che fallisce li lascia appesi allo stack e fa segfaultare i test successivi
+        AddFrame();
+        DrawStick(QPointF(300, 120), QPointF(300, 220));
+        StickData *stick = CurrentStickFigure()->stick_list.last();
+        stick->stick_type = StickData::RECT;
+        stick->img_w_scale = 40;
+        stick->pen = QPen(Qt::black, 2);
+        stick->brush = brush;                          // gradiente al 50%
+        CurrentStickFigure()->current_stick = stick;
+
+        QSlider fill_slider, stroke_slider;
+        QSpinBox fill_box, stroke_box;
+        struct Restore {
+            ~Restore(){
+                brush_opacity_slider = nullptr; brush_opacity_spinbox = nullptr;
+                pen_opacity_slider = nullptr;   pen_opacity_spinbox = nullptr;
+            }
+        } restore_globals;
+        for(QSlider *s : { &fill_slider, &stroke_slider }) s->setRange(0, 100);
+        for(QSpinBox *b : { &fill_box, &stroke_box })      b->setRange(0, 100);
+        brush_opacity_slider = &fill_slider;  brush_opacity_spinbox = &fill_box;
+        pen_opacity_slider = &stroke_slider;  pen_opacity_spinbox = &stroke_box;
+
+        view->my_animation->UpdateStyleControls();
+        QVERIFY(fill_slider.isEnabled());              // prima era spento per un gradiente
+        QCOMPARE(fill_slider.value(), 50);             // e l'eco legge il picco degli stop
+        QCOMPARE(fill_box.value(), 50);
+
+        // il vuoto resta l'unico caso senza nulla da sbiadire
+        stick->brush = QBrush(Qt::NoBrush);
+        view->my_animation->UpdateStyleControls();
+        QVERIFY(!fill_slider.isEnabled());
+    }
+
+    // StickGraphicsItem::TextureToScene() is what the tile -> scene mapping actually is, and
+    // both the non-tiling clip and the arrow handle depend on it agreeing with AlignBrush():
+    // for a scene-anchored texture the brush transform IS the whole mapping (AlignBrush has
+    // cancelled the stick's frame out), for a stick-anchored one the stick's frame composes on
+    // top. Also pins that texture_tiled only ever acts on a texture.
+    void TextureToSceneMatchesTheFrameAlignBrushChose()
+    {
+        QImage tile(4, 4, QImage::Format_ARGB32);
+        tile.fill(Qt::cyan);
+        QBrush brush(tile);
+        TextureXf xf;
+        xf.scale = 2.0;
+        WriteTextureXf(&brush, xf);
+
+        StickData rect;
+        rect.stick_type = StickData::RECT;
+        rect.my_line = QLineF(60, 80, 60, 180);
+        rect.img_angle = 0;                    // nessuna rotazione: la traslazione si legge diretta
+        StickGraphicsItem rect_view(&rect);
+
+        rect.brush_follows_stick = false;
+        QCOMPARE(rect_view.TextureToScene(brush), brush.transform());
+
+        rect.brush_follows_stick = true;
+        const QTransform followed = rect_view.TextureToScene(brush);
+        // la tile parte dall'origine dello stick (P1) e vale il doppio dei suoi pixel
+        QCOMPARE(followed.map(QPointF(0, 0)), QPointF(60, 80));
+        QCOMPARE(followed.map(QPointF(4, 4)), QPointF(68, 88));
+
+        // un gradiente non ha una tile da mappare, e una tinta unita nemmeno
+        QLinearGradient gradient(QPointF(0, 0), QPointF(1, 0));
+        gradient.setCoordinateMode(QGradient::ObjectMode);
+        QVERIFY(rect_view.TextureToScene(QBrush(gradient)).isIdentity());
+        QVERIFY(rect_view.TextureToScene(QBrush(Qt::red)).isIdentity());
+    }
+
+    // brush_follows_stick == false has to mean the fill STAYS PUT while the stick moves over it,
+    // and for a gradient that is not something a brush transform can deliver: ObjectMode means
+    // "relative to the painted shape's bounding box", so the box travels with the stick and the
+    // gradient with it however the transform is composed. Compensating the rotation fixes only
+    // the DIRECTION — the gradient still visibly rode along, which is the bug this pins.
+    // Rendered, not asserted on a matrix: the claim is about what lands on the canvas.
+    void UnanchoredGradientStaysPutWhenTheStickMoves()
+    {
+        QLinearGradient gradient(QPointF(0, 0), QPointF(1, 0)); // asse orizzontale, nero->bianco
+        gradient.setCoordinateMode(QGradient::ObjectMode);
+        gradient.setStops({ QGradientStop(0.0, Qt::black), QGradientStop(1.0, Qt::white) });
+
+        StickData rect;
+        rect.stick_type = StickData::RECT;
+        rect.my_line = QLineF(100, 100, 100, 180);  // lungo 80, verso il basso
+        rect.img_w_scale = 80;                      // largo 80: la forma ruota su una zona ampia
+        rect.brush = QBrush(gradient);
+        rect.pen = QPen(Qt::NoPen);                 // solo il riempimento: nessun contorno a sporcare
+
+        // (80,120) cade dentro la forma sia a 0 che a 90 gradi (footprint x 60..140 / y 100..180
+        // contro x 20..100 / y 60..140), quindi è il punto su cui la domanda ha senso
+        const QPoint probe(80, 120);
+        auto colour_at_probe = [&probe](StickData *data){
+            QGraphicsScene render_scene;
+            render_scene.setSceneRect(0, 0, 200, 200);
+            render_scene.addItem(new StickGraphicsItem(data)); // la scena possiede la view
+            QImage img(200, 200, QImage::Format_ARGB32);
+            img.fill(Qt::red);                                 // rosso = nulla dipinto qui
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 200, 200), QRectF(0, 0, 200, 200));
+            painter.end();
+            return img.pixelColor(probe);
+        };
+
+        rect.brush_follows_stick = false;
+        rect.img_angle = 0;
+        const QColor flat_still = colour_at_probe(&rect);
+        rect.img_angle = 90;
+        const QColor turned_still = colour_at_probe(&rect);
+        // il punto è coperto in entrambi i casi (altrimenti il test non misura nulla)...
+        QVERIFY(flat_still != QColor(Qt::red));
+        QVERIFY(turned_still != QColor(Qt::red));
+        // ...e il gradiente è fermo nella scena: stesso punto, stesso colore
+        QCOMPARE(turned_still, flat_still);
+
+        // controprova: con l'ancoraggio allo stick lo stesso punto DEVE cambiare colore, sennò
+        // il test sopra passerebbe anche per un gradiente diventato una tinta unita
+        rect.brush_follows_stick = true;
+        rect.img_angle = 0;
+        const QColor flat_follow = colour_at_probe(&rect);
+        rect.img_angle = 90;
+        const QColor turned_follow = colour_at_probe(&rect);
+        QVERIFY(qAbs(qGray(turned_follow.rgb()) - qGray(flat_follow.rgb())) > 20);
+    }
+
+    // Qt has no non-repeating brush style, so StickData::texture_tiled is enforced by clipping
+    // the fill to the one instance the texture transform places. Rendered rather than asserted
+    // on a matrix, because the whole point is what reaches the canvas: with tiling ON the fill
+    // covers the shape, with it OFF only the tile-sized corner does — and the STROKE, which is
+    // outside the clip, must survive either way.
+    void NonTilingTextureFillPaintsOneInstanceOnly()
+    {
+        QImage tile(10, 10, QImage::Format_ARGB32);
+        tile.fill(Qt::blue);
+
+        StickData rect;
+        rect.stick_type = StickData::RECT;
+        rect.my_line = QLineF(100, 40, 100, 140);  // 100 di lunghezza, verso il basso
+        rect.img_angle = 0;
+        rect.img_w_scale = 60;                     // largo 60: molte ripetizioni di una tile da 10
+        rect.brush = QBrush(tile);                 // scala 1 -> la tile resta 10x10
+        rect.pen = QPen(Qt::black, 3);
+        rect.brush_follows_stick = true;
+
+        auto blue_pixels = [](StickData *data){
+            QGraphicsScene render_scene;
+            render_scene.setSceneRect(0, 0, 200, 200);
+            render_scene.addItem(new StickGraphicsItem(data)); // la scena possiede la view
+            QImage img(200, 200, QImage::Format_ARGB32);
+            img.fill(Qt::white);
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 200, 200), QRectF(0, 0, 200, 200));
+            painter.end();
+            int blue = 0, black = 0;
+            for(int y = 0; y < img.height(); y++)
+                for(int x = 0; x < img.width(); x++){
+                    const QColor c = img.pixelColor(x, y);
+                    if(c == QColor(Qt::blue)) blue++;
+                    else if(c == QColor(Qt::black)) black++;
+                }
+            return QPair<int,int>(blue, black);
+        };
+
+        rect.texture_tiled = true;
+        const QPair<int,int> tiled = blue_pixels(&rect);
+        rect.texture_tiled = false;
+        const QPair<int,int> single = blue_pixels(&rect);
+
+        // ripetuta, la tile copre tutto il rettangolo (60 x 100, meno il bordo)
+        QVERIFY(tiled.first > 4000);
+        // una sola istanza: al massimo i 100 px della tile, e comunque qualcosa
+        QVERIFY(single.first > 0);
+        QVERIFY(single.first <= 100);
+        // il contorno sta FUORI dal clip e sopravvive identico in entrambi i casi
+        QVERIFY(tiled.second > 0);
+        QCOMPARE(single.second, tiled.second);
+    }
+
     // POLYGON sticks persist their normalized-local vertex list after the shared img
     // block; both the stream operators and Clone()/CopyFrom() must carry it
     void StickPolygonRoundTrip()
@@ -1093,6 +1925,16 @@ private slots:
         Frame *start_frame = CurrentFrame();
         AddFrame(); // secondo keyframe: stessa struttura (1 figura, 1 stick), posa diversa
         StickData *end_stick = DrawStick(QPointF(200, 100), QPointF(200, 300));
+        // un riempimento a gradiente su entrambi i keyframe: non ha punto intermedio
+        // lineare, quindi InterpolateStickData() deve LASCIARLO STARE invece di appiattirlo
+        // a tinta unita (QPen::setColor rimpiazzerebbe il brush del pen — vedi IsSolidFill())
+        QLinearGradient gradient(0, 0, 1, 1);
+        gradient.setColorAt(0, Qt::red);
+        gradient.setColorAt(1, Qt::blue);
+        start_stick->brush = QBrush(gradient);
+        end_stick->brush = QBrush(gradient);
+        start_stick->pen.setBrush(QBrush(gradient));
+        end_stick->pen.setBrush(QBrush(gradient));
         int start_index = start_frame->frame_number;
         QCOMPARE(view->my_animation->frame_list[start_index + 1], CurrentFrame()); // adiacenti
         int frames_before = view->my_animation->frame_list.count();
@@ -1105,6 +1947,9 @@ private slots:
         StickData *middle_stick = middle->stick_figures[0]->stick_list[0];
         QCOMPARE(middle_stick->my_line, QLineF(150, 100, 150, 250));
         QCOMPARE(middle->frame_number, start_index + 2);
+        // il gradiente è sopravvissuto all'interpolazione, su entrambi i lati
+        QCOMPARE(middle_stick->brush.style(), Qt::LinearGradientPattern);
+        QCOMPARE(middle_stick->pen.brush().style(), Qt::LinearGradientPattern);
         // i due keyframe restano intatti
         QCOMPARE(start_stick->my_line, QLineF(100, 100, 100, 200));
         QCOMPARE(end_stick->my_line, QLineF(200, 100, 200, 300));
@@ -1482,6 +2327,116 @@ private slots:
         view->undo_stack.redo();
         QCOMPARE(CurrentFrame()->stick_figures[figure_index]->stick_list[0]->my_line, dragged_line);
 
+        view->SetTool(NOTOOL);
+    }
+
+    // The texture arrow handle: the on-canvas editor for a texture's offset/angle/scale, which
+    // before it existed had no handle at all. Driven through the REAL mouse events, because the
+    // interesting half is the pick PRIORITY — the spec puts the arrow below the transformation
+    // box and below the stick's own endpoint handles, so a press has to fall through to the
+    // ordinary rotate whenever the arrow lies over one of those.
+    void TextureArrowDragsOffsetAngleAndScale()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        // uno stick RECT lontano dal centro, con un riempimento a texture da manovrare
+        DrawStick(QPointF(300, 300), QPointF(300, 400));
+        StickData *stick = CurrentStickFigure()->stick_list.last();
+        stick->stick_type = StickData::RECT;
+        QImage tile(20, 20, QImage::Format_ARGB32);
+        tile.fill(Qt::yellow);
+        stick->brush = QBrush(tile);
+        CurrentStickFigure()->current_stick = stick;
+        view->SetTool(NOTOOL);
+
+        // spenta, la freccia non esiste: né disegnata né afferrabile
+        QPointF tail, tip;
+        view->show_fill_texture_arrow = false;
+        QVERIFY(!view->TextureArrowPoints(true, &tail, &tip));
+
+        view->show_fill_texture_arrow = true;
+        QVERIFY(view->TextureArrowPoints(true, &tail, &tip));
+        // offset 0 -> coda ACCANTO allo stick, non su P1 né sul punto medio nudo: la freccia si
+        // afferra per ULTIMA, quindi una coda su una maniglia di stick — o, per uno stick
+        // diritto il cui bounding box è degenere, su una maniglia laterale della transformation
+        // box, che gli cade addosso — resterebbe coperta per sempre e l'offset non si potrebbe
+        // mai trascinare. È la proprietà a contare, non la formula: coda E punta devono stare
+        // fuori dal raggio di presa di tutto ciò che ha priorità più alta.
+        QCOMPARE(tail, view->TextureArrowAnchor(stick, 0.0));
+        for(const QPointF &grab : { stick->my_line.p1(), stick->my_line.p2(),
+                                    stick->my_line.pointAt(0.5) }){
+            QVERIFY(QLineF(tail, grab).length() > 10.0);  // 10 == handle_size, il raggio di presa
+            QVERIFY(QLineF(tip, grab).length() > 10.0);
+        }
+        // scala 1 e tile da 20 px -> la freccia è lunga esattamente una tile
+        QVERIFY(qAbs(QLineF(tail, tip).length() - 20.0) < 1e-6);
+        // il contorno è una tinta unita: nessuna seconda freccia
+        QVERIFY(!view->TextureArrowPoints(false, &tail, &tip));
+
+        // --- trascina la PUNTA: angolo e scala insieme
+        const int undo_before = view->undo_stack.index();
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(tip));
+        QTest::mouseMove(view->viewport(), view->mapFromScene(tip + QPointF(30, 30)));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                            view->mapFromScene(tip + QPointF(30, 30)));
+        TextureXf dragged = ReadTextureXf(stick->brush);
+        QVERIFY(dragged.scale > 1.5);                   // allungata
+        QVERIFY(qAbs(dragged.angle) > 5.0);             // e ruotata
+        QCOMPARE(dragged.offset, QPointF(0, 0));        // la punta non tocca l'offset
+        // tutto il trascinamento è UN solo passo di undo (StoreUndo() una volta, al press)
+        QCOMPARE(view->undo_stack.index(), undo_before + 1);
+        view->undo_stack.undo();
+        QVERIFY(qAbs(ReadTextureXf(CurrentStickFigure()->stick_list.last()->brush).scale - 1.0) < 1e-6);
+        view->undo_stack.redo();
+        stick = CurrentStickFigure()->stick_list.last();
+
+        // --- trascina la CODA: solo l'offset
+        CurrentStickFigure()->current_stick = stick;
+        QVERIFY(view->TextureArrowPoints(true, &tail, &tip));
+        const TextureXf before_move = ReadTextureXf(stick->brush);
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(tail));
+        QTest::mouseMove(view->viewport(), view->mapFromScene(tail + QPointF(-40, 25)));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                            view->mapFromScene(tail + QPointF(-40, 25)));
+        const TextureXf moved = ReadTextureXf(CurrentStickFigure()->stick_list.last()->brush);
+        QVERIFY(QLineF(moved.offset, before_move.offset).length() > 20.0);
+        QVERIFY(qAbs(moved.scale - before_move.scale) < 1e-6); // la coda non tocca la scala
+        QVERIFY(qAbs(moved.angle - before_move.angle) < 1e-6); // né l'angolo
+
+        // --- priorità: con la coda spinta SOPRA una maniglia dello stick, il press NON deve
+        // afferrare la freccia — deve cadere nella rotazione normale, come se la freccia non
+        // ci fosse. Frame nuovo, così il gesto parte dallo stesso stato pulito di
+        // DragRotateViaRealMouseEventsIsUndoable() invece che da quello lasciato dai due
+        // trascinamenti qui sopra.
+        AddFrame();
+        DrawStick(QPointF(500, 200), QPointF(500, 300));
+        stick = CurrentStickFigure()->stick_list.last();
+        stick->stick_type = StickData::RECT;
+        QBrush on_handle(tile);
+        TextureXf at_p2;
+        at_p2.offset = stick->my_line.p2() - view->TextureArrowAnchor(stick, 0.0);
+        WriteTextureXf(&on_handle, at_p2);
+        stick->brush = on_handle;
+        CurrentStickFigure()->current_stick = stick;
+        view->SetTool(NOTOOL);
+        QVERIFY(view->TextureArrowPoints(true, &tail, &tip));
+        QCOMPARE(tail, stick->my_line.p2());
+        const QLineF line_before = stick->my_line;
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(tail));
+        // più di un movimento: la rotazione normale si INIZIALIZZA sul primo (come in
+        // DragRotateViaRealMouseEventsIsUndoable), quindi con uno solo lo stick non gira e il
+        // test non distinguerebbe "priorità rispettata" da "il press non ha fatto nulla"
+        for(int i = 1; i <= 5; i++)
+            QTest::mouseMove(view->viewport(), view->mapFromScene(tail + QPointF(9*i, -4*i)));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                            view->mapFromScene(tail + QPointF(45, -20)));
+        StickData *after = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(ReadTextureXf(after->brush).offset, at_p2.offset); // la texture non si è mossa
+        QVERIFY(after->my_line != line_before);                     // lo stick sì
+        view->show_fill_texture_arrow = false;
         view->SetTool(NOTOOL);
     }
 
@@ -2839,6 +3794,77 @@ private slots:
         QVERIFY(warnings.isEmpty());
     }
 
+    // Neither foreign format has a fill beyond a flat colour, so a gradient/pattern/image
+    // one is dropped on export — but to its FIRST STOP (or the tile's average), never to
+    // QBrush::color(), which is an unset black for those styles and would silently blacken
+    // the figure. Both exporters warn once with the count.
+    void ForeignExportFlattensNonSolidFillsAndWarns()
+    {
+        StickFigureData figure;
+        StickData *master = new StickData();
+        master->my_line = QLineF(100, 100, 100, 60);
+        master->stick_type = StickData::LINE;
+        master->pen = QPen(QColor(0, 0, 0), 4.0);
+        figure.stick_list.append(master);
+        figure.master_stick = master;
+
+        // riempimento a gradiente: il primo stop è verde, QBrush::color() sarebbe nero
+        QLinearGradient gradient(QPointF(0, 0), QPointF(1, 0));
+        gradient.setCoordinateMode(QGradient::ObjectMode);
+        gradient.setStops({ QGradientStop(0.0, QColor(0, 200, 0)),
+                            QGradientStop(1.0, QColor(0, 0, 200)) });
+        StickData *filled = new StickData();
+        filled->my_line = QLineF(100, 60, 100, 20);
+        filled->stick_type = StickData::CIRCLE;
+        filled->pen = QPen(QColor(0, 0, 0), 2.0);
+        filled->brush = QBrush(gradient);
+        filled->img_w_scale = 1;
+        filled->parent = master;
+        filled->z = 0.01;
+        figure.stick_list.append(filled);
+
+        for (int variant = 0; variant < 2; variant++) {
+            QStringList warnings;
+            QString error;
+            const bool nodes = (variant == 1);
+            const QString out_path = stk_temp_dir.filePath(nodes ? "flat_fill.nodes"
+                                                                 : "flat_fill.stk");
+            QVERIFY2(nodes ? StkFormat::ExportNodes(out_path, figure, &warnings, &error)
+                           : StkFormat::ExportStk(out_path, figure, StkFormat::PIVOT5,
+                                                  &warnings, &error),
+                     qPrintable(error));
+            QVERIFY(warnings.filter("flat color").count() == 1);
+        }
+
+        // e il colore appiattito è davvero il primo stop, non il nero di default
+        QStringList warnings;
+        QString error;
+        const QString round_trip = stk_temp_dir.filePath("flat_fill_back.stk");
+        QVERIFY2(StkFormat::ExportStk(round_trip, figure, StkFormat::PIVOT5, &warnings, &error),
+                 qPrintable(error));
+        StickFigureData *back = StkFormat::ImportStk(round_trip, QPointF(0, 0), &warnings, &error);
+        QVERIFY2(back != nullptr, qPrintable(error));
+        bool found_green = false;
+        for (StickData *stick : back->stick_list)
+            if (stick->brush.style() != Qt::NoBrush && stick->brush.color() == QColor(0, 200, 0))
+                found_green = true;
+        QVERIFY(found_green);
+        delete back; // ~StickFigureData() owns stick_list (come negli altri test di import)
+
+        // il nativo invece non appiattisce nulla: stesso StickData, gradiente intatto
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << *filled;
+        }
+        StickData native;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> native;
+        }
+        QCOMPARE(native.brush.style(), Qt::LinearGradientPattern);
+    }
+
     void StkExportImportRoundTrip()
     {
         StickFigureData figure;
@@ -3261,6 +4287,286 @@ private slots:
         QCOMPARE(flat.size(), hard.size());         // square mask: uniform dab scaling still holds
         QCOMPARE(qAlpha(flat.pixel(32, 5)), 0);     // squashed to half height: top rim is empty
         QCOMPARE(qAlpha(flat.pixel(5, 32)), 255);   // ...while the width is untouched
+    }
+
+    // The "Brush" BORDER: the outline is stamped with a brush tip instead of traced by the pen,
+    // through the same BrushStroke/StampAlongPath() pair draw mode stamps with. Rendered, because
+    // the whole claim is about what reaches the canvas, and in three parts:
+    //   1) the pen must NOT also draw its own outline (it did, until StrokeWithBrush() returned
+    //      true and FillAndStroke() honoured it), which shows up as a widely spaced brush border
+    //      covering far less than the continuous line;
+    //   2) spacing must actually act on a border, exactly as it acts on a freehand stroke;
+    //   3) the whole thing must survive a save/load — it is the one style entry that is not a
+    //      QBrush, so unlike every other fill/stroke kind it needed real serialization (record
+    //      version 6) rather than riding along inside QPen/QBrush's own operators.
+    void BrushBorderStampsTheOutlineInsteadOfTracingIt()
+    {
+        StickData rect;
+        rect.stick_type = StickData::RECT;
+        rect.my_line = QLineF(100, 50, 100, 150);
+        rect.img_angle = 0;
+        rect.img_w_scale = 60;
+        rect.brush = QBrush(Qt::NoBrush);          // solo il bordo: ogni pixel dipinto è suo
+        rect.pen = QPen(Qt::blue, 8);
+        rect.stroke_brush.stamp = MyView::MakeRoundBrush(32, 100, 100); // punta piena, bordo netto
+
+        auto painted_pixels = [](StickData *data){
+            QGraphicsScene render_scene;
+            render_scene.setSceneRect(0, 0, 200, 220);
+            render_scene.addItem(new StickGraphicsItem(data)); // la scena possiede la view
+            QImage img(200, 220, QImage::Format_ARGB32);
+            img.fill(Qt::white);
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 200, 220), QRectF(0, 0, 200, 220));
+            painter.end();
+            int painted = 0;
+            for(int y = 0; y < img.height(); y++)
+                for(int x = 0; x < img.width(); x++)
+                    if(img.pixelColor(x, y) != QColor(Qt::white))
+                        painted++;
+            return painted;
+        };
+
+        rect.stroke_brush.spacing = 25;
+        const int dense = painted_pixels(&rect);
+        rect.stroke_brush.spacing = 600;
+        const int sparse = painted_pixels(&rect);
+        QImage no_brush_stamp;
+        qSwap(rect.stroke_brush.stamp, no_brush_stamp);
+        const int plain_pen = painted_pixels(&rect);
+        qSwap(rect.stroke_brush.stamp, no_brush_stamp);
+
+        QVERIFY2(sparse > 0, "the brush border painted nothing at all");
+        QVERIFY2(sparse * 2 < dense, qPrintable(QStringLiteral("border spacing ignored: %1 px at "
+                                     "600%% vs %2 px at 25%%").arg(sparse).arg(dense)));
+        // la penna non traccia ANCHE il suo contorno: a dab radi si copre molto meno della linea
+        // continua, mentre disegnandoli entrambi il conto sarebbe almeno quello della penna
+        QVERIFY2(sparse * 2 < plain_pen, qPrintable(QStringLiteral("the pen drew the outline as "
+                                     "well: %1 px stamped vs %2 px with the pen alone")
+                                     .arg(sparse).arg(plain_pen)));
+
+        // ...e vale per OGNI tipo con un percorso, non solo per il rettangolo, con un
+        // riempimento sotto (il caso reale): conta i soli pixel del colore della penna, così un
+        // contorno tracciato si distingue dal riempimento che gli sta dietro
+        const struct { const char *name; int type; } types[] = {
+            { "LINE", StickData::LINE }, { "RECT", StickData::RECT },
+            { "CIRCLE", StickData::CIRCLE }, { "TRAPEZOID", StickData::TRAPEZOID },
+            { "TAPER", StickData::TAPER }, { "POLYGON", StickData::POLYGON },
+            { "MULTILINE", StickData::MULTILINE } };
+        auto pen_coloured_pixels = [](StickData *data){
+            QGraphicsScene render_scene;
+            render_scene.setSceneRect(0, 0, 240, 240);
+            render_scene.addItem(new StickGraphicsItem(data));
+            QImage img(240, 240, QImage::Format_ARGB32);
+            img.fill(Qt::white);
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 240, 240), QRectF(0, 0, 240, 240));
+            painter.end();
+            int n = 0;
+            for(int y = 0; y < img.height(); y++)
+                for(int x = 0; x < img.width(); x++)
+                    if(img.pixelColor(x, y) == QColor(Qt::blue)) n++;
+            return n;
+        };
+        for(const auto &t : types){
+            StickData d;
+            d.stick_type = t.type;
+            d.my_line = QLineF(100, 60, 100, 160);
+            d.img_angle = 0;
+            d.img_w_scale = 60;
+            d.img_h_scale = 60;
+            d.brush = QBrush(Qt::red);                 // riempimento pieno sotto il bordo
+            d.pen = QPen(Qt::blue, 8);
+            if(t.type == StickData::POLYGON || t.type == StickData::MULTILINE){
+                d.polygon_points = { QPointF(0.4, 0.3), QPointF(-0.4, 0.6) };
+                d.vertex_curvatures = { 0, 0, 0, 0 };
+                d.vertex_widths = { 8, 8, 8, 8 };
+            }
+            const int traced = pen_coloured_pixels(&d);
+            d.stroke_brush.stamp = MyView::MakeRoundBrush(32, 100, 100);
+            d.stroke_brush.spacing = 600;
+            const int stamped = pen_coloured_pixels(&d);
+            QVERIFY2(stamped > 0 && stamped * 2 < traced,
+                     qPrintable(QStringLiteral("%1: pen outline still drawn under the dabs "
+                                "(%2 px stamped vs %3 px traced)")
+                                .arg(t.name).arg(stamped).arg(traced)));
+        }
+
+        // l'ONION SKIN passa di qui come tutto il resto, in grigio piatto. Lasciarlo alla penna
+        // (che è ciò che faceva l'esclusione di onion_render) metteva un contorno pieno su ogni
+        // fotogramma fantasma di uno stick che sulla tela è timbrato: un bordo solido visibile
+        // DIETRO il pennello. Il flag è static: va rimesso da un distruttore, perché una QVERIFY
+        // fallita esce subito e lo lascerebbe acceso per ogni slot successivo.
+        struct OnionGuard { ~OnionGuard(){ StickGraphicsItem::onion_render = false; } } guard;
+        StickData ghost;
+        ghost.stick_type = StickData::RECT;
+        ghost.my_line = QLineF(100, 50, 100, 150);
+        ghost.img_angle = 0;
+        ghost.img_w_scale = 60;
+        ghost.brush = QBrush(Qt::NoBrush);
+        ghost.pen = QPen(Qt::blue, 8);
+        StickGraphicsItem::onion_render = true;
+        const int ghost_traced = painted_pixels(&ghost);
+        ghost.stroke_brush.stamp = MyView::MakeRoundBrush(32, 100, 100);
+        ghost.stroke_brush.spacing = 600;
+        const int ghost_stamped = painted_pixels(&ghost);
+        StickGraphicsItem::onion_render = false;
+        QVERIFY2(ghost_stamped > 0, "the onion skin of a brush border painted nothing");
+        QVERIFY2(ghost_stamped * 2 < ghost_traced,
+                 qPrintable(QStringLiteral("the onion skin traced a solid outline under the "
+                            "dabs: %1 px stamped vs %2 px traced")
+                            .arg(ghost_stamped).arg(ghost_traced)));
+
+        // e il giro attraverso lo stream: version 6, nessun campo perso
+        rect.stroke_brush.spacing = 40;
+        rect.stroke_brush.angle = -30;
+        rect.stroke_brush.size_jitter = 15;
+        rect.stroke_brush.angle_jitter = 70;
+        rect.stroke_brush.opacity_jitter = 55;
+        QByteArray blob;
+        QDataStream out(&blob, QIODevice::WriteOnly);
+        out << rect;
+        StickData back;
+        QDataStream in(&blob, QIODevice::ReadOnly);
+        in >> back;
+        QCOMPARE(back.stroke_brush.stamp.size(), rect.stroke_brush.stamp.size());
+        QCOMPARE(back.stroke_brush.spacing, 40);
+        QCOMPARE(back.stroke_brush.angle, -30);
+        QCOMPARE(back.stroke_brush.size_jitter, 15);
+        QCOMPARE(back.stroke_brush.angle_jitter, 70);
+        QCOMPARE(back.stroke_brush.opacity_jitter, 55);
+
+        // colore, diametro e opacità NON sono memorizzati: StrokeBrush() li rilegge dalla penna,
+        // così i controlli di colore/spessore/opacità che già esistono comandano anche qui
+        back.pen = QPen(QColor(0, 128, 0, 128), 17);
+        const BrushStroke assembled = back.StrokeBrush();
+        QCOMPARE(assembled.color, QColor(0, 128, 0, 128));
+        QCOMPARE(assembled.size, 17.0);
+        QVERIFY(qAbs(assembled.opacity - 128/255.0) < 0.01);
+
+        // un TEXT ha un contorno ma non un percorso da percorrere: la voce non gli si applica
+        back.stick_type = StickData::TEXT;
+        QVERIFY(back.PaintsStroke());
+        QVERIFY(!back.StrokesAPath());
+    }
+
+    // A stick-anchored paint's placement is stored in the STICK's frame — a texture's offset is a
+    // translation the local frame then rotates, an ObjectMode gradient's is a displacement inside a
+    // box ObjectGradientTurn() turns — while the arrow handle speaks scene coordinates. Reading one
+    // as the other moved the paint along the stick's angle instead of along the drag: for a stick
+    // pointing UP (img_angle 180) exactly backwards, which is the report this pins. Rendered rather
+    // than asserted on the stored numbers, because the claim is about what lands on the canvas.
+    // Also pins that a type which never hands its brush to the painter shows no fill arrow at all.
+    void TextureArrowDragMovesThePaintTheWayItWasDragged()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        DrawStick(QPointF(300, 400), QPointF(300, 300));   // verso l'ALTO: il frame è girato di 180
+        StickData *stick = CurrentStickFigure()->stick_list.last();
+        stick->stick_type = StickData::RECT;
+        // il tipo cambia dopo il disegno, e img_angle lo riallineano alla spina i percorsi che lo
+        // usano (StickFigure::Elongate() e simili): qui va messo a mano, come negli altri slot
+        stick->img_angle = 180;                            // convenzione -atan2(dx,dy) per il verso su
+        stick->img_w_scale = 120;                          // forma larga: i due sensori ci stanno dentro
+        stick->pen = QPen(Qt::NoPen);                      // solo il riempimento, nessun contorno
+        // una macchia radiale: dove sta il bianco si legge in un pixel, senza ambiguità di direzione
+        QRadialGradient spot(QPointF(0.5, 0.5), 0.5);
+        spot.setCoordinateMode(QGradient::ObjectMode);
+        spot.setStops({ QGradientStop(0.0, Qt::white), QGradientStop(1.0, Qt::black) });
+        stick->brush = QBrush(spot);
+        CurrentStickFigure()->current_stick = stick;
+        view->SetTool(NOTOOL);
+        view->show_fill_texture_arrow = true;
+        // senza questo il test non misurerebbe nulla: è il frame ruotato a rendere il caso interessante
+        QVERIFY2(qAbs(qAbs(stick->img_angle) - 180.0) < 0.5, "lo stick non punta in su: niente da misurare");
+
+        // luminanza in un punto di scena, dipinta da una COPIA dei soli campi che servono:
+        // avvolgere lo stick VIVO in una seconda StickGraphicsItem gli ruberebbe il back-pointer
+        auto bright_at = [](const StickData *from, const QPoint &probe){
+            StickData copy;
+            copy.stick_type = from->stick_type;
+            copy.my_line = from->my_line;
+            copy.img_angle = from->img_angle;
+            copy.img_w_scale = from->img_w_scale;
+            copy.brush = from->brush;
+            copy.brush_follows_stick = from->brush_follows_stick;
+            copy.pen = QPen(Qt::NoPen);
+            QGraphicsScene render_scene;
+            render_scene.setSceneRect(0, 0, 600, 600);
+            render_scene.addItem(new StickGraphicsItem(&copy)); // la scena possiede la view
+            QImage img(600, 600, QImage::Format_ARGB32);
+            img.fill(Qt::red);
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 600, 600), QRectF(0, 0, 600, 600));
+            painter.end();
+            return qGray(img.pixelColor(probe).rgb());
+        };
+        // simmetrici rispetto al centro della forma (300,350), dentro i suoi 240..360 x 300..400
+        const QPoint left(265, 350), right(335, 350);
+        QVERIFY(qAbs(bright_at(stick, left) - bright_at(stick, right)) < 12); // macchia centrata
+
+        QPointF tail, tip;
+        QVERIFY(view->TextureArrowPoints(true, &tail, &tip));
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(tail));
+        QTest::mouseMove(view->viewport(), view->mapFromScene(tail + QPointF(40, 0)));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                            view->mapFromScene(tail + QPointF(40, 0)));
+        stick = CurrentStickFigure()->stick_list.last();
+        // la presa ha funzionato (altrimenti il confronto sotto passerebbe a macchia ferma)
+        QVERIFY(ReadGradientXf(stick->brush).offset != QPointF(0, 0));
+        // ...e la macchia è andata a DESTRA, come il trascinamento
+        QVERIFY2(bright_at(stick, right) > bright_at(stick, left) + 20,
+                 "il riempimento non ha seguito la freccia");
+        // la freccia ridisegnata sta dove il mouse l'ha lasciata: Read e Write sono inversi
+        QPointF moved_tail, moved_tip;
+        QVERIFY(view->TextureArrowPoints(true, &moved_tail, &moved_tip));
+        QVERIFY(QLineF(moved_tail, tail + QPointF(40, 0)).length() < 1.0);
+
+        // un tipo che non passa il brush al painter non ha un riempimento da puntare: niente
+        // freccia, per quanta geometria il pennello contenga (StickData::PaintsFill())
+        for(qint32 no_fill : { qint32(StickData::LINE), qint32(StickData::MULTILINE),
+                              qint32(StickData::TEXT), qint32(StickData::IMAGE),
+                              qint32(StickData::FREEHAND) }){
+            stick->stick_type = no_fill;
+            QVERIFY2(!view->TextureArrowPoints(true, &tail, &tip),
+                     qPrintable(QStringLiteral("tipo %1: freccia di riempimento mostrata")
+                                    .arg(no_fill)));
+        }
+        stick->stick_type = StickData::RECT;               // ...e per un tipo che riempie sì
+        QVERIFY(view->TextureArrowPoints(true, &tail, &tip));
+    }
+
+    // A gradient's transparency lives in its stops (see
+    // GradientOpacityLivesInTheStopsAndTheSliderIsEnabled for why it can live nowhere else), so
+    // per-stop alpha is the only way to dial a gradient that FADES rather than one uniformly
+    // faded. The box has to write the selected stop only, and it has to be echoed back on a
+    // selection change — a stale echo would slam the newly selected stop to the previous one's
+    // alpha at the first nudge, which is the failure mode UpdateStyleControls() exists for.
+    // One dialog class serves fill and border, linear and radial, so this covers all four.
+    void GradientStopAlphaIsEditablePerStop()
+    {
+        for(GradientDialog::Kind kind : { GradientDialog::LINEAR, GradientDialog::RADIAL }){
+            GradientDialog dialog(kind);
+            QSpinBox *alpha = dialog.findChild<QSpinBox*>("gradient_stop_alpha");
+            QVERIFY(alpha);
+            QCOMPARE(alpha->value(), 100);          // lo stop 0 di partenza è opaco, e l'eco lo dice
+
+            alpha->setValue(40);
+            QGradientStops stops = dialog.Gradient().stops();
+            QCOMPARE(stops.size(), 2);
+            QVERIFY(qAbs(stops[0].second.alphaF() - 0.4) < 0.01);
+            QCOMPARE(stops[1].second.alpha(), 255); // solo lo stop selezionato cambia
+            QCOMPARE(stops[0].second.rgb(), QColor(Qt::white).rgb()); // e ne cambia solo l'alpha
+
+            // l'eco: selezionare l'altro stop deve portare il SUO alpha nella casella
+            QListWidget *list = dialog.findChild<QListWidget*>();
+            QVERIFY(list);
+            list->setCurrentRow(1);
+            QCOMPARE(alpha->value(), 100);
+            list->setCurrentRow(0);
+            QCOMPARE(alpha->value(), 40);
+        }
     }
 };
 

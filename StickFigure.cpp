@@ -109,7 +109,11 @@ void StickFigure::UpdateIcon()
     // imposta l'iconea
     delete stick_figure_icon;
     stick_figure_icon = new QIcon(*icon_img);
-    linked_item->setIcon(*stick_figure_icon);
+    // una figura ricostruita da PopulateLiveFrame() non ha ancora una riga nella lista layer
+    // (la crea MoveToFrame() per il frame mostrato): l'icona è comunque pronta in
+    // stick_figure_icon, che è quello che quella riga leggerà quando esisterà
+    if(linked_item)
+        linked_item->setIcon(*stick_figure_icon);
     // libera prima le view (icoScene le possiede) poi i dati clonati (view non owning)
     icoScene.clear();
     qDeleteAll(renderClones);

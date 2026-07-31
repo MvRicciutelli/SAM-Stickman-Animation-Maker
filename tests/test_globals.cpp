@@ -82,6 +82,12 @@ AdvancedTaperWidget *advanced_taper_tab = nullptr;
 QSpinBox *line_edit_thickness_width_spinbox = nullptr;
 QSlider *circle_squash_slider = nullptr;
 QSpinBox *circle_squash_spinbox = nullptr;
+QComboBox *fill_type_combo = nullptr;    // nulli: UpdateSliders() salta il blocco che li disabilita
+QComboBox *stroke_type_combo = nullptr;
+QCheckBox *brush_follows_check = nullptr; // idem
+QCheckBox *texture_tiled_check = nullptr; // idem
+QCheckBox *fill_texture_arrow_check = nullptr;   // idem
+QCheckBox *stroke_texture_arrow_check = nullptr; // idem
 QDir temp_render_folder;
 QDir my_animations_folder;
 QDir my_stick_figures_folder;

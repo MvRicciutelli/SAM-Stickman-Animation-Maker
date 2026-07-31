@@ -178,14 +178,17 @@ void PopulateLiveFrame(Frame *target_frame, const FrameData &source_data,
     target_frame->name = source_data.name;
     target_frame->total_sticks.clear();
     for (StickFigureData *figure_data : source_data.stick_figures) {
-        QListWidgetItem *added_item = new QListWidgetItem();
-        StickFigure *figure = new StickFigure(added_item);
+        // linked_item resta nullptr: l'unica QListWidgetItem che una figura può possedere è
+        // quella INSERITA nella lista layer, e la crea MoveToFrame() per il solo frame
+        // mostrato (riassegnando linked_item). Crearne una qui la lasciava senza proprietario
+        // — mai inserita, mai cancellata, e il puntatore sovrascritto da MoveToFrame(): una
+        // QListWidgetItem persa per figura a ogni restore di undo/redo, paste e load
+        StickFigure *figure = new StickFigure(nullptr);
         target_frame->stick_figures.append(figure);
         figure->base_z = target_frame->stick_figures.count();
         figure->scene = target_frame->scene;
         target_frame->current_stick_figure = figure;
         PopulateLiveStickFigure(figure, *figure_data, attach_to_scene, update_icons);
-        added_item->setData(Qt::DisplayRole, figure->name);
         for (StickData *s : figure->stick_list)
             target_frame->total_sticks.append(s);
     }

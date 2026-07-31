@@ -1,5 +1,6 @@
 #ifndef STICKDATA_H
 #define STICKDATA_H
+#include <abrbrush.h>   // BrushStroke: the border-brush settings live on the record
 #include <QBrush>
 #include <QDataStream>
 #include <QFont>
@@ -67,6 +68,50 @@ public:
     bool IsImageType() const { return stick_type == IMAGE || stick_type == FREEHAND; }
 
     /**
+     * @brief True for the types whose paint() actually hands `brush` to the painter.
+     *
+     * A raster type IS its image (pen and brush are never looked at), and LINE, MULTILINE and
+     * TEXT are stroke-only — for all of them the brush is a value the stick carries and nothing
+     * renders. Everything the fill can be edited or aimed with therefore has to be gated on
+     * this, not merely on the brush having a gradient/texture in it: Animation::UpdateSliders()
+     * greys the fill type combo, UpdateStyleControls() the fill's texture-handle box, and
+     * MyView::TextureArrowPoints() hides the handle itself.
+     */
+    bool PaintsFill() const
+    {
+        return !IsImageType() && stick_type != LINE && stick_type != MULTILINE
+                               && stick_type != TEXT;
+    }
+
+    /**
+     * @brief True for the types whose paint() actually hands `pen` to the painter.
+     *
+     * Only the raster types are excluded — see PaintsFill(); a TEXT stick strokes its glyphs
+     * with the pen, so it counts.
+     */
+    bool PaintsStroke() const { return !IsImageType(); }
+
+    /**
+     * @brief True for the types whose border is a PATH that a brush tip can be walked along.
+     *
+     * PaintsStroke() minus TEXT: a text stick's "stroke" is the glyph fill, not a contour, so
+     * there is nothing to stamp along. Gates both the renderer (paint()) and the "Brush" entry
+     * of the Border type combo.
+     */
+    bool StrokesAPath() const { return PaintsStroke() && stick_type != TEXT; }
+
+    /**
+     * @brief The border brush ready to stamp with: the stored tip and dynamics, plus the three
+     *        numbers that are the PEN's (colour, dab diameter, opacity).
+     * @return a BrushStroke whose stamp is null when this stick has no brush border.
+     *
+     * The one place the derived half is filled in, so the thickness slider, the colour button and
+     * the opacity slider keep driving a brush border exactly as they drive a plain one — see the
+     * note on BrushStroke (abrbrush.h) for why those three are not stored twice.
+     */
+    BrushStroke StrokeBrush() const;
+
+    /**
      * @brief Builds an empty stick record with safe defaults (LINE type, no images).
      */
     StickData();
@@ -123,10 +168,11 @@ public:
 
     // ------- persistent fields (exactly what operator<</operator>> read and write) ------
 
-    qint32 version = 3;              ///< serialization format version of this record; 2 adds the
-                                     ///< IK fields below, 3 adds TEXT's text_v_stretch — both
-                                     ///< gated in operator<</operator>> so files saved before
-                                     ///< those fields existed still load correctly
+    qint32 version = 6;              ///< serialization format version of this record; 2 adds the
+                                     ///< IK fields below, 3 adds TEXT's text_v_stretch, 4 adds
+                                     ///< brush_follows_stick, 5 adds texture_tiled, 6 adds
+                                     ///< stroke_brush — all gated in operator<</operator>> so
+                                     ///< files saved before those fields existed still load
     qint32 stick_type = StickType::LINE;///< StickType value; drives painting and serialization
     /**
      * @brief True only for the invisible bridge stick MergeStickFigures() creates to
@@ -145,6 +191,55 @@ public:
     qint32 parent_idx = 0;           ///< index of the parent stick inside its figure's stick_list; -1 for the master (only meaningful during (de)serialization)
     QPen pen;                       ///< outline color/thickness
     QBrush brush;                   ///< fill for the shape types (CIRCLE/RECT/TRAPEZOID/TAPER)
+
+    /**
+     * @brief Whether a pattern/gradient/image fill or stroke is anchored to the stick
+     *        (rotating, moving and stretching with it) or to the scene (staying put while
+     *        the stick moves over it). True — anchored to the stick — is the default.
+     *
+     * Meaningless for a plain colour, which has no geometry to anchor. It governs the pen
+     * AND the brush together: one visual decision per stick, not two.
+     *
+     * The flag is needed because the stick types do not agree on which coordinate frame
+     * they paint in: RECT/CIRCLE/TRAPEZOID/TAPER/TEXT/IMAGE paint inside the stick's own
+     * rotated frame (so a texture follows for free), while LINE/POLYGON/MULTILINE paint in
+     * scene coordinates (so it does not). StickGraphicsItem::AlignBrush() reconciles the
+     * two by pre-multiplying the brush transform, in whichever direction that type needs —
+     * which is why this is one bool here and no per-type special-casing anywhere else.
+     *
+     * Serialized only from record version 4 on.
+     */
+    bool brush_follows_stick = true;
+
+    /**
+     * @brief Whether a texture FILL repeats across the shape (true, the default) or is
+     *        painted as a single instance (false).
+     *
+     * Only a Qt::TexturePattern fill has anything to repeat, so this is meaningless for a
+     * plain colour, a gradient and an empty brush. Qt has no non-repeating brush style, so
+     * StickGraphicsItem clips the fill to the one instance the texture transform places —
+     * see StickGraphicsItem::SingleInstanceClip(). The STROKE always tiles: clipping a
+     * stroke to one instance would chop the outline into a fragment instead of drawing it.
+     *
+     * Serialized only from record version 5 on.
+     */
+    bool texture_tiled = true;
+
+    /**
+     * @brief The "Brush" border: the outline is STAMPED with a brush tip, dab by dab, instead of
+     *        being traced by the pen.
+     *
+     * A null `stamp` — the default — means no brush border, and the pen draws the outline exactly
+     * as it always has; everything else here is inert until a tip is picked. The tip and the
+     * spacing/jitters are the same ones freehand draw mode uses, read from the same .abr library
+     * (see BrushPicker), so a border can be given the texture of any imported Photoshop brush.
+     *
+     * Only the stored half of a BrushStroke is meaningful here: `color`, `size` and `opacity` are
+     * the pen's and are refilled by StrokeBrush(), so they are neither edited nor serialized.
+     *
+     * Serialized only from record version 6 on.
+     */
+    BrushStroke stroke_brush;
     qint32 order = 0;                ///< position inside Frame::total_sticks (frame-wide draw order)
     float img_angle = 0;             ///< orientation of the image/shape, follows the line direction
     float img_w_scale = 1;            ///< horizontal scale of the image, or shape width
@@ -324,5 +419,103 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data);
  * placement moves.
  */
 void InterpolateStickData(StickData &target, const StickData &start, const StickData &end, float t);
+
+/**
+ * @brief The placement of a texture or gradient inside a QBrush, as three editable numbers.
+ *
+ * A QBrush already carries its placement, in QBrush::transform() — and QDataStream writes
+ * that transform, so it persists with no field of its own (see CLAUDE.md "Fill and stroke").
+ * What a transform cannot do is be edited: neither the numeric options dialog nor the
+ * on-canvas arrow handle can act on a 3x3 matrix. This struct is that matrix in the form
+ * both of them speak, and ReadTextureXf()/WriteTextureXf() convert losslessly in both
+ * directions — every brush this app builds is a plain scale+rotate+translate, which is
+ * exactly what these three fields describe.
+ */
+struct TextureXf {
+    qreal   scale  = 1.0;         ///< uniform scale factor applied to the tile / gradient box
+    qreal   angle  = 0.0;         ///< rotation in degrees, clockwise (QTransform::rotate's sign)
+    QPointF offset = QPointF(0,0);///< translation, applied after the rotation
+};
+
+/**
+ * @brief Reads a brush's placement out of its transform.
+ * @param brush brush to inspect; a brush with no transform reads back as the identity
+ *        placement (scale 1, angle 0, no offset).
+ * @return the placement. Only meaningful for a texture or gradient brush — a solid colour
+ *         has no geometry, and its transform is always the identity.
+ */
+TextureXf ReadTextureXf(const QBrush &brush);
+
+/**
+ * @brief Writes a placement back into a brush's transform.
+ * @param brush brush to modify; must not be null. Its style, colour, tile and gradient
+ *        stops are left alone — only QBrush::setTransform() is called.
+ * @param xf the placement to store. The scale is clamped to a small positive floor: a zero
+ *        (or near-zero) scale collapses the transform to a matrix Qt treats as singular,
+ *        which renders as nothing at all and which ReadTextureXf() could then never recover
+ *        an angle from. The floor is on the DETERMINANT's terms, not merely non-zero — see
+ *        the implementation.
+ */
+void WriteTextureXf(QBrush *brush, const TextureXf &xf);
+
+/**
+ * @brief Reads a GRADIENT brush's placement, as the same three numbers a texture's is.
+ * @param brush brush to inspect; a non-gradient brush reads back as the identity placement.
+ * @return the placement, in the gradient's OWN coordinate space — 0..1 of whatever box it is
+ *         anchored to, since that is what a QGradient's geometry is expressed in. The offset is
+ *         measured from the box's CENTRE, so a centred gradient reads offset (0,0).
+ *
+ * The gradient counterpart of ReadTextureXf(), and it exists because the two brush kinds keep
+ * their placement in completely different places: a texture's is QBrush::transform(), while a
+ * gradient's is its own geometry (start/finalStop for a linear one, centre/radius/focus for a
+ * radial one) and its transform is normally the identity. Editing a gradient through its
+ * transform is not an option — for an ObjectMode gradient the transform acts in that 0..1 box
+ * space, so an offset in scene units would mean that many whole bounding boxes.
+ *
+ * The mapping onto the three numbers is: linear — the axis's midpoint, direction and LENGTH;
+ * radial — the circle's centre, its DIAMETER (so it compares with the linear axis) and the
+ * direction of its focal highlight, which is the one thing an angle can mean for a circle.
+ */
+TextureXf ReadGradientXf(const QBrush &brush);
+
+/**
+ * @brief Writes a placement back into a gradient brush, rebuilding its geometry.
+ * @param brush brush to modify; must not be null. A non-gradient brush is left alone. The
+ *        stops, the spread, the coordinate mode and the brush transform are all preserved —
+ *        only the geometry is rebuilt, which is why the gradient has to be reconstructed rather
+ *        than mutated (QBrush hands out only a const QGradient*).
+ * @param xf the placement, in the gradient's own 0..1 space. A radial gradient keeps its focal
+ *        DISTANCE and is only re-aimed, so dragging the angle spins the highlight around the
+ *        centre instead of flattening it onto it.
+ */
+void WriteGradientXf(QBrush *brush, const TextureXf &xf);
+
+/**
+ * @brief How opaque a fill or stroke paint is, as one number for all three kinds of paint.
+ * @param brush brush to inspect.
+ * @return 0..1. A solid colour's or a texture's is the alpha of QBrush::color(); a gradient's is
+ *         the alpha of its MOST OPAQUE stop.
+ *
+ * Two storage places rather than one, and measured rather than chosen: QDataStream writes a
+ * QBrush's colour for every style, but on the way back in it only restores it for a solid and a
+ * texture — a gradient brush is rebuilt from its stops and the colour is dropped, so an opacity
+ * parked there would silently vanish on save/load. The stops, which do persist, are therefore
+ * where a gradient's opacity lives (and where Qt already looks when rendering it, so unlike a
+ * texture it needs no painter opacity at paint time — see StickGraphicsItem::FillOpacity()).
+ */
+qreal ReadPaintOpacity(const QBrush &brush);
+
+/**
+ * @brief Sets a paint's opacity, in whichever of the two places that kind of brush keeps it.
+ * @param brush brush to modify; must not be null. Qt::NoBrush has no paint to fade — callers
+ *        (Widget::SetPaintOpacity(), Animation::UpdateStyleControls()) exclude it.
+ * @param opacity 0..1, absolute: setting the same value twice changes nothing.
+ *
+ * A gradient's stops are scaled RELATIVE to the most opaque one, which is what keeps the
+ * transparency the user dialled per stop: the ratios between the stops survive, and the number
+ * the slider shows is the peak. ponytail: alphas are 8-bit, so a round trip through a very low
+ * opacity quantizes the ratios a little; the upgrade, if it ever shows, is a stored base.
+ */
+void WritePaintOpacity(QBrush *brush, qreal opacity);
 
 #endif // STICKDATA_H

@@ -106,7 +106,7 @@ guard and phase 5 deletes them outright.
   one-liner tricks, no exotic language features where a simple class,
   explicit loop, or plain function does the job. The code must be easy to
   grep, read top-to-bottom, and step through in a debugger.
-- **Doxygen comments in English on every symbol a phase creates or
+- **Doxygen comments in English, using simple language, aimed to a junior engineer, on every symbol a phase creates or
   refactors** (functions, variables, defines, enums, classes):
   - In **headers**: `@brief` on each declaration, plus `@param`/`@return`
     where applicable.
@@ -116,6 +116,7 @@ guard and phase 5 deletes them outright.
   - Old, untouched code keeps its existing comments (Italian or English) —
     this rule applies to what a phase touches, same scoping as the naming
     convention above.
+  - Cross reference where symbols are used in the code, explain the logic of the single element in the big picture.
 
 ### Qt-imposed exceptions — do not rename these, in any phase
 

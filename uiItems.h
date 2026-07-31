@@ -2,6 +2,7 @@
 #define UIITEMS_H
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QLabel>
 #include <QListWidget>
 #include <QSlider>
@@ -73,6 +74,55 @@ extern AdvancedTaperWidget* advanced_taper_tab;
 extern QSpinBox * line_edit_thickness_width_spinbox;
 extern QSlider*  circle_squash_slider;
 extern QSpinBox * circle_squash_spinbox;
+
+/**
+ * @brief The "what is this painted with" pickers at the top of the Style column's Fill and
+ *        Border groups: solid colour, .pat pattern, linear/radial gradient, image, none.
+ *
+ * Built and wired by Widget (see Widget::BuildStyleCombos(), Widget::StyleKind for the
+ * entries), but listed here because Animation::UpdateSliders() also needs them: it greys
+ * out the fill picker for the stick types that have no fill and both for the raster types,
+ * the same way it already gates the image placement panel. Null when no panel exists (the
+ * test binary doesn't link widget.cpp), which every user must therefore check.
+ */
+extern QComboBox * fill_type_combo;
+extern QComboBox * stroke_type_combo; ///< stroke twin of fill_type_combo; writes into the pen's brush
+
+/**
+ * @brief The "Texture follows stick" toggle at the top of the Style column: whether a
+ *        pattern/gradient/image fill AND stroke are anchored to the stick or to the scene.
+ *
+ * Mirrors StickData::brush_follows_stick, which is one flag for both. Built by Widget, but
+ * echoed here by Animation::UpdateSliders() on every selection change (like every other
+ * per-stick control) and disabled for a plain colour, which has no geometry to anchor.
+ */
+extern QCheckBox * brush_follows_check;
+
+/**
+ * @brief The "Tile texture" toggle beside it: whether a texture FILL repeats across the shape or
+ *        is painted as a single instance (StickData::texture_tiled).
+ *
+ * Lives in the Style column rather than only inside TextureOptionsDialog, which is where it
+ * started, because the flag is per-stick and sticky: set once for an image, it then rode along
+ * onto every later fill — including a pattern picked from the library, which had no control for
+ * it at all and so could be silently clipped to one tile with no way back. Echoed and greyed out
+ * by Animation::UpdateStyleControls() like the anchoring box next to it.
+ */
+extern QCheckBox * texture_tiled_check;
+
+/**
+ * @brief The "Show texture handle" toggles, one in the Style column's Fill group and one in
+ *        its Border group: whether that texture's arrow handle is drawn on the canvas and can
+ *        be grabbed.
+ *
+ * One per group rather than one shared, because with both arrows on they overlap exactly
+ * while the two textures share a placement. Pure interface state (they drive
+ * MyView::show_fill_texture_arrow / show_stroke_texture_arrow, nothing that is saved), but
+ * listed here because Animation::UpdateSliders() greys them out for a stick whose fill or
+ * stroke has no geometry to point at.
+ */
+extern QCheckBox * fill_texture_arrow_check;
+extern QCheckBox * stroke_texture_arrow_check; ///< border twin of fill_texture_arrow_check
 
 extern QDir temp_render_folder;
 extern QDir my_animations_folder;

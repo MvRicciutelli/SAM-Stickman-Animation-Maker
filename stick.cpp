@@ -166,16 +166,257 @@ static QRectF LayoutText(const StickData *d, QTextLayout &layout)
     return layout.boundingRect();
 }
 
+/// @details True for every type whose paint() branch enters the stick's translated+rotated
+/// frame before filling; false for the three that draw straight in scene coordinates. Shared
+/// by AlignBrush() and TextureToScene() so the two can never disagree about it.
+static bool PainterIsLocalFor(const StickData *d)
+{
+    return !(d->stick_type == StickData::LINE
+          || d->stick_type == StickData::POLYGON
+          || d->stick_type == StickData::MULTILINE);
+}
+
+/// @details The stick's own frame, exactly as the type branches of paint() install it on the
+/// painter (`translate(p1)` then `rotate(img_angle)`, or TextFrame() for a text stick), so the
+/// two matrices are the same by construction rather than by a coincidence a later edit could
+/// break. This is the frame anything living in LOGICAL coordinates needs — a texture, and a
+/// LogicalMode gradient.
+static QTransform StickLocalFrame(const StickData *d)
+{
+    if(d->stick_type == StickData::TEXT)
+        return TextFrame(d);
+    QTransform local;
+    local.translate(d->my_line.p1().x(), d->my_line.p1().y());
+    local.rotate(d->img_angle);
+    return local;
+}
+
+/// @details The rotation of the frame above, on its own — the one number both ObjectGradientTurn()
+/// and StickGraphicsItem::BrushFrameAngle() need, kept here so the TEXT case (whose frame is
+/// TextFrame()'s, not a plain img_angle) cannot drift between them.
+///
+/// ponytail: TextFrame() also SCALES for text_v_stretch, which this cannot express. Only the arrow
+/// handle reads it, and a text stick has no fill to aim; if a stretched TEXT ever needs an exact
+/// textured stroke handle, the route is to decompose TextFrame() instead of rebuilding its angle.
+static qreal StickFrameAngle(const StickData *d)
+{
+    return (d->stick_type == StickData::TEXT)
+         ? d->img_angle + d->img_angle_offset + 90 : d->img_angle;
+}
+
+/// @details The rotation an ObjectMode gradient needs to TURN WITH the stick, and nothing more.
+/// It is already anchored to the shape's bounding box, so it has the position and is missing
+/// only the orientation. The pivot is the CENTRE of the box, (0.5, 0.5), because the transform
+/// of an ObjectMode gradient acts in the box's own 0..1 space whose origin is its top-left
+/// CORNER: rotating there swings the gradient axis out of the shape (at -90° entirely out, and
+/// the fill renders as one flat colour). Both facts measured, not reasoned about.
+///
+/// ponytail: the bounding box stays axis-aligned, so rotating the stick stretches the gradient
+/// a little as well as turning it. If it ever matters, the route is the same one
+/// SceneAnchoredGradient() takes below — a LogicalMode gradient, built from the stick's own
+/// endpoints instead of from the scene rect.
+static QTransform ObjectGradientTurn(const StickData *d)
+{
+    QTransform turn;
+    turn.translate(0.5, 0.5);
+    turn.rotate(StickFrameAngle(d));
+    turn.translate(-0.5, -0.5);
+    return turn;
+}
+
+/// @details Re-expresses an ObjectMode gradient as a LogicalMode one anchored to a fixed
+/// rectangle of the SCENE, which is the only way to stop it following the stick: ObjectMode is
+/// *defined* relative to the painted shape's bounding box, so no brush transform can detach it —
+/// the box moves with the stick and the gradient goes along, however the transform is composed.
+/// Compensating the rotation (ObjectGradientTurn()) fixes the gradient's DIRECTION and nothing
+/// else, which is why an unanchored gradient still visibly travelled with the stick.
+///
+/// The gradient's numbers are left exactly as they were and it is the transform that maps their
+/// 0..1 space onto @p box, so the result is the same gradient it always was — non-uniform radial
+/// stretch included — merely pinned somewhere else.
+/// @param source the ObjectMode gradient brush.
+/// @param box the scene rectangle the 0..1 coordinates now span (the canvas).
+/// @param cancel_frame transform that undoes the painter's own frame, so scene coordinates come
+///        out where they should: the inverse of the stick's local frame for the types that paint
+///        inside it, the identity for the types already painting in scene coordinates.
+static QBrush SceneAnchoredGradient(const QBrush &source, const QRectF &box,
+                                    const QTransform &cancel_frame)
+{
+    QGradient pinned = *source.gradient();
+    pinned.setCoordinateMode(QGradient::LogicalMode);
+    QTransform unit_to_scene;
+    unit_to_scene.translate(box.left(), box.top());
+    unit_to_scene.scale(box.width() > 0 ? box.width() : 1.0,
+                        box.height() > 0 ? box.height() : 1.0);
+    QBrush out(pinned);
+    out.setTransform(source.transform() * unit_to_scene * cancel_frame);
+    return out;
+}
+
+/**
+ * @details See the header for why this exists at all and for the texture-vs-gradient split.
+ */
+QBrush StickGraphicsItem::AlignBrush(const QBrush &source) const
+{
+    // una tinta unita (o il vuoto) non ha una geometria da ancorare
+    if(source.style() == Qt::SolidPattern || source.style() == Qt::NoBrush)
+        return source;
+    const bool painter_is_local = PainterIsLocalFor(data);
+    const QGradient *gradient = source.gradient();
+
+    if(gradient != nullptr && gradient->coordinateMode() == QGradient::ObjectMode
+            && !data->brush_follows_stick){
+        // un ObjectMode non si sgancia dalla forma ritoccandone il transform: È definito
+        // rispetto al bounding box della forma. Va riespresso, e ancorato alla scena.
+        // Un item senza scena non viene mai dipinto, quindi lì il rettangolo è indifferente.
+        const QRectF box = scene() != nullptr ? scene()->sceneRect() : QRectF(0, 0, 1, 1);
+        return SceneAnchoredGradient(source, box,
+                                     painter_is_local ? StickLocalFrame(data).inverted()
+                                                      : QTransform());
+    }
+    if(data->brush_follows_stick == painter_is_local)
+        return source; // il brush è già nel frame che serve: niente da fare
+
+    const QTransform local = (gradient != nullptr
+                              && gradient->coordinateMode() == QGradient::ObjectMode)
+                           ? ObjectGradientTurn(data) : StickLocalFrame(data);
+    QBrush aligned(source);
+    // il transform del brush si applica PRIMA di quello del painter, quindi comporre a
+    // destra con il frame locale (o con la sua inversa) è ciò che aggiunge o annulla la
+    // rotazione/traslazione dello stick
+    aligned.setTransform(painter_is_local ? source.transform() * local.inverted()
+                                          : source.transform() * local);
+    return aligned;
+}
+
+/// @details Composes the two halves of the answer: the brush's own transform (the user's
+/// scale/angle/offset) and the part of the stick's frame the brush ends up painting in. The
+/// second half is the stick frame exactly when the texture is anchored to the stick — for a
+/// scene-anchored one, AlignBrush() has already cancelled it out, so scene coordinates ARE the
+/// brush's frame. Gradients are excluded: their transform is in a normalized box, not in tile
+/// pixels, so there is no tile rectangle to map.
+QTransform StickGraphicsItem::TextureToScene(const QBrush &source) const
+{
+    if(source.style() != Qt::TexturePattern)
+        return QTransform();
+    if(!data->brush_follows_stick)
+        return source.transform();
+    return source.transform() * StickLocalFrame(data);
+}
+
+/// @details See the header. Zero for a scene-anchored paint is not a special case so much as the
+/// same statement: AlignBrush() cancels the stick's frame out of a scene-anchored texture, and
+/// rebuilds a scene-anchored gradient against the (unrotated) scene rect, so in both the brush's
+/// placement is already read in scene axes.
+qreal StickGraphicsItem::BrushFrameAngle(const StickData *data)
+{
+    return data->brush_follows_stick ? StickFrameAngle(data) : 0.0;
+}
+
+/// @details The tile's own rectangle mapped to the scene, which is precisely the one instance the
+/// user's offset/angle/scale places.
+QPainterPath StickGraphicsItem::SingleInstancePath(const QBrush &source) const
+{
+    QPainterPath instance;
+    if(data->texture_tiled || source.style() != Qt::TexturePattern)
+        return instance;
+    const QImage tile = source.textureImage();
+    if(tile.isNull())
+        return instance;
+    instance.addPolygon(TextureToScene(source).map(QRectF(QPointF(0, 0), tile.size())));
+    instance.closeSubpath();
+    return instance;
+}
+
+/// @details See the header for why a texture brush's own colour is where the opacity lives.
+qreal StickGraphicsItem::FillOpacity(const QBrush &source)
+{
+    if(source.style() != Qt::TexturePattern)
+        return 1.0;
+    return qBound(0.0, source.color().alphaF(), 1.0);
+}
+
+/// @details See the header. The frame is installed here rather than by each type branch, from the
+/// same PainterIsLocalFor()/StickLocalFrame() pair AlignBrush() reads, so the shape and the paint
+/// it is filled with can never end up in two different frames.
+void StickGraphicsItem::FillAndStroke(QPainter *painter, const QBrush &fill,
+                                      const QPainterPath &shape) const
+{
+    const bool local = PainterIsLocalFor(data);
+    auto draw = [&]{
+        if(!local){
+            painter->drawPath(shape);
+            return;
+        }
+        painter->save();
+        painter->setTransform(StickLocalFrame(data), true);
+        painter->drawPath(shape);
+        painter->restore();
+    };
+    painter->setBrush(AlignBrush(fill));
+    const QPainterPath instance = SingleInstancePath(fill);
+    const qreal opacity = FillOpacity(fill);
+    // un contorno a pennello non è tracciato dalla penna: il riempimento va comunque disegnato
+    // senza penna, e il profilo timbrato dopo
+    const bool brush_border = !data->stroke_brush.stamp.isNull() && data->StrokesAPath();
+    if(instance.isEmpty() && opacity >= 1.0 && !brush_border){
+        draw();                  // il caso normale: un solo passaggio, come è sempre stato
+        return;
+    }
+    const QPen outline = painter->pen();
+    painter->save();
+    if(!instance.isEmpty())
+        painter->setClipPath(instance, Qt::IntersectClip);
+    painter->setOpacity(opacity);
+    painter->setPen(Qt::NoPen);
+    draw();                      // 1) il riempimento, ritagliato e/o sbiadito
+    painter->restore();          // via clip, opacità e penna: torna com'era
+    painter->setBrush(Qt::NoBrush);
+    painter->setPen(outline);
+    if(StrokeWithBrush(painter, shape))
+        return;
+    draw();                      // 2) il contorno, che nulla di tutto ciò deve toccare
+}
+
+/// @details The one place a border decides between the pen and the brush tip, so the branches of
+/// paint() that have no fill can share it. The path is lifted into scene coordinates before being
+/// walked because a dab is an IMAGE: painted inside the stick's rotated frame it would come out
+/// turned with the stick and stretched by any scale in the frame, which is not what a brush tip's
+/// own angle and size mean.
+///
+/// An ONION RENDER goes through here too, in flat grey — exactly the treatment paint() gives the
+/// pen. Letting the pen draw the ghost instead (which is what excluding onion_render did) put a
+/// solid grey outline on every ghost frame of a stick whose real border is stamped, i.e. a solid
+/// border showing BEHIND the brush on the canvas.
+bool StickGraphicsItem::StrokeWithBrush(QPainter *painter, const QPainterPath &shape) const
+{
+    if(data->stroke_brush.stamp.isNull() || !data->StrokesAPath())
+        return false;
+    if(data->pen.style() == Qt::NoPen)
+        return true; // nessun contorno richiesto: nulla da timbrare, ma nemmeno da tracciare
+    BrushStroke brush = data->StrokeBrush();
+    if(onion_render)
+        brush.color = Qt::gray;
+    StampAlongPath(painter, PainterIsLocalFor(data) ? StickLocalFrame(data).map(shape) : shape,
+                   brush);
+    return true;
+}
+
 void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
 {
     Q_UNUSED(option);
     Q_UNUSED(widget);
     QPointF p(data->my_line.p1().x(),data->my_line.p1().y());
     this->setZValue(data->z);
-    if(!onion_render)
-        painter->setPen(data->pen);
+    if(!onion_render){
+        QPen aligned_pen(data->pen);
+        aligned_pen.setBrush(AlignBrush(data->pen.brush()));
+        painter->setPen(aligned_pen);
+    }
     else{
         QPen onionSkinPen(data->pen);
+        // setColor sostituisce il brush con una tinta unita: l'onion skin è grigio piatto
+        // anche per una penna a gradiente, e non c'è nulla da riancorare
         onionSkinPen.setColor(Qt::gray);
         painter->setPen(onionSkinPen);
     }
@@ -209,19 +450,17 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
     }
     else if(data->stick_type == StickData::RECT || data->stick_type == StickData::CIRCLE){
 
-        painter->setBrush(data->brush);
-        painter->translate(p);
-        painter->rotate(data->img_angle);
-         if(data->stick_type == StickData::RECT){
-             QPointF c(-data->img_w_scale/2,0);
-            painter->drawRect(c.x(),c.y(),data->img_w_scale,data->my_line.length());
-         }
-         else{
-             QPointF c(-data->img_w_scale*data->my_line.length()/2,0);
-             painter->drawEllipse(c.x(),c.y(),data->my_line.length()*data->img_w_scale,data->my_line.length());
-         }
-        painter->rotate(-data->img_angle);
-        painter->translate(-p.x(),-p.y());
+        // la forma in coordinate locali: la translate/rotate dello stick la mette FillAndStroke()
+        QPainterPath shape;
+        if(data->stick_type == StickData::RECT){
+            QPointF c(-data->img_w_scale/2,0);
+            shape.addRect(c.x(),c.y(),data->img_w_scale,data->my_line.length());
+        }
+        else{
+            QPointF c(-data->img_w_scale*data->my_line.length()/2,0);
+            shape.addEllipse(c.x(),c.y(),data->my_line.length()*data->img_w_scale,data->my_line.length());
+        }
+        FillAndStroke(painter, data->brush, shape);
 
     }
     else if(data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::TAPER){
@@ -229,10 +468,7 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
 
         QVector <QPointF>pVect = {points[0],points[1],points[2],points[3]};
         QPolygonF poly(pVect);
-        painter->setBrush(data->brush);
-        painter->translate(p);
-        painter->rotate(data->img_angle);
-
+        QPainterPath shape;
         if(data->stick_type == StickData::TAPER){
 
             QPainterPath totalPath;
@@ -254,13 +490,13 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
                 piePath.closeSubpath();
                 totalPath.addPath(piePath);
             }
-            painter->drawPath(totalPath.simplified());
+            shape = totalPath.simplified();
         }
         else{
-            painter->drawPolygon(points,4);
+            shape.addPolygon(poly);
+            shape.closeSubpath(); // drawPolygon() chiude da sé, addPolygon() no
         }
-        painter->rotate(-data->img_angle);
-        painter->translate(-p.x(),-p.y());
+        FillAndStroke(painter, data->brush, shape);
 
     }
     else if(data->stick_type == StickData::POLYGON){
@@ -268,7 +504,11 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         // scena (inclusa l'anteprima del prossimo vertice durante il disegno)
         QPolygonF poly = ScenePolygon();
         if(poly.size() == 2){
-            painter->drawLine(poly[0], poly[1]);
+            QPainterPath segment;
+            segment.moveTo(poly[0]);
+            segment.lineTo(poly[1]);
+            if(!StrokeWithBrush(painter, segment))
+                painter->drawLine(poly[0], poly[1]);
         }
         else if(poly.size() >= 3){
             // curvatura per vertice: gli spigoli con curvatura > 0 diventano curve
@@ -279,8 +519,7 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
                              : (poly_preview_active && i > poly_preview_idx) ? i-1 : i;
                 curvatures.append(data->vertex_curvatures.value(data_idx, 0.0f));
             }
-            painter->setBrush(data->brush);
-            painter->drawPath(CurvedPath(poly, curvatures, true));
+            FillAndStroke(painter, data->brush, CurvedPath(poly, curvatures, true));
         }
         PaintVertexSquares(painter, poly);
     }
@@ -342,17 +581,30 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
                 left  << center[k] + n * (widths[k]/2.0);
                 right << center[k] - n * (widths[k]/2.0);
             }
-            QColor stroke = painter->pen().color(); // già ingrigito durante l'onion render
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(stroke);
-            QPolygonF outline = left;
-            for(int k = right.size()-1; k >= 0; k--)
-                outline << right[k];
-            painter->drawPolygon(outline);
-            // estremità arrotondate come i cap RoundCap di uno stick normale
-            if(data->pen.capStyle() == Qt::RoundCap){
-                painter->drawEllipse(center.first(), widths.first()/2.0, widths.first()/2.0);
-                painter->drawEllipse(center.last(),  widths.last()/2.0,  widths.last()/2.0);
+            // il contorno di una spezzata È il suo riempimento: prendi tutto il brush della
+            // penna, non solo il colore, così una penna a pattern/gradiente si vede anche
+            // qui. Resta ingrigito durante l'onion render, perché QPen::setColor() (sopra)
+            // sostituisce il brush con uno tinta unita grigia.
+            // il contorno a pennello timbra la LINEA CENTRALE: la larghezza per vertice non
+            // sopravvive (un dab ha una taglia sola), il che è esattamente ciò che scegliere un
+            // pennello al posto della penna significa
+            QPainterPath spine;
+            spine.moveTo(center.first());
+            for(int k = 1; k < center.size(); k++)
+                spine.lineTo(center[k]);
+            if(!StrokeWithBrush(painter, spine)){
+                QBrush stroke = painter->pen().brush();
+                painter->setPen(Qt::NoPen);
+                painter->setBrush(stroke);
+                QPolygonF outline = left;
+                for(int k = right.size()-1; k >= 0; k--)
+                    outline << right[k];
+                painter->drawPolygon(outline);
+                // estremità arrotondate come i cap RoundCap di uno stick normale
+                if(data->pen.capStyle() == Qt::RoundCap){
+                    painter->drawEllipse(center.first(), widths.first()/2.0, widths.first()/2.0);
+                    painter->drawEllipse(center.last(),  widths.last()/2.0,  widths.last()/2.0);
+                }
             }
             painter->setPen(data->pen);
             painter->setBrush(Qt::NoBrush);
@@ -379,7 +631,11 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         }
     }
     else if(data->stick_type == StickData::LINE){
-        painter->drawLine(data->my_line.x1(),data->my_line.y1(),data->my_line.x2(),data->my_line.y2());
+        QPainterPath segment;
+        segment.moveTo(data->my_line.p1());
+        segment.lineTo(data->my_line.p2());
+        if(!StrokeWithBrush(painter, segment))
+            painter->drawLine(data->my_line.x1(),data->my_line.y1(),data->my_line.x2(),data->my_line.y2());
     }
 
     // il marcatore della catena IK (linea tratteggiata + croce sul target) non è più

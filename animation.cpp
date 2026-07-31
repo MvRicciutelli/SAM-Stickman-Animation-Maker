@@ -7,7 +7,10 @@
 #include "advancedcirclewidget.h"
 #include "advancedtaperwidget.h"
 #include <QCheckBox>
+#include <QComboBox>
+#include <QStandardItemModel>
 #include "uiItems.h"
+#include "widget.h" // solo per Widget::StyleKind, i valori UserData delle due combo di stile
 #include "StickFigure.h" // IkChainStart()/StickIsInActiveIkChain() per il tab IK
 
 extern qint32 W;
@@ -249,6 +252,87 @@ void Animation::UpdateSelection(StickFigure* S)
 
 }
 
+/**
+ * @details Split out of UpdateSliders() because these three check boxes depend on WHAT THE
+ * SELECTED STICK IS PAINTED WITH, and that changes without any selection change: pressing one of
+ * the Style column's Apply buttons (MyView::SetGraphics()) swaps a stick's solid fill for a
+ * gradient or a texture while the same stick stays selected. UpdateSliders() only runs on a
+ * selection change, so the boxes kept the enablement computed while the fill was still solid and
+ * stayed greyed out — looking, correctly enough, like they did not respond to a click. Both
+ * callers now refresh them: the selection path through UpdateSliders(), and SetGraphics().
+ *
+ * Deliberately narrow — setEnabled() plus one signal-blocked setChecked(), nothing that can
+ * re-enter an edit — so SetGraphics() can call it mid-edit, which the whole of UpdateSliders()
+ * (which drives every slider in the panel) could not safely be.
+ */
+void Animation::UpdateStyleControls()
+{
+    StickData *cs = current_frame == nullptr ? nullptr : current_frame->CurrentStick();
+    if(cs == nullptr)
+        return;
+    // texture e gradiente hanno entrambi una geometria da ancorare/puntare, ognuno attraverso
+    // campi propri (vedi MyView::ReadArrow()); una tinta unita e il vuoto no
+    auto has_geometry = [](const QBrush &b){
+        return b.style() == Qt::TexturePattern || b.gradient() != nullptr;
+    };
+    // l'ancoraggio: l'eco va zittita, altrimenti riallineare la casella allo stick selezionato
+    // passerebbe per una modifica dell'utente e spingerebbe un undo a vuoto (stessa ragione del
+    // blockSignals sulla casella IK). Un solo flag per penna E pennello, quindi basta che uno
+    // dei due abbia qualcosa da ancorare.
+    if(brush_follows_check != nullptr){
+        QSignalBlocker mute(brush_follows_check);
+        brush_follows_check->setChecked(cs->brush_follows_stick);
+        brush_follows_check->setEnabled(has_geometry(cs->brush)
+                                       || (cs->pen.style() != Qt::NoPen
+                                           && has_geometry(cs->pen.brush())));
+    }
+    // la ripetizione della texture: solo il RIEMPIMENTO ha qualcosa da ripetere
+    if(texture_tiled_check != nullptr){
+        QSignalBlocker mute(texture_tiled_check);
+        texture_tiled_check->setChecked(cs->texture_tiled);
+        texture_tiled_check->setEnabled(cs->brush.style() == Qt::TexturePattern);
+    }
+    // le due frecce: nulla da rileggere dallo stick — sono stato dell'interfaccia, non del
+    // disegno — quindi qui solo l'abilitazione, senza eco e senza QSignalBlocker
+    // ...e su un tipo che non passa mai brush/pen al painter la freccia non ha nulla da puntare,
+    // anche quando il pennello contiene una geometria: PaintsFill()/PaintsStroke(), gli stessi
+    // predicati con cui UpdateSliders() spegne i due selettori di tipo
+    if(fill_texture_arrow_check != nullptr && stroke_texture_arrow_check != nullptr){
+        fill_texture_arrow_check->setEnabled(cs->PaintsFill() && has_geometry(cs->brush));
+        stroke_texture_arrow_check->setEnabled(cs->PaintsStroke()
+                                               && cs->pen.style() != Qt::NoPen
+                                               && has_geometry(cs->pen.brush()));
+    }
+    // l'opacità: gli slider agiscono ORA sullo stick selezionato, quindi vanno riallineati a
+    // quel che lo stick ha davvero — altrimenti il primo tocco gli imporrebbe il valore rimasto
+    // dallo stick precedente. Dove il numero sta dipende dal tipo di pennello (il colore per una
+    // tinta unita e per una texture, gli stop per un gradiente): lo sa ReadPaintOpacity(), qui
+    // basta sapere che solo il vuoto non ha nulla da sbiadire.
+    auto fadeable = [](const QBrush &b){ return b.style() != Qt::NoBrush; };
+    if(brush_opacity_slider != nullptr && brush_opacity_spinbox != nullptr){
+        const bool can_fade = fadeable(cs->brush);
+        brush_opacity_slider->setEnabled(can_fade);
+        brush_opacity_spinbox->setEnabled(can_fade);
+        if(can_fade){
+            QSignalBlocker mute_slider(brush_opacity_slider), mute_box(brush_opacity_spinbox);
+            const int percent = qRound(ReadPaintOpacity(cs->brush) * 100.0);
+            brush_opacity_slider->setValue(percent);
+            brush_opacity_spinbox->setValue(percent);
+        }
+    }
+    if(pen_opacity_slider != nullptr && pen_opacity_spinbox != nullptr){
+        const bool can_fade = cs->pen.style() != Qt::NoPen && fadeable(cs->pen.brush());
+        pen_opacity_slider->setEnabled(can_fade);
+        pen_opacity_spinbox->setEnabled(can_fade);
+        if(can_fade){
+            QSignalBlocker mute_slider(pen_opacity_slider), mute_box(pen_opacity_spinbox);
+            const int percent = qRound(ReadPaintOpacity(cs->pen.brush()) * 100.0);
+            pen_opacity_slider->setValue(percent);
+            pen_opacity_spinbox->setValue(percent);
+        }
+    }
+}
+
 void Animation::UpdateSliders(){
     StickData *cs = current_frame->CurrentStick();
     if(current_frame->CurrentStick() == nullptr)
@@ -271,6 +355,22 @@ void Animation::UpdateSliders(){
         img_list_widget->setEnabled(image_controls);
         img_buttons_row->setEnabled(image_controls);
     }
+    // Stesso criterio per i due selettori di tipo riempimento/contorno della colonna Style:
+    // un IMAGE/FREEHAND non ha né l'uno né l'altro (il suo aspetto È il raster, che paint()
+    // disegna senza guardare pen e brush), mentre LINE, MULTILINE e TEXT hanno solo il
+    // contorno — per loro il brush non viene mai passato al painter. Disabilitati invece
+    // di lasciarli sembrare guasti. Nulli nei test, che non linkano widget.cpp.
+    if(fill_type_combo != nullptr && stroke_type_combo != nullptr){
+        fill_type_combo->setEnabled(cs->PaintsFill());
+        stroke_type_combo->setEnabled(cs->PaintsStroke());
+        // ...e la voce "Brush" da sola vale meno: un TEXT ha un contorno ma non un percorso da
+        // percorrere a timbri (StrokesAPath()), quindi lì la voce è spenta e il resto no
+        const int brush_row = stroke_type_combo->findData(Widget::STYLE_BRUSH);
+        QStandardItemModel *entries = qobject_cast<QStandardItemModel*>(stroke_type_combo->model());
+        if(brush_row >= 0 && entries != nullptr)
+            entries->item(brush_row)->setEnabled(cs->StrokesAPath());
+    }
+    UpdateStyleControls();
     if(cs->stick_type == StickData::IMAGE){
         //aggiorna gli slider di modifica alla scala e all'offset
         if(cs->img_w_scale>=1){

@@ -70,10 +70,14 @@
 #define MODE_UNDO 1
 
 // --- Which graphic attribute SetGraphics() copies from my_pen/my_brush onto a stick.
-#define ATTRIBUTE_PENCOLOR 0
-#define ATTRIBUTE_PENWIDTH 1
-#define ATTRIBUTE_BRUSHCOLOR 2
-#define ATTRIBUTE_BRUSHSIZE 3
+// --- The two "colour" ones copy the whole QPen paint / QBrush, not just a QColor: since
+// --- the Style column's type combo boxes can make either a pattern, a gradient or an
+// --- image, a setColor() call would be a no-op on exactly those. The names are kept as
+// --- they were to leave every call site in widget.cpp untouched.
+#define ATTRIBUTE_PENCOLOR 0    ///< the stroke's whole paint (brush + the Qt::NoPen state), via CopyPenPaint()
+#define ATTRIBUTE_PENWIDTH 1    ///< the stroke's thickness only
+#define ATTRIBUTE_BRUSHCOLOR 2  ///< the fill's whole QBrush, by plain assignment
+#define ATTRIBUTE_BRUSHSIZE 3   ///< unused; kept so the numbering of the three above never shifts
 
 
 /**
@@ -144,6 +148,74 @@ public:
 
     QPen    my_pen;   ///< current pen pushed onto newly drawn sticks and applied by SetGraphics()
     QBrush  my_brush; ///< current brush, same role as my_pen; both edited from widget.cpp's panels
+    /**
+     * @brief Current value of StickData::brush_follows_stick: same role as my_pen/my_brush,
+     *        i.e. what a newly drawn stick inherits and what SetGraphics() applies.
+     *
+     * One flag for the pen and the brush together, matching the field it feeds. Driven by
+     * the "Texture follows stick" check box at the top of the Style column.
+     */
+    bool    my_brush_follows_stick = true;
+    /**
+     * @brief Current value of StickData::texture_tiled: same role as my_pen/my_brush, i.e.
+     *        what a newly drawn stick inherits and what SetGraphics() applies.
+     *
+     * Driven by the "Tile" check box of TextureOptionsDialog, the only control that edits it.
+     */
+    bool    my_texture_tiled = true;
+    /**
+     * @brief Current value of StickData::stroke_brush: same role as my_pen/my_brush, i.e. what a
+     *        newly drawn stick inherits and what SetGraphics()'s ATTRIBUTE_PENCOLOR applies.
+     *
+     * A null `stamp` — the default — is "no brush border", so until the Border type combo's
+     * "Brush" entry is used this rides along costing nothing. Driven by BrushStrokeDialog, which
+     * is also where the tip is picked (from the same .abr library draw mode uses).
+     */
+    BrushStroke my_stroke_brush;
+
+    // ---- maniglia a freccia della texture (fill e contorno) --------------------------
+    // Un pattern/gradiente/immagine ha tre numeri che nessuna maniglia mostrava: offset,
+    // angolo e scala. La freccia li rende un solo gesto — la coda è l'offset, la direzione
+    // l'angolo, la lunghezza la scala — e ne mostra il valore corrente anche a riposo.
+    // Vivono qui e non su StickData perché sono stato dell'INTERFACCIA (quali maniglie
+    // mostrare), non del disegno: nulla di ciò che si salva o si esporta cambia.
+    bool show_fill_texture_arrow = false;   ///< draw/grab the fill's texture arrow ("Show texture handle", Fill group)
+    bool show_stroke_texture_arrow = false; ///< same for the stroke's ("Show texture handle", Border group)
+
+    /**
+     * @brief The two arrow endpoints for one of the current stick's textures, in scene coords.
+     * @param for_fill true for StickData::brush, false for the pen's paint.
+     * @param tail out: the arrow's start — the texture's offset.
+     * @param tip out: the arrow's end — direction is the texture's angle, length its scale.
+     * @return false when there is no arrow to draw: no current stick, no live view, that group's
+     *         check box off, or a brush with no geometry to point at (a solid colour or
+     *         Qt::NoBrush). Both a texture and a gradient get one, but NOT through the same
+     *         field: ReadArrow()/WriteArrow() go to QBrush::transform() for a texture and to the
+     *         gradient's own geometry for a gradient, because a gradient's transform acts in its
+     *         0..1 box space, where a scene-unit offset would mean that many whole bounding
+     *         boxes. The numeric editors (TextureOptionsDialog, GradientDialog) stay the place
+     *         for exact values; this is for aiming.
+     *
+     * Public because Widget's check boxes and the tests both need to ask about the arrow;
+     * MyView itself uses it from drawForeground() and from the hit test.
+     */
+    bool TextureArrowPoints(bool for_fill, QPointF *tail, QPointF *tip) const;
+
+    /**
+     * @brief Scene point an offset of (0,0) puts the arrow's tail on: beside the stick's
+     *        midpoint, pushed out along its normal by a grab radius or two, on the side the
+     *        arrow points to.
+     * @param stick the stick the arrow belongs to; must be non-null.
+     * @param angle the texture's rotation in degrees — it decides which of the two sides.
+     *
+     * A display anchor, not a claim about the texture: the offset the arrow reports is always
+     * exactly `tail - anchor`, so dragging it is exact whatever the anchor is. It is NOT P1 and
+     * NOT the bare midpoint because the arrow is the lowest-priority thing on the canvas to
+     * grab, so an anchor coinciding with any higher-priority handle would be permanently
+     * shadowed by it and the offset could never be dragged at all — see TextureArrowPoints().
+     */
+    QPointF TextureArrowAnchor(const StickData *stick, qreal angle) const;
+
     StickFigureData* copy_stick_figure_buffer = nullptr; ///< owned copy-paste buffer (pure data since Phase 2b)
 
     // ---- Freehand draw mode (myview.cpp) ---------------------------------------------
@@ -413,8 +485,10 @@ public:
      * @param all false: only the current stick; true: every stick in the current figure.
      * @param attribute which property to copy (ATTRIBUTE_PENCOLOR/PENWIDTH/BRUSHCOLOR).
      *
-     * Reads my_pen/my_brush (set by widget.cpp's colour/width controls) and pushes the
-     * chosen attribute onto the model, then refreshes the affected views and icon.
+     * Reads my_pen/my_brush (set by the Style column's controls in widget.cpp) and pushes
+     * the chosen attribute onto the model, then refreshes the affected views and icon.
+     * The fill/stroke KIND — solid, pattern, gradient, image, none — travels inside those
+     * two objects, so no extra parameter was needed when the type combo boxes were added.
      */
     void SetGraphics(bool all, int attribute);
 
@@ -758,6 +832,97 @@ private:
     QPointF multi_center_buffer;      ///< pivot captured at gesture start (rotate/scale origin)
     // ---- transformation box (stile del gizmo della selezione pixel, applicato alle figure) ----
     int sel_box_gesture = 0;          ///< 0 nessuno, 1 scala (uniforme), 2 rotazione: drag di una maniglia della box
+    int texture_arrow_gesture = 0;    ///< 0 nessuno, 1 coda (offset), 2 punta (angolo + scala): drag della freccia della texture
+    bool texture_arrow_is_fill = true;///< quale delle due frecce è sotto trascinamento
+    /**
+     * @brief The arrow's tail, latched at press for the duration of a tip drag.
+     *
+     * The tail is what the tip's angle and length are measured FROM, and the anchor it sits on
+     * depends on the texture's angle (TextureArrowAnchor() picks the side the arrow points to).
+     * Recomputing it on every mouse move would therefore move the very origin the drag is being
+     * measured against, the moment the drag crosses the stick's own direction.
+     */
+    QPointF texture_arrow_tail;
+
+    /**
+     * @brief Which texture arrow a scene click grabs.
+     * @param scene the click position.
+     * @param for_fill out: which of the two arrows was hit.
+     * @param on_tip out: true for the arrow's tip (angle + scale), false for its tail (offset).
+     * @return true on a hit.
+     *
+     * Deliberately the LOWEST-priority pick of the selection tool (spec): it reports a miss
+     * whenever the click is also on a transformation-box handle or within grabbing distance
+     * of any stick endpoint handle of the selection, so those two keep working exactly as
+     * before wherever an arrow happens to lie over them.
+     */
+    bool HitTextureArrow(const QPointF &scene, bool *for_fill, bool *on_tip) const;
+
+    /**
+     * @brief Applies a texture-arrow drag to the current stick's fill or stroke brush.
+     * @param scene the current cursor position.
+     *
+     * Rewrites one TextureXf: the tail sets the offset, the tip sets the angle and the scale
+     * together (its distance from the tail IS the tile's painted size). The undo snapshot was
+     * taken once, at press — this runs on every mouse move of the gesture.
+     */
+    void DragTextureArrow(const QPointF &scene);
+
+    /**
+     * @brief The arrow's geometry in SCENE units — the one form both brush kinds are converted
+     *        to, so the drawing, the hit test and the drag are written once instead of twice.
+     */
+    struct ArrowXf {
+        QPointF offset;      ///< displacement of the tail from TextureArrowAnchor(), scene units
+        qreal   angle  = 0;  ///< direction in degrees, clockwise (QTransform's sign)
+        qreal   length = 0;  ///< tail-to-tip distance in scene units, i.e. the scale
+    };
+
+    /**
+     * @brief Scene length one unit of the brush's own placement measures.
+     * @param brush the brush being pointed at.
+     * @return the tile's longer side for a texture (so the arrow's length IS the painted size of
+     *         one tile); the size of the box a gradient's 0..1 coordinates span otherwise.
+     */
+    qreal ArrowUnit(const QBrush &brush) const;
+
+    /**
+     * @brief Degrees the current stick's brush frame is turned from the scene's axes.
+     * @return StickGraphicsItem::BrushFrameAngle() of the current stick, 0 when there is none.
+     *
+     * The rotational half of the same conversion ArrowUnit() does for lengths: without it a
+     * stick-anchored placement, which is stored in the stick's own frame, is read as though it
+     * were scene coordinates and a drag moves the paint along the stick's angle instead of along
+     * the drag.
+     */
+    qreal ArrowFrameAngle() const;
+
+    /**
+     * @brief Reads the arrow's geometry out of whichever placement this brush kind keeps —
+     *        QBrush::transform() for a texture, the gradient's own geometry for a gradient.
+     */
+    ArrowXf ReadArrow(const QBrush &brush) const;
+
+    /**
+     * @brief Writes the arrow's geometry back; the exact inverse of ReadArrow().
+     */
+    void WriteArrow(QBrush *brush, const ArrowXf &arrow) const;
+
+    /**
+     * @brief The current stick's fill or stroke brush, or an empty brush when there is none.
+     * @param for_fill true for StickData::brush, false for the pen's paint.
+     *
+     * One accessor for the three places that need "whichever of the two brushes this control
+     * acts on" — the arrow's geometry, its hit test and its drag.
+     */
+    QBrush CurrentTextureBrush(bool for_fill) const;
+
+    /**
+     * @brief The stick the texture arrows act on — the current one — or nullptr when there
+     *        is no frame or nothing is selected.
+     */
+    StickData *TextureArrowStick() const;
+
     bool band_is_lasso = false;       ///< il gesto rubber band in corso è un lazo (senza selection_band scene item)
     QPolygonF band_poly;              ///< punti del lazo (coordinate di scena) accumulati durante il drag
 
@@ -953,6 +1118,8 @@ private:
      *  dialled-in brush size/opacity comes out exactly at draw_pressure_val==0.5, a harder
      *  press scales above it (up to 2x at full pressure) and a lighter one scales below. */
     double PressureFactor() const;
+    /** @brief The loose draw_brush_* fields gathered into the BrushStroke that BrushDab() takes. */
+    BrushStroke DrawBrush() const;
     /** @brief Stamps one brush dab (tinted/eraser) onto draw_canvas at a canvas-pixel point. */
     void StampBrush(const QPointF &canvas_px);
     /** @brief Stamps the brush along a scene-space segment (interpolated by brush spacing). */

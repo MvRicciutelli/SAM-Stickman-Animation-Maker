@@ -39,6 +39,17 @@ public:
     void LoadAnimation(QString name);
     void ClearAnimation();
     void UpdateSliders();
+
+    /**
+     * @brief Re-evaluates the three Style-column check boxes that depend on what the selected
+     *        stick is PAINTED WITH: "Texture follows stick" and the two "Show texture handle".
+     *
+     * Called by UpdateSliders() (the selection path) and by MyView::SetGraphics() — an Apply
+     * button changes a stick's fill or stroke from a solid colour to a gradient/texture without
+     * any selection change, and these boxes are meaningless for the first and meaningful for the
+     * second. No-op when nothing is selected, or in the test binary, where the controls are null.
+     */
+    void UpdateStyleControls();
     void UpdateTab(int t);
     qint32 width = 0;
     qint32 height = 0;

@@ -25,6 +25,7 @@ SOURCES += \
     ../animation.cpp \
     ../frame.cpp \
     ../framedata.cpp \
+    ../gradientdialog.cpp \
     ../framepresenter.cpp \
     ../myview.cpp \
     ../stick.cpp \
@@ -43,6 +44,7 @@ HEADERS += \
     ../frame.h \
     ../framedata.h \
     ../framepresenter.h \
+    ../gradientdialog.h \
     ../myview.h \
     ../stick.h \
     ../stickdata.h \
