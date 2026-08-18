@@ -119,6 +119,11 @@ private slots:
 
     void on_actionAbout_triggered();
 
+    /**
+     * @brief Shows Qt's own about box (version, LGPLv3 notice) via QMessageBox::aboutQt().
+     *        Required credit for the LGPLv3-licensed Qt libraries this app links against.
+     */
+    void on_actionAboutQt_triggered();
 
     void on_actionTerms_and_Conditions_triggered();
 

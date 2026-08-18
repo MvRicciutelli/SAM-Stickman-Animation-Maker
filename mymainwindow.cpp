@@ -586,6 +586,16 @@ void MyMainWindow::on_actionAbout_triggered()
 }
 
 
+/**
+ * @details Qt's own about box: version, and the LGPLv3 notice Qt requires apps built
+ * against it to make available. See NOTICE.md for the full statement (version linked,
+ * source location, unmodified).
+ */
+void MyMainWindow::on_actionAboutQt_triggered()
+{
+    QMessageBox::aboutQt(this, "About Qt");
+}
+
 extern QString license;
 extern int terms_accepted;
 /**

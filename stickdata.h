@@ -4,6 +4,7 @@
 #include <QBrush>
 #include <QDataStream>
 #include <QFont>
+#include <QHash>
 #include <QImage>
 #include <QLineF>
 #include <QList>
@@ -383,6 +384,62 @@ public:
  * once the load is done.
  */
 extern QStringList missing_text_fonts;
+
+/**
+ * @brief Releases the load-time image pool's references.
+ *
+ * operator>> shares one pixel buffer between every record that reads identical pixels —
+ * an image stick, a texture fill/stroke or a border-brush tip repeated across N frames
+ * costs one copy instead of N. The pool holds a reference to each distinct image so that
+ * sharing can span the whole file; this drops those references once the load is over,
+ * leaving the loaded records as the only owners.
+ *
+ * Called by MyView::ReportMissingTextFonts(), i.e. by every file-load entry point, for
+ * the same reason and at the same moment missing_text_fonts is drained.
+ */
+void ClearStickImagePool();
+
+/**
+ * @brief File-wide table of distinct images, so a repeated one is written once.
+ *
+ * Without it every record inlines its own copy of its pixels: the same picture, texture
+ * or brush tip is re-encoded once per stick PER FRAME, which is what made a .mAnim grow
+ * to hundreds of megabytes. With a table installed the record writes a qint32 index into
+ * @c images instead, and the container writes the table once.
+ *
+ * Installed by InstallImageTable() around a whole-file read/write and null otherwise, so
+ * a record written with no table still inlines its images (that is what the single-figure
+ * .stck path does, and it keeps StickData's own record format unchanged).
+ */
+struct ImageTable {
+    QList<QImage> images;               ///< distinct images, in first-written order
+    QHash<size_t, int> index_of;        ///< content key -> index into images (write side only)
+
+    /**
+     * @brief Index of @p image in the table, appending it if this is the first sighting.
+     * @param image the image to look up; a null one is a valid entry (index reused).
+     * @return the index to write into the record.
+     */
+    qint32 IndexFor(const QImage &image);
+};
+
+/**
+ * @brief Installs (or removes, with nullptr) the table StickData's operators index into.
+ * @param table the table to use for the duration of one whole-file read or write.
+ * @return the previously installed table, to restore — always restore it, so a nested
+ *         or aborted load cannot leave a dangling table behind.
+ */
+ImageTable *InstallImageTable(ImageTable *table);
+
+/**
+ * @brief Writes an image table (the container's half of the indexing above).
+ */
+QDataStream &operator<<(QDataStream &stream, const ImageTable &table);
+
+/**
+ * @brief Reads an image table, pooling each entry so the sharing survives the load.
+ */
+QDataStream &operator>>(QDataStream &stream, ImageTable &table);
 
 /**
  * @brief Serializes one stick record (used by every save/copy/undo path).

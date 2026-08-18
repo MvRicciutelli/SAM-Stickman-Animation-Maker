@@ -375,6 +375,28 @@ private:
     Ui::Widget *ui;
 
     /**
+     * @brief The frames selected in the frame list, in frame order.
+     *
+     * The list is a ContiguousSelection (set in the constructor), so this is always one
+     * unbroken block — shift-clicking a row extends it without changing which frame is
+     * displayed. Rows are walked in list order rather than through selectedItems(), which
+     * does not promise one; the list is kept parallel to Animation::frame_list by
+     * Animation::SetupFrame()/MyView::DeleteFrame(). Falls back to the current frame when
+     * nothing is selected, so every caller can treat it as "the frames to act on".
+     */
+    QList<Frame *> SelectedFrames() const;
+
+    /**
+     * @brief The copy-frame buffer: one FrameData per copied frame, in frame order.
+     *
+     * Pure data since refactor Phase 2b, and a member rather than the file-scope global it
+     * used to be (only this class touches it — the same move the safety sweep made for the
+     * slider latches). Empty until the first copy; owned here and freed in the destructor,
+     * while a paste hands the undo stack Clone()s so the buffer survives repeated pastes.
+     */
+    QList<FrameData *> frame_copy_buffer;
+
+    /**
      * @brief Builds fill_type_combo/stroke_type_combo and inserts each at the top of its
      *        group ("Fill" and "Border") in the Style column.
      *

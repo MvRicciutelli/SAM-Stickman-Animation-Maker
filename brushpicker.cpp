@@ -5,11 +5,14 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDirIterator>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
@@ -51,6 +54,72 @@ QImage TipPreview(const QImage &stamp, int size, int opacity)
     return preview;
 }
 
+/// Le collezioni dell'utente: stamp PIÙ parametri, cioè proprio quello che un .abr non sa
+/// portarsi dietro — da lì il formato nostro invece di riscrivere il pacchetto Photoshop.
+const QLatin1String USER_BRUSH_EXT(".mbrush");
+const QLatin1String USER_BRUSH_DEFAULT("My brushes.mbrush"); // non tradotto: è un nome di file
+const quint32 USER_BRUSH_MAGIC = 0x4D504231; // 'MPB1'
+
+struct SavedTip { BrushPreset params; QImage stamp; };
+
+bool IsUserCollection(const QString &collection)
+{
+    return collection.endsWith(USER_BRUSH_EXT, Qt::CaseInsensitive);
+}
+
+QDataStream &operator<<(QDataStream &s, const BrushPreset &p)
+{
+    return s << p.name << p.size << p.opacity << p.spacing << p.hardness << p.roundness
+             << p.size_jitter << p.angle_jitter << p.angle << p.opacity_jitter;
+}
+
+QDataStream &operator>>(QDataStream &s, BrushPreset &p)
+{
+    return s >> p.name >> p.size >> p.opacity >> p.spacing >> p.hardness >> p.roundness
+             >> p.size_jitter >> p.angle_jitter >> p.angle >> p.opacity_jitter;
+}
+
+/// Un file illeggibile o di un'altra specie dà una lista vuota, come LoadAbr(): la griglia lo
+/// mostra come "niente da vedere" invece di far fallire l'apertura del pannello.
+QList<SavedTip> LoadUserBrushes(const QString &path)
+{
+    QList<SavedTip> tips;
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly))
+        return tips;
+    QDataStream stream(&file);
+    quint32 magic = 0;
+    qint32 count = 0;
+    stream >> magic >> count;
+    if(magic != USER_BRUSH_MAGIC)
+        return tips;
+    for(qint32 i = 0; i < count && stream.status() == QDataStream::Ok; i++){
+        SavedTip tip;
+        stream >> tip.params >> tip.stamp;
+        if(tip.stamp.isNull())
+            continue;
+        // QDataStream scrive un QImage come PNG e lo rilegge ARGB32: senza riconvertire, il
+        // risparmio di memoria degli stamp Alpha8 svanirebbe al primo caricamento
+        tips.append({ tip.params, tip.stamp.convertToFormat(QImage::Format_Alpha8) });
+    }
+    return tips;
+}
+
+/// Una collezione svuotata sparisce dal disco: un'altra voce vuota nella combo non serve a nessuno.
+bool SaveUserBrushes(const QString &path, const QList<SavedTip> &tips)
+{
+    if(tips.isEmpty())
+        return QFile::remove(path);
+    QFile file(path);
+    if(!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return false;
+    QDataStream stream(&file);
+    stream << USER_BRUSH_MAGIC << qint32(tips.size());
+    for(const SavedTip &tip : tips)
+        stream << tip.params << tip.stamp;
+    return stream.status() == QDataStream::Ok;
+}
+
 } // namespace
 
 BrushPicker::BrushPicker(const QString &brushes_path, QWidget *parent)
@@ -87,17 +156,37 @@ BrushPicker::BrushPicker(const QString &brushes_path, QWidget *parent)
         if(!stamp.isNull())
             emit brushChosen(stamp);
         QVariant preset_idx = cur->data(Qt::UserRole + 1);
-        if(!preset_idx.isValid())
+        if(preset_idx.isValid()){
+            emit presetChosen(brush_presets[preset_idx.toInt()]);
+            return;
+        }
+        QVariant saved = cur->data(Qt::UserRole + 2);
+        if(!saved.isValid())
             return; // pennello .abr: solo lo stamp, i parametri restano quelli impostati a mano
-        emit presetChosen(brush_presets[preset_idx.toInt()]);
+        emit presetChosen(saved.value<BrushPreset>()); // punta salvata: torna com'era stata regolata
     });
 
-    // import (.abr copiati nella cartella) + refresh, nel pannello inferiore dello splitter
+    // import (.abr copiati nella cartella) + refresh, nel pannello inferiore dello splitter;
+    // salva/elimina su una riga a parte, quattro bottoni in fila non ci stanno nel pannello
     QHBoxLayout *btn_row = new QHBoxLayout();
     QPushButton *import_btn = new QPushButton(tr("Import brush"), this);
     QPushButton *refresh_btn = new QPushButton(tr("Refresh"), this);
     btn_row->addWidget(import_btn);
     btn_row->addWidget(refresh_btn);
+    QHBoxLayout *edit_row = new QHBoxLayout();
+    save_btn = new QPushButton(tr("Save brush"), this);
+    save_btn->setToolTip(tr("Store the selected tip with the parameters as they are now, in your "
+                            "own brush collection."));
+    save_btn->setEnabled(false);   // finché nessuno fornisce i parametri non c'è nulla da salvare
+    delete_btn = new QPushButton(tr("Delete brush"), this);
+    delete_btn->setToolTip(tr("Remove the selected brush. Only your own saved collections can be "
+                              "edited; an imported .abr pack cannot."));
+    edit_row->addWidget(save_btn);
+    edit_row->addWidget(delete_btn);
+    // lambda e non puntatore a metodo: clicked(bool) si aggancerebbe a DeleteBrush(bool confirm)
+    // passandogli il "checked" del bottone, cioè saltando la conferma
+    connect(save_btn, &QPushButton::clicked, this, [this]{ SaveBrush(); });
+    connect(delete_btn, &QPushButton::clicked, this, [this]{ DeleteBrush(); });
     connect(import_btn, &QPushButton::clicked, this, &BrushPicker::Import);
     connect(refresh_btn, &QPushButton::clicked, this, [this]{
         Rescan();
@@ -114,6 +203,7 @@ BrushPicker::BrushPicker(const QString &brushes_path, QWidget *parent)
     QVBoxLayout *below_col = new QVBoxLayout(below);
     below_col->setContentsMargins(0, 0, 0, 0);
     below_col->addLayout(btn_row);
+    below_col->addLayout(edit_row);
     split->addWidget(below);
     split->setStretchFactor(0, 1);
     split->setStretchFactor(1, 0);
@@ -124,10 +214,26 @@ BrushPicker::BrushPicker(const QString &brushes_path, QWidget *parent)
 }
 
 /// @details Empty collection = the built-in presets, one item each, thumbnail rendered at the
-/// preset's own thickness and opacity. Otherwise every sampled tip LoadAbr() could decode.
+/// preset's own thickness and opacity. Otherwise every sampled tip LoadAbr() could decode, or —
+/// for a `.mbrush` — the tips the user saved, which carry their parameters like a preset does.
 void BrushPicker::Populate(const QString &collection)
 {
     brush_list->clear();
+    delete_btn->setEnabled(IsUserCollection(collection));
+    if(IsUserCollection(collection)){
+        for(const SavedTip &tip : LoadUserBrushes(collection)){
+            QListWidgetItem *it = new QListWidgetItem(
+                        QIcon(QPixmap::fromImage(TipPreview(tip.stamp, tip.params.size,
+                                                            tip.params.opacity))),
+                        tip.params.name);
+            it->setData(Qt::UserRole, tip.stamp);
+            it->setData(Qt::UserRole + 2, QVariant::fromValue(tip.params));
+            brush_list->addItem(it);
+        }
+        if(brush_list->count())
+            brush_list->setCurrentRow(0);
+        return;
+    }
     if(collection.isEmpty()){
         for(int i = 0; i < int(std::size(brush_presets)); i++){
             const BrushPreset &p = brush_presets[i];
@@ -151,9 +257,10 @@ void BrushPicker::Populate(const QString &collection)
         brush_list->setCurrentRow(0);
 }
 
-/// @details Entry 0 is the built-in tip; every .abr under the folder (subdirectories included)
-/// follows, labelled by its path relative to the folder. Preserves the current selection when
-/// it is still there, so a Refresh does not jump the user back to the built-in tip.
+/// @details Entry 0 is the built-in tip; every .abr and every saved .mbrush under the folder
+/// (subdirectories included) follows, labelled by its path relative to the folder. Preserves the
+/// current selection when it is still there, so a Refresh does not jump the user back to the
+/// built-in tip.
 void BrushPicker::Rescan()
 {
     const QString prev = folder_combo->currentData().toString();
@@ -161,7 +268,7 @@ void BrushPicker::Rescan()
     folder_combo->clear();
     folder_combo->addItem(tr("Built-in"), QString());
     QDir root(brushes_path);
-    QDirIterator it(brushes_path, QStringList() << "*.abr", QDir::Files,
+    QDirIterator it(brushes_path, QStringList() << "*.abr" << "*" + USER_BRUSH_EXT, QDir::Files,
                     QDirIterator::Subdirectories);
     QStringList files;
     while(it.hasNext()){ it.next(); files << it.filePath(); }
@@ -193,6 +300,88 @@ void BrushPicker::Import()
         folder_combo->setCurrentIndex(idx);  // la collezione appena importata (fa Populate)
     else
         Populate(folder_combo->currentData().toString());
+}
+
+void BrushPicker::SetParamsProvider(std::function<BrushPreset()> provider)
+{
+    params_provider = std::move(provider);
+    save_btn->setEnabled(bool(params_provider));
+}
+
+/// @details The stamp is whatever is selected (a built-in tip, an .abr one, an already saved one)
+/// and the numbers are the host's current ones — saving an .abr tip with the spacing and jitter
+/// just dialled is the whole point, and it is also why the target is never the .abr file itself.
+void BrushPicker::SaveBrush(const QString &name)
+{
+    const QImage stamp = CurrentStamp();
+    if(stamp.isNull() || !params_provider)
+        return;
+    BrushPreset params = params_provider();
+    params.name = name;
+    if(params.name.isEmpty()){
+        bool ok = false;
+        params.name = QInputDialog::getText(this, tr("Save brush"), tr("Brush name"),
+                                            QLineEdit::Normal, brush_list->currentItem()->text(),
+                                            &ok).trimmed();
+        if(!ok || params.name.isEmpty())
+            return;
+    }
+
+    const QString current = folder_combo->currentData().toString();
+    const QString target = IsUserCollection(current) ? current
+                                                     : brushes_path + "/" + USER_BRUSH_DEFAULT;
+    QList<SavedTip> tips = LoadUserBrushes(target);
+    // stesso nome = sostituzione: due voci indistinguibili nella griglia sarebbero peggio
+    for(int i = tips.size() - 1; i >= 0; i--)
+        if(tips[i].params.name == params.name)
+            tips.removeAt(i);
+    tips.append({ params, stamp });
+    if(!SaveUserBrushes(target, tips)){
+        QMessageBox::warning(this, tr("Save brush"), tr("Could not write %1").arg(target));
+        return;
+    }
+
+    Rescan();
+    int idx = folder_combo->findData(target);
+    if(idx >= 0){
+        QSignalBlocker mute(folder_combo);   // il Populate lo facciamo qui sotto in ogni caso
+        folder_combo->setCurrentIndex(idx);
+    }
+    Populate(folder_combo->currentData().toString());
+    for(int i = 0; i < brush_list->count(); i++)
+        if(brush_list->item(i)->text() == params.name){
+            brush_list->setCurrentRow(i);
+            break;
+        }
+}
+
+/// @details Riscrive il file dagli item rimasti invece di rileggerlo e filtrarlo: la griglia è
+/// già la collezione, e così non può divergere da quello che l'utente sta guardando.
+void BrushPicker::DeleteBrush(bool confirm)
+{
+    const QString collection = folder_combo->currentData().toString();
+    QListWidgetItem *selected = brush_list->currentItem();
+    if(!selected || !IsUserCollection(collection))
+        return;
+    if(confirm && QMessageBox::question(this, tr("Delete brush"),
+                             tr("Delete \"%1\" from this collection?").arg(selected->text()))
+            != QMessageBox::Yes)
+        return;
+    QList<SavedTip> tips;
+    for(int i = 0; i < brush_list->count(); i++){
+        if(i == brush_list->currentRow())
+            continue;
+        QListWidgetItem *it = brush_list->item(i);
+        tips.append({ it->data(Qt::UserRole + 2).value<BrushPreset>(),
+                      it->data(Qt::UserRole).value<QImage>() });
+    }
+    if(!SaveUserBrushes(collection, tips)){
+        QMessageBox::warning(this, tr("Delete brush"), tr("Could not write %1").arg(collection));
+        return;
+    }
+    if(tips.isEmpty())
+        Rescan();   // l'ultima punta se n'è andata col file: la collezione non esiste più
+    Populate(folder_combo->currentData().toString());
 }
 
 /// @details See the header for why this regenerates in place instead of repopulating.
@@ -241,6 +430,19 @@ BrushStrokeDialog::BrushStrokeDialog(const QString &brushes_path, QWidget *paren
         spacing_spin->setValue(p.spacing);
         size_jitter_spin->setValue(p.size_jitter);
         angle_jitter_spin->setValue(p.angle_jitter);
+        angle_spin->setValue(p.angle);
+        opacity_jitter_spin->setValue(p.opacity_jitter);
+    });
+    // quello che "Save brush" mette da parte: i cinque numeri di qui. Colore/spessore/opacità
+    // restano fuori per la stessa ragione per cui non hanno un controllo — sono della penna.
+    picker->SetParamsProvider([this]{
+        BrushPreset p;
+        p.spacing = brush.spacing;
+        p.angle = brush.angle;
+        p.size_jitter = brush.size_jitter;
+        p.angle_jitter = brush.angle_jitter;
+        p.opacity_jitter = brush.opacity_jitter;
+        return p;
     });
 
     QFormLayout *form = new QFormLayout();

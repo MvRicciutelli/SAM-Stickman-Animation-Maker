@@ -478,15 +478,61 @@ Frame* Animation::SetupFrame(int pos){
 }
 // Animation::cloneFrame è stato eliminato (Phase 2b): il ripristino di undo/redo passa
 // da PopulateLiveFrame() e le copie in-memory da ExtractFrameData()
+/**
+ * @details v3 writes every distinct image ONCE, in a table ahead of the frames, and lets the
+ * stick records index into it. Before it, each record inlined its own pixels: the same
+ * picture, texture or brush tip was re-encoded once per stick PER FRAME, so a figure that
+ * simply exists through the animation multiplied its images by the frame count — a measured
+ * 218 MB for sixty frames of one image stick, three brush borders and two pattern fills, of
+ * which 1.9 MB was actual content.
+ *
+ * The table is written in TWO passes because it can only be complete once every record has
+ * been asked for its images, yet it has to sit BEFORE them (a QDataStream is read front to
+ * back, and the records need it as they are read — unlike the v2 name trailer, which nothing
+ * depends on). So the frames go into a scratch buffer first, filling the table as a side
+ * effect, and the buffer is then written after it. Serializing into the buffer through the
+ * very same operators, rather than walking the model separately to collect images, is what
+ * keeps the table from ever disagreeing with what the records actually reference.
+ */
 QDataStream &operator<<(QDataStream& stream, const Animation& my_animation){
     qint32 frameNum = (qint32)my_animation.frame_list.count();
     stream<<my_animation.version;
     stream<<frameNum;
     stream<<W;
     stream<<H;
-    for(Frame* f: my_animation.frame_list){
-        stream<<*f;
+
+    // la tabella è gated sulla versione scritta nell'header, non solo presente: scriverla
+    // mentre l'header dice v2 produrrebbe un file che il lettore disallinea al primo frame
+    if(my_animation.version >= 3){
+        ImageTable table;
+        QByteArray frame_payload;
+        {
+            QDataStream frames(&frame_payload, QIODevice::WriteOnly);
+            frames.setVersion(stream.version()); // stessa versione: il payload è parte dello stesso file
+            ImageTable *previous = InstallImageTable(&table);
+            for(Frame* f: my_animation.frame_list){
+                frames<<*f;
+            }
+            InstallImageTable(previous); // sempre ripristinata, anche se sopra è andato storto qualcosa
+        }
+        stream<<table;
+        // a blocchi: writeRawData() prende un int, e passargli una dimensione che non ci sta
+        // troncherebbe il salvataggio in silenzio. Le immagini ora stanno nella tabella, quindi
+        // qui restano solo i record: il ciclo gira una volta sola in ogni caso reale.
+        qsizetype written = 0;
+        while(written < frame_payload.size()){
+            const int chunk = (int)qMin<qsizetype>(1 << 30, frame_payload.size() - written);
+            if(stream.writeRawData(frame_payload.constData() + written, chunk) != chunk)
+                break; // dispositivo pieno o in errore: lo status dello stream lo riporta
+            written += chunk;
+        }
     }
+    else{
+        for(Frame* f: my_animation.frame_list){
+            stream<<*f;
+        }
+    }
+
     // v2: i nomi dei frame in coda al file. Stanno QUI e non in FrameData::operator<<
     // perché in coda sono ignorabili: un lettore v1 non li vedrebbe mai, e soprattutto
     // un file v1 (che non li ha) resta leggibile senza toccare il layout dei frame
@@ -500,8 +546,8 @@ QDataStream &operator>>(QDataStream& stream,Animation& my_animation){
     qint32 file_version = 0;
     stream>>file_version;
     // in memoria si tiene sempre il formato corrente: un salvataggio successivo a un load
-    // di un file v1 deve scrivere un v2 completo, non un header v1 con contenuto v2
-    my_animation.version = 2;
+    // di un file v1/v2 deve scrivere un v3 completo, non un header vecchio con contenuto nuovo
+    my_animation.version = 3;
     stream>>frameNum;
     stream>>my_animation.width;
     stream>>my_animation.height;
@@ -523,6 +569,15 @@ QDataStream &operator>>(QDataStream& stream,Animation& my_animation){
     if(stream.status() != QDataStream::Ok || frameNum < 0 || frameNum > 100000){
         return stream;
     }
+    // v3: la tabella delle immagini precede i frame, che la indicizzano invece di portarsi
+    // dietro una copia dei propri pixel ciascuno (vedi operator<<)
+    ImageTable table;
+    if(file_version >= 3){
+        stream>>table;
+        if(stream.status() != QDataStream::Ok)
+            return stream; // tabella illeggibile: i frame sarebbero solo immagini nulle
+    }
+    ImageTable *previous = InstallImageTable(file_version >= 3 ? &table : nullptr);
     for(int i = 0;i<frameNum;i++){
         Frame* addedFrame = my_animation.SetupFrame(i);
         stream>>*addedFrame;
@@ -532,6 +587,9 @@ QDataStream &operator>>(QDataStream& stream,Animation& my_animation){
         }
         addedFrame->UpdateIcon();
     }
+    // ripristinata appena finiti i record (le UpdateIcon() qui sopra non leggono lo stream):
+    // una tabella lasciata installata punterebbe a memoria di questo stack frame
+    InstallImageTable(previous);
     // trailer dei nomi (solo v2): l'iterazione è su frame_list, quindi un file troncato
     // a metà frame ne ha semplicemente meno da nominare
     if(file_version >= 2){

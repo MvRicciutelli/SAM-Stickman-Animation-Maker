@@ -78,18 +78,24 @@ bool DecodeRle(QDataStream &s, int height, int expected, QByteArray &dst)
     return s.status() == QDataStream::Ok;
 }
 
-/// Grayscale sample buffer -> ARGB32 stamp with alpha = coverage. Photoshop sampled
+/// Grayscale sample buffer -> Alpha8 stamp with alpha = coverage. Photoshop sampled
 /// bitmaps store the value AS the coverage (bright = paint, dark = no paint), verified
 /// against real v6 smoke packs (a mostly-empty brush must read as mostly-transparent).
+///
+/// Alpha8 rather than ARGB32 because the RGB of a stamp is dead weight by contract — it is
+/// black, and TintedStamp() throws it away through CompositionMode_SourceIn anyway. Real
+/// packs make that a lot of dead weight: the 20 tips of a smoke pack (up to 2500 px on a
+/// side) hold 163 MB as ARGB32 against 40 MB here, and every consumer was measured to render
+/// identically from either (BrushDab(), StampAlongPath(), BrushPicker's own preview). The
+/// serialized size is the same either way — PNG already compresses a constant black plane to
+/// nothing — so this is purely a memory saving.
 QImage MaskToStamp(const QByteArray &mask, int width, int height)
 {
-    QImage img(width, height, QImage::Format_ARGB32);
+    QImage img(width, height, QImage::Format_Alpha8);
     for(int y = 0; y < height; y++){
-        QRgb *row = reinterpret_cast<QRgb*>(img.scanLine(y));
-        for(int x = 0; x < width; x++){
-            quint8 v = quint8(mask[y * width + x]);
-            row[x] = qRgba(0, 0, 0, v);
-        }
+        uchar *row = img.scanLine(y);
+        for(int x = 0; x < width; x++)
+            row[x] = quint8(mask[y * width + x]);
     }
     return img;
 }

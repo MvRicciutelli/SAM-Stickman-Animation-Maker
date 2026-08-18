@@ -55,6 +55,9 @@ extern int op_count;
 extern int handle_size;
 
 #define MAXUNDO 50 ///< cap on undo_stack depth, enforced via QUndoStack::setUndoLimit()
+#define MAXDRAWUNDO 20 ///< cap on draw mode's own stroke history (PushDrawUndo()); far
+                       ///< shallower than MAXUNDO because one entry is a whole canvas
+                       ///< (~19 MB at 1080p), not a frame's worth of stick records
 
 /**
  * @details Builds the empty document the rest of the app edits: a fresh Animation
@@ -1247,7 +1250,10 @@ QImage MyView::MakeRoundBrush(int size, int hardness, int roundness)
     p.translate(-size/2.0, -size/2.0);
     p.drawEllipse(0, 0, size, size);
     p.end();
-    return mask;
+    // stessa forma delle punte importate (MaskToStamp): di un timbro conta solo l'alpha,
+    // quindi tenerlo a 8 bit invece che a 32 — qui è poca roba (128x128), ma è il formato
+    // che ogni consumatore si aspetta di poter ricevere indifferentemente
+    return mask.convertToFormat(QImage::Format_Alpha8);
 }
 
 /// @details Tight bounding rect of the non-transparent pixels (alpha > 0). Empty rect
@@ -1365,6 +1371,13 @@ void MyView::PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_sce
 
 /// @details Session-local undo push: drops any redo tail, then snapshots the canvas. This
 /// chain lives only while draw_mode is active and never touches undo_stack (spec).
+///
+/// Capped like undo_stack is (MAXUNDO), and for a much more pressing reason: an entry here is
+/// a WHOLE canvas, and the canvas is a square the size of the viewport's diagonal — about
+/// 19 MB at 1080p. Uncapped, a long drawing session kept one per stroke and ran into the
+/// gigabytes. The oldest snapshot goes first, so the depth is the last MAXDRAWUNDO strokes.
+///
+/// ponytail: whole-canvas snapshots; per-stroke dirty rectangles if the cap ever feels tight.
 void MyView::PushDrawUndo()
 {
     if(!draw_canvas)
@@ -1372,6 +1385,8 @@ void MyView::PushDrawUndo()
     while(draw_undo.count() > draw_undo_idx + 1)
         draw_undo.removeLast();
     draw_undo.append(*draw_canvas);
+    while(draw_undo.count() > MAXDRAWUNDO)
+        draw_undo.removeFirst(); // scartando dalla testa l'indice corrente scala con la lista
     draw_undo_idx = draw_undo.count() - 1;
 }
 
@@ -3954,6 +3969,26 @@ void MyView::DeleteFrame(Frame* frame){
     if(my_animation->current_frame != nullptr) // cancellato l'ultimo frame: niente da selezionare
         my_animation->current_frame->linked_item->setSelected(true);
 }
+/**
+ * @details Le righe della lista layer sono le uniche QListWidgetItem che una StickFigure
+ * possa possedere (vedi PopulateLiveFrame()), e finora nessuno azzerava il linked_item di
+ * chi le perdeva: ogni frame visitato e poi lasciato restava con puntatori PENDENTI, cosa
+ * che non si notava solo perché Animation::DeleteFrame() li rilegge unicamente per
+ * `frame == current_frame`, cioè — di norma — per il frame mostrato, le cui righe esistono
+ * davvero. "Di norma" non è sempre: Animation::DeleteFrame() riassegna essa stessa
+ * current_frame, quindi dentro un ciclo di cancellazioni (FrameBatchUndoCommand::Remove())
+ * il current diventa un frame NON mostrato, e cancellarlo passava un QListWidgetItem già
+ * distrutto a QListWidget::row() — segfault. Si azzera dove le righe muoiono, così il
+ * puntatore non può mai sopravvivere all'oggetto.
+ */
+void MyView::ClearLayerRows()
+{
+    if(my_animation->current_frame != nullptr){
+        for(StickFigure *S:my_animation->current_frame->stick_figures)
+            S->linked_item = nullptr;
+    }
+    my_stick_figure_widget_list->clear();
+}
 // routine per passare da un frame ad un altro, svuota la scena, svuota le widget list, ripopola entrambi, aggiorna onion skins e selezioni
 /**
  * @details The single frame-switch routine (frame list slot in widget.cpp, undo/redo
@@ -3997,8 +4032,8 @@ void MyView::MoveToFrame(Frame* frame){
 
         }
     }
-    // rimuovigli elementi dalla lista widget
-    my_stick_figure_widget_list->clear();
+    // rimuovigli elementi dalla lista widget (azzerando i linked_item che stanno per morire)
+    ClearLayerRows();
 
     // assicura che ogni stick del nuovo frame abbia una view PRIMA di AddHandles() qui sotto:
     // un frame appena caricato da file (attach_to_scene=false) non ne ha ancora una, un frame
@@ -4057,8 +4092,15 @@ void MyView::MoveToFrame(Frame* frame){
     }
     // se non siamo in modalità playback aggiorna le selezioni nelle widgetlists e delle iconee
     if(play_back == false){
-        my_animation->current_frame->linked_item->setSelected(true);
-        my_frame_widget_list->setCurrentItem(my_animation->current_frame->linked_item);
+        // ClearAndSelect ESPLICITO: QListWidgetItem::setSelected() sgombra la selezione
+        // precedente solo in SingleSelection (Qt prende un ramo diverso per modalità —
+        // misurato), e da quando la lista è ContiguousSelection il frame lasciato restava
+        // selezionato accanto a quello nuovo — visibilissimo duplicando un frame. Un
+        // cambio frame definisce SEMPRE una selezione nuova di un solo elemento: la
+        // selezione multipla si estende con shift+clic, che non passa da qui
+        // (Widget::on_frameListWidget_itemClicked() esce prima)
+        my_frame_widget_list->setCurrentItem(my_animation->current_frame->linked_item,
+                                            QItemSelectionModel::ClearAndSelect);
         // niente guardia su stick_figures.isEmpty(): UpdateIcon() gestisce già correttamente un
         // frame vuoto (lo riempie di bianco), senza di essa un frame appena creato restava senza
         // anteprima invece di mostrare una tela bianca
@@ -4203,62 +4245,130 @@ private:
 };
 
 /**
- * @brief Undo entry for a whole inbetween generation: the N frames
- *        MyView::GenerateInbetweens() inserts between two keyframes, as ONE step.
+ * @brief Undo entry for a contiguous BLOCK of frames appearing or disappearing at once,
+ *        as ONE step: the inbetweens of MyView::GenerateInbetweens(), a multi-frame
+ *        paste (MyView::InsertFrames()) or a multi-frame delete (MyView::DeleteFrames()).
  *
- * @details FrameUndoCommand above covers exactly one frame, so it cannot express this
- * batch; this command owns the N ready-made FrameData snapshots instead and is a
+ * @details FrameUndoCommand above covers exactly one frame, so it cannot express any of
+ * these; this command owns the N ready-made FrameData snapshots instead and is a
  * textbook QUndoCommand (unlike FrameUndoCommand, the mutation is NOT performed inline
- * by the caller): `QUndoStack::push()` calls redo() and that is what actually creates the
- * frames, so undo/redo are perfectly symmetric — undo() removes the N frames it created,
- * redo() rebuilds them from the very same snapshots. The two keyframes are never touched
- * by either direction.
+ * by the caller): `QUndoStack::push()` calls redo() and that is what actually inserts —
+ * or removes — the frames, so undo/redo are perfectly symmetric. The two directions are
+ * the same pair of routines with `inserting_` deciding which way round they run, since
+ * "undo an insertion" and "do a deletion" are the same operation; the snapshots are what
+ * a deletion is restored FROM, and are cheap to keep (QImage is copy-on-write, so a
+ * snapshot shares its pixels with the live sticks — see CLAUDE.md "Images are shared").
+ * Frames outside the block are never touched by either direction.
  */
-class InbetweenUndoCommand : public QUndoCommand
+class FrameBatchUndoCommand : public QUndoCommand
 {
 public:
     /**
      * @param view the canvas whose animation is edited.
-     * @param insert_at index the first generated frame takes (== start keyframe + 1).
-     * @param snapshots one snapshot per frame to create, in order; taken over by this
+     * @param first_index index the first frame of the block occupies.
+     * @param snapshots one snapshot per frame of the block, in order; taken over by this
      *        command and freed in its destructor.
+     * @param inserting true → redo() inserts the block (paste, inbetweens), false →
+     *        redo() removes it (multi-frame delete).
      */
-    InbetweenUndoCommand(MyView *view, int insert_at, const QList<FrameData*> &snapshots)
-        : view_(view), insert_at_(insert_at), snapshots_(snapshots)
+    FrameBatchUndoCommand(MyView *view, int first_index, const QList<FrameData*> &snapshots,
+                          bool inserting)
+        : view_(view), first_index_(first_index), snapshots_(snapshots), inserting_(inserting)
     {
     }
-    ~InbetweenUndoCommand() override
+    ~FrameBatchUndoCommand() override
     {
         qDeleteAll(snapshots_);
     }
     void redo() override
     {
+        if(inserting_)
+            Insert();
+        else
+            Remove();
+    }
+    void undo() override
+    {
+        if(inserting_)
+            Remove();
+        else
+            Insert();
+    }
+private:
+    /// Rebuilds the block at first_index_, one live frame per snapshot, and shows the first.
+    void Insert()
+    {
         for(int i = 0; i < snapshots_.count(); i++){
-            Frame *added = view_->SetUpFrame(insert_at_ + i);
+            Frame *added = view_->SetUpFrame(first_index_ + i);
+            // PopulateLiveFrame() copia frame_number DAL dato sul frame vivo, sovrascrivendo
+            // quello che SetUpFrame() gli ha appena dato: allinea lo snapshot alla posizione
+            // in cui sta entrando (per un paste il numero salvato è quello di origine)
+            snapshots_[i]->frame_number = first_index_ + i;
             // attach_to_scene = false di proposito: con true gli stick di TUTTI i frame
-            // generati finirebbero insieme sulla scena, e MoveToFrame() ne rimuove solo
+            // del blocco finirebbero insieme sulla scena, e MoveToFrame() ne rimuove solo
             // quelli di UN frame. Stesso schema del load da file: le view le crea
             // MoveToFrame() (FramePresenter::AttachView) per il solo frame mostrato
             PopulateLiveFrame(added, *snapshots_[i], false, false);
             added->UpdateIcon(); // l'anteprima invece serve subito: il frame non passa da MoveToFrame
         }
-        // mostra il primo frame generato, così l'effetto dell'operazione è visibile
-        view_->MoveToFrame(view_->my_animation->frame_list[insert_at_]);
+        // mostra il primo frame del blocco, così l'effetto dell'operazione è visibile
+        view_->MoveToFrame(view_->my_animation->frame_list[first_index_]);
     }
-    void undo() override
+    /// Deletes the block again and shows the frame that preceded it (or the first surviving one).
+    void Remove()
     {
+        // Animation::DeleteFrame() ripulisce le righe della lista layer per il solo
+        // current_frame, ma è essa stessa a riassegnare current_frame a ogni giro: dal
+        // secondo in poi il current NON è più il frame mostrato, e la sua figura non ha
+        // righe vere. Le righe si tolgono qui, tutte in una volta e finché i puntatori sono
+        // ancora coerenti (qui il current è per forza il frame mostrato), così nessun giro
+        // del ciclo può passarne una a QListWidget::row(); la MoveToFrame() in fondo le
+        // ricostruisce per il frame che resta
+        view_->ClearLayerRows();
         // dall'ultimo al primo: cancellare un frame più avanti non sposta gli indici di
-        // quelli prima, quindi insert_at_+i resta valido a ogni giro
+        // quelli prima, quindi first_index_+i resta valido a ogni giro
         for(int i = snapshots_.count()-1; i >= 0; i--)
-            view_->DeleteFrame(view_->my_animation->frame_list[insert_at_ + i]);
-        // insert_at_ >= 1 per costruzione (è l'indice del frame iniziale + 1)
-        view_->MoveToFrame(view_->my_animation->frame_list[insert_at_ - 1]);
+            view_->DeleteFrame(view_->my_animation->frame_list[first_index_ + i]);
+        // il frame prima del blocco, che esiste sempre tranne quando il blocco partiva da 0
+        int show = qBound(0, first_index_ - 1, (int)view_->my_animation->frame_list.count()-1);
+        view_->MoveToFrame(view_->my_animation->frame_list[show]);
     }
-private:
     MyView *view_;
-    int insert_at_;
+    int first_index_;
     QList<FrameData*> snapshots_;
+    bool inserting_;
 };
+
+/**
+ * @details Thin push of a FrameBatchUndoCommand in the inserting direction — the command's
+ * own redo(), which `QUndoStack::push()` calls, is what creates the frames. Shared by the
+ * multi-frame paste (widget.cpp) and by GenerateInbetweens().
+ */
+void MyView::InsertFrames(int insert_at, const QList<FrameData*> &snapshots)
+{
+    if(snapshots.isEmpty())
+        return;
+    undo_stack.push(new FrameBatchUndoCommand(this, insert_at, snapshots, true));
+}
+
+/**
+ * @details Snapshots the whole block BEFORE anything is removed (that is what an undo
+ * restores it from) and hands it to FrameBatchUndoCommand in the removing direction, whose
+ * redo() performs the deletion. Refuses to empty the animation: at least one frame must
+ * survive, exactly like the single-frame delete button.
+ */
+bool MyView::DeleteFrames(int first_index, int count)
+{
+    if(count < 1 || first_index < 0 || first_index + count > my_animation->frame_list.count())
+        return false;
+    if(count >= my_animation->frame_list.count())
+        return false;
+    QList<FrameData*> snapshots;
+    for(int i = 0; i < count; i++)
+        snapshots.append(ExtractFrameData(*my_animation->frame_list[first_index + i]));
+    undo_stack.push(new FrameBatchUndoCommand(this, first_index, snapshots, false));
+    return true;
+}
 
 /**
  * @details Replaces the pre-Phase-4 `undoRedo()`'s dispatch body verbatim, just
@@ -4333,14 +4443,12 @@ void MyView::StoreUndo(int command){
 /**
  * @details Validates first and modifies nothing until every check passes (the caller only
  * gets a message back), then builds the N snapshots and hands them to
- * InbetweenUndoCommand, whose redo() — run by `undo_stack.push()` — is what actually
- * inserts the frames. Each snapshot starts as a Clone() of the base frame, so everything
- * that cannot be interpolated (stick types, images, IK roles, layer names, z-order) comes
- * from a real frame, and only the pose of each stick is rewritten by
+ * InsertFrames(), whose FrameBatchUndoCommand::redo() — run by `undo_stack.push()` — is
+ * what actually inserts the frames. Each snapshot starts as a Clone() of the base frame, so
+ * everything that cannot be interpolated (stick types, images, IK roles, layer names,
+ * z-order) comes from a real frame, and only the pose of each stick is rewritten by
  * InterpolateStickData() at t = i/(N+1) — t never reaches 0 or 1, so no generated frame
- * duplicates a keyframe. frame_number is pre-set on each snapshot because
- * PopulateLiveFrame() copies it onto the live frame (the same reason
- * Widget::on_copyFrame_clicked() fixes it up by hand).
+ * duplicates a keyframe.
  */
 QString MyView::GenerateInbetweens(int start_index, int count)
 {
@@ -4384,7 +4492,6 @@ QString MyView::GenerateInbetweens(int start_index, int count)
     QList<FrameData*> snapshots;
     for(int i = 1; i <= count; i++){
         FrameData *inbetween = base->Clone();
-        inbetween->frame_number = start_index + i;
         inbetween->name.clear(); // i frame generati nascono senza nome, non col nome del base
         float t = float(i)/float(count + 1);
         for(int f = 0; f < inbetween->stick_figures.count(); f++){
@@ -4397,7 +4504,7 @@ QString MyView::GenerateInbetweens(int start_index, int count)
         snapshots.append(inbetween);
     }
     delete base;
-    undo_stack.push(new InbetweenUndoCommand(this, start_index + 1, snapshots));
+    InsertFrames(start_index + 1, snapshots);
     return QString();
 }
 /**
@@ -4522,9 +4629,15 @@ void MyView::SaveStickFigureAsLibrary(const QString &file_name, StickFigure *fig
  * @details One prompt per load, not per stick: StickData::operator>> has already applied
  * the Arial fallback to every TEXT stick whose font is missing and collected the family
  * names, so this only reports and resets. Called by every load path (see myview.h).
+ *
+ * It also releases the load-time image pool, for the same reason and at the same moment:
+ * both are state that operator>> accumulates across a whole file and that only a load's
+ * end can know is complete. Necessarily BEFORE the early return below — the pool has to be
+ * dropped after every load, not only after one that happened to hit a missing font.
  */
 void MyView::ReportMissingTextFonts()
 {
+    ClearStickImagePool();
     if(missing_text_fonts.isEmpty())
         return;
     QMessageBox::warning(this, tr("Missing fonts"),

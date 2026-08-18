@@ -514,6 +514,14 @@ and the eraser's `DestinationOut`); `StampAlongPath()` marches it along a
 `QPainterPath` for a border. The pitch is measured over the WHOLE path, so a corner
 doesn't restart the rhythm and re-stamp on itself.
 
+Draw mode's own session undo chain (`draw_undo`, pushed per stroke by
+`MyView::PushDrawUndo()`, never touching `undo_stack`) is capped at `MAXDRAWUNDO` = 20,
+much shallower than `MAXUNDO`'s 50 because **one entry is a whole canvas** — a square
+the size of the viewport's diagonal, so ~19 MB at 1080p — where an `undo_stack` entry is
+one frame's worth of stick records. Uncapped it kept one per stroke for the whole
+session and ran into the gigabytes. The committed drawing is cropped to its painted
+bounds on exit (`ExitDrawMode()`), so only the live chain was ever the problem.
+
 **Colour, dab diameter and opacity are the PEN's** (`StickData::StrokeBrush()` refills
 them from `pen.brush().color()` / `pen.widthF()` / `ReadPaintOpacity(pen.brush())`) and
 are deliberately NOT serialized with the rest — the thickness slider, the opacity slider
@@ -553,6 +561,24 @@ one way in the dialog and another on the canvas. `Widget::ApplyStyleBrush()` cle
 `my_stroke_brush.stamp` for any stroke kind other than `STYLE_BRUSH` — one border at a
 time, the same rule the fills follow, or the dabs would stay on top of the new pen and
 the pick would look as though it had done nothing.
+
+**A user's own brushes are a THIRD kind of collection, `.mbrush`** (magic `'MPB1'`, a
+`QDataStream` of `BrushPreset` + stamp per tip, in the same `Brushes` folder and listed in
+the same combo). "Save brush" stores the selected stamp with the parameters as currently
+dialled; "Delete brush" rewrites the file without the selected tip and removes the file
+outright when the last one goes, so the combo never keeps an empty entry. It is a format of
+our own rather than a write-back into the `.abr` because **an `.abr` carries a shape and no
+parameters** — which is the whole thing being saved — so `.abr`/built-in collections stay
+read-only and Save falls back to `My brushes.mbrush`. The picker holds no live parameters of
+its own (draw mode's spin boxes write `MyView`'s state, `BrushStrokeDialog`'s write a
+`BrushStroke`), so it asks its host for them through `SetParamsProvider()`; a saved tip then
+re-emits them on selection exactly like a built-in preset does, which is why `BrushPreset`
+grew `angle`/`opacity_jitter` and became `qint32`-typed. Both buttons connect through
+*lambdas*: `clicked(bool)` would bind straight to `DeleteBrush(bool confirm)` and pass the
+button's checked state, silently skipping the confirmation.
+`UserBrushCollectionRoundTripsAndDeletes` pins the codec by reading the values back off the
+grid — which `Populate()` has reloaded from the file — and was checked to fail with the
+loader neutralised.
 
 **An onion render goes through `StrokeWithBrush()` too**, in flat grey — the same treatment
 `paint()` gives the pen. Excluding `onion_render` from it (the first cut did) left the pen
@@ -804,20 +830,108 @@ last of the original six) was eliminated by fixing the double-ownership
 it guarded, rather than guarding it more carefully.
 
 **The one exception to the `StoreUndo()` shape** is
-`InbetweenUndoCommand` (`myview.cpp`, the second and only other
-`QUndoCommand` in the project), pushed by
-`MyView::GenerateInbetweens(start_index, count)` — the "generate
-inbetweens" button. `FrameUndoCommand` snapshots exactly ONE frame, so it
+`FrameBatchUndoCommand` (`myview.cpp`, the second and only other
+`QUndoCommand` in the project): a contiguous BLOCK of frames appearing or
+disappearing at once. `FrameUndoCommand` snapshots exactly ONE frame, so it
 cannot express "N frames appeared at once"; this command instead owns the
-N ready-made `FrameData` snapshots and is a textbook `QUndoCommand`: its
-`redo()` is what actually creates the frames (`QUndoStack::push()` calls
-it), `undo()` deletes them again, and neither direction touches the two
-keyframes. So `GenerateInbetweens()` does NOT call `StoreUndo()` and does
-NOT mutate anything inline — it validates, builds the snapshots, and
-pushes. It also passes `attach_to_scene = false` to `PopulateLiveFrame()`
-(like the file-load path) because attaching would put every generated
-frame's sticks on the scene at once, while `MoveToFrame()` only ever
-removes one frame's worth.
+N ready-made `FrameData` snapshots and is a textbook `QUndoCommand` —
+`QUndoStack::push()` calls `redo()` and that is what actually performs the
+edit, so the two directions are symmetric. Its two halves are `Insert()`
+and `Remove()`, and a single `inserting_` flag decides which one is
+`redo()`, **because "undo an insertion" and "do a deletion" are the same
+operation**: one class covers all three callers instead of one per verb.
+- `MyView::GenerateInbetweens(start_index, count)` (the "generate
+  inbetweens" button) → `InsertFrames()`. It does NOT call `StoreUndo()`
+  and does NOT mutate anything inline — it validates, builds the
+  snapshots, and pushes; neither direction touches the two keyframes.
+- `MyView::InsertFrames(insert_at, snapshots)` — also the multi-frame
+  paste (see below). **Ownership of the snapshots passes to the undo
+  stack**, which frees them when the entry is evicted, so a caller that
+  keeps a copy buffer must hand over `Clone()`s.
+- `MyView::DeleteFrames(first_index, count)` — the delete-frame button
+  with several rows selected. It snapshots the whole block FIRST (that is
+  what an undo restores it from) and refuses to empty the animation.
+
+**`Remove()` empties the layer list up front** (`MyView::ClearLayerRows()`), and that is
+not tidying: `Animation::DeleteFrame()` cleans up the layer rows for
+`frame == current_frame` only — using "is the current frame" as a proxy for "its figures
+own real rows" — yet it is **itself what reassigns `current_frame`** on every call. So from
+the second iteration of the loop on, `current_frame` is a frame that was never displayed,
+and if a later iteration deletes it, `QListWidget::row()` is handed a `QListWidgetItem`
+that `MoveToFrame()` already destroyed → **segfault**. It needs the block to sit at the
+END of the animation (there the reassignment falls back on `frame_list[count-1]`, i.e. the
+very next frame the loop deletes), which is why inbetweens — always between two keyframes,
+so never last — never hit it, and a paste at the end does. Clearing at the top of
+`Remove()`, where `current_frame` is still genuinely the displayed one, is what makes every
+iteration safe rather than making each one guess.
+
+`ClearLayerRows()` is also what `MoveToFrame()` clears the list through, which closes the
+underlying hole for good: the rows are the only `QListWidgetItem` a `StickFigure` may own,
+and nothing used to null `StickFigure::linked_item` when they died, so **every frame that
+was displayed and then left kept dangling ones**. Reachable by any future code that deletes
+a non-displayed frame, not just this command. Every other reader of a non-displayed
+figure's `linked_item` already null-checks (`StickFigure::UpdateIcon()`,
+`MyView::UpdateSelectionDecorations()`, the layer-selection helpers), so nulling costs
+nothing.
+
+`Insert()` passes `attach_to_scene = false` to `PopulateLiveFrame()` (like
+the file-load path) because attaching would put every frame of the block's
+sticks on the scene at once, while `MoveToFrame()` only ever removes one
+frame's worth. It also **rewrites each snapshot's `frame_number` to the
+position it is entering at**, since `PopulateLiveFrame()` copies that field
+from the data onto the live frame and would otherwise undo what
+`SetUpFrame()` just numbered (a pasted snapshot carries its ORIGIN's
+number). `Remove()` deletes from the last index down, so the earlier
+indices stay valid, and lands on the frame before the block.
+
+### Multiple frames: selection, copy/paste, delete
+
+The frame list is a `QAbstractItemView::ContiguousSelection` (set in
+`Widget`'s ctor) — shift-clicking a row extends the block, and that native
+mode is the whole of the "select more than one frame" feature.
+`ExtendedSelection` was not used on purpose: it also allows *sparse*
+selections, which none of the three operations below can treat as a block.
+
+**The previewed frame stays the one the selection started from**, which is
+why `Widget::on_frameListWidget_itemClicked()` returns early on a shift
+click: Qt has already extended the block by then, and `MoveToFrame()` would
+both switch frame and collapse the selection back to one row through its
+own `setCurrentItem()` call. Qt's shift anchor is the last *pressed*
+position (not the current index), so it stays on the previewed frame across
+repeated shift clicks on either side of it.
+
+**`MoveToFrame()` passes `QItemSelectionModel::ClearAndSelect` explicitly** when it selects
+the new frame's row, instead of the `linked_item->setSelected(true)` it used to: Qt takes a
+different branch per selection mode inside `QListWidgetItem::setSelected()` and only clears
+the previous selection in **SingleSelection** (measured with a throwaway probe — in
+ContiguousSelection two rows end up selected, and a following bare `setCurrentItem()` does
+not collapse them either). So the moment the list stopped being SingleSelection, every frame
+switch left the frame it came FROM selected next to the new one — most visible on "duplicate
+frame", where the source and the copy both stayed highlighted. A frame switch always defines
+a fresh one-row selection; the multi-frame selection is built by shift-clicking, which never
+reaches `MoveToFrame()` (`Widget::on_frameListWidget_itemClicked()` returns first).
+`MoveToFrameSelectsOnlyTheNewFrame` pins it and was checked to fail with the old pair
+restored — the frame-list selection mode is set in `Widget`'s ctor, which the test binary
+does not link, so the slot sets it itself and restores it from a destructor.
+
+`Widget::SelectedFrames()` is the one reader — rows walked in list order
+(`selectedItems()` promises no order; the list is kept parallel to
+`Animation::frame_list` by `Animation::SetupFrame()`/`MyView::DeleteFrame()`),
+falling back to the current frame when nothing is selected.
+
+`frame_copy_buffer` is now a `QList<FrameData*>` **member of `Widget`**
+(it was a file-scope global, and leaked at exit): one snapshot per copied
+frame. Copying a whole block costs almost nothing in memory — a snapshot
+shares its images with the live sticks, `QImage` being copy-on-write (see
+"Images are shared" below) — so no cap is needed on how many frames go in.
+
+**Paste is two different operations, told apart by how many frames were
+copied**, and deliberately so: a block enters AS frames after the current
+one, in its original order (`InsertFrames()`, one undo step), while a
+single frame keeps its historical behaviour of MERGING its figures into the
+current frame as new layers. That merge is the only way to fold one frame's
+figures into another, so unifying the two would remove a feature rather
+than tidy one up.
 
 ## Serialization
 
@@ -856,9 +970,85 @@ row, shown by `Frame::UpdateLabel()`) travels through `Clone()`/
 a trailer at the END of `Animation::operator<<` instead, gated on the new
 animation format `version = 2`. A trailer is ignorable, so every existing
 version-1 `.mAnim` (and every `.marlib`, which never carries names) still
-loads unchanged. `Animation::operator>>` resets `version` to 2 after
-reading, so re-saving a v1 file writes a complete v2 one rather than a v1
-header with v2 content.
+loads unchanged. `Animation::operator>>` resets `version` to the current
+format after reading, so re-saving an old file writes a complete current
+one rather than an old header with new content.
+
+### Images are shared, never duplicated: the pool and the `ImageTable`
+
+**`QImage` is copy-on-write, so every in-memory duplication this project
+already does is free and must be left alone.** `StickData::CopyFrom()`'s
+`new QImage(*image)` shares the pixel buffer; measured, 60 clones of an
+11 MB picture cost **0 MB** (identical `constBits()`), and a write detaches
+automatically. So `Clone()`, undo snapshots, frame/figure copy-paste,
+inbetweens, icon/onion/export render clones cost nothing in pixels — the
+doc comment on `CopyFrom()` describes the *semantics* ("never shares", i.e.
+a write can't leak across), not the memory. Do not "optimize" those paths;
+there is nothing there.
+
+The duplication was entirely at the two ends of a **file**, where four
+fields carry pixels: `stick_img_list` (IMAGE/FREEHAND), the texture inside
+`brush`, the texture inside `pen`'s brush, and `stroke_brush.stamp` (a
+border-brush tip, and by far the heaviest at ~900 KB encoded).
+
+- **`operator>>` decoded an independent buffer per record**, so a figure
+  that merely exists through N frames cost N copies of each of its images.
+  Fixed by a load-time content-hash pool in `stickdata.cpp`
+  (`PoolImage()`/`PoolBrushTexture()`/`PoolPenTexture()`): identical pixels
+  read anywhere in one file end up sharing one buffer. Measured on the real
+  operators: **898 MB → 19 MB** for 360 records. The pool holds a reference
+  so sharing can span a whole file, and is drained by
+  `ClearStickImagePool()` — called from `MyView::ReportMissingTextFonts()`,
+  *before* its early return, because that is already the "a load just
+  finished" hook every load path calls (same convention as
+  `missing_text_fonts`). One choke point covers `.mAnim`, `.stck` and
+  `.marlib`.
+- **`operator<<` encoded an independent copy per record.** Fixed by
+  `ImageTable` (`stickdata.h`) + animation format **`version = 3`**: the
+  distinct images are written ONCE, ahead of the frames, and records write a
+  `qint32` index. Measured: **512 MB → 6 MB** for a realistic 60-frame
+  scene. `qCompress` is no alternative — zlib's 32 KB window cannot span
+  PNG blocks megabytes apart (10 identical blocks: 14 MB → 14 MB).
+
+`InstallImageTable()` installs/removes the table and returns the previous
+one — **always restore it**, or a dangling table outlives its stack frame.
+With none installed, records inline their pixels exactly as before, which
+is what keeps `.stck`/`.marlib` byte-compatible; only `.mAnim` uses a table.
+The write is **two passes** (frames into a scratch `QByteArray` first,
+filling the table as a side effect, then table + payload) because the table
+must be complete yet sit *before* the records that need it — a
+`QDataStream` is read front to back, unlike the ignorable v2 name trailer.
+Serializing into that buffer through the very same operators, rather than
+walking the model to collect images separately, is what stops the table
+from ever disagreeing with what the records reference. The table write is
+**gated on `my_animation.version`**, not merely on a table being present:
+writing one while the header says v2 desynchronizes the reader at the first
+frame (found by a counterproof run, not in review).
+
+A **texture inside a `QBrush` cannot be excluded from Qt's own operator**,
+so a table write substitutes a 1x1 placeholder and appends the index;
+`setTextureImage()` was measured to preserve style, transform and rendering
+(and `QPen::setBrush()` to preserve width/cap/join — `setColor()` would
+flatten the paint). v3 files do not open in a build that predates them;
+v1/v2 files still load here.
+
+**A brush tip is a mask** — only its alpha means anything by contract, and
+`TintedStamp()` discards the RGB through `CompositionMode_SourceIn` — so
+`MaskToStamp()` and `MyView::MakeRoundBrush()` build **`Format_Alpha8`**,
+a 4x saving that a real 20-tip smoke pack turns into **163 MB → 40 MB**
+resident. Every consumer renders identically from either format (measured:
+`BrushDab()`, `StampAlongPath()`, `BrushPicker`'s un-tinted preview), and
+the encoded size is unchanged, so this is purely memory. A tip read back
+from a file arrives as ARGB32 (`QDataStream` writes PNG), so
+`StickData::operator>>` re-converts it — without that the saving would
+vanish at the first load.
+
+Three findings from the same audit that are *not* fixed here, deliberately:
+capping the resolution of pattern tiles is **lossy on real packs** (a
+cut-out `.pat` shifts antialiased alpha edges: rmse 6-9, ~0.6% of pixels
+past a diff of 16 — an opaque pack is untouched at max 1), JPEG would be
+5-10x smaller than PNG but drops alpha, and this Qt build has **no WebP
+writer** (`bmp cur ico jpeg jpg pbm pgm png ppm xbm xpm`).
 
 `Frame::UpdateLabel()` exists because the frame number is *baked into the
 thumbnail* (`UpdateIcon()` blanks the item's own `DisplayRole` label,
@@ -948,8 +1138,8 @@ before it is displayed must therefore null-check `linked_item` —
 ## Tests
 
 `tests/tests.pro` is a standalone qmake QtTest project (characterization
-suite, REFACTOR_PLAN.md Phase 0, 104 tests as of the brush border —
-103 passing plus the one font-dependent skip). Note the slots share
+suite, REFACTOR_PLAN.md Phase 0, 110 tests as of the multi-frame pass —
+109 passing plus the one font-dependent skip). Note the slots share
 ONE animation and run in declaration order: a test that leaves the current
 frame somewhere other than the last one breaks every later test that
 assumes `AddFrame()` appends (see the closing `MoveToFrame()` in
@@ -984,6 +1174,15 @@ totals just don't grow):
 ```
 mingw32-make -f Makefile.Release compiler_moc_source_make_all && mingw32-make -f Makefile.Release
 ```
+
+**When you temporarily neutralize code to check that a test really fails
+without it, `touch` the file and rebuild after restoring it too.** This
+make setup compares timestamps at one-second resolution, so patch → build →
+restore inside the same second leaves the OLD object file in place: the
+suite then reports a failure that the source on disk no longer explains,
+and the obvious conclusion (a bug in the new code) is wrong. Cost real
+debugging time during the image-sharing pass. A `mingw32-make clean` first,
+or `touch` + `sleep 1`, makes a counterproof trustworthy.
 
 A slot that fills in one of the `uiItems.h` UI globals (they are null in the test
 binary, which doesn't link `widget.cpp`) must restore it to `nullptr` from a

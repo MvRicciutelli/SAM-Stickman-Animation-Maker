@@ -9,13 +9,18 @@ public:
     Animation();
     /**
      * @brief On-disk format version of the whole animation file, always the CURRENT one:
-     *        operator>> resets it after reading, so re-saving a version-1 file writes
-     *        version 2 rather than a v1 header with v2 content.
+     *        operator>> resets it after reading, so re-saving an older file writes a
+     *        complete current-version file rather than an old header with new content.
      *
      * 2 appends the per-frame names (Frame::name) after the frame blocks — a version-1
      * file simply has no such trailer and still loads.
+     *
+     * 3 inserts an ImageTable between the header and the frames, and the stick records index
+     * into it instead of each inlining its own copy of its pixels. Unlike the v2 trailer this
+     * one is NOT ignorable — it sits ahead of the data that needs it — so a v3 file does not
+     * open in a build that predates it. v1 and v2 files still load here.
      */
-    qint32 version = 2;
+    qint32 version = 3;
     QList<Frame*> frame_list;
     Frame *frame_buffer = nullptr;
     Frame * AddFrame(QListWidgetItem* item, int pos);

@@ -41,6 +41,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QRadioButton>
+#include <QApplication>
 #include "advancedtab.h"
 #include "advancedlinewidget.h"
 #include "advancedcirclewidget.h"
@@ -153,7 +154,8 @@ AdvancedCircleWidget *advanced_circle_tab;
 AdvancedTaperWidget * advanced_taper_tab;
 QSlider*  circle_squash_slider;
 QSpinBox * circle_squash_spinbox;
-FrameData * frame_copy_buffer = nullptr; ///< buffer copia-frame: solo dati da Phase 2b
+// frame_copy_buffer è diventato un membro privato di Widget (widget.h), ed è una LISTA:
+// si copiano N frame contigui in un colpo
 
 //----------------------
 qint32 W                   = DEFAULTWIDTH;
@@ -194,6 +196,11 @@ Widget::Widget(QWidget *parent)
     my_library_list_widget = ui->libraryList;
     my_current_library_widget = ui->currentLibrary;
     my_frame_widget_list = ui->frameListWidget;
+    // shift+clic seleziona un BLOCCO contiguo di frame (copia/incolla e cancellazione
+    // multipla): la modalità nativa di Qt è tutto quello che serve, e a differenza di
+    // ExtendedSelection non permette selezioni sparse, che nessuna di quelle operazioni
+    // saprebbe trattare come un blocco
+    my_frame_widget_list->setSelectionMode(QAbstractItemView::ContiguousSelection);
     onion_skin_sb = ui->onionSkinSpinBox;
     stick_figure_name_text = ui->stickFigureNameText;
     fps_spin_box = ui->fpsSpinBox;
@@ -709,7 +716,22 @@ Widget::Widget(QWidget *parent)
             view->draw_brush_roundness = p.roundness;
             view->draw_brush_size_jitter = p.size_jitter;
             view->draw_brush_angle_jitter = p.angle_jitter;
+            view->draw_brush_angle = p.angle;
             sync_controls();
+        });
+        // quello che "Save brush" mette da parte insieme alla punta: lo stato di disegno com'è
+        // adesso, così una punta ritoccata si ritrova alla sessione dopo con i suoi numeri
+        brush_picker->SetParamsProvider([this]{
+            BrushPreset p;
+            p.size = view->draw_brush_size;
+            p.opacity = view->draw_brush_opacity;
+            p.spacing = view->draw_brush_spacing;
+            p.hardness = view->draw_brush_hardness;
+            p.roundness = view->draw_brush_roundness;
+            p.size_jitter = view->draw_brush_size_jitter;
+            p.angle_jitter = view->draw_brush_angle_jitter;
+            p.angle = view->draw_brush_angle;
+            return p;
         });
 
         // durezza/rotondità: rigenerano la punta selezionata sul posto (stamp + anteprima),
@@ -832,7 +854,6 @@ Widget::Widget(QWidget *parent)
     my_library_list_widget->clear();
     DetectLibraries();
     my_library_list_widget->setCurrentRow(0);
-    frame_copy_buffer = new FrameData();
 }
 
 /**
@@ -1031,6 +1052,7 @@ Widget::~Widget()
     delete advanced_ik_tab;
     advanced_draw_tab->setParent(nullptr);
     delete advanced_draw_tab;
+    qDeleteAll(frame_copy_buffer); // il buffer copia-frame è nostro (era un globale mai liberato)
     delete ui;
 }
 
@@ -1212,13 +1234,25 @@ void Widget::on_onionSkinSpinBox_valueChanged(const QString &arg1)
     view->UpdateOnionSkins();
 }
 
-/// @details Refuses to delete the last remaining frame — an animation always has at least one.
+/**
+ * @details Refuses to delete the last remaining frame — an animation always has at least
+ * one. With several rows selected in the frame list the whole block goes in ONE undo step
+ * (MyView::DeleteFrames()); the single-frame path is the historical one, which needs no
+ * snapshot of its own beyond StoreUndo()'s.
+ */
 void Widget::on_deleteFrameBtn_clicked()
 {
     // finalizza un'eventuale sessione di disegno PRIMA di cancellare il frame (che
     // libererebbe lo stick del freehand → dangling); così lo snapshot cattura il disegno
     // già ritagliato e non c'è use-after-free
     view->ExitDrawMode();
+    QList<Frame *> selected = SelectedFrames();
+    if(selected.count() > 1){
+        // il blocco è contiguo per costruzione (ContiguousSelection), quindi primo
+        // frame_number + quanti sono lo descrivono per intero
+        view->DeleteFrames(selected.first()->frame_number, selected.count());
+        return;
+    }
     if(view->my_animation->frame_list.count()>1){
         view->StoreUndo(CMD_DELETEFRAME);
         view->DeleteFrame(view->my_animation->CurrentFrame());
@@ -1226,15 +1260,40 @@ void Widget::on_deleteFrameBtn_clicked()
     }
 }
 
-/// @details Switches the displayed frame to whichever row was clicked in the frame list.
+/**
+ * @details Switches the displayed frame to whichever row was clicked in the frame list —
+ * unless the click is extending the selection (shift), in which case the frame shown must
+ * stay the one the selection started from: Qt has already extended the block by the time
+ * this fires, and MoveToFrame() would both switch frame and collapse the selection back to
+ * a single row through its setCurrentItem() call.
+ */
 void Widget::on_frameListWidget_itemClicked(QListWidgetItem *item)
 {
+    if(QApplication::keyboardModifiers() & Qt::ShiftModifier)
+        return;
     view->ExitDrawMode(); // il cambio frame chiude la sessione di disegno (finalizza sul frame corrente)
     view->StoreUndo(CMD_MOVETOFRAME);
     QVariant  retrievedData = (item->data(Qt::UserRole));
     Frame* cs = qvariant_cast<Frame*>(retrievedData);
 
     view->MoveToFrame(cs);
+}
+
+/// @details See the header for why the rows are walked in order instead of via selectedItems().
+QList<Frame *> Widget::SelectedFrames() const
+{
+    QList<Frame *> frames;
+    for(int row = 0; row < my_frame_widget_list->count(); row++){
+        QListWidgetItem *item = my_frame_widget_list->item(row);
+        if(!item->isSelected())
+            continue;
+        Frame *frame = qvariant_cast<Frame*>(item->data(Qt::UserRole));
+        if(frame != nullptr)
+            frames.append(frame);
+    }
+    if(frames.isEmpty() && view->my_animation->CurrentFrame() != nullptr)
+        frames.append(view->my_animation->CurrentFrame()); // nessuna riga selezionata: il frame mostrato
+    return frames;
 }
 
 /**
@@ -3043,26 +3102,46 @@ void Widget::on_deleteLibrary_clicked()
         }
     }
 }
-/// @details Snapshots the current frame into `frame_copy_buffer` for on_pasteFrame_clicked() to consume.
+/**
+ * @details Snapshots every SELECTED frame into `frame_copy_buffer` for
+ * on_pasteFrame_clicked() to consume — one frame with no multi-selection, the whole block
+ * with one. The buffer is pure data (Phase 2b): direct extraction, no stream and no flags,
+ * and cheap in memory whatever the block's size, since a snapshot shares its images with
+ * the live sticks (QImage is copy-on-write — see CLAUDE.md "Images are shared").
+ */
 void Widget::on_cpyFrame_clicked()
 {
-    // il buffer è puro dato (Phase 2b): estrazione diretta, niente stream né flag
-    delete frame_copy_buffer;
-    frame_copy_buffer = ExtractFrameData(*view->my_animation->CurrentFrame());
+    qDeleteAll(frame_copy_buffer);
+    frame_copy_buffer.clear();
+    for(Frame *frame : SelectedFrames())
+        frame_copy_buffer.append(ExtractFrameData(*frame));
 }
 
 /**
- * @details Adds one new layer per stickfigure in the copy buffer to the *current*
- * frame (not a new one) — pasting a frame merges its content into whatever frame is
- * displayed, rather than creating a separate frame for it. The last figure pasted
- * becomes the new current selection.
+ * @details Two different pastes, told apart by how many frames were copied:
+ * - a BLOCK of frames enters as frames, in its original order, right after the current one
+ *   (MyView::InsertFrames(), one undo step for the lot). The buffer is handed Clone()s, so
+ *   the same block can be pasted again;
+ * - a single frame keeps its historical behaviour and merges instead: one new layer per
+ *   stickfigure in the buffer is added to the *current* frame rather than creating a frame
+ *   for it, and the last figure pasted becomes the new current selection. It is the only way
+ *   to fold one frame's figures into another, so it is deliberately not unified with the above.
  */
 void Widget::on_pasteFrame_clicked()
 {
+    if(frame_copy_buffer.isEmpty())
+        return;
     view->ExitDrawMode(); // il paste aggiunge layer al frame corrente: chiudi prima il disegno
+    if(frame_copy_buffer.count() > 1){
+        QList<FrameData *> snapshots;
+        for(FrameData *copied : frame_copy_buffer)
+            snapshots.append(copied->Clone()); // l'undo stack li prende in proprietà, il buffer resta
+        view->InsertFrames(view->my_animation->CurrentFrame()->frame_number + 1, snapshots);
+        return;
+    }
     view->StoreUndo();
     // add a new stickfigure per every stickfigure in the copy buffer
-    for(StickFigureData*S:frame_copy_buffer->stick_figures){
+    for(StickFigureData*S:frame_copy_buffer.first()->stick_figures){
         StickFigure *added = AddStick();
         PopulateLiveStickFigure(added,*S,true,true);
         for(StickData*s:added->stick_list){
@@ -3071,7 +3150,7 @@ void Widget::on_pasteFrame_clicked()
         view->AddHandles(added); // mancava: senza questo i manici degli stick incollati non comparivano
         added->linked_item->setData(Qt::DisplayRole,added->name);
         added->UpdateIcon(); // mancava: l'icona del layer incollato restava quella vuota di AddStick()
-        if(frame_copy_buffer->stick_figures.last() == S){
+        if(frame_copy_buffer.first()->stick_figures.last() == S){
             view->my_animation->UpdateSelection(added);
             my_stick_figure_widget_list->setCurrentRow(my_stick_figure_widget_list->row(added->linked_item));
         }

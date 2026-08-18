@@ -18,6 +18,7 @@
 #include "framepresenter.h"
 #include "stkformat.h"
 #include "abrbrush.h"
+#include "brushpicker.h"
 
 extern QGraphicsScene *scene;
 extern QGraphicsRectItem *my_rect;
@@ -1917,7 +1918,7 @@ private slots:
 
     // MyView::GenerateInbetweens(): N frames appear between the two keyframes with every
     // stick at its linearly interpolated pose, the keyframes themselves are untouched, and
-    // the whole batch is ONE undo step (InbetweenUndoCommand, myview.cpp).
+    // the whole batch is ONE undo step (FrameBatchUndoCommand, myview.cpp).
     void GenerateInbetweensInterpolatesAndIsOneUndoStep()
     {
         AddFrame();
@@ -1985,6 +1986,101 @@ private slots:
         // e nemmeno un frame inesistente oltre l'ultimo
         QVERIFY(!view->GenerateInbetweens(view->my_animation->frame_list.count() - 1, 1).isEmpty());
         QCOMPARE(view->my_animation->frame_list.count(), frames_before);
+    }
+
+    // MyView::InsertFrames()/DeleteFrames(): a contiguous BLOCK of frames enters or leaves
+    // in ONE undo step (FrameBatchUndoCommand, myview.cpp), in its original order, and the
+    // snapshots belong to the undo entry (so a paste can be repeated from the same buffer).
+    // Replicates what Widget::on_cpyFrame_clicked()/on_pasteFrame_clicked() and
+    // on_deleteFrameBtn_clicked() do for a multi-frame selection in the frame list.
+    void MultiFramePasteAndDeleteAreOneUndoStep()
+    {
+        AddFrame();
+        DrawStick(QPointF(30, 30), QPointF(30, 80));
+        int first_index = CurrentFrame()->frame_number;
+        AddFrame();
+        DrawStick(QPointF(40, 30), QPointF(40, 90));
+        int frames_before = view->my_animation->frame_list.count();
+
+        // "copia i due frame selezionati" (on_cpyFrame_clicked): il buffer è puro dato
+        QList<FrameData *> copy_buffer;
+        copy_buffer.append(ExtractFrameData(*view->my_animation->frame_list[first_index]));
+        copy_buffer.append(ExtractFrameData(*view->my_animation->frame_list[first_index + 1]));
+        // "incolla" dopo il frame corrente: all'undo stack vanno dei Clone(), il buffer resta
+        QList<FrameData *> snapshots;
+        for (FrameData *copied : copy_buffer)
+            snapshots.append(copied->Clone());
+        int paste_at = CurrentFrame()->frame_number + 1;
+        view->InsertFrames(paste_at, snapshots);
+
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before + 2);
+        // ordine originale conservato, e ogni frame incollato è numerato per la sua posizione
+        QCOMPARE(view->my_animation->frame_list[paste_at]->frame_number, paste_at);
+        QCOMPARE(view->my_animation->frame_list[paste_at + 1]->frame_number, paste_at + 1);
+        QCOMPARE(view->my_animation->frame_list[paste_at]->stick_figures[0]->stick_list[0]->my_line,
+                 QLineF(30, 30, 30, 80));
+        QCOMPARE(view->my_animation->frame_list[paste_at + 1]->stick_figures[0]->stick_list[0]->my_line,
+                 QLineF(40, 30, 40, 90));
+
+        view->undo_stack.undo(); // un solo passo deve togliere entrambi
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before);
+        view->undo_stack.redo();
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before + 2);
+
+        // la sequenza che segfaultava: LASCIARE il blocco (le righe della lista layer del
+        // primo frame incollato muoiono lì, in MoveToFrame) e solo POI annullare. Il ciclo
+        // di cancellazione passava ad Animation::DeleteFrame() un QListWidgetItem già
+        // distrutto, perché è DeleteFrame stessa a riassegnare current_frame a ogni giro —
+        // vedi MyView::ClearLayerRows(). Serve un blocco IN CODA: il current riassegnato
+        // ricade sull'ultimo frame rimasto, cioè sul prossimo che il ciclo cancella
+        view->MoveToFrame(view->my_animation->frame_list[0]);
+        view->undo_stack.undo();
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before);
+        view->undo_stack.redo();
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before + 2);
+
+        // ...e ora cancellali insieme, che è l'altra direzione dello stesso comando
+        QVERIFY(view->DeleteFrames(paste_at, 2));
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before);
+        view->undo_stack.undo();
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before + 2);
+        QCOMPARE(view->my_animation->frame_list[paste_at]->stick_figures[0]->stick_list[0]->my_line,
+                 QLineF(30, 30, 30, 80));
+        view->undo_stack.redo();
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before);
+        // un blocco che comprende TUTTI i frame è rifiutato senza toccare niente:
+        // un'animazione ha sempre almeno un frame
+        QVERIFY(!view->DeleteFrames(0, view->my_animation->frame_list.count()));
+        QCOMPARE(view->my_animation->frame_list.count(), frames_before);
+
+        qDeleteAll(copy_buffer);
+        // i test successivi danno per scontato che il frame corrente sia l'ultimo
+        view->MoveToFrame(view->my_animation->frame_list.last());
+    }
+
+    // MoveToFrame(): a frame switch leaves EXACTLY the new frame selected in the frame list.
+    // The list is ContiguousSelection in the app (Widget's ctor — the test binary doesn't link
+    // widget.cpp, hence the guard below), and in any mode other than SingleSelection
+    // QListWidgetItem::setSelected() does NOT clear the previous selection, so every switch
+    // used to leave the frame it came from selected too (most obvious when duplicating a frame).
+    void MoveToFrameSelectsOnlyTheNewFrame()
+    {
+        // ripristina la modalità da un DISTRUTTORE: un QVERIFY che fallisce esce subito, e
+        // lasciarla cambiata falserebbe gli slot successivi (stessa ragione del guard in
+        // ApplyingAGradientEnablesTheStyleCheckBoxes)
+        struct Restore {
+            QListWidget *list;
+            QAbstractItemView::SelectionMode previous;
+            ~Restore() { list->setSelectionMode(previous); }
+        } restore{my_frame_widget_list, my_frame_widget_list->selectionMode()};
+        my_frame_widget_list->setSelectionMode(QAbstractItemView::ContiguousSelection);
+
+        AddFrame();
+        QCOMPARE(my_frame_widget_list->selectedItems().count(), 1);
+        AddFrame(); // il frame lasciato non deve restare selezionato accanto al nuovo
+        QCOMPARE(my_frame_widget_list->selectedItems().count(), 1);
+        QCOMPARE(my_frame_widget_list->selectedItems().first(), CurrentFrame()->linked_item);
+        QCOMPARE(my_frame_widget_list->currentItem(), CurrentFrame()->linked_item);
     }
 
     void ChopAndWeld()
@@ -4567,6 +4663,251 @@ private slots:
             list->setCurrentRow(0);
             QCOMPARE(alpha->value(), 40);
         }
+    }
+
+    // A picture, a texture fill/stroke and a border-brush tip are all read back by
+    // StickData::operator>> as freshly decoded, INDEPENDENT pixel buffers, so a figure that
+    // exists through N frames used to cost N copies of each of its images (measured: 60
+    // frames of one 11 MB picture = ~690 MB). The load-time pool gives every record that
+    // reads identical pixels the same buffer instead. QImage is copy-on-write, so this is
+    // invisible: sharing is only ever an allocation, never a semantic change — which the
+    // detach check at the bottom is here to prove.
+    void LoadedImagesShareOneBufferAcrossRecords()
+    {
+        ClearStickImagePool(); // stato definito: altri slot hanno già caricato immagini
+
+        QImage tile(16, 16, QImage::Format_ARGB32);
+        tile.fill(Qt::magenta);
+        QImage tip(12, 12, QImage::Format_Alpha8);
+        for(int y = 0; y < 12; y++)
+            memset(tip.scanLine(y), y * 20, tip.bytesPerLine());
+
+        StickData source;
+        source.stick_type = StickData::IMAGE;
+        source.my_line = QLineF(0, 0, 0, 40);
+        QImage *picture = new QImage(24, 24, QImage::Format_ARGB32);
+        picture->fill(Qt::darkCyan);
+        source.stick_img_list << picture;
+        source.img_name_list << "shared";
+        source.stick_img = picture;
+        QBrush fill(tile);
+        fill.setTransform(QTransform::fromScale(0.5, 0.5).rotate(30)); // il piazzamento deve sopravvivere
+        source.brush = fill;
+        QPen stroke(QBrush(tile), 4);
+        source.pen = stroke;
+        source.stroke_brush.stamp = tip;
+
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << source;
+        }
+        // DUE record letti dallo stesso blocco: è la situazione di uno stesso stick presente
+        // in due frame diversi, che è il caso che moltiplicava la memoria
+        StickData first, second;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> first;
+        }
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> second;
+        }
+
+        QCOMPARE(*first.stick_img, *picture);              // i pixel sono ancora quelli giusti
+        QVERIFY(first.stick_img != second.stick_img);      // oggetti QImage distinti, come prima
+        QCOMPARE(first.stick_img->constBits(), second.stick_img->constBits()); // ...ma un solo buffer
+        QCOMPARE(first.brush.textureImage().constBits(),
+                 second.brush.textureImage().constBits());
+        QCOMPARE(first.pen.brush().textureImage().constBits(),
+                 second.pen.brush().textureImage().constBits());
+        QCOMPARE(first.stroke_brush.stamp.constBits(), second.stroke_brush.stamp.constBits());
+        // la texture della penna e quella del riempimento sono gli stessi pixel: una sola copia
+        QCOMPARE(first.brush.textureImage().constBits(),
+                 first.pen.brush().textureImage().constBits());
+        // il piazzamento della texture (scala/angolo/offset) non deve essere toccato dallo scambio
+        QCOMPARE(first.brush.transform(), fill.transform());
+        QCOMPARE(first.pen.widthF(), stroke.widthF());
+
+        // copy-on-write: scrivere su una copia condivisa non tocca l'altra
+        first.stick_img->fill(Qt::yellow);
+        QCOMPARE(second.stick_img->pixelColor(0, 0), QColor(Qt::darkCyan));
+        QVERIFY(first.stick_img->constBits() != second.stick_img->constBits());
+
+        ClearStickImagePool();
+    }
+
+    // The file half of the same problem: every record used to inline its own copy of its
+    // pixels, so one picture in N frames was encoded N times (measured: a realistic 60-frame
+    // animation at 218 MB, of which 1.9 MB was content). v3 writes an ImageTable once, ahead
+    // of the frames, and the records index into it. Checked by SIZE — the only way to tell
+    // "written once" from "written N times and read back correctly".
+    void AnimationFileWritesEachDistinctImageOnce()
+    {
+        ClearStickImagePool();
+
+        // un'immagine non comprimibile, così il suo peso nel file si vede. Tenuta PER VALORE:
+        // le copie che finiscono negli stick sono di proprietà loro, e LoadAnimation() più
+        // sotto le distrugge tutte prima che il confronto finale avvenga.
+        QImage expected(200, 200, QImage::Format_ARGB32);
+        quint32 noise = 12345; // LCG: rumore riproducibile, e PNG non riesce a comprimerlo
+        for(int y = 0; y < 200; y++){
+            QRgb *row = reinterpret_cast<QRgb*>(expected.scanLine(y));
+            for(int x = 0; x < 200; x++){
+                noise = noise * 1664525u + 1013904223u;
+                row[x] = qRgba((noise >> 16) & 255, (noise >> 8) & 255, noise & 255, 255);
+            }
+        }
+        qint64 one_image_bytes = 0;
+        {
+            QByteArray encoded;
+            QDataStream out(&encoded, QIODevice::WriteOnly);
+            out << expected;
+            one_image_bytes = encoded.size();
+        }
+        QVERIFY(one_image_bytes > 20000); // se comprimesse, la misura sotto non direbbe nulla
+
+        const QString path = QDir::temp().filePath("marionetta_imagetable_test.mAnim");
+        qint64 size_with_one = 0, size_with_five = 0;
+        for(int frame = 0; frame < 5; frame++){
+            AddFrame();
+            DrawStick(QPointF(120, 120), QPointF(120, 200));
+            StickData *stick = CurrentStickFigure()->stick_list.last();
+            stick->stick_type = StickData::IMAGE;
+            stick->stick_img_list << new QImage(expected); // stessi pixel in ogni frame
+            stick->img_name_list << "noise";
+            stick->stick_img = stick->stick_img_list.last();
+            view->my_animation->SaveAnimation(path);
+            if(frame == 0) size_with_one = QFileInfo(path).size();
+            if(frame == 4) size_with_five = QFileInfo(path).size();
+        }
+
+        // la misura: quattro frame in più con la STESSA immagine devono costare meno di una
+        // sola copia in più di quell'immagine. Senza tabella ne costerebbero quattro.
+        const qint64 growth = size_with_five - size_with_one;
+        QVERIFY2(growth < one_image_bytes,
+                 qPrintable(QStringLiteral("4 frame con la stessa immagine hanno aggiunto %1 byte, "
+                                           "contro %2 per una sola copia: è stata riscritta ogni volta")
+                                .arg(growth).arg(one_image_bytes)));
+
+        // e il contenuto torna indietro intatto
+        view->ClearUndo();
+        view->my_animation->LoadAnimation(path);
+        ClearStickImagePool();
+        view->MoveToFrame(view->my_animation->frame_list[0]);
+        int checked = 0;
+        for(Frame *f : view->my_animation->frame_list){
+            for(StickFigure *figure : f->stick_figures){
+                for(StickData *s : figure->stick_list){
+                    if(s->stick_type != StickData::IMAGE)
+                        continue;
+                    QVERIFY(s->stick_img != nullptr);
+                    QCOMPARE(*s->stick_img, expected);
+                    checked++;
+                }
+            }
+        }
+        QCOMPARE(checked, 5);
+
+        QFile::remove(path);
+        // gli slot successivi assumono che AddFrame() accodi in fondo (vedi la nota in
+        // GenerateInbetweensInterpolatesAndIsOneUndoStep)
+        view->MoveToFrame(view->my_animation->frame_list.last());
+    }
+
+    // A brush tip is a MASK: only its alpha means anything (AbrBrush::stamp's contract, and
+    // TintedStamp() drops the RGB through CompositionMode_SourceIn anyway). Holding one as
+    // ARGB32 therefore costs four bytes per pixel to say what one byte says — 163 MB against
+    // 40 MB for a real 20-tip smoke pack. The saving is only legitimate if every consumer
+    // renders identically from either format, which is what this checks.
+    void BrushTipsAreAlpha8AndRenderIdentically()
+    {
+        const QImage tip = MyView::MakeRoundBrush(64, 70, 100);
+        QCOMPARE(tip.format(), QImage::Format_Alpha8);
+
+        BrushStroke as_alpha8;
+        as_alpha8.stamp = tip;
+        as_alpha8.color = QColor(200, 40, 40);
+        as_alpha8.size = 24;
+        BrushStroke as_argb32 = as_alpha8;
+        as_argb32.stamp = tip.convertToFormat(QImage::Format_ARGB32);
+
+        const QImage dab8 = BrushDab(as_alpha8);
+        const QImage dab32 = BrushDab(as_argb32);
+        QCOMPARE(dab8.size(), dab32.size());
+        QCOMPARE(dab8.convertToFormat(QImage::Format_ARGB32),
+                 dab32.convertToFormat(QImage::Format_ARGB32));
+
+        // e lungo un contorno, che è la strada del bordo a pennello
+        QPainterPath path;
+        path.addRect(10, 10, 60, 40);
+        QImage stamped8(90, 70, QImage::Format_ARGB32), stamped32(90, 70, QImage::Format_ARGB32);
+        stamped8.fill(Qt::transparent);
+        stamped32.fill(Qt::transparent);
+        { QPainter p(&stamped8);  StampAlongPath(&p, path, as_alpha8); }
+        { QPainter p(&stamped32); StampAlongPath(&p, path, as_argb32); }
+        QCOMPARE(stamped8, stamped32);
+
+        // il round trip su file riporta ARGB32 (QDataStream scrive PNG), e operator>> lo
+        // riconverte: senza quella riconversione il risparmio sparirebbe al primo caricamento
+        StickData source;
+        source.stick_type = StickData::RECT;
+        source.my_line = QLineF(0, 0, 0, 30);
+        source.stroke_brush.stamp = tip;
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << source;
+        }
+        StickData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+        QCOMPARE(loaded.stroke_brush.stamp.format(), QImage::Format_Alpha8);
+        QCOMPARE(loaded.stroke_brush.stamp, tip);
+        ClearStickImagePool();
+    }
+
+    // "Save brush" stores the selected tip PLUS the host's live parameters in a .mbrush
+    // collection — the parameters are the whole reason the format exists, since an .abr carries
+    // only a shape. What the grid shows afterwards has been through the file (Populate() reloads
+    // it), so reading it back off the item is what pins the codec; deleting the last tip must
+    // take the collection with it, or the combo keeps an empty entry forever.
+    void UserBrushCollectionRoundTripsAndDeletes()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        BrushPicker picker(dir.path());
+
+        BrushPreset dialled;
+        dialled.size = 33;
+        dialled.spacing = 77;
+        dialled.hardness = 41;
+        dialled.angle = -40;
+        dialled.size_jitter = 19;
+        dialled.opacity_jitter = 12;
+        picker.SetParamsProvider([dialled]{ return dialled; });
+
+        BrushPreset seen;
+        QObject::connect(&picker, &BrushPicker::presetChosen, &picker,
+                         [&seen](const BrushPreset &p){ seen = p; });
+        picker.SaveBrush(QStringLiteral("Test tip"));
+
+        const QString file = dir.path() + "/My brushes.mbrush";
+        QVERIFY(QFile::exists(file));
+        QCOMPARE(seen.name, QStringLiteral("Test tip"));
+        QCOMPARE(seen.spacing, 77);
+        QCOMPARE(seen.hardness, 41);
+        QCOMPARE(seen.angle, -40);
+        QCOMPARE(seen.size_jitter, 19);
+        QCOMPARE(seen.opacity_jitter, 12);
+        // lo stamp torna Alpha8 come ci era andato (QDataStream lo riporta ARGB32)
+        QCOMPARE(picker.CurrentStamp().format(), QImage::Format_Alpha8);
+        QCOMPARE(picker.CurrentStamp().size(), QSize(128, 128));
+
+        picker.DeleteBrush(false);
+        QVERIFY(!QFile::exists(file));
     }
 };
 

@@ -6,6 +6,249 @@
 /// emptied by MyView::ReportMissingTextFonts() after it has shown the prompt.
 QStringList missing_text_fonts;
 
+// ---------------------------------------------------------------------------------------
+// Image sharing: one pixel buffer per distinct image, both in memory and in the file.
+//
+// A QImage is copy-on-write, so every in-memory duplication the app already does (Clone(),
+// undo snapshots, copy/paste, inbetweens, render clones) is free and needs nothing. The two
+// places that DO build independent buffers are the two ends of a file: operator>> decodes a
+// fresh one per record, and operator<< encodes a fresh one per record. A picture, texture or
+// brush tip repeated over N frames therefore cost N copies of itself in RAM and N in the
+// file. The pool below fixes the first, the ImageTable the second.
+// ---------------------------------------------------------------------------------------
+
+/// Content key of an image. Hashed row by row rather than over bytesPerLine()*height so the
+/// scanline PADDING — uninitialized, and 3 bytes per row on e.g. an Alpha8 tip of odd width —
+/// cannot make two identical pictures hash differently and silently skip the sharing. The
+/// format is part of the key because operator== treats two formats as different images.
+static size_t ImageKey(const QImage &image)
+{
+    if (image.isNull())
+        return 0;
+    const int row_bytes = qMin(image.bytesPerLine(), (image.width() * image.depth() + 7) / 8);
+    size_t key = qHash(image.width()) ^ (qHash(image.height()) << 1) ^ (size_t)image.format();
+    for (int y = 0; y < image.height(); y++)
+        key = qHashBits(image.constScanLine(y), row_bytes, key);
+    return key;
+}
+
+/// @details Live only between the start of a load and ClearStickImagePool(). Holding the
+/// QImages by value is what lets the sharing span records that are read minutes apart in a
+/// big file; dropping them afterwards leaves the loaded StickDatas as the only owners.
+static QHash<size_t, QImage> image_pool;
+
+/// Replaces @p image with an identical one already seen during this load, so the two share
+/// one buffer. The == check means a hash collision can only cost a missed sharing, never a
+/// wrong picture.
+static void PoolImage(QImage &image)
+{
+    if (image.isNull())
+        return;
+    const size_t key = ImageKey(image);
+    const auto found = image_pool.constFind(key);
+    if (found != image_pool.cend() && *found == image)
+        image = *found;
+    else
+        image_pool.insert(key, image);
+}
+
+/// The same, for the texture hiding inside a QBrush — a pattern or image fill/stroke, which
+/// QBrush's own stream operator decodes as an independent buffer just like an image stick.
+/// setTextureImage() preserves the style and the transform (the texture's whole placement),
+/// but it is re-set explicitly so this cannot quietly depend on that.
+static void PoolBrushTexture(QBrush &brush)
+{
+    if (brush.style() != Qt::TexturePattern)
+        return; // solid and gradient brushes have no pixels to share
+    QImage texture = brush.textureImage();
+    if (texture.isNull())
+        return;
+    PoolImage(texture);
+    const QTransform placement = brush.transform();
+    brush.setTextureImage(texture);
+    brush.setTransform(placement);
+}
+
+/// The pen's paint is a QBrush too, and a textured stroke is as duplicated as a textured
+/// fill. setBrush() rather than setColor(), which would replace the paint with a flat colour.
+static void PoolPenTexture(QPen &pen)
+{
+    if (pen.brush().style() != Qt::TexturePattern)
+        return;
+    QBrush paint = pen.brush();
+    PoolBrushTexture(paint);
+    pen.setBrush(paint);
+}
+
+/// @details Drops the pool's own references; the images stay alive through whatever records
+/// took them. Deliberately not called per record or per frame — the sharing must be able to
+/// span the whole file, which is exactly the case (the same figure in every frame) it exists
+/// for.
+void ClearStickImagePool()
+{
+    image_pool.clear();
+}
+
+/// @details Deduplicates on the way in, so a table written from N identical pictures holds
+/// one. The key is the same content hash the load-time pool uses, with the same == guard.
+qint32 ImageTable::IndexFor(const QImage &image)
+{
+    const size_t key = ImageKey(image);
+    const auto found = index_of.constFind(key);
+    if (found != index_of.cend() && images.value(*found) == image)
+        return *found;
+    const qint32 index = (qint32)images.count();
+    images.append(image);
+    index_of.insert(key, index);
+    return index;
+}
+
+/// @details Null while a record is written or read on its own (an undo snapshot, a clone, a
+/// single-figure .stck): those inline their images exactly as they always have.
+static ImageTable *active_image_table = nullptr;
+
+ImageTable *InstallImageTable(ImageTable *table)
+{
+    ImageTable *previous = active_image_table;
+    active_image_table = table;
+    return previous;
+}
+
+/// One image field of a record: an index when a table is installed, the pixels themselves
+/// otherwise. Both halves of every image field in operator<</operator>> go through this
+/// pair, so the two cannot disagree about which of the two layouts is on disk.
+static void WriteRecordImage(QDataStream &stream, const QImage &image)
+{
+    if (active_image_table != nullptr)
+        stream << active_image_table->IndexFor(image);
+    else
+        stream << image;
+}
+
+static void ReadRecordImage(QDataStream &stream, QImage &image)
+{
+    if (active_image_table != nullptr) {
+        qint32 index = -1;
+        stream >> index;
+        // l'indice viene dal file: su un file corrotto può puntare fuori dalla tabella
+        image = active_image_table->images.value(index);
+        return;
+    }
+    stream >> image;
+    PoolImage(image);
+}
+
+/// A brush whose texture is in the table is written with a 1x1 placeholder in its place:
+/// QBrush's own operator inlines whatever texture it is given, and there is no way to ask it
+/// not to. Everything else about the brush — style, colour, and above all the transform that
+/// IS the texture's scale/angle/offset — still travels through Qt's operator as before.
+static void WriteRecordBrush(QDataStream &stream, const QBrush &brush)
+{
+    if (active_image_table == nullptr || brush.style() != Qt::TexturePattern) {
+        stream << brush;
+        return;
+    }
+    QBrush stripped = brush;
+    QImage placeholder(1, 1, QImage::Format_ARGB32);
+    placeholder.fill(Qt::transparent);
+    const QTransform placement = brush.transform();
+    stripped.setTextureImage(placeholder);
+    stripped.setTransform(placement);
+    stream << stripped;
+    stream << active_image_table->IndexFor(brush.textureImage());
+}
+
+static void ReadRecordBrush(QDataStream &stream, QBrush &brush)
+{
+    stream >> brush;
+    if (active_image_table == nullptr) {
+        PoolBrushTexture(brush);
+        return;
+    }
+    if (brush.style() != Qt::TexturePattern)
+        return;
+    qint32 index = -1;
+    stream >> index;
+    const QImage texture = active_image_table->images.value(index);
+    if (texture.isNull())
+        return; // file corrotto: meglio il placeholder che una texture nulla, che Qt rifiuta
+    const QTransform placement = brush.transform();
+    brush.setTextureImage(texture);
+    brush.setTransform(placement);
+}
+
+/// The pen's paint is a QBrush and can be textured exactly like a fill, so it gets the same
+/// placeholder treatment — around Qt's own QPen operator, which stays responsible for the
+/// width, the dash pattern, the caps and everything else a pen carries.
+static void WriteRecordPen(QDataStream &stream, const QPen &pen)
+{
+    if (active_image_table == nullptr || pen.brush().style() != Qt::TexturePattern) {
+        stream << pen;
+        return;
+    }
+    QBrush paint = pen.brush();
+    QImage placeholder(1, 1, QImage::Format_ARGB32);
+    placeholder.fill(Qt::transparent);
+    const QTransform placement = paint.transform();
+    paint.setTextureImage(placeholder);
+    paint.setTransform(placement);
+    QPen stripped = pen;
+    stripped.setBrush(paint); // setBrush, non setColor: quest'ultima appiattirebbe la penna
+    stream << stripped;
+    stream << active_image_table->IndexFor(pen.brush().textureImage());
+}
+
+static void ReadRecordPen(QDataStream &stream, QPen &pen)
+{
+    stream >> pen;
+    if (active_image_table == nullptr) {
+        PoolPenTexture(pen);
+        return;
+    }
+    if (pen.brush().style() != Qt::TexturePattern)
+        return;
+    qint32 index = -1;
+    stream >> index;
+    const QImage texture = active_image_table->images.value(index);
+    if (texture.isNull())
+        return;
+    QBrush paint = pen.brush();
+    const QTransform placement = paint.transform();
+    paint.setTextureImage(texture);
+    paint.setTransform(placement);
+    pen.setBrush(paint);
+}
+
+/// @details The container's half: the distinct images, once each. Written before the frames
+/// that index into it, because a QDataStream is read front to back and the records need it
+/// as they are read — unlike the frame-name trailer, which nothing else depends on.
+QDataStream &operator<<(QDataStream &stream, const ImageTable &table)
+{
+    stream << (qint32)table.images.count();
+    for (const QImage &image : table.images)
+        stream << image;
+    return stream;
+}
+
+QDataStream &operator>>(QDataStream &stream, ImageTable &table)
+{
+    qint32 count = 0;
+    stream >> count;
+    // il conteggio viene dal file: senza questo controllo un file troncato o corrotto
+    // farebbe allocare immagini finché la memoria regge, come per frameNum in Animation
+    if (stream.status() != QDataStream::Ok || count < 0 || count > 100000)
+        return stream;
+    for (qint32 i = 0; i < count; i++) {
+        QImage image;
+        stream >> image;
+        if (stream.status() != QDataStream::Ok)
+            break; // tabella troncata: i record che la indicizzano leggeranno un'immagine nulla
+        PoolImage(image); // la condivisione vale anche fra file caricati di seguito
+        table.images.append(image);
+    }
+    return stream;
+}
+
 /**
  * @details All defaults live as in-class initializers in stickdata.h so they are visible
  * next to each field's documentation; the constructor has nothing left to do.
@@ -378,8 +621,11 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
     stream << stick_data.stepchild;
     stream << stick_data.my_line;
     stream << stick_data.parent_idx;
-    stream << stick_data.pen;
-    stream << stick_data.brush;
+    // penna e riempimento: una texture è un'immagine come quella di uno stick IMAGE, e va
+    // nella tabella del file allo stesso modo. Tutto il RESTO della penna e del pennello
+    // continua a passare dall'operatore di Qt, che è l'unico a sapere cosa contengono.
+    WriteRecordPen(stream, stick_data.pen);
+    WriteRecordBrush(stream, stick_data.brush);
     stream << stick_data.order;
     if (stick_data.version >= 4) {
         // ancoraggio della texture/gradiente: come l'IK sotto, ortogonale allo stick_type
@@ -393,7 +639,7 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
     if (stick_data.version >= 6) {
         // il pennello del contorno: solo la metà MEMORIZZATA di BrushStroke — colore, diametro
         // e opacità sono quelli della penna, che è già qui sopra, e StrokeBrush() li rimette
-        stream << stick_data.stroke_brush.stamp;
+        WriteRecordImage(stream, stick_data.stroke_brush.stamp);
         stream << stick_data.stroke_brush.spacing;
         stream << stick_data.stroke_brush.angle;
         stream << stick_data.stroke_brush.size_jitter;
@@ -430,7 +676,7 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
             stream << (qint32)stick_data.stick_img_list.indexOf(stick_data.stick_img);
             int j = 0;
             for (QImage *i : stick_data.stick_img_list) {
-                stream << *i;
+                WriteRecordImage(stream, *i);
                 stream << stick_data.img_name_list[j];
                 j++;
             }
@@ -483,8 +729,8 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
     stream >> stick_data.stepchild;
     stream >> stick_data.my_line;
     stream >> stick_data.parent_idx;
-    stream >> stick_data.pen;
-    stream >> stick_data.brush;
+    ReadRecordPen(stream, stick_data.pen);
+    ReadRecordBrush(stream, stick_data.brush);
     stream >> stick_data.order;
     if (stick_data.version >= 4) {
         stream >> stick_data.brush_follows_stick;
@@ -493,7 +739,15 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
         stream >> stick_data.texture_tiled;
     }
     if (stick_data.version >= 6) {
-        stream >> stick_data.stroke_brush.stamp;
+        ReadRecordImage(stream, stick_data.stroke_brush.stamp);
+        // la punta è una maschera: solo il canale alpha conta (l'RGB è nero per contratto,
+        // vedi AbrBrush::stamp), e tenerla a 8 bit invece che a 32 la fa costare un quarto
+        if (!stick_data.stroke_brush.stamp.isNull()
+                && stick_data.stroke_brush.stamp.format() != QImage::Format_Alpha8) {
+            stick_data.stroke_brush.stamp =
+                    stick_data.stroke_brush.stamp.convertToFormat(QImage::Format_Alpha8);
+            PoolImage(stick_data.stroke_brush.stamp); // ricondividi: la conversione stacca il buffer
+        }
         stream >> stick_data.stroke_brush.spacing;
         stream >> stick_data.stroke_brush.angle;
         stream >> stick_data.stroke_brush.size_jitter;
@@ -510,7 +764,11 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
     if (stick_data.IsImageType() || (stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE) || (stick_data.stick_type == StickData::TEXT)) {
         QSize mysize;
         if (stick_data.IsImageType()) {
+            // letta solo per restare allineati al formato: le dimensioni vere arrivano con
+            // ogni immagine, e da quando le immagini non sono più preallocate su questa
+            // QSize nessuno la usa
             stream >> mysize;
+            Q_UNUSED(mysize);
         }
         stream >> stick_data.img_angle;
         stream >> stick_data.img_angle_offset;
@@ -525,8 +783,11 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
             stream >> numOfImgs;
             stream >> stickImgIdx;
             for (int i = 0; i < numOfImgs; i++) {
-                QImage *img = new QImage(mysize, QImage::Format_ARGB32);
-                stream >> *img;
+                // niente preallocazione su mysize: l'operator>> di QImage ASSEGNA sempre
+                // (anche una QImage nulla, su file troncato), quindi il buffer allocato qui
+                // veniva buttato subito — a immagine intera, per ogni immagine di ogni frame
+                QImage *img = new QImage();
+                ReadRecordImage(stream, *img);
                 QString name;
                 stick_data.stick_img_list.append(img);
                 stream >> name;

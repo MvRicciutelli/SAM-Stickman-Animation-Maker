@@ -23,6 +23,7 @@ SOURCES += \
     ../advancedtab.cpp \
     ../advancedtaperwidget.cpp \
     ../animation.cpp \
+    ../brushpicker.cpp \
     ../frame.cpp \
     ../framedata.cpp \
     ../gradientdialog.cpp \
@@ -41,6 +42,7 @@ HEADERS += \
     ../advancedtab.h \
     ../advancedtaperwidget.h \
     ../animation.h \
+    ../brushpicker.h \
     ../frame.h \
     ../framedata.h \
     ../framepresenter.h \

@@ -387,6 +387,18 @@ public:
     void DeleteFrame(Frame *frame);
 
     /**
+     * @brief Empties the layer list, nulling the `linked_item` of every figure that owned
+     *        one of its rows.
+     *
+     * The rows are the only QListWidgetItem a StickFigure may own, and they are destroyed
+     * by the `clear()` inside: without nulling, every frame that was displayed and then
+     * left kept a DANGLING linked_item, which Animation::DeleteFrame() eventually reads
+     * (see the implementation for the crash it caused in a multi-frame delete). Call it
+     * instead of clearing my_stick_figure_widget_list by hand.
+     */
+    void ClearLayerRows();
+
+    /**
      * @brief Inserts a new empty frame at a position.
      * @param pos index where the frame is created.
      * @return the created Frame.
@@ -395,6 +407,31 @@ public:
      * and the add-frame button share one entry point.
      */
     Frame *SetUpFrame(int pos);
+
+    /**
+     * @brief Inserts a block of frames built from snapshots, as ONE undo step.
+     * @param insert_at index the first inserted frame takes (the ones from there on shift up).
+     * @param snapshots one snapshot per frame, in the order they must appear; OWNERSHIP
+     *        PASSES to the undo stack, which frees them when the entry is evicted. Their
+     *        frame_number is rewritten to the position they end up at.
+     *
+     * Used by the multi-frame paste (Widget::on_pasteFrame_clicked()) and by
+     * GenerateInbetweens(). Nothing is inserted inline: the FrameBatchUndoCommand this
+     * pushes does it from its own redo(), so undo/redo are symmetric.
+     */
+    void InsertFrames(int insert_at, const QList<FrameData*> &snapshots);
+
+    /**
+     * @brief Deletes a contiguous run of frames, as ONE undo step.
+     * @param first_index index of the first frame to remove.
+     * @param count how many consecutive frames from there.
+     * @return false — and nothing is modified — if the range is out of bounds or would
+     *         leave the animation with no frame at all.
+     *
+     * Used by the delete-frame button when several rows are selected in the frame list.
+     * Each frame is snapshotted first so undoing restores it whole.
+     */
+    bool DeleteFrames(int first_index, int count);
 
     /**
      * @brief Fills the gap between two adjacent frames with linearly interpolated ones.

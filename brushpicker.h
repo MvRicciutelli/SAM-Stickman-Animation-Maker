@@ -3,7 +3,9 @@
 
 #include <abrbrush.h>
 #include <QDialog>
+#include <QMetaType>
 #include <QWidget>
+#include <functional>
 
 class QComboBox;
 class QLabel;
@@ -27,12 +29,19 @@ class QSpinBox;
 /**
  * @brief One built-in round tip: not a texture but a set of numbers, since the pencils differ
  *        by hardness/opacity/thickness rather than by shape.
+ *
+ * Also what a USER-saved brush stores beside its stamp, which is why the fields are @c qint32 and
+ * why @c angle / @c opacity_jitter are here at all: the built-in presets leave both at 0, but a
+ * saved brush has to come back exactly as it was dialled. They are last so the presets' positional
+ * initializers stay valid.
  */
 struct BrushPreset {
     QString name;
-    int size = 20, opacity = 100, spacing = 25, hardness = 75, roundness = 100;
-    int size_jitter = 0, angle_jitter = 0;
+    qint32 size = 20, opacity = 100, spacing = 25, hardness = 75, roundness = 100;
+    qint32 size_jitter = 0, angle_jitter = 0;
+    qint32 angle = 0, opacity_jitter = 0;
 };
+Q_DECLARE_METATYPE(BrushPreset)   // sta nel UserRole+2 dell'item di una punta salvata
 
 /**
  * @brief Collection selector + thumbnail grid + import/refresh over the app's Brushes folder.
@@ -41,6 +50,11 @@ struct BrushPreset {
  * seven preset flavours. Selecting a thumbnail always emits brushChosen(); a built-in one also
  * emits presetChosen(), because a preset carries parameters and an imported tip carries only
  * its shape (whatever the user dialled stays put).
+ *
+ * A THIRD kind of collection is the user's own: "Save brush" writes the selected stamp plus the
+ * host's live parameters into a `.mbrush` file in the same folder, so a tweaked brush comes back
+ * next session — parameters included, which is exactly what an .abr cannot carry (and why saving
+ * does not try to write one back). Those are the only collections "Delete brush" can edit.
  */
 class BrushPicker : public QWidget
 {
@@ -68,6 +82,32 @@ public:
     /** @brief The selected tip's stamp, or a null image when the grid is empty. */
     QImage CurrentStamp() const;
 
+    /**
+     * @brief Supplies the parameters "Save brush" stores beside the stamp.
+     * @param provider called at save time; only the numbers are read, the name is asked for.
+     *
+     * The picker holds no live parameters of its own — they belong to the host (draw mode's
+     * spin boxes write MyView's state, the border dialog's write a BrushStroke), so it asks.
+     * Without a provider the Save button is disabled.
+     */
+    void SetParamsProvider(std::function<BrushPreset()> provider);
+
+    /**
+     * @brief Adds the selected stamp plus the provider's parameters to a `.mbrush` collection.
+     * @param name the name to store it under; empty (the button's case) asks for one.
+     *
+     * The target is the CURRENT collection when that is already a user one, otherwise a
+     * "My brushes.mbrush" created in the folder — an .abr is a read-only import here, so saving
+     * into the Photoshop pack the tip came from is not on offer.
+     */
+    void SaveBrush(const QString &name = QString());
+
+    /**
+     * @brief Removes the selected tip from the current user collection, rewriting its file.
+     * @param confirm ask first (what the button does); a collection left empty is deleted.
+     */
+    void DeleteBrush(bool confirm = true);
+
 signals:
     /** @brief A tip was selected; @p stamp is its coverage mask (alpha), never null. */
     void brushChosen(const QImage &stamp);
@@ -85,6 +125,9 @@ private:
     QString brushes_path;
     QComboBox *folder_combo = nullptr;
     QListWidget *brush_list = nullptr;
+    QPushButton *save_btn = nullptr;
+    QPushButton *delete_btn = nullptr;
+    std::function<BrushPreset()> params_provider;
 };
 
 /**

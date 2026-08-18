@@ -697,7 +697,10 @@ QRectF CalcImgRect(QLineF l,QSizeF s){
 
 QImage StickGraphicsItem::CalcImg(){
     QSizeF offsetted;
-    if(!data->stick_img) // possibile solo per un record IMAGE ricostruito da un file corrotto
+    // stick_img nullo, o non nullo ma VUOTO: entrambi possibili solo per un record IMAGE
+    // ricostruito da un file corrotto o troncato. Il secondo caso va escluso quanto il primo,
+    // perché sotto width()/height() valgono 0 e il rapporto fra i due sarebbe un NaN
+    if(!data->stick_img || data->stick_img->isNull())
         return QImage();
     if(data->stick_img->width()>data->stick_img->height())
     {
