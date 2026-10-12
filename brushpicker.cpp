@@ -249,7 +249,12 @@ void BrushPicker::Populate(const QString &collection)
     }
     const QList<AbrBrush> brushes = LoadAbr(collection);
     for(const AbrBrush &b : brushes){
-        QListWidgetItem *it = new QListWidgetItem(QIcon(QPixmap::fromImage(b.stamp)), b.name);
+        // icona da una miniatura, non dalla punta intera: QPixmap::fromImage porta l'Alpha8 a 32
+        // bit, e una punta da 2500 px teneva 25 MB per una riga mostrata a 64 px. Non TipPreview(),
+        // che disegna in un quadrato e deformerebbe le punte non quadrate
+        const QImage icon = (b.stamp.width() > 128 || b.stamp.height() > 128)
+                ? b.stamp.scaled(128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation) : b.stamp;
+        QListWidgetItem *it = new QListWidgetItem(QIcon(QPixmap::fromImage(icon)), b.name);
         it->setData(Qt::UserRole, b.stamp);
         brush_list->addItem(it);
     }

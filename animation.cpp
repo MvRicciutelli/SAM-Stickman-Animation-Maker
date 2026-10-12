@@ -15,7 +15,6 @@
 
 extern qint32 W;
 extern qint32 H;
-extern QPointF onion_offset;
 extern QGraphicsRectItem *my_rect;
 extern QGraphicsRectItem *limit_rect;
 extern QGraphicsScene* scene;
@@ -118,11 +117,11 @@ void Animation::UpdateSelection(QPointF point)
     // CurrentStickFigure() va controllato PRIMA: CurrentStick() da solo deferenzia già
     // current_stick_figure, che può essere nullptr dopo un ripristino di undo/redo il cui
     // "stickfigure corrente" salvato era un layer vuoto (operator>> lo lascia nullptr in quel caso)
-    if(current_frame->CurrentStickFigure() && current_frame->CurrentStick()){
-        if(selectedStickFigure->stick_list[selectedIdx]->stick_type != current_frame->CurrentStick()->stick_type){
-            UpdateTab(selectedStickFigure->stick_list[selectedIdx]->stick_type );
-        }
-    }
+    // confronta col tipo dei pannelli mostrati, non con lo stick corrente: scegliere un tool di
+    // disegno (MyView::ChangeTool) cambia i pannelli senza cambiare lo stick corrente, e
+    // ricliccare uno stick dello stesso tipo lasciava su i pannelli del tool
+    if(selectedStickFigure->stick_list[selectedIdx]->stick_type != tab_type)
+        UpdateTab(selectedStickFigure->stick_list[selectedIdx]->stick_type);
 
     current_frame->CurrentStickFigure() = selectedStickFigure;
     current_frame->CurrentStick() = current_frame->CurrentStickFigure()->stick_list[selectedIdx];
@@ -139,6 +138,7 @@ void Animation::UpdateSelection(QPointF point)
 
 }
 void Animation::UpdateTab(int t){
+    tab_type = t;
     int idx = my_tab_widget->currentIndex();
     // dal supporto POLYGON un tipo può portare PIÙ tab (proprietà + vertici): svuota tutto
     // tranne il tab base (0) e la tab Libraries invece di rimuovere solo la posizione 1.
@@ -552,7 +552,7 @@ QDataStream &operator>>(QDataStream& stream,Animation& my_animation){
     stream>>my_animation.width;
     stream>>my_animation.height;
     // applica subito le dimensioni appena lette: prima non veniva fatto, quindi caricare un file con
-    // una canvas di dimensioni diverse da quella corrente lasciava my_rect/limit_rect/onion_offset legati
+    // una canvas di dimensioni diverse da quella corrente lasciava my_rect/limit_rect legati
     // alla vecchia canvas (nessuno li ricalcolava finché l'utente non ridimensionava manualmente)
     W = my_animation.width;
     H = my_animation.height;
@@ -562,7 +562,6 @@ QDataStream &operator>>(QDataStream& stream,Animation& my_animation){
 
     scene->addItem(my_rect);
     scene->setSceneRect(limit_rect->rect());
-    onion_offset = QPointF(-my_rect->rect().width()/10,-my_rect->rect().height()/10);
     // un file valido non ha comunque un numero enorme di frame: senza questo controllo, un file
     // troncato o corrotto (es. un int con qualche bit invertito) farebbe partire un ciclo che
     // alloca centinaia di migliaia di Frame/QListWidgetItem prima di accorgersi che i dati non ci sono

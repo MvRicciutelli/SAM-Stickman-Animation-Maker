@@ -47,7 +47,6 @@ extern QGraphicsRectItem* my_rect;
 extern QGraphicsRectItem* limit_rect;
 // play_back è un membro di MyView ora (vedi myview.h);
 // load_file: rimosso — veniva solo scritto (mymainwindow.cpp) e mai letto da nessuno
-extern QPointF onion_offset;
 extern QImage * image_draw_buffer ;
 extern QString animation_path;
 extern int auto_save_interval;
@@ -4135,9 +4134,6 @@ void MyView::UpdateOnionSkins(){
     // imposta la flag per routine speciali
     StickGraphicsItem::onion_render = true;
     QGraphicsScene render_scene; // scena fittizia su cui renderizzare gli onionskins
-    // immagine fittizia su cui registrare gli onion skins
-    QImage render_img =  QImage(scene()->sceneRect().width(),scene()->sceneRect().height(),QImage::Format_ARGB32);
-
     render_scene.setSceneRect(scene()->sceneRect());
     // dallo spinbox trai il valore del numero di onionskins servono
     int skin_num = onion_skin_sb->value();
@@ -4159,23 +4155,29 @@ void MyView::UpdateOnionSkins(){
             render_clones.append(clone);
             render_scene.addItem(new StickGraphicsItem(clone));
         }
-        QPainter painter(&render_img);
-        render_img.fill(Qt::transparent);
-        painter.setBackground(QBrush(QColor(Qt::transparent)));
-        render_scene.render(&painter);
         // più è vecchio l'onion skin più è trasparente, più è vicino al frame corrente più è opaco
         opacity_val += 0.5/skin_num;
-        // trasferisci la scena renderizzata
-        QGraphicsPixmapItem* item = new QGraphicsPixmapItem(QPixmap::fromImage((render_img)));
-        item->setOffset(onion_offset);
-        item->setOpacity(opacity_val);
-        item->setZValue(0);
-        onion_skins.append(item);
-        scene()->addItem(item);
+        // solo l'ingombro delle figure, non tutta la scena: un fantasma costava 1.44x la tela
+        // (12 MB a 1080p) a ogni cambio frame, ora costa quanto le figure che mostra
+        QRect bounds = render_scene.itemsBoundingRect().intersected(render_scene.sceneRect()).toAlignedRect();
+        if(!bounds.isEmpty()){
+            // premoltiplicato: è il formato in cui il raster engine dipinge, ARGB32 semplice
+            // passava ogni span da una conversione (e QPixmap::fromImage ne faceva un'altra)
+            QImage render_img(bounds.size(), QImage::Format_ARGB32_Premultiplied);
+            render_img.fill(Qt::transparent);
+            QPainter painter(&render_img);
+            render_scene.render(&painter, QRectF(), bounds);
+            painter.end();
+            // trasferisci la scena renderizzata
+            QGraphicsPixmapItem* item = new QGraphicsPixmapItem(QPixmap::fromImage(std::move(render_img)));
+            item->setOffset(bounds.topLeft());
+            item->setOpacity(opacity_val);
+            item->setZValue(0);
+            onion_skins.append(item);
+            scene()->addItem(item);
+        }
         render_scene.clear(); // distruggi le view di rendering PRIMA di liberare i dati clonati
         qDeleteAll(render_clones);
-        painter.end();
-
     }
 
     StickGraphicsItem::onion_render = false;
@@ -4588,9 +4590,7 @@ static QIcon RenderLibraryIcon(const StickFigureData &figure_data){
         icon_scene.addItem(render_view); // la scena diventa proprietaria della view
     }
     QPainter painter(&icon_pixmap);
-    StickGraphicsItem::offscreen_render = true;
     icon_scene.render(&painter);
-    StickGraphicsItem::offscreen_render = false;
     return QIcon(icon_pixmap);
 }
 /**
@@ -4916,7 +4916,7 @@ void MyView::SplitStickFigure(){
 }
 /**
  * @details Applies a new canvas size to the scene: repaints the page rect (my_rect) and
- * limit rect at the new W/H, recomputes the onion offset, then — depending on `option` —
+ * limit rect at the new W/H, then — depending on `option` —
  * recentres every figure of every frame (REPO), recentres and rescales them (REPOSCALE,
  * via ScaleFrame()), or leaves them where they are (NOREPO). Called from
  * MyMainWindow::GetAnimationParams() after the options dialog changes the dimensions.
@@ -4930,7 +4930,6 @@ void MyView::SizeChange(int option){
     my_rect->setBrush(QBrush(QColor(Qt::white)));
     scene()->setBackgroundBrush(QBrush(QColor(Qt::white)));
     my_rect->setRect(0,0,W,H);
-    onion_offset = QPointF(-my_rect->rect().width()/10,-my_rect->rect().height()/10);
     QPointF new_center = my_rect->rect().center();
     limit_rect->setRect(-my_rect->rect().width()/10, -my_rect->rect().height()/10, my_rect->rect().width()*1.1, my_rect->rect().height()*1.1);
     scene()->setSceneRect(limit_rect->rect());
@@ -4965,52 +4964,8 @@ void MyView::SizeChange(int option){
 
 }
 /**
- * @details Flattens every frame to a single pixmap up front so playback can just swap
- * images instead of rebuilding the scene each tick. Like the onion-skin/icon renderers
- * it draws from Clone()d StickData wrapped in throwaway views, and clears the render
- * scene BEFORE freeing the clones so no view outlives its data. Sets `play_back` so the
- * rest of the app skips interactive-only work while previewing. DisplayPreview() then
- * shows the frames one at a time.
- */
-void MyView::PreparePreview(){
-
-    play_back = true;
-    StickGraphicsItem::offscreen_render = true; // niente marcatore IK nei fotogrammi di anteprima
-    for(Frame* f :my_animation->frame_list){
-        QGraphicsScene render_scene; //scena fittizia
-        QImage *render_img = new QImage(W,H,QImage::Format_ARGB32); //immagine temporanea
-
-
-        QPainter painter(render_img); // painter che esegue il drawing sull immagine
-        render_scene.setSceneRect(my_rect->rect());
-        // questi stick sono VIVI: clona i dati prima di wrapparli, altrimenti il costruttore
-        // di stick ruberebbe il back-pointer data->view alla view reale sullo schermo
-        QList<StickData*> render_clones;
-        for(StickFigure *S:f->stick_figures)
-        {
-            for(StickData* s: S->stick_list){
-                StickData* clone = s->Clone();
-                render_clones.append(clone);
-                render_scene.addItem(new StickGraphicsItem(clone));
-            }
-        }
-        //disegna sull' immagine e salvala
-        render_img->fill(Qt::white);
-        painter.setBackground(QBrush(QColor(Qt::white)));
-        render_scene.render(&painter);
-        painter.end();
-        QGraphicsPixmapItem* item = new QGraphicsPixmapItem(QPixmap::fromImage(*(render_img)));
-        preview_list.append(item);
-        delete render_img;
-        render_scene.clear(); // distruggi le view di rendering PRIMA di liberare i dati clonati
-        qDeleteAll(render_clones);
-        //...add all other video frames here
-    }
-    StickGraphicsItem::offscreen_render = false;
-    play_back = false;
-}
-/**
- * @details Shows the pixmap PreparePreview() rendered for frame `idx`, removing the
+ * @details Shows the pixmap rendered for frame `idx` (ImageExport in PREVIEW mode, turned
+ * into pixmaps by MySleeper::StartPlaying()), removing the
  * previous frame's pixmap first so they don't pile up on the scene during playback (the
  * whole preview_list is freed together only when playback ends).
  */
@@ -5021,7 +4976,6 @@ void MyView::DisplayPreview(int idx){
         scene()->removeItem(preview_list[idx-1]);
     QGraphicsPixmapItem* render_img = preview_list[idx];
 
-    //item->setOffset(onion_offset);
     scene()->addItem(render_img);
     //item->setZValue(0);
 }

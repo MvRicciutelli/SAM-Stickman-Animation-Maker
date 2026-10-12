@@ -338,11 +338,8 @@ void Frame::UpdateIcon()
     }
     // crea un painter che disegni sull'immagine
     QPainter painter(icon_img);
-    // renderizza dalla scena sull'immagine mediante il painter (mai il marcatore IK: è
-    // UI viva, non una proprietà dello stickfigure da mostrare in un'iconea)
-    StickGraphicsItem::offscreen_render = true;
+    // renderizza dalla scena sull'immagine mediante il painter
     icoScene.render(&painter);
-    StickGraphicsItem::offscreen_render = false;
     painter.end();
     // etichetta (numero + eventuale nome) e aggiornamento dell'item: vedi UpdateLabel()
     UpdateLabel();

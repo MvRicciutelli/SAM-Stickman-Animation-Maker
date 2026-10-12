@@ -12,7 +12,6 @@
 QGraphicsScene *scene = nullptr;
 QGraphicsRectItem *my_rect = nullptr;
 QGraphicsRectItem *limit_rect = nullptr;
-QPointF onion_offset;
 MyView *V = nullptr;
 qint32 W = 720;
 qint32 H = 480;

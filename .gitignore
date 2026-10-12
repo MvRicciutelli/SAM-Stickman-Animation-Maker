@@ -9,3 +9,9 @@
 *.Release
 *.exe
 release/qrc_myres.cpp
+# generati da uic nella build dir: una copia qui vince sull'#include "ui_*.h" e nasconde le modifiche ai .ui
+ui_*.h
+
+# I testi di licenza devono stare nel repo: la regola *.txt sopra li escluderebbe,
+# e la LGPLv3 sezione 4(b) richiede che accompagnino il programma distribuito.
+!LICENSES/*.txt

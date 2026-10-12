@@ -46,12 +46,14 @@ public:
     /**
      * @brief Renders every frame to a numbered image via a background ImageExport thread.
      * @param path output path template for the image sequence.
-     * @param option NONE / AVI / FFMPEG — what ImageRenderOver() does once rendering ends.
+     * @param option NONE / AVI / FFMPEG / MFVIDEO — what ImageRenderOver() does when done.
+     * @param video_file MFVIDEO only: destination .mp4.
+     * @param video_fps MFVIDEO only: frame rate of the encoded video.
      *
      * Refuses to start a second export while one is running. On completion
      * ImageRenderOver() either stops (NONE) or forwards the frames to the AVI/ffmpeg path.
      */
-    void ExportImageSequence(QString path, int option);
+    void ExportImageSequence(QString path, int option, QString video_file = "", int video_fps = 24);
 
     /**
      * @brief Opens the ffmpeg export options dialog (single instance) and, on accept,
@@ -80,6 +82,14 @@ public slots:
     void StartFFMPEGRender(QStringList options);
 
     /**
+     * @brief Kicks off the mp4 render: exports the image sequence that the ImageExport
+     *        thread then encodes with the Windows H.264 encoder (no ffmpeg involved).
+     * @param file destination .mp4 path chosen in the export dialog.
+     * @param fps frame rate chosen in the export dialog.
+     */
+    void StartMediaFoundationRender(QString file, int fps);
+
+    /**
      * @brief Autosave slot (bound to view->AutoSaveTrigger): saves to the current path.
      */
     void AutoSave();
@@ -93,7 +103,7 @@ public slots:
     /**
      * @brief Called when the ImageExport thread finishes: frees it and dispatches to the
      *        AVI/ffmpeg encoder or stops, per the option passed to ExportImageSequence().
-     * @param option NONE / AVI / FFMPEG.
+     * @param option NONE / AVI / FFMPEG / MFVIDEO.
      */
     void ImageRenderOver(int option);
 private slots:
@@ -116,6 +126,8 @@ private slots:
     void on_actionExport_video_using_FFMPEG_triggered();
 
     void on_actionExport_as_image_sequence_triggered();
+
+    void on_actionExport_as_mp4_triggered();
 
     void on_actionAbout_triggered();
 

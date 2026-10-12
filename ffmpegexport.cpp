@@ -1,8 +1,15 @@
 #include "ffmpegexport.h"
 #include "ui_ffmpegexport.h"
 
+#include "widget.h"
+
+#include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
+#include <QMessageBox>
 #include <QProcess>
+#include <QPushButton>
+#include <QVBoxLayout>
 extern qint32 W;
 extern qint32 H;
 extern int FPS;
@@ -10,6 +17,8 @@ QString output_file = ""; ///< chosen output video path; kept in sync with the s
 extern QString FFMPEGPath;
 extern QDir program_folder;
 extern QDir render_folder;
+extern QDir my_video_export_folder;
+extern Widget *my_widget;
 /**
  * @details Pre-fills the fps control from the current animation FPS and marks the dialog
  * WA_DeleteOnClose so closing it via the window X actually destroys it (otherwise it is
@@ -21,6 +30,12 @@ FfmpegExport::FfmpegExport(QWidget *parent) :
 {
     ui->setupUi(this);
     ui->fpsSpinbox->setValue(FPS);
+    // ffmpeg non viene distribuito col programma (NOTICE.md): da qui l'utente indica la
+    // propria installazione, ed e' quello che abilita i tre formati diversi dall'mp4
+    locate_ffmpeg_btn = new QPushButton(tr("Locate FFmpeg..."), this);
+    ui->verticalLayout->addWidget(locate_ffmpeg_btn);
+    connect(locate_ffmpeg_btn, &QPushButton::clicked, this, &FfmpegExport::LocateFfmpeg);
+    RefreshFfmpegAvailability();
     // senza questo, chiudere la finestra dalla X la nasconde soltanto: non viene mai distrutta
     setAttribute(Qt::WA_DeleteOnClose);
 }
@@ -56,22 +71,29 @@ void FfmpegExport::on_exportVideoBtn_clicked()
     }
     render_folder.setPath(image_path);
 
+    // l'mp4 non passa da ffmpeg: lo encoda l'encoder H.264 di Windows (mfvideo.h), quindi
+    // funziona anche su un'installazione che non ha ffmpeg
+    if(ui->mp4RadioBtn->isChecked()){
+        emit ExportVideoMF(output_file, ui->fpsSpinbox->value());
+        return;
+    }
+
     QStringList param_list;
     param_list<<
                 "-r"<<QString::number(ui->fpsSpinbox->value())<< // framerate
                 "-f"<<"image2"<< // force format, image2 is the image muxer
                 "-s"<<QString::number(W)+"x"+QString::number(H)<< //size
                 "-i"<<img_name+"_%d.png"; //input location
+    // -qscale:v e non -crf: il crf e' un'opzione privata di libx264/libvpx, che un build LGPL
+    // non contiene, e sugli encoder nativi qui sotto veniva ignorato con un warning
     if(ui->vmwRadioBtn->isChecked())
-        param_list<<"-vcodec"<<"msmpeg4"<<"-qscale"<<"2"; //codec
-    else if(ui->mp4RadioBtn->isChecked())
-        param_list<<"-vcodec"<<"libx264"; //codec
+        param_list<<"-c:v"<<"msmpeg4"<<"-qscale:v"<<"2"; //codec
     else if(ui->aviRadioButton->isChecked())
-       param_list<< "-vcodec"<<"mpeg4"<<"-vtag"<<"xvid"; //codec
-    else if(ui->gifRadioBtn->isChecked())
-       {}
-    param_list<<"-crf"<<"25"<<// quality
-                output_file;
+       param_list<< "-c:v"<<"mpeg4"<<"-vtag"<<"xvid"<<"-qscale:v"<<"3"; //codec
+    // il gif non ha codec da specificare
+    // -y: il file d'uscita e' stato scelto con getSaveFileName, quindi esiste gia' - senza
+    // questo ffmpeg resta in attesa di una conferma su stdin che nessuno gli dara' mai
+    param_list<<"-y"<<output_file;
     emit ExportVideo(param_list);
 }
 
@@ -140,6 +162,55 @@ void FfmpegExport::on_vmwRadioBtn_clicked()
 void FfmpegExport::on_gifRadioBtn_clicked()
 {
     ReplaceOutputExtension("gif");
+}
+
+/**
+ * @details One reader for the remembered path, so the dialog's format enablement, the
+ * export button and MyMainWindow::ImageRenderOver()'s process launch cannot disagree about
+ * whether an ffmpeg is available.
+ */
+QString ResolveFfmpeg()
+{
+    return QFile::exists(FFMPEGPath) ? FFMPEGPath : QString();
+}
+
+/**
+ * @details The advanced half of this dialog: mp4 needs nothing installed (Windows encodes
+ * it, mfvideo.h), while wmv, avi and gif are rendered by an ffmpeg the user owns. The path
+ * goes through Widget::WriteJson() so it outlives the session, and the radios are
+ * re-enabled straight away instead of at the next opening.
+ */
+void FfmpegExport::LocateFfmpeg()
+{
+    const QString file_name = QFileDialog::getOpenFileName(this,tr("find FFMPEG executable file"),
+                       my_video_export_folder.path(), "ffmpeg(*.exe)");
+    if(!QFile::exists(file_name)) // annullato
+        return;
+    if(QFileInfo(file_name).fileName().compare("ffmpeg.exe",Qt::CaseInsensitive)!=0){
+        QMessageBox::warning(this,"FFMPEG location","That file is not an ffmpeg.exe.");
+        return;
+    }
+    FFMPEGPath = file_name;
+    my_widget->WriteJson(); // altrimenti il percorso si perde alla chiusura del programma
+    RefreshFfmpegAvailability();
+}
+
+/**
+ * @details Disabling the three radios beats letting the user pick a format whose export
+ * would then quietly never start. mp4 is never disabled - it does not go through ffmpeg -
+ * and is force-selected when it is the only thing left available.
+ */
+void FfmpegExport::RefreshFfmpegAvailability()
+{
+    const QString ffmpeg = ResolveFfmpeg();
+    const bool have_ffmpeg = !ffmpeg.isEmpty();
+    ui->aviRadioButton->setEnabled(have_ffmpeg);
+    ui->vmwRadioBtn->setEnabled(have_ffmpeg);
+    ui->gifRadioBtn->setEnabled(have_ffmpeg);
+    if(!have_ffmpeg)
+        ui->mp4RadioBtn->setChecked(true);
+    locate_ffmpeg_btn->setToolTip(have_ffmpeg ? ffmpeg
+        : tr("wmv, avi and gif are rendered by ffmpeg, which is not included; mp4 does not need it"));
 }
 
 /**

@@ -3,6 +3,8 @@
 
 #include <QWidget>
 
+class QPushButton;
+
 namespace Ui {
 class FfmpegExport;
 }
@@ -40,6 +42,19 @@ private slots:
 
 private:
     Ui::FfmpegExport *ui;
+    QPushButton *locate_ffmpeg_btn; ///< opens the file dialog that points at the user's ffmpeg
+
+    /**
+     * @brief Asks the user for their own ffmpeg.exe, remembers it and re-enables the
+     *        formats that need it.
+     */
+    void LocateFfmpeg();
+
+    /**
+     * @brief Enables the three ffmpeg-only format radios per whether an ffmpeg is
+     *        currently available, and refreshes the locate button's tooltip.
+     */
+    void RefreshFfmpegAvailability();
 
     /**
      * @brief Swaps the chosen output file's extension for a new one.
@@ -57,6 +72,16 @@ private:
    *        quality, output file); consumed by MyMainWindow::StartFFMPEGRender().
    */
   void  ExportVideo(QStringList options);
+
+  /**
+   * @brief Emitted on Export when the chosen format is mp4, which does not use ffmpeg.
+   * @param file destination .mp4 path.
+   * @param fps frame rate chosen in the dialog.
+   *
+   * Consumed by MyMainWindow::StartMediaFoundationRender(): the frames are rendered the
+   * same way, then encoded by the Windows H.264 encoder (mfvideo.h) instead of ffmpeg.
+   */
+  void  ExportVideoMF(QString file, int fps);
 };
 
 /**
@@ -67,4 +92,14 @@ private:
  * (MyMainWindow::on_actionexport_as_AVI_file_triggered() / StartFFMPEGRender()).
  */
 void EmptyDirectory(QString path);
+
+/**
+ * @brief Path of the ffmpeg executable the user pointed the app at.
+ * @return that path when it still exists, otherwise an empty string.
+ *
+ * ffmpeg is not shipped with MarionettaPlus (see NOTICE.md) - it is the optional, advanced
+ * half of video export, located by the user through FfmpegExport's "Locate FFmpeg" button.
+ * An empty return is not fatal: mp4 export goes through Windows' own encoder (mfvideo.h).
+ */
+QString ResolveFfmpeg();
 #endif // FFMPEGEXPORT_H

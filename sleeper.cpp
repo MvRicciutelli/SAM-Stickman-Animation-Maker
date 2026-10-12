@@ -35,6 +35,15 @@ MySleeper::MySleeper(MyView * V, int time)
 void MySleeper::StartPlaying()
 {
     preview_generator->wait(); // il segnale è queued: run() potrebbe non essere ancora tornata
+    // i pixmap si creano qui, sul thread della UI: QPixmap non è utilizzabile da un thread
+    // secondario. Il thread li renderizza allo zoom della view, scalarli di 1/preview_scale
+    // li riporta a coprire la tela esattamente come prima
+    for(QImage &frame : preview_generator->preview_frames){
+        QGraphicsPixmapItem *item = new QGraphicsPixmapItem(QPixmap::fromImage(std::move(frame)));
+        item->setScale(1.0 / preview_generator->preview_scale);
+        v->preview_list.append(item);
+    }
+    preview_generator->preview_frames.clear();
     connect(&timer, SIGNAL(timeout()), SLOT(Connected()));
     timer.setSingleShot(false);
     timer.setInterval(interval_time);
@@ -47,6 +56,12 @@ void MySleeper::StartPlaying()
 void MySleeper::Stop(){
     pause_pressed = true;
 }
+/// @details No-op once the thread has finished: QPointer is null after its deleteLater().
+void MySleeper::WaitForPreview()
+{
+    if(preview_generator)
+        preview_generator->wait();
+}
 /**
  * @details Called once per timer tick (see StartPlaying()). While frames remain and
  * Stop() hasn't been requested, shows the next rendered frame
@@ -58,7 +73,9 @@ void MySleeper::Stop(){
 Q_SLOT void MySleeper::Connected()
 {
 
-   if (v->my_animation->frame_list.count()>counter && pause_pressed == false){
+   // preview_list, non frame_list: un frame aggiunto durante la riproduzione non ha un'anteprima,
+   // e preview_list[counter] leggeva oltre la fine
+   if (v->preview_list.count()>counter && pause_pressed == false){
        //v->MoveToFrame(v->my_animation->frame_list[counter]);
        v->DisplayPreview(counter);
        timer.start();
@@ -75,8 +92,12 @@ Q_SLOT void MySleeper::Connected()
            delete item;
        }
        v->preview_list.clear();
-       // counter è 0 se Stop() arriva prima del primissimo tick: frame_list[-1] leggeva fuori dai limiti
-       v->MoveToFrame(v->my_animation->frame_list[counter > 0 ? counter-1 : 0]);
+       // counter è 0 se Stop() arriva prima del primissimo tick, e i frame cancellati durante la
+       // riproduzione possono aver lasciato frame_list più corta di counter: entrambi leggevano
+       // fuori dai limiti
+       const QList<Frame*> &frames = v->my_animation->frame_list;
+       if(!frames.isEmpty())
+           v->MoveToFrame(frames[qBound(0, counter-1, frames.count()-1)]);
        // azzera 'play' PRIMA della self-delete: è ciò che segnala a Widget::on_PlayButton_clicked
        // che non c'è più una riproduzione in corso (sostituisce il vecchio flag busy_play)
        play = nullptr;

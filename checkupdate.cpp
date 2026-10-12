@@ -15,21 +15,23 @@ CheckUpdate::CheckUpdate()
  * @details Runs the bundled version.exe (extracted from resources next to the app),
  * reads its stdout, strips the wrapping punctuation and splits it into major,minor,
  * release. If that triple is newer than this build's VERSION/SUBVERSION/R it emits
- * UpdatePresent(). Every early-out routes through the `cleanup` label so the QProcess
- * and this thread are always freed (delete p + deleteLater()); a helper that reports
+ * UpdatePresent(). Every early-out routes through the `cleanup` label so this thread is
+ * always freed (deleteLater()); a helper that reports
  * -1 or too few fields is treated as "no update".
  */
 void CheckUpdate::run(){
-    QProcess *p = new QProcess(this);
+    // sullo stack: `new QProcess(this)` qui gira nel thread worker mentre `this` vive in quello
+    // della UI, quindi Qt rifiutava comunque il parent
+    QProcess p;
     QString output;
     QString exe_path = QCoreApplication::applicationDirPath();
     QFile::copy(":/version.exe",exe_path+"/version.exe");
-    p->start(exe_path+"/version.exe");
-    if (!p->waitForStarted()){
+    p.start(exe_path+"/version.exe");
+    if (!p.waitForStarted()){
 
     }else{
-        p->waitForFinished();
-        output = (p->readAllStandardOutput());
+        p.waitForFinished();
+        output = (p.readAllStandardOutput());
 
         output.remove("(",Qt::CaseSensitivity::CaseSensitive);
         output.remove(")",Qt::CaseSensitivity::CaseSensitive);
@@ -68,7 +70,6 @@ void CheckUpdate::run(){
 
     }
     cleanup:
-    delete p;
     quit();
     deleteLater();
 }

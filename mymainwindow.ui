@@ -315,6 +315,7 @@ QMenu::separator {
     <addaction name="actionsave_animation"/>
     <addaction name="actionload_animation"/>
     <addaction name="separator"/>
+    <addaction name="actionExport_as_mp4"/>
     <addaction name="actionExport_video_using_FFMPEG"/>
     <addaction name="actionExport_as_image_sequence"/>
     <addaction name="actionexport_as_AVI_file"/>
@@ -359,6 +360,11 @@ QMenu::separator {
   <action name="actionexport_as_AVI_file">
    <property name="text">
     <string>Export video as AVI file</string>
+   </property>
+  </action>
+  <action name="actionExport_as_mp4">
+   <property name="text">
+    <string>Export video as MP4 file</string>
    </property>
   </action>
   <action name="actionsave_animation_current">

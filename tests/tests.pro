@@ -27,6 +27,8 @@ SOURCES += \
     ../frame.cpp \
     ../framedata.cpp \
     ../gradientdialog.cpp \
+    ../mfvideo.cpp \
+    ../imageexport.cpp \
     ../framepresenter.cpp \
     ../myview.cpp \
     ../stick.cpp \
@@ -51,9 +53,14 @@ HEADERS += \
     ../stick.h \
     ../stickdata.h \
     ../stickfiguredata.h \
+    ../mfvideo.h \
+    ../imageexport.h \
     ../stkformat.h \
     ../style.h \
     ../uiItems.h
+
+# Media Foundation: l'encoder H.264 di Windows usato da mfvideo.cpp
+win32: LIBS += -lmfplat -lmfreadwrite -lmfuuid -lole32
 
 FORMS += \
     ../advancedcirclewidget.ui \

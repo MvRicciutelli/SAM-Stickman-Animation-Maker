@@ -118,7 +118,7 @@ public:
     unsigned int tool = NOTOOL; ///< active tool id (one of the DRAW/ROTATE/... constants)
 
     /**
-     * @brief True while playback is running (raised by MySleeper/PreparePreview()):
+     * @brief True while playback is running (raised by MySleeper for the whole playback):
      *        MoveToFrame() skips the interactive-only work (icons, handles, onion
      *        skins, list selection) for the duration. Formerly the free global
      *        `play_back` (widget.cpp), now owned by the class that consumes it.
@@ -510,7 +510,7 @@ public:
      * @param figure live figure to export; no-op if null or empty.
      */
     void SaveStickFigureAsLibrary(const QString &file_name, StickFigure *figure);
-    QList<QGraphicsPixmapItem*> preview_list; ///< rendered frames shown one-by-one during playback (PreparePreview/DisplayPreview)
+    QList<QGraphicsPixmapItem*> preview_list; ///< rendered frames shown one-by-one during playback (MySleeper::StartPlaying()/DisplayPreview())
 
     /**
      * @brief Removes the selected entry from the library (widget + data buffer).
@@ -562,14 +562,6 @@ public:
      * a width-only scale-factor bug (see CLAUDE.md "Known unresolved items").
      */
     void ScaleFrame(Frame *F, float scale_amount, QRectF R);
-
-    /**
-     * @brief Pre-renders every frame to a pixmap for smooth playback.
-     *
-     * Fills preview_list with one flattened image per frame (rendered from Clone()d
-     * data, so live views are untouched). DisplayPreview() then flips through them.
-     */
-    void PreparePreview();
 
     /**
      * @brief Shows the pre-rendered frame at `idx` during playback.

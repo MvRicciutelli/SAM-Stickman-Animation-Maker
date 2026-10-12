@@ -39,6 +39,7 @@ SOURCES += \
     gradientdialog.cpp \
     imageexport.cpp \
     main.cpp \
+    mfvideo.cpp \
     mymainwindow.cpp \
     myview.cpp \
     patternlibrary.cpp \
@@ -67,6 +68,7 @@ HEADERS += \
     framepresenter.h \
     gradientdialog.h \
     imageexport.h \
+    mfvideo.h \
     mymainwindow.h \
     myview.h \
     patternlibrary.h \
@@ -104,4 +106,8 @@ DISTFILES += \
     resources/add_poly_00002.png \
     resources/add_poly_00003.png \
     version.exe
+# Media Foundation: encoder H.264 fornito da Windows, usato da mfvideo.cpp per l'mp4
+# senza ffmpeg (mfuuid porta i GUID MF_MT_*/MFVideoFormat_*)
+win32: LIBS += -lmfplat -lmfreadwrite -lmfuuid -lole32
+
 RC_ICONS = marionettaIcon_00001.ico

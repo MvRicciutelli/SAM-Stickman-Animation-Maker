@@ -31,6 +31,7 @@
 #include <QVBoxLayout>
 #include <QPushButton>
 #include <QButtonGroup>
+#include <QToolButton>
 #include <QPixmap>
 #include <QPainter>
 #include <QSignalBlocker>
@@ -60,21 +61,47 @@
 #define DEFAULTHANDLES 10
 //#include "QVideoEncoder.h"
 //#include "QVideoDecoder.h"
-QString license = "The software package Marionetta is distributed as a free of charge Software,\r\n \
-   user must hereby acknowledges accept the following conditions to use Marionetta: \r\n\
--The only official distribution of Marionetta is under the authorship of Matteo Vittorio Ricciutelli \r\n\
--The user confirms he has acquired this software package from either: \r\n\
-    https://matteovittorioricc.wixsite.com/marionetta \r\n\
-    or \r\n\
-    https://sites.google.com/view/marionetta/home \r\n\
--The user will not upload this software package, the user will not share this software package via p2p,ftp or email \r\n\
-    and  he will not under any mean redistirbute this software.\r\n\
--To get other people to know Marionetta the user is allowed to share links to official sources such as \r\n\
-    https://matteovittorioricc.wixsite.com/marionetta \r\n\
-    https://sites.google.com/view/marionetta/home \r\n\
--The user agrees not to modify the software package and its contents in any way.\r\n\
--The user acknowledges Marionetta is released as-is, \r\n\
-   and that the author does not assume any resposability on the usage of the software or on the content created using the software.\r\n\
+// Deve restare allineata al file LICENSE (PolyForm Strict 1.0.0 + i permessi aggiuntivi):
+// se le due divergono, il programma dichiara a schermo condizioni diverse da quelle sotto
+// cui e' distribuito. Il punto 5 non e' una cortesia ma un requisito della sezione 4 LGPLv3.
+QString license = "MarionettaPlus - License terms\r\n\
+Copyright (C) 2026 Matteo Vittorio Ricciutelli. All rights reserved.\r\n\
+\r\n\
+MarionettaPlus is distributed free of charge under the PolyForm Strict License\r\n\
+1.0.0. The complete terms are in the LICENSE file supplied with the program;\r\n\
+the summary below is provided for convenience and does not replace them.\r\n\
+By accepting, you agree to the following.\r\n\
+\r\n\
+1. Permitted use. You may install and use this program free of charge for any\r\n\
+   noncommercial purpose, including personal projects, hobby and amateur work,\r\n\
+   private study and entertainment, and use by educational, charitable,\r\n\
+   research, public safety and government institutions.\r\n\
+\r\n\
+2. Your work is yours. Animations, images and videos you create with this\r\n\
+   program belong to you, and you may publish, distribute or sell them,\r\n\
+   including commercially. These terms govern the program, not its output.\r\n\
+\r\n\
+3. Redistribution. You may not redistribute the program - by upload, p2p, ftp,\r\n\
+   email or any other means - without the author's written authorization. You\r\n\
+   may freely share links to the official sources instead:\r\n\
+       https://sites.google.com/view/marionetta/home\r\n\
+   To request authorization to distribute, contact the author by email at\r\n\
+   matteoricciutelli(at)mail.com.\r\n\
+\r\n\
+4. Modification. You may not modify the program or create works based on it\r\n\
+   without the author's written authorization, requested as in point 3.\r\n\
+\r\n\
+5. Qt. This program is built with the Qt framework, copyright The Qt Company\r\n\
+   Ltd., used unmodified and dynamically linked under the GNU Lesser General\r\n\
+   Public License version 3 (see the LICENSES folder). Points 3 and 4 do not\r\n\
+   apply to the Qt libraries: you may modify, rebuild and replace them, relink\r\n\
+   this program against your own build, and reverse engineer this program as\r\n\
+   far as needed to debug such changes.\r\n\
+\r\n\
+6. No warranty. The program is provided \"as is\", without warranty or\r\n\
+   condition of any kind, as far as the law allows. The author accepts no\r\n\
+   liability for its use, for any works created with it, or for any loss of\r\n\
+   data.\r\n\
 ";
 int terms_accepted = 0;
 QString image_name_buffer;
@@ -85,7 +112,6 @@ QList <StickFigure*> layer_list;
 QTextEdit * stick_figure_name_text;
 QGraphicsRectItem *my_rect;
 QGraphicsRectItem *limit_rect;
-QPointF onion_offset;
 QDir program_folder;
 QDir lib_folder;
 QDir brush_folder; ///< cartella pennelli .abr, accanto a Libraries/myStickFigures (creata in CreatePaths)
@@ -549,20 +575,102 @@ Widget::Widget(QWidget *parent)
         // strumenti draw mode (mutuamente esclusivi): pennello, gomma, e i due strumenti di
         // selezione pixel (rettangolo, lazo). Il QButtonGroup garantisce l'esclusività; ogni
         // click instrada su MyView::SetDrawTool(), che scarta la selezione passando a pennello/gomma.
+        // icone alla Paint di Windows XP, disegnate a 10x10 pixel per pixel (una riga di
+        // caratteri per riga di pixel, '.' trasparente, le altre lettere sono la palette) e
+        // raddoppiate a 20x20 senza filtro, così restano pixel art nitida
+        auto pixel_icon = [](const char *const rows[10]){
+            QImage img(10, 10, QImage::Format_ARGB32);
+            img.fill(Qt::transparent);
+            for(int y = 0; y < 10; y++)
+                for(int x = 0; x < 10; x++){
+                    switch(rows[y][x]){
+                    case 'k': img.setPixel(x, y, qRgb(0, 0, 0)); break;
+                    case 'w': img.setPixel(x, y, qRgb(255, 255, 255)); break;
+                    case 'g': img.setPixel(x, y, qRgb(128, 128, 128)); break;
+                    case 'l': img.setPixel(x, y, qRgb(192, 192, 192)); break;
+                    case 'b': img.setPixel(x, y, qRgb(176, 112, 48)); break;
+                    case 'p': img.setPixel(x, y, qRgb(255, 160, 176)); break;
+                    case 'd': img.setPixel(x, y, qRgb(192, 96, 112)); break;
+                    }
+                }
+            return QIcon(QPixmap::fromImage(img.scaled(20, 20)));
+        };
+        static const char *const brush_rows[10] = {
+            ".......kk.", "......kbbk", ".....kbbk.", "....kbbk..", "...kllk...",
+            "..klgk....", ".kkkk.....", "kkkk......", "kkk.......", "k........." };
+        static const char *const eraser_rows[10] = {
+            "....kkkkkk", "...kwwwwwk", "..kwwwwwkk", ".kwwwwwkdk", "kkkkkkkddk",
+            "kpppppkddk", "kpppppkdk.", "kpppppkk..", "kkkkkkk...", ".........." };
+        // i due strumenti di selezione: contorno tratteggiato 1-on/1-off come in Paint
+        // (rettangolo e stella "a mano libera"), grigio chiaro perché il nero sparisce sullo
+        // sfondo scuro dell'applicazione
+        auto dashed_icon = [](const QPolygon &shape){
+            QPixmap pm(10, 10);
+            pm.fill(Qt::transparent);
+            QPainter p(&pm);
+            QPen pen(QColor(192, 192, 192), 0);
+            pen.setDashPattern({ 1, 1 });
+            p.setPen(pen);
+            p.drawPolygon(shape);
+            return QIcon(pm.scaled(20, 20));
+        };
+        const QPolygon rect_shape({ QPoint(0, 0), QPoint(9, 0), QPoint(9, 9), QPoint(0, 9) });
+        const QPolygon lasso_shape({ QPoint(4, 0), QPoint(6, 3), QPoint(9, 3), QPoint(7, 6), QPoint(8, 9),
+                                     QPoint(4, 7), QPoint(1, 9), QPoint(2, 5), QPoint(0, 2), QPoint(3, 3) });
+
+        // piatti finché il mouse non ci passa sopra (rilievo), incassati mentre sono premuti
+        // o attivi: lo stesso comportamento dei bottoni strumento di Paint
+        const QString tool_style =
+            "QToolButton { border: 2px solid transparent; background: transparent; padding: 0px; }"
+            "QToolButton:hover { border: 2px outset #c0c0c0; background: #e8e8e8; }"
+            "QToolButton:checked { border: 2px inset #c0c0c0; background: #ffffff; }"
+            "QToolButton:checked:hover { background: #e4ecf8; }"
+            "QToolButton:pressed { border: 2px inset #a0a0a0; background: #c8c8c8; }";
+
         QHBoxLayout *tool_row = new QHBoxLayout();
+        tool_row->setSpacing(1);
         QButtonGroup *tool_group = new QButtonGroup(advanced_draw_tab);
-        struct { const char *label; int id; } draw_tools[] = {
-            { "Brush",  MyView::DT_BRUSH }, { "Eraser", MyView::DT_ERASER },
-            { "Select", MyView::DT_SEL_RECT }, { "Lasso", MyView::DT_SEL_LASSO } };
+        struct { const char *label; int id; QIcon icon; } draw_tools[] = {
+            { "Brush",  MyView::DT_BRUSH,      pixel_icon(brush_rows) },
+            { "Eraser", MyView::DT_ERASER,     pixel_icon(eraser_rows) },
+            { "Select", MyView::DT_SEL_RECT,   dashed_icon(rect_shape) },
+            { "Lasso",  MyView::DT_SEL_LASSO,  dashed_icon(lasso_shape) } };
         for(const auto &dt : draw_tools){
-            QPushButton *b = new QPushButton(tr(dt.label), advanced_draw_tab);
+            QToolButton *b = new QToolButton(advanced_draw_tab);
+            b->setIcon(dt.icon);
+            b->setIconSize(QSize(20, 20));
+            b->setFixedSize(26, 26);
+            b->setToolTip(tr(dt.label));
+            b->setStyleSheet(tool_style);
             b->setCheckable(true);
             if(dt.id == MyView::DT_BRUSH) b->setChecked(true);
             tool_group->addButton(b, dt.id);
             tool_row->addWidget(b);
         }
-        col->addLayout(tool_row);
         connect(tool_group, &QButtonGroup::idClicked, this, [this](int id){ view->SetDrawTool(id); });
+
+        // colore: un quadratino 10x10 in rilievo sulla stessa riga degli strumenti (14x14
+        // meno il bordo da 2px); bordo blu al passaggio del mouse, incassato alla pressione
+        auto swatch_style = [](const QColor &c){
+            return QString("QToolButton { background-color: %1; border: 2px outset #c0c0c0; padding: 0px; }"
+                           "QToolButton:hover { border-color: #5a8ad8; }"
+                           "QToolButton:pressed { border-style: inset; }").arg(c.name());
+        };
+        QToolButton *color_btn = new QToolButton(advanced_draw_tab);
+        color_btn->setFixedSize(14, 14);
+        color_btn->setToolTip(tr("Brush color"));
+        color_btn->setStyleSheet(swatch_style(view->draw_brush_color));
+        tool_row->addSpacing(4);
+        tool_row->addWidget(color_btn);
+        tool_row->addStretch();
+        col->addLayout(tool_row);
+        connect(color_btn, &QToolButton::clicked, this, [this, color_btn, swatch_style]{
+            QColor c = QColorDialog::getColor(view->draw_brush_color, this, tr("Brush color"));
+            if(c.isValid()){
+                view->draw_brush_color = c;
+                color_btn->setStyleSheet(swatch_style(c));
+            }
+        });
 
         // dimensione
         QHBoxLayout *size_row = new QHBoxLayout();
@@ -651,18 +759,6 @@ Widget::Widget(QWidget *parent)
         connect(size_jitter_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int v){ view->draw_brush_size_jitter = v; });
         connect(angle_jitter_spin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int v){ view->draw_brush_angle_jitter = v; });
 
-        // colore
-        QPushButton *color_btn = new QPushButton(tr("Brush color"), advanced_draw_tab);
-        color_btn->setStyleSheet(QString("background-color: %1").arg(view->draw_brush_color.name()));
-        col->addWidget(color_btn);
-        connect(color_btn, &QPushButton::clicked, this, [this, color_btn]{
-            QColor c = QColorDialog::getColor(view->draw_brush_color, this, tr("Brush color"));
-            if(c.isValid()){
-                view->draw_brush_color = c;
-                color_btn->setStyleSheet(QString("background-color: %1").arg(c.name()));
-            }
-        });
-
         // modulazione da pressione penna: due checkbox indipendenti (dimensione/opacità),
         // entrambe attive di default; inerti in Phase 1, mouse-only
         QCheckBox *pressure_size_check = new QCheckBox(tr("Pen pressure drives size"), advanced_draw_tab);
@@ -747,12 +843,14 @@ Widget::Widget(QWidget *parent)
         connect(roundness_spin, QOverload<int>::of(&QSpinBox::valueChanged), this,
                 [this, rebuild_round](int v){ view->draw_brush_roundness = v; rebuild_round(); });
 
-        // azioni: rientra in draw mode su un freehand esistente + undo/redo di sessione
+        // azioni: rientra in draw mode su un freehand esistente (in testa alla riga strumenti,
+        // prima del pennello) + undo/redo di sessione
         QHBoxLayout *action_row = new QHBoxLayout();
         QPushButton *enter_btn = new QPushButton(tr("Edit drawing"), advanced_draw_tab);
         QPushButton *undo_btn = new QPushButton(tr("Undo"), advanced_draw_tab);
         QPushButton *redo_btn = new QPushButton(tr("Redo"), advanced_draw_tab);
-        action_row->addWidget(enter_btn);
+        tool_row->insertWidget(0, enter_btn);
+        tool_row->insertSpacing(1, 4);
         action_row->addWidget(undo_btn);
         action_row->addWidget(redo_btn);
         col->addLayout(action_row);
@@ -847,8 +945,6 @@ Widget::Widget(QWidget *parent)
     img_h_offset_slider->setRange(-my_rect->rect().width(), my_rect->rect().width());
     img_h_offset_spinbox->setRange(-my_rect->rect().width(), my_rect->rect().width());
     elongate_spinbox->setRange(0,W);
-    // set onion rendered image skin offset to be displayed properly on the scene
-    onion_offset = QPointF(-my_rect->rect().width()/10,-my_rect->rect().height()/10);
     //check if default library exists
 
     my_library_list_widget->clear();

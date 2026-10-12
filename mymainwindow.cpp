@@ -3,6 +3,7 @@
 #include "animation.h"
 #include "QFileDialog"
 #include "imageexport.h"
+#include "sleeper.h"
 #include  <QDir>
 #include <QProcess>
 #include <QFileInfo>
@@ -27,6 +28,7 @@ extern QDir my_animations_folder;
 extern QDir my_stick_figures_folder;
 extern QDir my_video_export_folder;
 extern int handle_size;
+extern MySleeper *play;
 int op_count = 0;
 // flag sweep: render_flag (scritto dal thread di export ma mai letto da nessuno) e
 // load_file (impostato attorno a LoadAnimation ma mai letto da nessuno) sono stati eliminati
@@ -260,8 +262,10 @@ void MyMainWindow::on_actionexport_as_AVI_file_triggered()
 }
 /**
  * @details Launches the bundled image2Avi.exe helper, feeding it the render folder,
- * output path, fps and geometry over stdin. Runs synchronously (waitForFinished) since
- * it is only reached after the image sequence has already been written to disk.
+ * output path, fps and geometry over stdin, then lets it run: the process frees itself
+ * when it exits, like the ffmpeg one in ImageRenderOver(). It used to waitForFinished(),
+ * whose 30 s default timeout was followed by a delete that KILLED the helper mid-file on
+ * any animation that took longer to encode, freezing the UI until then.
  */
 void MyMainWindow::ExportAvi(){
     // generate folder for renderings
@@ -281,24 +285,26 @@ void MyMainWindow::ExportAvi(){
     // estrai il file exporter di avi
     QFile::copy(":/image2Avi.exe",exe_path+"/image2Avi.exe");
     // eseguilo
+    QObject::connect(p, &QProcess::finished, p, &QObject::deleteLater);
     p->start(exe_path+"/image2Avi.exe");
-    if (!p->waitForStarted())
-        qDebug("starting render problem");
-    for(QString s: param_list){
-        p->write(s.toUtf8(),s.length());
+    if (!p->waitForStarted()){
+        QMessageBox::warning(this,"Video export failed","image2Avi could not be run: "+p->errorString());
+        delete p;
+        return;
+    }
+    for(const QString &s: param_list){
+        // la lunghezza la dà QByteArray: s.length() conta i caratteri UTF-16, non i byte, e
+        // troncava ogni percorso con lettere accentate
+        p->write(s.toUtf8());
         p->write("\n");
     }
-    p->waitForFinished();
-    QString output = (p->readAllStandardOutput());
-    delete p;
-
 }
 /**
  * @details Spawns a background ImageExport thread that renders every frame to a numbered
  * PNG. Guards against a second concurrent export: the previous thread owns the global
  * `exporter` pointer, and overwriting it would orphan the running thread.
  */
-void MyMainWindow::ExportImageSequence(QString path, int option){
+void MyMainWindow::ExportImageSequence(QString path, int option, QString video_file, int video_fps){
     view->ExitDrawMode(); // finalizza il disegno prima di renderizzare i frame (canvas ritagliato, non quello di sessione)
     // evita di avviare un secondo export mentre uno precedente è ancora in corso: altrimenti
     // il puntatore globale exporter verrebbe sovrascritto e il thread precedente resterebbe orfano
@@ -306,7 +312,7 @@ void MyMainWindow::ExportImageSequence(QString path, int option){
         QMessageBox::information(this,"Export in progress","An export is already running, please wait for it to finish.");
         return;
     }
-    exporter = new ImageExport(this,path,option);
+    exporter = new ImageExport(this,path,option,video_file,video_fps);
     QObject::connect(exporter,&ImageExport::ImageExportFinished,this,&MyMainWindow::ImageRenderOver);
     exporter->start();
 
@@ -398,27 +404,17 @@ void MyMainWindow::on_actionAnimation_Options_triggered()
 }
 
 /**
- * @details Entry point for the ffmpeg export: if the saved FFMPEGPath is valid it opens
- * the export dialog straight away (ExportUsingFFMPEG()); otherwise it asks the user to
- * locate ffmpeg.exe, remembers the path (WriteJson()) and then proceeds.
+ * @details Entry point for video export: it only opens the dialog (ExportUsingFFMPEG()).
+ * It used to gate that on a valid FFMPEGPath, which no longer holds - mp4 is encoded by
+ * Windows itself, and locating an ffmpeg is a button inside the dialog.
  */
 void MyMainWindow::on_actionExport_video_using_FFMPEG_triggered()
 {
-    if(QFile::exists(FFMPEGPath)){
-        ExportUsingFFMPEG();
-    }
-    else{
-        QMessageBox::about(this,"FFMPEG Location","Please locate where ffmpeg executable is located on your system");
-        QString file_name = QFileDialog::getOpenFileName(this,tr("find FFMPEG executable file"),
-                           my_video_export_folder.path(), "ffmpeg(*.exe)");
-        if(QFile::exists(file_name)){
-                if(QFileInfo(QFile(file_name)).fileName()=="ffmpeg.exe"){
-                    FFMPEGPath = file_name;
-                    my_widget->WriteJson();
-                    ExportUsingFFMPEG();
-                }
-        }
-    }
+    // ffmpeg non e' piu' una condizione per aprire la finestra: l'mp4 lo encoda Windows
+    // (mfvideo.h), e i formati che invece sono di ffmpeg si abilitano dal bottone
+    // "Locate FFmpeg..." della finestra stessa, che e' anche l'unico modo per cambiare
+    // quel percorso una volta impostato
+    ExportUsingFFMPEG();
 }
 
 FfmpegExport* ffmpeg_dialog = nullptr;
@@ -437,6 +433,7 @@ void MyMainWindow::ExportUsingFFMPEG(){
     ffmpeg_dialog = new FfmpegExport;
     ffmpeg_dialog->show();
     QObject::connect(ffmpeg_dialog, &FfmpegExport::ExportVideo,this, &MyMainWindow::StartFFMPEGRender);
+    QObject::connect(ffmpeg_dialog, &FfmpegExport::ExportVideoMF,this, &MyMainWindow::StartMediaFoundationRender);
     QObject::connect(ffmpeg_dialog, &QObject::destroyed, this, [](){ ffmpeg_dialog = nullptr; });
 }
 
@@ -452,6 +449,42 @@ void MyMainWindow::StartFFMPEGRender(QStringList options){
     ffmpeg_options = options;
     EmptyDirectory( render_folder.path());
     ExportImageSequence(render_folder.path()+"/img.png", FFMPEG);
+}
+
+/**
+ * @details Accept slot of the export dialog for the mp4 format: renders exactly the same
+ * image sequence the ffmpeg path uses, but ImageExport::run() then encodes it with the
+ * Windows H.264 encoder instead of launching a process (mfvideo.h) - so no ffmpeg, no
+ * bundled codec and nothing to locate.
+ */
+void MyMainWindow::StartMediaFoundationRender(QString file, int fps){
+    EmptyDirectory( render_folder.path());
+    ExportImageSequence(render_folder.path()+"/img.png", MFVIDEO, file, fps);
+}
+
+/**
+ * @details The direct mp4 menu entry, shaped after on_actionexport_as_AVI_file_triggered():
+ * asks for the output file, (re)creates and empties the scratch render folder, then renders
+ * the image sequence into it with option MFVIDEO. The encoding happens in ImageExport::run()
+ * as soon as the frames exist (mfvideo.h), so unlike the AVI and ffmpeg entries nothing
+ * further is dispatched from ImageRenderOver(). It uses the animation's own FPS - there is
+ * no dialog here in which to dial a different one.
+ */
+void MyMainWindow::on_actionExport_as_mp4_triggered()
+{
+    QString file_name = QFileDialog::getSaveFileName(this,tr("Export animation as an mp4 h264 video"),
+                       my_video_export_folder.path(), "Mp4 video (*.mp4)");
+    if(file_name.length() == 0)
+        return;
+    QString path = program_folder.path()+"/render";
+    render_folder = QDir(path);
+    if(!render_folder.exists())
+        render_folder.mkpath(path);
+    render_folder.setPath(path);
+    // per ogni frame renderizza la scena su una QImage e salvala nella cartella; poi il
+    // thread di export encoda quelle immagini con l'encoder H.264 di Windows
+    EmptyDirectory( path);
+    ExportImageSequence(path+"/img.png", MFVIDEO, file_name, FPS);
 }
 
 /**
@@ -476,12 +509,15 @@ void MyMainWindow::UpdatePresent(QString ver)
 /**
  * @details Called when the ImageExport thread finishes. Frees the exporter and nulls
  * the global pointer BEFORE dispatching, since ExportImageSequence()'s in-progress
- * guard reads it. Then hands the rendered sequence to the AVI helper or ffmpeg.
+ * guard reads it. Then hands the rendered sequence to the AVI helper or to ffmpeg - the
+ * mp4 path has already encoded itself on the render thread, so all that is left there is
+ * reporting a failure.
  */
 void MyMainWindow::ImageRenderOver(int option){
     // il segnale è queued: può essere consegnato prima che run() sia davvero tornata, e
     // distruggere un QThread ancora in esecuzione è UB — wait() chiude quella finestra
     exporter->wait();
+    const QString video_error = exporter->video_error; // l'exporter sta per essere distrutto
     delete exporter;
     // azzeralo subito: la guardia in ExportImageSequence legge questo puntatore, e dopo la delete sarebbe pendente
     exporter = nullptr;
@@ -492,13 +528,30 @@ void MyMainWindow::ImageRenderOver(int option){
     case AVI:
         ExportAvi();
         break;
-    case FFMPEG:
+    case MFVIDEO:
+        // l'encoding e' gia' avvenuto sul thread di render (ImageExport::run())
+        if(!video_error.isEmpty())
+            QMessageBox::warning(this,"Video export failed",video_error);
+        break;
+    case FFMPEG:{
         QProcess *p = new QProcess(this);
         // cancella il processo solo quando ha finito, non subito dopo start(): altrimenti il
-        // deleteLater() precedente distruggeva p mentre ffmpeg stava ancora incodificando il video
-        QObject::connect(p, &QProcess::finished, p, &QObject::deleteLater);
-        p->start(FFMPEGPath,ffmpeg_options);
+        // deleteLater() precedente distruggeva p mentre ffmpeg stava ancora incodificando il video.
+        // Riporta anche l'errore: senza questo un codec assente o un file non scrivibile
+        // facevano fallire l'export senza un messaggio
+        QObject::connect(p, &QProcess::finished, this, [this,p](int code, QProcess::ExitStatus){
+            if(code != 0)
+                QMessageBox::warning(this,"Video export failed",
+                                     QString::fromLocal8Bit(p->readAllStandardError()).right(1500));
+            p->deleteLater();
+        });
+        QObject::connect(p, &QProcess::errorOccurred, this, [this,p](QProcess::ProcessError){
+            QMessageBox::warning(this,"Video export failed","ffmpeg could not be run: "+p->errorString());
+            p->deleteLater();
+        });
+        p->start(ResolveFfmpeg(),ffmpeg_options);
         break;
+    }
     }
 }
 
@@ -543,6 +596,10 @@ void MyMainWindow::closeEvent(QCloseEvent *event)
     if(exporter && exporter->isRunning()){
         exporter->wait();
     }
+    // idem per il thread che prepara l'anteprima: renderizza con font e paint engine che
+    // QApplication smonta all'uscita
+    if(play)
+        play->WaitForPreview();
     if(op_count>0){
         QMessageBox::StandardButton reply;
         reply = QMessageBox::question(this, "Save", "There is unsaved progress in your work, do you want to save your changes?",
@@ -568,21 +625,48 @@ void MyMainWindow::closeEvent(QCloseEvent *event)
 }
 
 /**
- * @details Shows the About box (author, website, contact).
+ * @details Shows the About box: product identity, licensing, warranty disclaimer and
+ * the author's channels. This dialog is also where the app discharges LGPLv3 section
+ * 4(a)/4(c) for Qt — a combined work that displays copyright notices while running must
+ * name the library, its copyright holder and where its license text can be found, which
+ * is why the Qt paragraph is not optional decoration. NOTICE.md carries the same
+ * statement for the source tree; "About Qt" next to this entry shows Qt's own box.
  */
 void MyMainWindow::on_actionAbout_triggered()
 {
-    QMessageBox::about(this, "About Marionetta 1.00",
-                                  "Marionetta is a FREE stickfigure animation software designed and created"
-                                  " by Matteo Vittorio Ricciutelli.\r\n\r\n"
-                                  "Get the latest updates and infos at Marionetta official website: \r\n"
-                                  "https://sites.google.com/view/marionetta/home \r\n\n"
-                                  "Like Marionetta official facebook page! \r\n"
-                                  "https://www.facebook.com/Marionetta-StickFigure-Animation-Studio-2330682093680488"
-                       "\r\n\r\nAny distribution of this software must undergo authorization from its orginal creator"
-                                                         "you may contact him via email at the address  \r\nmatteoricciutelli(at)mail.com"
-                                                         " \r\n"
-                       );
+    QMessageBox::about(this, "About MarionettaPlus",
+        "<b>MarionettaPlus 0.9.0</b><br>"
+        "Frame-by-frame stickfigure animation studio.<br><br>"
+
+        "Draw and rig stick figures from segments, circles, tapers, polygons, text and "
+        "images, pose them frame by frame with onion-skin reference and generated "
+        "inbetweens, then export the result as an image sequence or as video "
+        "through FFmpeg.<br><br>"
+
+        "Designed and created by Matteo Vittorio Ricciutelli.<br>"
+        "Copyright (C) 2026 Matteo Vittorio Ricciutelli. All rights reserved.<br><br>"
+
+        "Distributed free of charge for personal, hobby, educational and other "
+        "noncommercial use under the PolyForm Strict License 1.0.0. Animations you "
+        "create with this program are your own and may be used commercially. "
+        "Redistributing or modifying the program itself requires the author's written "
+        "authorization, which you may request by email at "
+        "matteoricciutelli(at)mail.com. The full terms, including that permission, "
+        "are in the LICENSE file distributed with the program.<br><br>"
+
+        "This program is provided \"as is\", without warranty or condition of any kind. "
+        "The author accepts no liability for its use, for any works created with it, or "
+        "for any loss of data.<br><br>"
+
+        "Built with the Qt framework, Copyright (C) The Qt Company Ltd., used unmodified "
+        "and dynamically linked under the GNU Lesser General Public License version 3. "
+        "Copies of the LGPLv3 and the GPLv3 it refers to are supplied in the LICENSES "
+        "folder, and you may replace the Qt libraries with your own build of them. "
+        "Choose Help / About Qt to see the version in use.<br><br>"
+
+        "Website: https://sites.google.com/view/marionetta/home<br>"
+        "Facebook: https://www.facebook.com/Marionetta-StickFigure-Animation-Studio-2330682093680488"
+        );
 }
 
 

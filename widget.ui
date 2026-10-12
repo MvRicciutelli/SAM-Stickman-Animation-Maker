@@ -1174,21 +1174,29 @@ QPushButton:pressed{
                       </size>
                      </property>
                      <property name="toolTip">
-                      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Generate Inbetween Frames&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Generate Inbetween Frames&lt;/span&gt;&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-style:italic;&quot;&gt;Note&lt;/span&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;: &lt;/span&gt;&lt;span style=&quot; font-weight:600; text-decoration: underline;&quot;&gt;start&lt;/span&gt;&lt;span style=&quot; font-weight:600;&quot;&gt; and &lt;/span&gt;&lt;span style=&quot; font-weight:600; text-decoration: underline;&quot;&gt;end&lt;/span&gt;&lt;span style=&quot; font-weight:600;&quot;&gt; frame must contain the &lt;/span&gt;&lt;span style=&quot; font-weight:600; text-decoration: underline;&quot;&gt;same&lt;/span&gt;&lt;span style=&quot; font-weight:600;&quot;&gt; stickfigures&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
                      </property>
                      <property name="styleSheet">
                       <string notr="true">QPushButton {
+    qproperty-icon: url(&quot; &quot;); /* empty image */
+    qproperty-iconSize: 16px 16px; /* space for the background image */
+    background-image: url(:/resources/interpolate_00001.png);
+    background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
-	color: rgb(200, 200, 200);
-	font: bold 14px;
 }
 QPushButton:hover{
+    background-image: url(:/resources/interpolate_00002.png);
+    background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
+}
+QPushButton:pressed{
+    background-image: url(:/resources/interpolate_00003.png);
+    background-repeat: no-repeat;
 }
 </string>
                      </property>
                      <property name="text">
-                      <string>&gt;|&lt;</string>
+                      <string/>
                      </property>
                     </widget>
                    </item>
@@ -1569,8 +1577,27 @@ QPushButton:pressed{
             <property name="toolTip">
              <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Freehand stick tool:&lt;/p&gt;&lt;p&gt;Click twice to place an invisible stick, then paint on it in draw mode with brush/eraser. Esc or Enter finishes.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
             </property>
+            <property name="styleSheet">
+             <string notr="true">QPushButton {
+    qproperty-icon: url(&quot; &quot;); /* empty image */
+    qproperty-iconSize: 16px 16px; /* space for the background image */
+    background-image: url(:/resources/freehand_00001.png);
+    background-repeat: no-repeat;
+	border: 0px solid #5A5A5A;
+}
+QPushButton:hover{
+    background-image: url(:/resources/freehand_00002.png);
+    background-repeat: no-repeat;
+	background-color: rgb(25, 25, 25)
+}
+QPushButton:pressed{
+    background-image: url(:/resources/freehand_00003.png);
+    background-repeat: no-repeat;
+}
+</string>
+            </property>
             <property name="text">
-             <string>Free</string>
+             <string/>
             </property>
            </widget>
           </item>
@@ -1792,7 +1819,7 @@ QPushButton:pressed{
              <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/Add_multiline_00002.png);
+    background-image: url(:/resources/Add_multiline_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
@@ -1835,8 +1862,27 @@ QPushButton:pressed{
             <property name="toolTip">
              <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Text stick tool:&lt;/p&gt;&lt;p&gt;Click twice to place the stick the text runs along, then type the paragraph in the prompt. The stick itself stays invisible; edit content, font, justification, spacing, wrapping and offsets in the Text Editing / Text Placement tabs. The stick color is the text color.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
             </property>
+            <property name="styleSheet">
+             <string notr="true">QPushButton {
+    qproperty-icon: url(&quot; &quot;); /* empty image */
+    qproperty-iconSize: 16px 16px; /* space for the background image */
+    background-image: url(:/resources/addtext_00001.png);
+    background-repeat: no-repeat;
+	border: 0px solid #5A5A5A;
+}
+QPushButton:hover{
+    background-image: url(:/resources/addtext_00002.png);
+    background-repeat: no-repeat;
+	background-color: rgb(25, 25, 25)
+}
+QPushButton:pressed{
+    background-image: url(:/resources/addtext_00003.png);
+    background-repeat: no-repeat;
+}
+</string>
+            </property>
             <property name="text">
-             <string>Txt</string>
+             <string/>
             </property>
            </widget>
           </item>

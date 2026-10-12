@@ -66,6 +66,12 @@ private:
      *        only Animation's own methods ever touched it, so it lives here now.
      */
     bool clearing_animation = false;
+    /**
+     * @brief The type whose panels UpdateTab() last put up (-1 = none yet). UpdateSelection()
+     *        compares the clicked stick against THIS, not against the current stick: picking a
+     *        draw tool swaps the panels to that tool's type without changing the current stick.
+     */
+    int tab_type = -1;
 };
 Q_DECLARE_METATYPE(Animation*)
 QDataStream &operator<<(QDataStream& stream, const Animation& my_animation);

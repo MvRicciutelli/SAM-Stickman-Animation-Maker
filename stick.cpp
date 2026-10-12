@@ -6,7 +6,8 @@
 #include <QListWidget>
 #include <StickFigure.h>
 bool StickGraphicsItem::onion_render = false;
-bool StickGraphicsItem::offscreen_render = false;
+// `offscreen_render` era write-only da quando il marcatore IK si dipinge in
+// MyView::drawForeground() (mai nelle render scene): rimosso
 extern QGraphicsRectItem* my_rect;
 extern QListWidget* img_list_widget;
 extern int handle_size;
@@ -425,27 +426,27 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         // la ruotiamo
         // la trasliamo al punto di p1
         // il punto p1 deve essere sempre il topleft corner
-        QImage scaled = CalcImg();
-        // in caso di onion rendering converti l'immagine in grayscale
-        if(onion_render){
-            // convertToFormat è const e RESTITUISCE l'immagine convertita: scartarne il
-            // risultato lasciava gli onion skin delle immagini a colori invece che in grigio
-            scaled = scaled.convertToFormat(QImage::Format_Grayscale8);
+        // l'immagine sorgente va disegnata direttamente nel rettangolo di destinazione: il
+        // painter la ricampiona una volta sola, dove prima ogni repaint faceva un scaled()
+        // e poi una conversione in QPixmap, entrambi grandi quanto l'immagine dipinta
+        const QSizeF size = CalcImgSize();
+        if(!size.isEmpty()){
+            p = QPointF(data->my_line.p1().x(),data->my_line.p1().y());
+            QRectF target(QPointF(-size.width()/2,-size.height()/2), size);
+            painter->translate(p);
+            painter->rotate(data->img_angle+data->img_angle_offset);
+            QPointF p3 = QPointF(data->img_offset);
+            painter->translate(p3);
+            // in caso di onion rendering converti l'immagine in grayscale: DOPO averla scalata,
+            // così la conversione costa quanto l'immagine dipinta e non quanto la sorgente
+            if(onion_render)
+                painter->drawImage(target, CalcImg().convertToFormat(QImage::Format_Grayscale8));
+            else
+                painter->drawImage(target, *data->stick_img);
+            painter->translate(-p3.x(),-p3.y());
+            painter->rotate(-data->img_angle-data->img_angle_offset);
+            painter->translate(-p.x(),-p.y());
         }
-        p = QPointF(data->my_line.p1().x(),data->my_line.p1().y());
-        QPointF p2 = QPointF(-scaled.width()/2,-scaled.height()/2);
-        painter->translate(p);
-        painter->rotate(data->img_angle+data->img_angle_offset);
-        QPointF p3 = QPointF(data->img_offset);
-        painter->translate(p3);
-        QPixmap pixmap;
-        pixmap.convertFromImage(scaled);
-
-        painter->drawPixmap(p2,
-                            pixmap);
-        painter->translate(-p3.x(),-p3.y());
-        painter->rotate(-data->img_angle-data->img_angle_offset);
-        painter->translate(-p.x(),-p.y());
 
     }
     else if(data->stick_type == StickData::RECT || data->stick_type == StickData::CIRCLE){
@@ -695,22 +696,25 @@ QRectF CalcImgRect(QLineF l,QSizeF s){
 
 }
 
-QImage StickGraphicsItem::CalcImg(){
-    QSizeF offsetted;
+/// @details Split out of CalcImg() so the callers that only need the SIZE — ConstructBr() on
+/// every Refresh(), i.e. every mouse move of a drag, and paint() — no longer resample the
+/// whole image to get it.
+QSizeF StickGraphicsItem::CalcImgSize() const
+{
     // stick_img nullo, o non nullo ma VUOTO: entrambi possibili solo per un record IMAGE
     // ricostruito da un file corrotto o troncato. Il secondo caso va escluso quanto il primo,
     // perché sotto width()/height() valgono 0 e il rapporto fra i due sarebbe un NaN
     if(!data->stick_img || data->stick_img->isNull())
-        return QImage();
+        return QSizeF();
     if(data->stick_img->width()>data->stick_img->height())
-    {
-        offsetted = QSizeF(data->my_line.length()*data->img_w_scale, data->stick_img->height()*data->my_line.length()/data->stick_img->width()*data->img_h_scale);
-    }
-    else
-    {
-        offsetted = QSizeF(data->my_line.length()*data->stick_img->width()*data->img_w_scale/data->stick_img->height(), data->my_line.length()*data->img_h_scale);
-    }
+        return QSizeF(data->my_line.length()*data->img_w_scale, data->stick_img->height()*data->my_line.length()/data->stick_img->width()*data->img_h_scale);
+    return QSizeF(data->my_line.length()*data->stick_img->width()*data->img_w_scale/data->stick_img->height(), data->my_line.length()*data->img_h_scale);
+}
 
+QImage StickGraphicsItem::CalcImg(){
+    const QSizeF offsetted = CalcImgSize();
+    if(offsetted.isNull())
+        return QImage();
     return  data->stick_img->scaled(offsetted.width(),offsetted.height());
 }
 
@@ -747,7 +751,7 @@ QRectF StickGraphicsItem::ConstructBr()
         float d = 0;
 
         if(data->IsImageType() ){
-            QImage scaled = CalcImg();
+            QSizeF scaled = CalcImgSize();
             d = sqrt(pow(scaled.width(),2)+pow(scaled.height(),2));
             // l'immagine è centrata su p1 + img_offset: senza contare l'offset (grande per un
             // freehand dipinto lontano dal 1° click) il bounding rect, centrato su p1, la

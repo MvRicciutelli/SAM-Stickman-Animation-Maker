@@ -89,6 +89,12 @@ public:
     QImage CalcImg();
 
     /**
+     * @brief The size CalcImg() scales to, without scaling anything.
+     * @return the painted size in scene units; empty when there is no usable image.
+     */
+    QSizeF CalcImgSize() const;
+
+    /**
      * @brief Paints the stick according to its StickData (type, pen, brush, image).
      */
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget);
@@ -369,18 +375,6 @@ public:
      *        (stick.cpp), now scoped to the class whose paint() reads it.
      */
     static bool onion_render;
-    /**
-     * @brief True while a throwaway, non-interactive render is in progress (figure/
-     *        frame icons, the library icon, playback preview frames, video export) —
-     *        paint() uses it to suppress the IK chain marker (dotted line + cross),
-     *        which is UI-only despite ik_role/ik_target being real StickData fields
-     *        that DO survive Clone() (unlike `selected`/`selected_vertices`, which
-     *        default false/empty on a fresh view and so exclude themselves from those
-     *        renders for free). Set/cleared by whichever function owns the throwaway
-     *        QGraphicsScene — see StickFigure::UpdateIcon(), Frame::UpdateIcon(),
-     *        RenderLibraryIcon(), MyView::PreparePreview(), ImageExport::Render().
-     */
-    static bool offscreen_render;
     bool highlight = false;          ///< visual emphasis when the owning figure is selected
     bool selected = false;           ///< yellow endpoint markers when this is the current stick
     int rotation_spinbox_buffer = 0;   ///< last value pushed to the rotation spinbox (UI echo suppression)

@@ -744,6 +744,20 @@ class existed or as a habit. Two outcomes per global:
     move).
   - `MySleeper`'s `pausePressed`/`intervalTime`/`previewGenerator` → members
     (`pause_pressed`/`interval_time`/`preview_generator`).
+  - `imageexport.cpp`'s `render_option`/`export_path` → members of
+    `ImageExport` (found later: a preview started during an export overwrote
+    them, and the export finished without encoding its video).
+
+**`ImageExport::run()` never reads the live animation.** The user keeps
+editing while an export or a playback preview renders, so the constructor
+(UI thread) clones every frame's `total_sticks` plus `W`/`H`/`my_rect`, and
+the worker renders only that snapshot — cheap, since the images inside are
+shared copy-on-write. PREVIEW mode is the same class (`MyView::PreparePreview()`
+is gone): it returns `QImage`s, and `MySleeper::StartPlaying()` turns them into
+pixmaps on the UI thread, because `QPixmap` is GUI-thread only. Preview frames
+are rendered at the view's zoom (capped at 1:1, times the device pixel ratio)
+and scaled back up by the item, so a zoomed-out preview no longer holds
+full-canvas pixels per frame.
 
 The re-scoping itself is behavior-preserving. The same pass also fixed a
 number of unrelated memory-safety issues found along the way (out-of-bounds

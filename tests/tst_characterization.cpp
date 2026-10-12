@@ -19,11 +19,12 @@
 #include "stkformat.h"
 #include "abrbrush.h"
 #include "brushpicker.h"
+#include "mfvideo.h"
+#include "imageexport.h"
 
 extern QGraphicsScene *scene;
 extern QGraphicsRectItem *my_rect;
 extern QGraphicsRectItem *limit_rect;
-extern QPointF onion_offset;
 extern MyView *V;
 extern qint32 W;
 extern qint32 H;
@@ -240,7 +241,6 @@ private slots:
         scene->addItem(my_rect);
         limit_rect = new QGraphicsRectItem(-W / 10.0, -H / 10.0, W * 1.1, H * 1.1);
         scene->setSceneRect(limit_rect->rect());
-        onion_offset = QPointF(-W / 10.0, -H / 10.0);
 
         AddFrame();
         CurrentFrame()->current_stick_figure = CurrentFrame()->stick_figures[0];
@@ -4908,6 +4908,122 @@ private slots:
 
         picker.DeleteBrush(false);
         QVERIFY(!QFile::exists(file));
+    }
+
+    // mfvideo.cpp: l'mp4 lo encoda Media Foundation (l'encoder H.264 di Windows), non ffmpeg.
+    // Replica quello che ImageExport::run() fa in modalita' MFVIDEO, che a sua volta arriva da
+    // MyMainWindow::StartMediaFoundationRender().
+    void MediaFoundationEncodesAnMp4FromAnImageSequence()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        // lati dispari di proposito: l'H.264 li rifiuta e il writer deve arrotondarli
+        QStringList frames;
+        for(int i = 0; i < 12; ++i){
+            QImage img(321, 241, QImage::Format_ARGB32);
+            img.fill(Qt::white);
+            QPainter p(&img);
+            p.setBrush(Qt::red);
+            p.drawRect(10 * i, 100, 40, 40);
+            p.end();
+            const QString path = dir.filePath(QString("img_%1.png").arg(i));
+            QVERIFY(img.save(path));
+            frames << path;
+        }
+
+        const QString out = dir.filePath("out.mp4");
+        QString error;
+        QVERIFY2(WriteMp4WithMediaFoundation(out, frames, 24, &error), qPrintable(error));
+
+        QFile f(out);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const QByteArray written = f.readAll();
+        f.close();
+        QVERIFY(written.size() > 2000);        // un container vuoto pesa poche centinaia di byte
+        QVERIFY(written.contains("ftyp"));     // e' davvero un mp4...
+        QVERIFY(written.contains("avc1"));     // ...con una traccia H.264 dentro
+
+        // un fallimento deve restare un fallimento, non un file vuoto dichiarato buono
+        QVERIFY(!WriteMp4WithMediaFoundation(dir.filePath("none.mp4"), QStringList(), 24, &error));
+        QVERIFY(!error.isEmpty());
+    }
+
+    // ImageExport gira in un thread mentre l'utente continua a modificare l'animazione: deve
+    // renderizzare l'istantanea presa alla costruzione, non il modello vivo (che il thread della
+    // UI può cambiare o liberare sotto di lui). E modo/percorso sono suoi: quando erano globali,
+    // un'anteprima creata durante un export li sovrascriveva e l'export non scriveva nulla.
+    // Infine l'anteprima si renderizza allo zoom della view, non alla risoluzione della tela.
+    void ExportRendersTheSnapshotTakenAtConstruction()
+    {
+        struct Restore {
+            MyView *v; QPen pen;
+            ~Restore(){ v->my_pen = pen; v->setTransform(QTransform()); }
+        } restore{view, view->my_pen};
+        struct Reap { ImageExport *e; ~Reap(){ e->wait(); delete e; } };
+
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        AddFrame();
+        view->my_pen = QPen(Qt::black, 20);
+        StickData *stick = DrawStick(QPointF(100, 100), QPointF(100, 300));
+
+        Reap exporter{new ImageExport(nullptr, dir.filePath("img.png"), FFMPEG)};
+        view->setTransform(QTransform::fromScale(0.5, 0.5));
+        Reap preview{new ImageExport(nullptr, "", PREVIEW)};
+        // il modello cambia DOPO la costruzione, prima che i thread partano
+        stick->my_line = QLineF(600, 100, 600, 300);
+
+        QSignalSpy finished(exporter.e, &ImageExport::ImageExportFinished);
+        exporter.e->start();
+        preview.e->start();
+        QVERIFY(exporter.e->wait(30000));
+        QVERIFY(preview.e->wait(30000));
+
+        QCOMPARE(finished.count(), 1);
+        QCOMPARE(finished[0][0].toInt(), FFMPEG);
+        QCOMPARE(exporter.e->rendered_files.count(), view->my_animation->frame_list.count());
+        const QImage frame(exporter.e->rendered_files.last());
+        QCOMPARE(frame.size(), QSize(W, H));
+        QVERIFY2(qGray(frame.pixel(100, 200)) < 64, "the export lost the stick where it was");
+        QVERIFY2(qGray(frame.pixel(600, 200)) > 192, "the export rendered the live model");
+
+        const qreal k = qMin(1.0, 0.5 * view->devicePixelRatioF());
+        QCOMPARE(preview.e->preview_scale, k);
+        QCOMPARE(preview.e->preview_frames.count(), view->my_animation->frame_list.count());
+        const QImage shown = preview.e->preview_frames.last();
+        QCOMPARE(shown.size(), QSize(qRound(W * k), qRound(H * k)));
+        QVERIFY(qGray(shown.pixel(qRound(100 * k), qRound(200 * k))) < 64);
+        QVERIFY(qGray(shown.pixel(qRound(600 * k), qRound(200 * k))) > 192);
+    }
+
+    // Un onion skin si renderizza solo sull'ingombro delle figure del suo frame, non su tutta la
+    // scena (1.44x la tela per fantasma): il pixmap deve restare piccolo e, posizionato col suo
+    // offset, cadere esattamente dove lo stick era — il pixel sotto lo stick è dipinto, quelli
+    // accanto no.
+    void OnionSkinIsCroppedToTheFiguresAndStaysInPlace()
+    {
+        struct Restore {
+            MyView *v; QPen pen;
+            ~Restore(){ onion_skin_sb->setValue(0); v->my_pen = pen; }
+        } restore{view, view->my_pen};
+        view->my_pen = QPen(Qt::black, 12); // spesso: il pixel campionato non dipende dall'arrotondamento
+        AddFrame();
+        DrawStick(QPointF(300, 150), QPointF(300, 250));
+        AddFrame(); // il frame precedente diventa il fantasma
+        onion_skin_sb->setValue(1);
+        view->UpdateOnionSkins();
+
+        QCOMPARE(view->onion_skins.count(), 1);
+        QGraphicsPixmapItem *ghost = view->onion_skins.first();
+        const QImage pixels = ghost->pixmap().toImage();
+        QVERIFY2(pixels.width() < W / 2 && pixels.height() < H / 2, "the ghost was not cropped");
+        auto alpha_at = [&](QPointF scene_point){
+            QPoint p = (scene_point - ghost->offset()).toPoint();
+            return pixels.rect().contains(p) ? qAlpha(pixels.pixel(p)) : 0;
+        };
+        QVERIFY2(alpha_at(QPointF(300, 200)) > 0, "the ghost is not where the stick was");
+        QCOMPARE(alpha_at(QPointF(300, 200) + QPointF(40, 0)), 0);
     }
 };
 

@@ -283,5 +283,15 @@
         <file>resources/Ik_00001.png</file>
         <file>resources/Ik_00002.png</file>
         <file>resources/Ik_00003.png</file>
+        <file>resources/freehand_00001.png</file>
+        <file>resources/freehand_00002.png</file>
+        <file>resources/freehand_00003.png</file>
+        <file>resources/addtext_00001.png</file>
+        <file>resources/addtext_00002.png</file>
+        <file>resources/addtext_00003.png</file>
+        <file>resources/Add_multiline_00001.png</file>
+        <file>resources/interpolate_00001.png</file>
+        <file>resources/interpolate_00002.png</file>
+        <file>resources/interpolate_00003.png</file>
     </qresource>
 </RCC>
