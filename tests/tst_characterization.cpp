@@ -30,6 +30,25 @@ extern qint32 W;
 extern qint32 H;
 extern FrameData *stick_library_buffer;
 
+// QMessageBox's static helpers are modal and would hang a headless run: close whatever modal
+// box appears, and count them so a test can also require that the user WAS told.
+struct ModalDismisser
+{
+    QTimer timer;
+    int dismissed = 0;
+    ModalDismisser()
+    {
+        timer.setInterval(10);
+        QObject::connect(&timer, &QTimer::timeout, [this]{
+            if(QWidget *modal = QApplication::activeModalWidget()){
+                dismissed++;
+                modal->close();
+            }
+        });
+        timer.start();
+    }
+};
+
 class TestCharacterization : public QObject
 {
     Q_OBJECT
@@ -2321,6 +2340,179 @@ private slots:
         QFile::remove(path);
     }
 
+    // ------------------------------------------------------------------------------------
+    // Files saved by a NEWER build: every versioned record is refused, never misread.
+    // A version above the supported one used to be taken for "the newest I know" and its extra
+    // fields were read as the start of the next record, desyncing the stream. These pin that each
+    // loader (stick record, .stck, .mAnim, .marlib) refuses it, says why through file_load_error,
+    // and — the part that keeps the program alive — leaves what is open untouched.
+    // ------------------------------------------------------------------------------------
+
+    void NewerStickRecordVersionIsRefused()
+    {
+        StickData newer;
+        newer.version = StickData::CURRENT_VERSION + 1;
+        QByteArray bytes;
+        { QDataStream out(&bytes, QIODevice::WriteOnly); out << newer; }
+
+        file_load_error.clear();
+        StickData loaded;
+        QDataStream in(bytes);
+        in >> loaded;
+        QVERIFY(in.status() != QDataStream::Ok);
+        QVERIFY(file_load_error.contains(QString::number(StickData::CURRENT_VERSION + 1)));
+        QVERIFY(file_load_error.contains(QString::number(StickData::CURRENT_VERSION)));
+        file_load_error.clear();
+
+        // the newest version this build knows must still read (counterproof for an off-by-one)
+        StickData current;
+        QByteArray current_bytes;
+        { QDataStream out(&current_bytes, QIODevice::WriteOnly); out << current; }
+        QDataStream in_current(current_bytes);
+        StickData loaded_current;
+        in_current >> loaded_current;
+        QCOMPARE(in_current.status(), QDataStream::Ok);
+        QVERIFY(file_load_error.isEmpty());
+    }
+
+    void NewerStickFigureFileIsRefusedWithoutAnyLiveChange()
+    {
+        AddFrame();
+        DrawStick(QPointF(120, 100), QPointF(120, 200));
+        StickFigure *figure = CurrentStickFigure();
+        const QString path = QDir::temp().filePath("marionetta_newer_figure.stck");
+
+        figure->SaveStickFigure(path);
+        StickFigureData *ok = LoadStickFigureData(path);
+        QVERIFY(ok != nullptr);
+        QVERIFY(file_load_error.isEmpty());
+        delete ok;
+
+        // the figure record itself newer
+        figure->version = StickFigureData::CURRENT_VERSION + 1;
+        figure->SaveStickFigure(path);
+        figure->version = StickFigureData::CURRENT_VERSION;
+        QVERIFY(LoadStickFigureData(path) == nullptr);
+        QVERIFY(!file_load_error.isEmpty());
+
+        // one of its STICKS newer, under a figure header that is fine
+        figure->stick_list[0]->version = StickData::CURRENT_VERSION + 1;
+        figure->SaveStickFigure(path);
+        figure->stick_list[0]->version = StickData::CURRENT_VERSION;
+        QVERIFY(LoadStickFigureData(path) == nullptr);
+        QVERIFY(!file_load_error.isEmpty());
+
+        // an unreadable path is a refusal too, not a crash
+        QVERIFY(LoadStickFigureData(QDir::temp().filePath("marionetta_no_such_dir/x.stck")) == nullptr);
+        QVERIFY(!file_load_error.isEmpty());
+
+        // and a refusal must not poison the next, valid load
+        figure->SaveStickFigure(path);
+        StickFigureData *again = LoadStickFigureData(path);
+        QVERIFY(again != nullptr);
+        QVERIFY(file_load_error.isEmpty());
+        delete again;
+        QFile::remove(path);
+    }
+
+    void NewerAnimationFileIsRefusedAndTheOpenAnimationIsKept()
+    {
+        AddFrame();
+        DrawStick(QPointF(200, 100), QPointF(200, 220));
+        Animation *animation = view->my_animation;
+        const QString path = QDir::temp().filePath("marionetta_newer_animation.mAnim");
+
+        const QList<Frame*> frames_before = animation->frame_list;
+        Frame *current_before = animation->current_frame;
+        const int items_before = scene->items().count();
+        const qint32 width_before = W;
+        auto expect_untouched = [&]{
+            QVERIFY(!file_load_error.isEmpty());
+            QCOMPARE(animation->frame_list, frames_before);   // same Frame objects, not rebuilt
+            QVERIFY(animation->current_frame == current_before);
+            QCOMPARE(scene->items().count(), items_before);
+            QCOMPARE(W, width_before);
+            QCOMPARE(animation->version, Animation::CURRENT_VERSION);
+        };
+
+        // 1) the file's own header is newer
+        animation->version = Animation::CURRENT_VERSION + 1;
+        animation->SaveAnimation(path);
+        animation->version = Animation::CURRENT_VERSION;
+        QVERIFY(!animation->LoadAnimation(path));
+        expect_untouched();
+
+        // 2) the header is fine but one STICK record is newer — what a build that added a stick
+        //    field without bumping the file header writes. Only discoverable mid-stream, i.e.
+        //    after the point where ClearAnimation() used to have wiped the document.
+        StickData *stick = CurrentStickFigure()->stick_list[0];
+        stick->version = StickData::CURRENT_VERSION + 1;
+        animation->SaveAnimation(path);
+        stick->version = StickData::CURRENT_VERSION;
+        QVERIFY(!animation->LoadAnimation(path));
+        expect_untouched();
+
+        // 3) not a file at all
+        QVERIFY(!animation->LoadAnimation(QDir::temp().filePath("marionetta_no_such_dir/x.mAnim")));
+        expect_untouched();
+
+        // a refusal must not poison the next, valid load
+        animation->SaveAnimation(path);
+        QVERIFY(animation->LoadAnimation(path));
+        QVERIFY(file_load_error.isEmpty());
+        QVERIFY(!animation->frame_list.isEmpty());
+        view->ReportMissingTextFonts(); // drops the load-time image pool, like the real handler
+        view->MoveToFrame(animation->frame_list.last()); // later slots expect AddFrame() to append
+        QFile::remove(path);
+    }
+
+    void NewerLibraryIsRefusedKeptAndNeverOverwritten()
+    {
+        AddFrame();
+        DrawStick(QPointF(300, 100), QPointF(300, 200));
+        QVERIFY(view->AddStickFigureToLibrary("keep me") != nullptr);
+        const QString path = QDir::temp().filePath("marionetta_newer_library.marlib");
+
+        // build a library file whose stick is newer, then put the buffer back to normal
+        StickData *library_stick = stick_library_buffer->stick_figures.last()->stick_list[0];
+        library_stick->version = StickData::CURRENT_VERSION + 1;
+        view->SaveLibrary(path);
+        library_stick->version = StickData::CURRENT_VERSION;
+        QFile written(path);
+        QVERIFY(written.open(QIODevice::ReadOnly));
+        const QByteArray newer_bytes = written.readAll();
+        written.close();
+
+        FrameData *buffer_before = stick_library_buffer;
+        const int figures_before = stick_library_buffer->stick_figures.count();
+        const int rows_before = my_current_library_widget->count();
+
+        ModalDismisser dismisser;
+        QVERIFY(!view->LoadLibrary(path));
+        QTRY_VERIFY(dismisser.dismissed >= 1);          // the user was told
+        QVERIFY(stick_library_buffer == buffer_before);  // the open library is exactly as it was
+        QCOMPARE(stick_library_buffer->stick_figures.count(), figures_before);
+        QCOMPARE(my_current_library_widget->count(), rows_before);
+
+        // "Save current library" writes the buffer to the selected row's file: it must not be
+        // allowed to replace the newer file with another library's contents
+        const int shown = dismisser.dismissed;
+        view->SaveLibrary(path);
+        QTRY_VERIFY(dismisser.dismissed > shown);       // and it says so
+        QFile after(path);
+        QVERIFY(after.open(QIODevice::ReadOnly));
+        QCOMPARE(after.readAll(), newer_bytes);
+        after.close();
+
+        // a file that loads fine lifts nothing but is itself unaffected by the refusal list
+        const QString good = QDir::temp().filePath("marionetta_good_library.marlib");
+        view->SaveLibrary(good);
+        QVERIFY(view->LoadLibrary(good));
+        QVERIFY(file_load_error.isEmpty());
+        QFile::remove(good);
+        QFile::remove(path);
+    }
+
     // exercises the exact destructor cascade Widget::~Widget()'s `delete view` triggers
     // (MyView -> Animation -> Frame -> StickFigure -> stick) with an IMAGE stick present,
     // on a throwaway MyView instance — proves removing undoFlag's guard from
@@ -3037,9 +3229,11 @@ private slots:
         view->SetTool(NOTOOL);
     }
 
-    // Bug 1: rotating the whole figure by dragging the MASTER must carry the stepchild
-    // limbs too (they hang off the master's origin). The old master-drag filtered out
-    // stepchildren, so those limbs stayed put while the rest turned.
+    // Dragging the MASTER's end rotates only what hangs off its P2: the stepchild limbs
+    // hang off its origin, which is also the pivot, so they stay put and still attached.
+    // (Reverses an earlier "Bug 1" fix that rotated the whole figure, by user request.)
+    // Also pins that SetMaster() on the current master, with both children and
+    // stepchildren (its early-return branch), leaves the origin handle green.
     void MasterDragRotatesStepchildChain()
     {
         AddFrame();
@@ -3055,8 +3249,103 @@ private slots:
         QTest::mouseMove(view->viewport(),  view->mapFromScene(QPointF(220,220))); // rotate (closer to p2)
         QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(220,220)));
         QVERIFY2(qAbs(child->my_line.angle() - child_a0) > 1.0, "test setup: master drag did not rotate at all");
-        QVERIFY2(qAbs(step->my_line.angle()  - step_a0)  > 1.0, "stepchild limb was left behind by the master-drag rotation");
+        QVERIFY2(qAbs(step->my_line.angle()  - step_a0)  < 0.01, "stepchild limb rotated with the master-drag");
+        QVERIFY(QLineF(step->my_line.p1(), master->my_line.p1()).length() < 0.01);
+        view->grab(); // paint() derives the handle colour from the tree
+        QCOMPARE(master->view->stick_handle[0]->brush().color(), QColor(Qt::green));
+        QCOMPARE(step->view->stick_handle[0]->brush().color(), QColor(Qt::red));
+        CurrentStickFigure()->SetMaster(master);
+        QCOMPARE(master->view->stick_handle[0]->brush().color(), QColor(Qt::green));
         view->SetTool(NOTOOL);
+    }
+
+    // MyView::ConvertStick(): ends, IK role and pen survive; what only the old type means
+    // (a MULTILINE's interior vertices, a POLYGON's outline) is dropped; the new type is
+    // seeded (a POLYGON's diamond passes through both ends); the whole thing is one undo step.
+    void ConvertStickKeepsEndsIkAndPaintDropsOldTypeData()
+    {
+        AddFrame();
+        DrawStick(QPointF(100,100), QPointF(100,200));
+        StickData *s = DrawStick(QPointF(100,200), QPointF(200,300));
+        s->stick_type = StickData::MULTILINE;
+        s->polygon_points << QPointF(0.3, 0.5);
+        s->vertex_widths << 3 << 3 << 3;
+        s->pen = QPen(QColor(10,20,30), 7);
+        s->ik_role = StickData::IK_NODE;
+        const QLineF line = s->my_line;
+
+        view->ConvertStick(s, StickData::POLYGON);
+        QCOMPARE(s->stick_type, (qint32)StickData::POLYGON);
+        QCOMPARE(s->my_line, line);
+        QCOMPARE(s->pen.color(), QColor(10,20,30));
+        QCOMPARE(s->pen.widthF(), 7.0);
+        QCOMPARE(s->ik_role, (qint32)StickData::IK_NODE);
+        QVERIFY(s->vertex_widths.isEmpty());
+        QCOMPARE(s->polygon_points.count(), 4);
+        QVERIFY(QLineF(s->PolygonTransform().map(s->polygon_points[0]), line.p1()).length() < 0.01);
+        QVERIFY(QLineF(s->PolygonTransform().map(s->polygon_points[2]), line.p2()).length() < 0.01);
+
+        view->ConvertStick(s, StickData::MULTILINE);
+        QVERIFY(s->polygon_points.isEmpty()); // the polygon's outline is gone
+        QCOMPARE(s->vertex_widths.count(), 2);
+        QCOMPARE(s->my_line, line);
+
+        view->undo_stack.undo();
+        QCOMPARE(CurrentStickFigure()->stick_list.last()->stick_type, (qint32)StickData::POLYGON);
+    }
+
+    // A band that encloses nothing clears the selection (CurrentStickFigure() == nullptr). It
+    // must clear the layer list's CURRENT row too, not just its selected rows: the list selects
+    // through currentItemChanged (Widget::on_stickLayerView_currentItemChanged), which Qt does
+    // not emit when the clicked row is already current — so the deselected figure could not be
+    // reselected from the list, and the draw tools then reported "no stickfigure layer present".
+    // A click on a row is setCurrentItem(row) inside QListWidget; that must now be a change.
+    void LayerRowReselectsAfterBandDeselect()
+    {
+        AddFrame();
+        StickFigure *figure = CurrentStickFigure();
+        QVERIFY(figure != nullptr && figure->linked_item != nullptr);
+        my_stick_figure_widget_list->setCurrentItem(figure->linked_item);
+
+        view->ApplyBandSelection({});
+        QVERIFY(CurrentStickFigure() == nullptr);
+
+        QSignalSpy changed(my_stick_figure_widget_list, &QListWidget::currentItemChanged);
+        my_stick_figure_widget_list->setCurrentItem(figure->linked_item); // the user's click
+        QCOMPARE(changed.count(), 1);
+
+        view->my_animation->UpdateSelection(figure); // what the slot does; later slots expect one
+    }
+
+    // A MULTILINE turning sharper than 90° into a LONGER segment: the old outline offset each
+    // vertex along the normal of the prev->next chord, which here points backwards, so the band
+    // flipped at the corner and pinched to nothing mid-segment ("twists on itself"). Probes 5 px
+    // either side of each segment's centre (half width 8) must be painted, and a point outside
+    // the band must not, so a render that floods everything cannot pass.
+    void MultilineSharpTurnKeepsAFullWidthBand()
+    {
+        StickData m;
+        m.stick_type = StickData::MULTILINE;
+        m.my_line = QLineF(200, 200, 100, 260); // P1 -> P2; the corner (300,200) is interior
+        m.vertex_widths << 16 << 16 << 16;
+        m.vertex_curvatures << 0 << 0 << 0;
+        m.pen = QPen(Qt::black, 16, Qt::SolidLine, Qt::FlatCap);
+        QGraphicsScene render_scene;
+        render_scene.setSceneRect(0, 0, 400, 400);
+        StickGraphicsItem *item = new StickGraphicsItem(&m); // la scena possiede la view
+        render_scene.addItem(item);
+        // after the view exists, so the local frame is whatever angle it settled on
+        m.polygon_points << m.PolygonTransform().inverted().map(QPointF(300, 200));
+        item->Refresh(0);
+        QImage img(400, 400, QImage::Format_ARGB32);
+        img.fill(Qt::white);
+        QPainter painter(&img);
+        render_scene.render(&painter, QRectF(0, 0, 400, 400), QRectF(0, 0, 400, 400));
+        painter.end();
+        auto painted = [&img](int x, int y){ return img.pixelColor(x, y) != QColor(Qt::white); };
+        QVERIFY2(painted(250, 195) && painted(250, 205), "first segment pinched: the band twisted");
+        QVERIFY2(painted(198, 224) && painted(202, 236), "second segment is not full width");
+        QVERIFY(!painted(250, 180)); // outside the band
     }
 
     // Bug 3: the ROTATE tool pivots on the HANDLE (master origin + pivot_offset), not on

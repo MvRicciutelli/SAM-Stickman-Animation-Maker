@@ -1,4 +1,5 @@
 #include "stickfiguredata.h"
+#include "stickdata.h" // RejectNewerVersion()
 
 /**
  * @details Defaults live as in-class initializers in the header.
@@ -104,6 +105,8 @@ QDataStream &operator>>(QDataStream &stream, StickFigureData &figure_data)
     qint32 max = 0;
     qint32 current_stick_idx = -1;
     stream >> figure_data.version;
+    if (RejectNewerVersion(stream, "stickfigure", figure_data.version, StickFigureData::CURRENT_VERSION))
+        return stream; // le liste restano vuote e il master nullo: il chiamante scarta il record
     stream >> max;
     stream >> figure_data.name;
     stream >> current_stick_idx;

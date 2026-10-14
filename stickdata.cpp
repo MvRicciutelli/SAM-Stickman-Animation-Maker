@@ -1,10 +1,28 @@
 #include "stickdata.h"
+#include <QCoreApplication>
 #include <QFontDatabase>
 #include <QtMath>
 
 /// @details Filled by operator>> when a TEXT stick names a font this system doesn't have;
 /// emptied by MyView::ReportMissingTextFonts() after it has shown the prompt.
 QStringList missing_text_fonts;
+
+/// @details See stickdata.h. Cleared by every loader before it reads and by
+/// MyView::ReportRejectedFile() after it has been shown.
+QString file_load_error;
+
+bool RejectNewerVersion(QDataStream &stream, const char *what, qint32 found, qint32 supported)
+{
+    if (found <= supported)
+        return false;
+    if (file_load_error.isEmpty())
+        file_load_error = QCoreApplication::translate("FileVersion",
+            "This file was saved by a newer version of Marionetta (%1 format version %2; this "
+            "version reads up to %3). Update the program to open it.")
+            .arg(QString::fromLatin1(what)).arg(found).arg(supported);
+    stream.setStatus(QDataStream::ReadCorruptData);
+    return true;
+}
 
 // ---------------------------------------------------------------------------------------
 // Image sharing: one pixel buffer per distinct image, both in memory and in the file.
@@ -724,6 +742,10 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
     stream >> z_value; // matches the explicit double written by operator<<, regardless of qreal's local width
     stick_data.z = z_value;
     stream >> stick_data.version;
+    // PRIMA di leggere altro: i campi di una versione più nuova non li conosciamo, e
+    // leggerli con il layout vecchio sfaserebbe tutto il resto dello stream
+    if (RejectNewerVersion(stream, "stick", stick_data.version, StickData::CURRENT_VERSION))
+        return stream;
     stream >> stick_data.stick_type;
     stream >> stick_data.is_linker;
     stream >> stick_data.stepchild;

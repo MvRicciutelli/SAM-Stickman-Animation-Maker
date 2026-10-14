@@ -86,6 +86,16 @@ extern QSpinBox * circle_squash_spinbox;
  * test binary doesn't link widget.cpp), which every user must therefore check.
  */
 extern QComboBox * fill_type_combo;
+
+/**
+ * @brief The stick-type picker of the "Convert to" row (UserData = StickData::StickType).
+ *
+ * Built and wired by Widget's ctor (the button calls MyView::ConvertStick()). Its parent row
+ * is ONE widget shared by every advanced panel, so Animation::UpdateTab() moves it to the top
+ * of whichever panel the selected stick's type shows, and preselects that type. Null in the
+ * test binary.
+ */
+extern QComboBox * convert_type_combo;
 extern QComboBox * stroke_type_combo; ///< stroke twin of fill_type_combo; writes into the pen's brush
 
 /**

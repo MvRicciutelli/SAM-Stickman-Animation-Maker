@@ -1,5 +1,7 @@
 #include "animation.h"
 
+#include <QBoxLayout>
+#include <QCoreApplication>
 #include <QFile>
 #include <QSpinBox>
 #include "advancedtab.h"
@@ -193,6 +195,17 @@ void Animation::UpdateTab(int t){
         // proprietà (img_offset/img_angle_offset), riusate invece di duplicarle
         my_tab_widget->insertTab(1,advanced_text_tab,"Text Editing");
         my_tab_widget->insertTab(2,advanced_img_tab,"Text Placement");
+    }
+    // la riga "Convert to" (Widget) è UN solo widget e un widget ha un solo genitore: va
+    // spostata in cima al primo pannello del tipo mostrato a ogni cambio di tipo
+    QWidget *panel = my_tab_widget->count() > 1 ? my_tab_widget->widget(1) : nullptr;
+    if(convert_type_combo != nullptr && panel != nullptr && panel != library_tab){
+        QWidget *row = convert_type_combo->parentWidget();
+        if(row->parentWidget() && row->parentWidget()->layout())
+            row->parentWidget()->layout()->removeWidget(row);
+        if(QBoxLayout *box = qobject_cast<QBoxLayout*>(panel->layout()))
+            box->insertWidget(0, row);
+        convert_type_combo->setCurrentIndex(convert_type_combo->findData(t));
     }
     my_tab_widget->setCurrentIndex(idx);
 }
@@ -541,65 +554,71 @@ QDataStream &operator<<(QDataStream& stream, const Animation& my_animation){
     }
     return stream;
 }
-QDataStream &operator>>(QDataStream& stream,Animation& my_animation){
-    qint32 frameNum = 0;
-    qint32 file_version = 0;
-    stream>>file_version;
-    // in memoria si tiene sempre il formato corrente: un salvataggio successivo a un load
-    // di un file v1/v2 deve scrivere un v3 completo, non un header vecchio con contenuto nuovo
-    my_animation.version = 3;
-    stream>>frameNum;
-    stream>>my_animation.width;
-    stream>>my_animation.height;
-    // applica subito le dimensioni appena lette: prima non veniva fatto, quindi caricare un file con
-    // una canvas di dimensioni diverse da quella corrente lasciava my_rect/limit_rect legati
-    // alla vecchia canvas (nessuno li ricalcolava finché l'utente non ridimensionava manualmente)
-    W = my_animation.width;
-    H = my_animation.height;
-    my_rect->setRect(0,0,W,H);
-    SceneRemover(scene);
-    limit_rect->setRect(-my_rect->rect().width()/10, -my_rect->rect().height()/10, my_rect->rect().width()*1.1, my_rect->rect().height()*1.1);
+/**
+ * @brief Everything an .mAnim file holds, read into pure data: no scene, no widget, no live frame.
+ * @details Parsing first and applying second is what lets LoadAnimation() refuse a file without
+ * having changed anything. Owns its frames.
+ */
+struct AnimationFileData {
+    qint32 version = 0;
+    qint32 width = 0;
+    qint32 height = 0;
+    QList<FrameData*> frames;
+    QStringList names;          ///< v2 trailer, parallel to frames (may be shorter on a truncated file)
+    ~AnimationFileData() { qDeleteAll(frames); }
+};
 
-    scene->addItem(my_rect);
-    scene->setSceneRect(limit_rect->rect());
+/**
+ * @details Mirror of operator<<. Stops at the first problem and keeps what was read before it, so a
+ * truncated file still yields its leading frames exactly as it always did. A newer version is the
+ * exception: it is reported through file_load_error (RejectNewerVersion()) and LoadAnimation()
+ * discards the lot — the header is checked before anything else, and each stick/figure record
+ * checks its own, because a newer build can add a record field without bumping the file's header.
+ */
+static void ReadAnimationFileData(QDataStream &stream, AnimationFileData &file)
+{
+    qint32 frame_count = 0;
+    stream >> file.version;
+    if (RejectNewerVersion(stream, "animation", file.version, Animation::CURRENT_VERSION))
+        return;
+    stream >> frame_count;
+    stream >> file.width;
+    stream >> file.height;
     // un file valido non ha comunque un numero enorme di frame: senza questo controllo, un file
     // troncato o corrotto (es. un int con qualche bit invertito) farebbe partire un ciclo che
     // alloca centinaia di migliaia di Frame/QListWidgetItem prima di accorgersi che i dati non ci sono
-    if(stream.status() != QDataStream::Ok || frameNum < 0 || frameNum > 100000){
-        return stream;
-    }
+    if (stream.status() != QDataStream::Ok || frame_count < 0 || frame_count > 100000)
+        return;
     // v3: la tabella delle immagini precede i frame, che la indicizzano invece di portarsi
     // dietro una copia dei propri pixel ciascuno (vedi operator<<)
     ImageTable table;
-    if(file_version >= 3){
-        stream>>table;
-        if(stream.status() != QDataStream::Ok)
-            return stream; // tabella illeggibile: i frame sarebbero solo immagini nulle
+    if (file.version >= 3) {
+        stream >> table;
+        if (stream.status() != QDataStream::Ok)
+            return; // tabella illeggibile: i frame sarebbero solo immagini nulle
     }
-    ImageTable *previous = InstallImageTable(file_version >= 3 ? &table : nullptr);
-    for(int i = 0;i<frameNum;i++){
-        Frame* addedFrame = my_animation.SetupFrame(i);
-        stream>>*addedFrame;
-        if(stream.status() != QDataStream::Ok){
-            // file troncato a metà frame: fermati qui, i frame già letti restano validi
-            break;
-        }
-        addedFrame->UpdateIcon();
+    ImageTable *previous = InstallImageTable(file.version >= 3 ? &table : nullptr);
+    for (int i = 0; i < frame_count; i++) {
+        FrameData *frame = new FrameData();
+        stream >> *frame;
+        file.frames.append(frame);
+        if (stream.status() != QDataStream::Ok)
+            break; // file troncato a metà frame: i frame già letti restano validi
     }
-    // ripristinata appena finiti i record (le UpdateIcon() qui sopra non leggono lo stream):
-    // una tabella lasciata installata punterebbe a memoria di questo stack frame
+    // ripristinata appena finiti i record: una tabella lasciata installata punterebbe a memoria
+    // di questo stack frame
     InstallImageTable(previous);
-    // trailer dei nomi (solo v2): l'iterazione è su frame_list, quindi un file troncato
-    // a metà frame ne ha semplicemente meno da nominare
-    if(file_version >= 2){
-        for(Frame* f: my_animation.frame_list){
-            if(stream.status() != QDataStream::Ok)
+    // trailer dei nomi (solo v2): l'iterazione è su frames, quindi un file troncato a metà
+    // frame ne ha semplicemente meno da nominare
+    if (file.version >= 2) {
+        for (int i = 0; i < file.frames.count(); i++) {
+            if (stream.status() != QDataStream::Ok)
                 break;
-            stream>>f->name;
-            f->UpdateLabel(); // il nome entra nella fascia dell'anteprima già renderizzata sopra
+            QString frame_name;
+            stream >> frame_name;
+            file.names.append(frame_name);
         }
     }
-    return stream;
 }
 void Animation::SaveAnimation(QString file_name){
     QFile file(file_name);
@@ -611,22 +630,55 @@ void Animation::SaveAnimation(QString file_name){
     out << *this;
     file.close();
 }
-void Animation::LoadAnimation(QString name)
+bool Animation::LoadAnimation(QString name)
 {
-
+    file_load_error.clear();
     QFile file(name);
     if(!file.open(QIODevice::ReadOnly))
     {
-        return;
+        file_load_error = QCoreApplication::translate("FileVersion", "The file could not be opened.");
+        return false;
     }
-    QDataStream out(&file);
-    ClearAnimation();
-    // niente più loadingAnimationFlag: l'operator>> di Frame non attacca alla scena né
-    // renderizza icone per costruzione (vedi PopulateLiveFrame), non serve una guardia
-    out >> *this;
+    AnimationFileData parsed;
+    {
+        QDataStream in(&file);
+        ReadAnimationFileData(in, parsed);
+    }
     file.close();
-    qDebug("load finished");
+    if(file_load_error.isEmpty() && parsed.frames.isEmpty())
+        file_load_error = QCoreApplication::translate("FileVersion", "The file contains no readable frame.");
+    if(!file_load_error.isEmpty())
+        return false; // rifiutato: niente è stato toccato
 
+    ClearAnimation();
+    // in memoria si tiene sempre il formato corrente: un salvataggio successivo a un load
+    // di un file v1/v2 deve scrivere un v3 completo, non un header vecchio con contenuto nuovo
+    version = CURRENT_VERSION;
+    width = parsed.width;
+    height = parsed.height;
+    // applica subito le dimensioni appena lette: prima non veniva fatto, quindi caricare un file con
+    // una canvas di dimensioni diverse da quella corrente lasciava my_rect/limit_rect legati
+    // alla vecchia canvas (nessuno li ricalcolava finché l'utente non ridimensionava manualmente)
+    W = width;
+    H = height;
+    my_rect->setRect(0,0,W,H);
+    SceneRemover(scene);
+    limit_rect->setRect(-my_rect->rect().width()/10, -my_rect->rect().height()/10, my_rect->rect().width()*1.1, my_rect->rect().height()*1.1);
+    scene->addItem(my_rect);
+    scene->setSceneRect(limit_rect->rect());
+    // sticks staccati e icone non renderizzate come sempre per il load di un file (vedi
+    // PopulateLiveFrame): MoveToFrame() attacca e aggiorna il frame che viene mostrato davvero
+    for(int i = 0; i < parsed.frames.count(); i++){
+        Frame *added_frame = SetupFrame(i);
+        PopulateLiveFrame(added_frame, *parsed.frames[i], false, false);
+        added_frame->UpdateIcon();
+        if(i < parsed.names.count()){
+            added_frame->name = parsed.names[i];
+            added_frame->UpdateLabel(); // il nome entra nella fascia dell'anteprima già renderizzata sopra
+        }
+    }
+    qDebug("load finished");
+    return true;
 }
 void Animation::ClearAnimation(){
     clearing_animation = true;

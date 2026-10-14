@@ -35,7 +35,8 @@ public:
      */
     StickFigureData *Clone() const;
 
-    qint32 version = 1;                  ///< serialization format version of this record
+    static constexpr qint32 CURRENT_VERSION = 1; ///< newest figure record format this build reads (operator>> refuses newer)
+    qint32 version = CURRENT_VERSION;    ///< serialization format version of this record
     QString name;                       ///< user-visible layer name
     QList<StickData*> stick_list;        ///< owned sticks forming the figure
     StickData *master_stick = nullptr;   ///< tree root; points into stick_list

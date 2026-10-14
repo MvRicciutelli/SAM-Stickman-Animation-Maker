@@ -8,6 +8,7 @@
 #include <QTransform>
 #include <QGraphicsRotation>
 #include <frame.h>
+#include <QFileInfo>
 #include <QMessageBox>
 #include <QSpinBox>
 #include <QCheckBox>
@@ -2024,6 +2025,90 @@ void MyView::DeleteWholeStick(StickData *stick)
 }
 
 /**
+ * @details Called by the "Convert to" row of the advanced panels (Widget's ctor, moved
+ * between panels by Animation::UpdateTab()). Destructive on purpose (spec): everything only
+ * the old type reads is dropped before the new type is seeded, so nothing stale can resurface
+ * if the stick is later converted back.
+ */
+void MyView::ConvertStick(StickData *stick, int new_type, const QImage &image,
+                          const QString &image_name, const QString &text)
+{
+    if(stick == nullptr || stick->stick_type == new_type)
+        return;
+    if(draw_mode)
+        ExitDrawMode(); // finalizza il canvas prima dello snapshot
+    StoreUndo();
+
+    // --- ciò che solo il tipo di origine sa leggere va perso ---
+    if(stick->view){
+        stick->view->RemoveImagesFromListWidget(); // agisce solo se è ANCORA un IMAGE
+        stick->view->selected_vertices.clear();
+        stick->view->ClearPolygonPreview();
+    }
+    qDeleteAll(stick->stick_img_list);
+    stick->stick_img_list.clear();
+    stick->img_name_list.clear();
+    stick->stick_img = nullptr;
+    stick->polygon_points.clear();
+    stick->vertex_widths.clear();
+    stick->vertex_curvatures.clear();
+    stick->text.clear();
+    stick->img_offset = QPointF(0, 0);
+    stick->img_angle_offset = 0;
+    stick->img_w_scale = 1;
+    stick->img_h_scale = 1;
+    poly_session_active = false;
+
+    // --- il nuovo tipo nasce come lo farebbe DrawCmd(); estremi, IK, penna e pennello restano ---
+    stick->stick_type = new_type;
+    stick->img_angle = -atan2(stick->my_line.dx(), stick->my_line.dy())*180/M_PI;
+    switch(new_type){
+    case StickData::RECT:
+        stick->img_w_scale = advanced_rect_slider->value();
+        break;
+    case StickData::TAPER:
+    case StickData::TRAPEZOID:
+        stick->img_h_scale = taper_h_slider->value();
+        stick->img_w_scale = taper_w_slider->value();
+        break;
+    case StickData::POLYGON:
+        // un poligono senza vertici non si vede: nasce come un rombo che passa per entrambi
+        // gli estremi (frame locale normalizzato, +y lungo lo stick: P1 = (0,0), P2 = (0,1))
+        stick->polygon_points = { QPointF(0, 0), QPointF(0.25, 0.5), QPointF(0, 1), QPointF(-0.25, 0.5) };
+        break;
+    case StickData::MULTILINE:
+        stick->vertex_widths << stick->pen.widthF() << stick->pen.widthF();
+        stick->vertex_curvatures << 0.0f << 0.0f;
+        break;
+    case StickData::IMAGE:
+        if(stick->view){
+            stick->view->AddImage(new QImage(image), image_name);
+            stick->view->img_rect = CalcImgRect(stick->my_line, image.size());
+        }
+        break;
+    case StickData::TEXT:
+        stick->text = text;
+        break;
+    default: // LINE, CIRCLE, FREEHAND (il canvas glielo dà EnterDrawMode, sotto)
+        break;
+    }
+
+    if(stick->view)
+        stick->view->Refresh(0);
+    my_animation->UpdateTab(new_type);
+    my_animation->UpdateSelection(stick);
+    StickFigure *fig = my_animation->CurrentFrame()->CurrentStickFigure();
+    if(fig != nullptr){
+        fig->UpdateIcon();
+        if(fig->linked_item)
+            fig->linked_item->setIcon(*fig->stick_figure_icon);
+    }
+    my_animation->current_frame->UpdateIcon();
+    if(new_type == StickData::FREEHAND)
+        EnterDrawMode(stick, false); // lo StoreUndo() sopra copre già la sessione
+}
+
+/**
  * @details handle_size è in pixel di schermo: convertito in unità di scena il raggio
  * di aggancio di vertici e spigoli resta percettivamente costante a ogni zoom.
  */
@@ -2267,18 +2352,22 @@ void MyView::drawForeground(QPainter *painter, const QRectF &rect)
         // in foreground DOPO le maniglie del box, replicando l'aspetto reale dei loro scene
         // item (rect/penna/pennello, quindi colore e stato di selezione corretti). Le maniglie
         // sono in coordinate di scena (setRect assoluto, nessun setPos), come questo painter.
-        for(StickFigure *S : SelectedFigures())
-            for(StickData *s : S->stick_list){
-                if(!s->view) continue;
-                for(int k = 0; k < 2; k++){
-                    QGraphicsEllipseItem *hnd = s->view->stick_handle[k];
-                    if(hnd && hnd->isVisible()){
-                        painter->setPen(hnd->pen());
-                        painter->setBrush(hnd->brush());
-                        painter->drawEllipse(hnd->rect());
+        // Due passate: l'ordine di stick_list ignora gli z delle maniglie, e la maniglia rossa
+        // di uno stick nato dall'origine del master copriva quella verde (z 101) — che va
+        // quindi disegnata per ultima, sopra tutte le altre della figura.
+        for(bool top : { false, true })
+            for(StickFigure *S : SelectedFigures())
+                for(StickData *s : S->stick_list){
+                    if(!s->view) continue;
+                    for(int k = 0; k < 2; k++){
+                        QGraphicsEllipseItem *hnd = s->view->stick_handle[k];
+                        if(hnd && hnd->isVisible() && (hnd->zValue() > 100) == top){
+                            painter->setPen(hnd->pen());
+                            painter->setBrush(hnd->brush());
+                            painter->drawEllipse(hnd->rect());
+                        }
                     }
                 }
-            }
         painter->restore();
     }
 
@@ -3129,6 +3218,11 @@ void MyView::ApplyBandSelection(const QList<StickFigure*> &touched)
     // riallinea la lista layer alla selezione singola senza rientrare dai suoi segnali
     multi_widget_sync = true;
     my_stick_figure_widget_list->clearSelection();
+    // nessuna figura = nessuna riga CORRENTE, non solo nessuna riga selezionata: la lista
+    // seleziona tramite currentItemChanged, che non scatta ricliccando la riga che è già
+    // corrente — la figura appena deselezionata restava così non riselezionabile dalla lista
+    if(pick == nullptr)
+        my_stick_figure_widget_list->setCurrentItem(nullptr);
     if(pick != nullptr){
         if(!pick->stick_list.isEmpty())
             frame->SelectStick(pick);
@@ -3669,11 +3763,11 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                         else{
                             QList<StickGraphicsItem*> to_rotate;
                             if(my_animation->CurrentFrame()->CurrentStick() == my_animation->CurrentFrame()->CurrentStickFigure()->master_stick){
-                                // ruotando dal master ruota TUTTA la figura, stepchild inclusi:
-                                // il vecchio filtro !s->stepchild lasciava indietro gli arti
-                                // agganciati all'origine del master (bug: la figura si spezzava)
-                                for(StickData*s:my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
-                                    if(s->view){
+                                // ruotando dal master seguono solo i discendenti agganciati alla
+                                // sua P2: gli stepchild (agganciati all'origine, che è anche il
+                                // perno della rotazione) restano fermi e comunque attaccati
+                                for(StickData*s:my_animation->CurrentFrame()->CurrentStick()->children){
+                                    if(!s->stepchild && s->view){
                                         to_rotate.append(s->view);
                                     }
                                 }
@@ -4599,6 +4693,16 @@ static QIcon RenderLibraryIcon(const StickFigureData &figure_data){
  * has exactly one behavior.
  */
 void MyView::SaveLibrary(QString file_name){
+    // una libreria rifiutata perché troppo nuova NON ha il suo contenuto nel buffer (che è
+    // quello della libreria precedente): "Save current library" scrive sul file della riga
+    // selezionata, quindi senza questo controllo distruggerebbe l'unica copia
+    if(refused_library_files.contains(QFileInfo(file_name).absoluteFilePath())){
+        QMessageBox::warning(this, tr("Library not saved"),
+                             tr("\"%1\" was saved by a newer version of Marionetta and could not be "
+                                "opened, so it will not be overwritten. Save to a different file "
+                                "name instead.").arg(QFileInfo(file_name).fileName()));
+        return;
+    }
     QFile file(file_name);
     if(!file.open(QIODevice::WriteOnly)){
         return;
@@ -4647,6 +4751,22 @@ void MyView::ReportMissingTextFonts()
     missing_text_fonts.clear();
 }
 /**
+ * @details The pool and font list are dropped BEFORE the early return, for the same reason
+ * ReportMissingTextFonts() drops the pool before its own: they must go after every load, not only
+ * after one that happened to leave a message.
+ */
+void MyView::ReportRejectedFile(const QString &file_name)
+{
+    ClearStickImagePool();
+    missing_text_fonts.clear();
+    if(file_load_error.isEmpty())
+        return;
+    QMessageBox::critical(this, tr("Cannot open file"),
+                          tr("\"%1\" was not opened.\n\n%2")
+                          .arg(QFileInfo(file_name).fileName(), file_load_error));
+    file_load_error.clear();
+}
+/**
  * @details The library buffer owns plain data: replacing it is delete + new, no
  * per-figure cleanup choreography (freeLibraryFrame is gone).
  */
@@ -4656,24 +4776,38 @@ void MyView::ClearCurrentLib(){
     stick_library_buffer = new FrameData();
 }
 /**
- * @details Reads the library file into the data buffer, then builds the list-widget
- * entries: each item stores its StickFigureData pointer and an icon rendered from the
- * data. mode!=0 keeps the widget untouched (legacy semantics, currently unused).
+ * @details Reads the library file into a NEW buffer first and only swaps it in once nothing was
+ * refused, so a library saved by a newer version leaves the open one (buffer and list widget)
+ * untouched; then builds the list-widget entries: each item stores its StickFigureData pointer
+ * and an icon rendered from the data. mode!=0 keeps the widget untouched (legacy semantics,
+ * currently unused).
  */
-void MyView::LoadLibrary(QString file_name, int mode){
+bool MyView::LoadLibrary(QString file_name, int mode){
     QFile file(file_name);
     if(!file.open(QIODevice::ReadOnly)){
-        return;
+        return false;
     }
-    QDataStream in(&file);
+    file_load_error.clear();
+    FrameData *parsed = new FrameData();
+    {
+        QDataStream in(&file);
+        in >> *parsed;
+    }
+    file.close();
+    const QString library_path = QFileInfo(file_name).absoluteFilePath();
+    if(!file_load_error.isEmpty()){
+        delete parsed;
+        refused_library_files.insert(library_path);
+        ReportRejectedFile(file_name);
+        return false;
+    }
+    refused_library_files.remove(library_path);
     my_current_library_widget->clear();
     delete stick_library_buffer;
-    stick_library_buffer = new FrameData();
-    in >> *stick_library_buffer;
-    file.close();
+    stick_library_buffer = parsed;
     ReportMissingTextFonts();
     if(mode)
-        return;
+        return true;
     // aggiungi tutti gli stickfigure della libreria alla lista del widget
     for(StickFigureData *figure_data:stick_library_buffer->stick_figures){
         QListWidgetItem * added_item = new QListWidgetItem();
@@ -4682,6 +4816,7 @@ void MyView::LoadLibrary(QString file_name, int mode){
         added_item->setIcon(RenderLibraryIcon(*figure_data));
         my_current_library_widget->addItem(added_item);
     }
+    return true;
 }
 /**
  * @details Extracts the current figure into a data record, appends it to the library

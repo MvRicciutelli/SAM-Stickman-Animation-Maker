@@ -121,6 +121,38 @@ selection change rather than only on a type change. A font missing on load is re
 by every load path) turns into one prompt. The foreign `.stk`/`.nodes`
 exporters have no text: a TEXT stick leaves as a plain segment.
 
+### The MULTILINE outline
+
+A MULTILINE is not stroked by the pen: per-vertex widths (`vertex_widths`) are something
+`QPainterPathStroker` cannot do, so `paint()` builds the band's outline itself and fills it.
+It follows the stroker's own rules, and each one fixed a visible bug: offset along the
+bisector of the two segments' **unit** directions (the old prev→next chord is length-weighted
+and points backwards at a sharp turn into a longer segment — the band flipped and "twisted on
+itself"); a true miter (`h / cos(half turn)`) up to QPen's default limit; past it, a bevel on
+the outer side with the inner side running through the vertex; and `Qt::WindingFill`, which
+fills the inner overlap that rule produces (odd-even left a hole). A miter merely *clamped*
+to the limit is wrong: it bends both edges toward the tip and thins both segments.
+`MultilineSharpTurnKeepsAFullWidthBand` pins it by rendering.
+
+### Converting a stick's type
+
+`MyView::ConvertStick()` turns any stick type into any other, in place, as one
+`StoreUndo()`. It keeps `my_line`, the IK role/chain, the tree links, `pen` (colour,
+thickness, border brush) and `brush`, and is **destructive by spec**: it first drops
+everything only the old type reads (POLYGON/MULTILINE vertices, IMAGE/FREEHAND images —
+IMAGE's `img_list_widget` rows too — TEXT's `text`, and the shared `img_offset`/
+`img_angle_offset`/`img_*_scale` placement), then seeds the new type the way `DrawCmd()`
+seeds a fresh one (RECT/TAPER/TRAPEZOID widths from their sliders, MULTILINE's two endpoint
+widths from the pen). Two seeds are this function's own: a POLYGON starts as a **diamond
+through both ends** (an empty one is invisible), and a FREEHAND enters draw mode on a blank
+canvas. IMAGE and TEXT need user input, which the caller (the Widget lambda) asks for
+BEFORE calling, so cancelling leaves neither a half-converted stick nor an empty undo step.
+
+The UI is a single "Convert to" row (combo + button; `convert_type_combo` in `uiItems.h`,
+its parent is the row). A widget has one parent, so `Animation::UpdateTab()` moves that row
+to the top of the first advanced panel of whatever type it is showing, and preselects that
+type.
+
 ### Fill and stroke: pattern, gradient, image
 
 `StickData::pen`/`StickData::brush` are a whole `QPen`/`QBrush`, and that is the
@@ -984,9 +1016,56 @@ row, shown by `Frame::UpdateLabel()`) travels through `Clone()`/
 a trailer at the END of `Animation::operator<<` instead, gated on the new
 animation format `version = 2`. A trailer is ignorable, so every existing
 version-1 `.mAnim` (and every `.marlib`, which never carries names) still
-loads unchanged. `Animation::operator>>` resets `version` to the current
+loads unchanged. `Animation::LoadAnimation()` resets `version` to the current
 format after reading, so re-saving an old file writes a complete current
 one rather than an old header with new content.
+
+### Files from a newer version are refused, not misread
+
+Three versions are on the wire and each is checked: the `.mAnim` header
+(`Animation::CURRENT_VERSION`, 3), `StickFigureData::version` (1) and `StickData::version`
+(`StickData::CURRENT_VERSION`, 6). `FrameData` has none. **Raising a format means raising its
+`CURRENT_VERSION` constant** — the in-class default of `version` is that constant, so a writer
+and the reader's limit cannot drift apart. The stick record is the one that matters most: it
+went 2→6 while the file header stayed at 3, so a newer build's `.mAnim` can hold a too-new
+stick under a perfectly supported header, discoverable only mid-stream.
+
+`RejectNewerVersion()` (`stickdata.h`) is called right after each `version` read. It puts the
+stream into `ReadCorruptData` — every loop that already bails on `status() != Ok` then stops
+instead of parsing the next record's bytes as this one's extra fields — and records the reason
+in the global `file_load_error`, the same shape as `missing_text_fonts` (the data layer has no
+UI). Every loader clears it BEFORE reading, so a stale message cannot fail a later load; the UI
+layer shows it through `MyView::ReportRejectedFile()`, which also drops the load-time image pool
+and the font list that the refused read filled (`ReportMissingTextFonts()` is skipped on this
+path and would have drained them).
+
+**A refused load changes nothing**, which is why the loaders now parse into pure data first:
+- `Animation::LoadAnimation()` (returns `bool`) reads an `AnimationFileData` and only then
+  `ClearAnimation()`s and applies it. It used to clear first, so any unreadable file had already
+  destroyed the document; the same restructure makes a file with no readable frame a refusal
+  instead of leaving a frame-less animation (`current_frame == nullptr` crashes most handlers).
+  `operator>>(Animation)` is gone. A truncated file still keeps its leading frames, as before.
+- `LoadStickFigureData()` replaces `StickFigure::LoadStickFigure()`, which streamed into a layer
+  the caller had already added. The handler now reads, and only then does `StoreUndo()` +
+  `AddStick()` — the order the foreign-format imports always used.
+- `MyView::LoadLibrary()` (returns `bool`) swaps a freshly parsed buffer in only on success.
+
+Two writes would have turned a refusal into data loss, and are guarded:
+- `on_actionload_animation_triggered()` set `animation_path` **before** loading. Autosave and
+  "Save" write to it, so a refused file would have been overwritten by the still-open (older)
+  animation. It is now set, and undo cleared, only after a successful load.
+- "Save current library" writes the buffer to the **selected list row's** file; after a refusal
+  the buffer is some other library. `refused_library_files` makes `SaveLibrary()` refuse (with a
+  warning) to overwrite such a file for the rest of the session — including an explicit
+  "Save as" onto the same name.
+
+Pinned by `NewerStickRecordVersionIsRefused`, `NewerStickFigureFileIsRefusedWithoutAnyLiveChange`,
+`NewerAnimationFileIsRefusedAndTheOpenAnimationIsKept` (header-newer AND stick-newer, asserting
+the very same `Frame` objects are still there) and `NewerLibraryIsRefusedKeptAndNeverOverwritten`
+(byte-compares the file); each was checked to fail with its guard neutralized. NOT covered: the
+two `mymainwindow.cpp` handlers (ordering of `animation_path`/`ClearUndo()`), since the test
+binary doesn't link that file. QMessageBox is modal — a test that reaches one needs
+`ModalDismisser` (file scope in the test source) or it hangs headless.
 
 ### Images are shared, never duplicated: the pool and the `ImageTable`
 
@@ -1152,8 +1231,8 @@ before it is displayed must therefore null-check `linked_item` —
 ## Tests
 
 `tests/tests.pro` is a standalone qmake QtTest project (characterization
-suite, REFACTOR_PLAN.md Phase 0, 110 tests as of the multi-frame pass —
-109 passing plus the one font-dependent skip). Note the slots share
+suite, REFACTOR_PLAN.md Phase 0, 120 tests as of the file-version guards —
+119 passing plus the one font-dependent skip). Note the slots share
 ONE animation and run in declaration order: a test that leaves the current
 frame somewhere other than the last one breaks every later test that
 assumes `AddFrame()` appends (see the closing `MoveToFrame()` in
@@ -1196,7 +1275,9 @@ restore inside the same second leaves the OLD object file in place: the
 suite then reports a failure that the source on disk no longer explains,
 and the obvious conclusion (a bug in the new code) is wrong. Cost real
 debugging time during the image-sharing pass. A `mingw32-make clean` first,
-or `touch` + `sleep 1`, makes a counterproof trustworthy.
+or `sleep 1` **then** `touch` (in that order — the touch has to land in a later
+second than the object file, so a sleep after it does nothing), makes a
+counterproof trustworthy.
 
 A slot that fills in one of the `uiItems.h` UI globals (they are null in the test
 binary, which doesn't link `widget.cpp`) must restore it to `nullptr` from a

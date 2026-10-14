@@ -81,6 +81,7 @@ AdvancedTaperWidget *advanced_taper_tab = nullptr;
 QSpinBox *line_edit_thickness_width_spinbox = nullptr;
 QSlider *circle_squash_slider = nullptr;
 QSpinBox *circle_squash_spinbox = nullptr;
+QComboBox *convert_type_combo = nullptr; // nullo: UpdateTab() non sposta la riga "Convert to"
 QComboBox *fill_type_combo = nullptr;    // nulli: UpdateSliders() salta il blocco che li disabilita
 QComboBox *stroke_type_combo = nullptr;
 QCheckBox *brush_follows_check = nullptr; // idem

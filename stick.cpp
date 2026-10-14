@@ -570,17 +570,49 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
             }
             center.append(chain[chain.size()-1]);
             widths.append(width_at(chain.size()-1));
-            // 2) contorno: per ogni punto densificato sposta a destra/sinistra di metà
-            //    larghezza lungo la normale della direzione media, poi riempi
+            // 2) contorno: per ogni punto densificato sposta a destra/sinistra lungo la
+            //    bisettrice dell'angolo, poi riempi. La bisettrice viene dai versori dei due
+            //    segmenti: la corda prev->next (usata un tempo) è pesata dalle lunghezze, e a
+            //    una svolta oltre 90° con il segmento successivo più lungo punta all'INDIETRO —
+            //    la normale si ribaltava e la banda si attorcigliava su sé stessa.
+            auto unit = [](QPointF from, QPointF to) -> QPointF {
+                qreal len = QLineF(from, to).length();
+                return len < 1e-6 ? QPointF(0,0) : (to - from) / len;
+            };
+            auto perp = [](QPointF u) { return QPointF(-u.y(), u.x()); }; // normale sinistra
             QPolygonF left, right;
             for(int k = 0; k < center.size(); k++){
-                QPointF prev = center[qMax(0, k-1)];
-                QPointF next = center[qMin(center.size()-1, k+1)];
-                QLineF dir(prev, next);
-                if(dir.length() < 1e-6) dir = QLineF(QPointF(0,0), QPointF(1,0));
-                QPointF n(-dir.dy()/dir.length(), dir.dx()/dir.length());
-                left  << center[k] + n * (widths[k]/2.0);
-                right << center[k] - n * (widths[k]/2.0);
+                QPointF c = center[k];
+                qreal h = widths[k]/2.0;
+                QPointF u_in  = k > 0 ? unit(center[k-1], c) : QPointF(0,0);
+                QPointF u_out = k < center.size()-1 ? unit(c, center[k+1]) : QPointF(0,0);
+                QPointF t = u_in + u_out;
+                qreal t_len = QLineF(QPointF(0,0), t).length();
+                if(t_len < 1e-6) // inversione secca a 180° (o punti coincidenti)
+                    t = !u_in.isNull() ? u_in : (!u_out.isNull() ? u_out : QPointF(1,0));
+                else
+                    t /= t_len;
+                QPointF n = perp(t);
+                // coseno di metà svolta: 1 agli estremi e sui tratti dritti
+                qreal cos_half = u_in.isNull() ? 1.0 : QPointF::dotProduct(n, perp(u_in));
+                if(cos_half >= 0.25){
+                    // spigolo vivo (miter): per restare a metà larghezza da ENTRAMBI i segmenti
+                    // il punto va a h / cos(metà svolta), non a h, che strozzava gli angoli
+                    left  << c + n * (h / cos_half);
+                    right << c - n * (h / cos_half);
+                    continue;
+                }
+                // svolta più stretta del miterLimit di default di QPen (2 larghezze): come fa
+                // QPainterPathStroker, smusso (bevel) sul lato esterno e lato interno che passa
+                // per il vertice — la sovrapposizione che ne nasce la riempie il WindingFill.
+                // Un miter accorciato a un punto solo, invece, piegava entrambi i bordi verso
+                // la punta e assottigliava i due segmenti
+                QPointF n_in = perp(u_in), n_out = perp(u_out);
+                qreal s = QPointF::dotProduct(n, u_out - u_in) > 0 ? 1.0 : -1.0; // lato interno
+                QPolygonF &inner = s > 0 ? left : right;
+                QPolygonF &outer = s > 0 ? right : left;
+                inner << c + s*n_in*h << c << c + s*n_out*h;
+                outer << c - s*n_in*h << c - s*n_out*h;
             }
             // il contorno di una spezzata È il suo riempimento: prendi tutto il brush della
             // penna, non solo il colore, così una penna a pattern/gradiente si vede anche
@@ -600,7 +632,9 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
                 QPolygonF outline = left;
                 for(int k = right.size()-1; k >= 0; k--)
                     outline << right[k];
-                painter->drawPolygon(outline);
+                // WindingFill: negli angoli stretti il lato interno si sovrappone a sé stesso, e
+                // con l'OddEvenFill di default la sovrapposizione restava un buco
+                painter->drawPolygon(outline, Qt::WindingFill);
                 // estremità arrotondate come i cap RoundCap di uno stick normale
                 if(data->pen.capStyle() == Qt::RoundCap){
                     painter->drawEllipse(center.first(), widths.first()/2.0, widths.first()/2.0);
@@ -646,6 +680,12 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
 
     stick_handle[0]->setRect(data->my_line.p1().x()-handle_size/2,data->my_line.p1().y()-handle_size/2,handle_size,handle_size);
     stick_handle[1]->setRect(data->my_line.p2().x()-handle_size/2,data->my_line.p2().y()-handle_size/2,handle_size,handle_size);
+    // origine del master sempre verde: il master è l'unico stick senza genitore, quindi il
+    // colore si ricava qui a ogni paint invece di dipendere da chi ha ritoccato la maniglia
+    // per ultimo (merge/split/cambio master). setBrush/setZValue non fanno nulla se invariati
+    bool is_root = (data->parent == nullptr);
+    stick_handle[0]->setBrush(QBrush(is_root ? Qt::green : Qt::red));
+    stick_handle[0]->setZValue(is_root ? 101 : 100);
     if(this->selected){
         QColor c(Qt::yellow);
         c.setAlphaF(0.75);
@@ -743,7 +783,7 @@ QRectF StickGraphicsItem::ConstructBr()
         QRectF r = line_rect.normalized() | ScenePolygon().boundingRect();
         float m = data->pen.widthF() + handle_size;
         for(float w : data->vertex_widths)
-            m = qMax(m, w + handle_size);
+            m = qMax(m, 2*w + handle_size); // lo spigolo vivo arriva fino a 2 larghezze (tetto del miter in paint())
         return r.adjusted(-m, -m, m, m);
     }
     if((data->IsImageType() || data->stick_type == StickData::CIRCLE||data->stick_type ==StickData::RECT || data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::TAPER ) && data->my_line.length()>0)

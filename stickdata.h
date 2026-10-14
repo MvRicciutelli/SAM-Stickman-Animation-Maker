@@ -169,7 +169,11 @@ public:
 
     // ------- persistent fields (exactly what operator<</operator>> read and write) ------
 
-    qint32 version = 6;              ///< serialization format version of this record; 2 adds the
+    /// The newest record format this build reads AND writes; operator>> refuses anything above
+    /// it (RejectNewerVersion()), because a newer record's extra fields would be read as the
+    /// start of the next record and desync the whole stream.
+    static constexpr qint32 CURRENT_VERSION = 6;
+    qint32 version = CURRENT_VERSION; ///< serialization format version of this record; 2 adds the
                                      ///< IK fields below, 3 adds TEXT's text_v_stretch, 4 adds
                                      ///< brush_follows_stick, 5 adds texture_tiled, 6 adds
                                      ///< stroke_brush — all gated in operator<</operator>> so
@@ -384,6 +388,27 @@ public:
  * once the load is done.
  */
 extern QStringList missing_text_fonts;
+
+/**
+ * @brief Why the file being loaded was refused, in words for the user; empty when nothing was.
+ *
+ * The data layer cannot show a dialog, so a refusal travels the way missing_text_fonts does: the
+ * operators and loaders record it here and the UI layer that started the load reports it
+ * (MyView::ReportRejectedFile()). Every loader clears it before it reads, so a stale message can
+ * never fail a later, valid load. The first refusal wins.
+ */
+extern QString file_load_error;
+
+/**
+ * @brief Refuses a record or file whose format version is newer than this build understands.
+ * @param stream the stream being read; put into QDataStream::ReadCorruptData so every
+ *        status-checking loop downstream stops instead of parsing the rest as garbage.
+ * @param what the kind of record, for the message ("stick", "stickfigure", "animation").
+ * @param found the version read from the file.
+ * @param supported the newest version this build reads.
+ * @return true when @p found is newer (and file_load_error is set), false when it is readable.
+ */
+bool RejectNewerVersion(QDataStream &stream, const char *what, qint32 found, qint32 supported);
 
 /**
  * @brief Releases the load-time image pool's references.

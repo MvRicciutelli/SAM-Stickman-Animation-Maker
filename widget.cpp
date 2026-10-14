@@ -122,6 +122,7 @@ QDir my_stick_figures_folder;
 QDir my_video_export_folder;
 // -----------------
 QComboBox * fill_type_combo = nullptr;   ///< vedi uiItems.h: la costruisce BuildStyleCombos(), la disabilita UpdateSliders()
+QComboBox * convert_type_combo = nullptr; ///< vedi uiItems.h: riga "Convert to", spostata da UpdateTab()
 QComboBox * stroke_type_combo = nullptr; ///< idem, per il contorno
 QCheckBox * brush_follows_check = nullptr; ///< idem: l'ancoraggio della texture allo stick
 QCheckBox * texture_tiled_check = nullptr; ///< idem: la ripetizione della tile nel riempimento
@@ -384,6 +385,58 @@ Widget::Widget(QWidget *parent)
             ToggleIkChain(target);
             view->UpdateIkOverlay();
             if(target->view) target->view->Refresh(0);
+        });
+    }
+
+    // ---- riga "Convert to": un solo widget per tutti i pannelli avanzati, che ----------
+    // ---- Animation::UpdateTab() sposta in cima a quello del tipo selezionato ------------
+    {
+        QWidget *row = new QWidget();
+        QHBoxLayout *row_layout = new QHBoxLayout(row);
+        row_layout->setContentsMargins(0, 0, 0, 0);
+        row_layout->addWidget(new QLabel(tr("Convert to"), row));
+        convert_type_combo = new QComboBox(row);
+        convert_type_combo->addItem(tr("Line"), StickData::LINE);
+        convert_type_combo->addItem(tr("Circle"), StickData::CIRCLE);
+        convert_type_combo->addItem(tr("Rectangle"), StickData::RECT);
+        convert_type_combo->addItem(tr("Trapezoid"), StickData::TRAPEZOID);
+        convert_type_combo->addItem(tr("Taper"), StickData::TAPER);
+        convert_type_combo->addItem(tr("Polygon"), StickData::POLYGON);
+        convert_type_combo->addItem(tr("Multiline"), StickData::MULTILINE);
+        convert_type_combo->addItem(tr("Image"), StickData::IMAGE);
+        convert_type_combo->addItem(tr("Freehand"), StickData::FREEHAND);
+        convert_type_combo->addItem(tr("Text"), StickData::TEXT);
+        row_layout->addWidget(convert_type_combo, 1);
+        QPushButton *convert_btn = new QPushButton(tr("Convert"), row);
+        row_layout->addWidget(convert_btn);
+        connect(convert_btn, &QPushButton::clicked, this, [this]{
+            Frame *frame = view->my_animation->CurrentFrame();
+            if(frame->CurrentStickFigure() == nullptr || frame->CurrentStick() == nullptr)
+                return;
+            StickData *stick = frame->CurrentStick();
+            int type = convert_type_combo->currentData().toInt();
+            if(stick->stick_type == type)
+                return;
+            // ciò che il nuovo tipo deve ricevere dall'utente si chiede PRIMA: annullare
+            // non deve lasciare né uno stick convertito a metà né un passo di undo vuoto
+            QImage image;
+            QString image_name, text;
+            if(type == StickData::IMAGE){
+                QString file_name = QFileDialog::getOpenFileName(this, tr("Load Image"),
+                                    "C:/", tr("Images (*.png *.bmp *.jpg)"));
+                image = QImage(file_name);
+                if(image.isNull())
+                    return;
+                image_name = QFileInfo(file_name).fileName();
+            }
+            else if(type == StickData::TEXT){
+                bool confirmed = false;
+                text = QInputDialog::getMultiLineText(this, tr("Text stick"), tr("Text:"),
+                                                      QString(), &confirmed);
+                if(!confirmed || text.isEmpty())
+                    return;
+            }
+            view->ConvertStick(stick, type, image, image_name, text);
         });
     }
 

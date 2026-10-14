@@ -20,7 +20,8 @@ public:
      * one is NOT ignorable — it sits ahead of the data that needs it — so a v3 file does not
      * open in a build that predates it. v1 and v2 files still load here.
      */
-    qint32 version = 3;
+    static constexpr qint32 CURRENT_VERSION = 3; ///< newest file format this build reads; LoadAnimation() refuses a newer header
+    qint32 version = CURRENT_VERSION;
     QList<Frame*> frame_list;
     Frame *frame_buffer = nullptr;
     Frame * AddFrame(QListWidgetItem* item, int pos);
@@ -41,7 +42,21 @@ public:
     Frame *DeleteFrame(Frame* frame);
     Frame *SetupFrame(int pos);
     void SaveAnimation(QString file_name);
-    void LoadAnimation(QString name);
+    /**
+     * @brief Replaces the open animation with the contents of a .mAnim file — or leaves it
+     *        completely untouched when the file is refused.
+     * @param name path of the file.
+     * @return true when loaded. False means nothing at all was changed (frames, canvas size and
+     *         scene included) and file_load_error says why: the file could not be opened, was
+     *         saved by a newer version (the header's, or one of its stick/figure records — a
+     *         newer build can add a record field without touching the header), or held no
+     *         readable frame.
+     *
+     * The file is parsed into pure data FIRST and only applied once nothing was refused, which is
+     * what makes the refusal safe: ClearAnimation() used to run before the first byte was read,
+     * so a file that turned out unreadable had already destroyed the document.
+     */
+    bool LoadAnimation(QString name);
     void ClearAnimation();
     void UpdateSliders();
 
@@ -75,5 +90,5 @@ private:
 };
 Q_DECLARE_METATYPE(Animation*)
 QDataStream &operator<<(QDataStream& stream, const Animation& my_animation);
-QDataStream &operator>>(QDataStream& stream,Animation& my_animation);
+// niente operator>> : il caricamento passa da Animation::LoadAnimation(), che legge prima in dati puri
 #endif // ANIMATION_H

@@ -2,6 +2,7 @@
 #include "framepresenter.h"
 
 #include <QtAlgorithms>
+#include <QCoreApplication>
 #include <QDebug>
 #include <QFile>
 #include <QSet>
@@ -555,17 +556,6 @@ QDataStream & operator<< (QDataStream& stream, const StickFigure& my_stick_figur
     return stream;
 }
 
-/**
- * @details Wrapper kept for the .stck single-figure load path (LoadStickFigure): the
- * target is a live, on-scene figure, so the rebuilt sticks are attached and the icon
- * rendered — the behavior the legacy operator had with all flags clear.
- */
-QDataStream & operator>> (QDataStream& stream,StickFigure& my_stick_figure){
-    StickFigureData data;
-    stream >> data;
-    PopulateLiveStickFigure(&my_stick_figure, data, true, true);
-    return stream;
-}
 // salva sul percorso impostato i dati serializzati dello stickfigure usando il datastream
 void StickFigure::SaveStickFigure(QString name)
 {
@@ -761,20 +751,24 @@ StickData*  StickFigure::Chop(StickData* origin){
     return toAdd;
 }
 
-// attraverso il percorso file, carica un data stream su cui caricare i dati salvati
-// chiama il deserializzatore per stickfigures per interpretare lo stream
-void StickFigure::LoadStickFigure(QString name)
+StickFigureData *LoadStickFigureData(const QString &name)
 {
-
+    file_load_error.clear();
     QFile file(name);
-    if(!file.open(QIODevice::ReadOnly))
-        return;
-    QDataStream out(&file);
-    out >> *this;
-
+    if(!file.open(QIODevice::ReadOnly)){
+        file_load_error = QCoreApplication::translate("FileVersion", "The file could not be opened.");
+        return nullptr;
+    }
+    QDataStream in(&file);
+    StickFigureData *data = new StickFigureData();
+    in >> *data;
     file.close();
+    if(!file_load_error.isEmpty()){
+        delete data;
+        return nullptr;
+    }
     qDebug("load finished");
-
+    return data;
 }
 // rotates the whole stickfigure
 void StickFigure::RotateStickFigure(QPointF *coord, QList<StickGraphicsItem*> sticks, bool complete_rotation){
@@ -1359,10 +1353,9 @@ void StickFigure::Elongate(QPointF new_end_point, StickData* my_stick){
 void StickFigure::SetMaster(StickData* to_master){
     QList<StickData*> figli;
     QList<StickData*> figliastri;
-    if(master_stick->view){
-        master_stick->view->stick_handle[0]->setBrush(QBrush(Qt::red));
-        master_stick->view->stick_handle[0]->setZValue(100);
-    }
+    // la maniglia del vecchio master torna rossa solo a cambio avvenuto: farlo qui, prima
+    // del return anticipato più sotto, lasciava rosso il master che restava master
+    StickData *old_master = master_stick;
     //prima, considerando il master, vedi quanti sick nascono dal suo punto di origine (figliastri) e quanti nascono dal suo estremo libero (figli)
     for(StickData*s:stick_list){
         if(s->parent == master_stick && s->stepchild){
@@ -1385,6 +1378,10 @@ void StickFigure::SetMaster(StickData* to_master){
         SetStepChildAsMaster(to_master);
     else
         SetDirectChainAsMaster(to_master); // masterscelto fa parte dei vecchi stepchild
+    if(old_master != master_stick && old_master->view){
+        old_master->view->stick_handle[0]->setBrush(QBrush(Qt::red));
+        old_master->view->stick_handle[0]->setZValue(100);
+    }
     if(master_stick->view){
         master_stick->view->stick_handle[0]->setBrush(QBrush(Qt::green));
         master_stick->view->stick_handle[0]->setZValue(101);

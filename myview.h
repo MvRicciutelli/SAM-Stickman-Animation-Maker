@@ -8,6 +8,7 @@
 #include <QGraphicsItem>
 #include <QLineF>
 #include <QUndoStack>
+#include <QSet>
 #include <StickFigure.h>
 #include <animation.h>
 
@@ -455,6 +456,23 @@ public:
     QString GenerateInbetweens(int start_index, int count);
 
     /**
+     * @brief Turns a stick into another stick type, in place and as one undo step.
+     * @param stick the live stick to convert; nothing happens if it already has @p new_type.
+     * @param new_type the StickData::StickType to convert to.
+     * @param image IMAGE only: the picture the new image stick shows (the caller picks it).
+     * @param image_name IMAGE only: its display name in the image-variant list.
+     * @param text TEXT only: the paragraph the new text stick shows (the caller asks for it).
+     *
+     * Kept: my_line (start and end), the IK role and chain, the tree links, pen (colour,
+     * thickness, border brush) and brush. Lost, by design: whatever only the OLD type means —
+     * the vertices of a POLYGON/MULTILINE, the image(s) of an IMAGE/FREEHAND, the text of a
+     * TEXT, and the image-placement fields they share. The new type is then seeded the way
+     * DrawCmd() seeds a freshly drawn one; a FREEHAND enters draw mode on a blank canvas.
+     */
+    void ConvertStick(StickData *stick, int new_type, const QImage &image = QImage(),
+                      const QString &image_name = QString(), const QString &text = QString());
+
+    /**
      * @brief Converts a viewport point to scene coordinates, clamped to the canvas.
      * @param my_coord in/out: the point to clamp (kept within my_rect + a 10% margin).
      * @param starting_point raw viewport position from the mouse event.
@@ -479,18 +497,38 @@ public:
      *
      * StickData::operator>> does the substitution and fills `missing_text_fonts`
      * (stickdata.h) — it has no UI to prompt from. Every load entry point calls this
-     * when it's done: LoadLibrary() here, LoadAnimation()/LoadStickFigure() from their
+     * when it's done: LoadLibrary() here, LoadAnimation()/LoadStickFigureData() from their
      * callers in mymainwindow.cpp. No-op when nothing was missing.
      */
     void ReportMissingTextFonts();
 
     /**
+     * @brief The counterpart of ReportMissingTextFonts() for a load that was REFUSED: shows the
+     *        reason in an error box (file_load_error, stickdata.h) and clears it.
+     * @param file_name the file that was refused, named in the box.
+     *
+     * Also drops the load-time image pool and the missing-font list, which the refused read
+     * filled but ReportMissingTextFonts() — skipped on this path — would have drained: left
+     * behind, the pool would pin the refused file's images and a stale font list would show up
+     * in the next, unrelated load's prompt. Called by every load entry point when its loader
+     * says no (LoadLibrary() here; the .mAnim/.stck handlers in mymainwindow.cpp).
+     */
+    void ReportRejectedFile(const QString &file_name);
+
+    /**
      * @brief Loads a stick-figure library file into the buffer and its list widget.
-     * @param file_name .stck-style library file to read.
+     * @param file_name .marlib file to read.
      * @param mode 0 (default) rebuilds the widget entries; non-zero loads data only
      *        (legacy path, currently unused).
+     * @return true when loaded. False when the file could not be opened (silently) or was
+     *         refused for being saved by a newer version (reported to the user): in both cases
+     *         the open library — buffer and list — is left exactly as it was.
+     *
+     * A refused file is also remembered in refused_library_files so SaveLibrary() will not
+     * overwrite it: "Save current library" writes the buffer to the file of the SELECTED list
+     * row, and after a refusal that buffer is some other library's contents.
      */
-    void LoadLibrary(QString file_name, int mode = 0);
+    bool LoadLibrary(QString file_name, int mode = 0);
 
     /**
      * @brief Copies the current figure into the library as a data record.
@@ -616,6 +654,7 @@ public:
         UpdateSelectionDecorations(true);
     }
 
+    QSet<QString> refused_library_files; ///< absolute paths of .marlib files LoadLibrary() refused as too new this session; SaveLibrary() will not overwrite them
     QList<StickFigure*> multi_selection; ///< the selected figures (UI state; cleared on frame change/undo restore)
     QList<StickFigureData*> multi_copy_buffer; ///< copy buffer for a multi-selection (pure data)
     bool multi_widget_sync = false; ///< raised while THIS code drives the layer list's selection, so Widget's itemSelectionChanged handler can tell echo from user input
@@ -721,7 +760,9 @@ public:
 public slots:
     /**
      * @brief Writes the current library buffer to a file.
-     * @param file_name destination path.
+     * @param file_name destination path. Refused, with a warning, when it is a library this
+     *        session could not load for being too new (see LoadLibrary()): the buffer is not
+     *        that library's contents, and writing it would destroy the only copy.
      */
     void SaveLibrary(QString file_name);
 signals:

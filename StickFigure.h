@@ -67,7 +67,6 @@ public:
 
     void UpdateIcon();
     bool selecting_origin = false;
-    void LoadStickFigure(QString name);
     void Refresh(int mode = 0);
 
     void RotateStickFigure(QPointF *coord, QList<StickGraphicsItem*>sticks, bool complete_rotation);
@@ -109,14 +108,6 @@ Q_DECLARE_METATYPE(StickFigure*)
 QDataStream &operator<<(QDataStream& stream, const StickFigure& my_stick_figure);
 
 /**
- * @brief Streams data into a live figure, attaching it to the scene (.stck load path).
- * @param stream source stream.
- * @param my_stick_figure live figure to fill; must have a valid scene member.
- * @return the stream, for chaining.
- */
-QDataStream &operator>>(QDataStream& stream,StickFigure& my_stick_figure);
-
-/**
  * @brief Snapshots a live figure into a pure-data record (undo/copy/library source).
  * @param source_figure live figure to copy from.
  * @return new StickFigureData; caller takes ownership.
@@ -135,6 +126,20 @@ StickFigureData *ExtractStickFigureData(const StickFigure &source_figure);
  */
 void PopulateLiveStickFigure(StickFigure *target_figure, const StickFigureData &source_data,
                              bool attach_to_scene, bool update_icon);
+
+/**
+ * @brief Reads a native .stck file into a pure-data record, touching nothing live.
+ * @param name path of the file.
+ * @return the record (caller takes ownership), or nullptr when the file is refused —
+ *         file_load_error then says why: it could not be opened, or it (or one of its sticks)
+ *         was saved by a newer version than this build reads.
+ *
+ * Replaces StickFigure::LoadStickFigure(), which streamed into a layer the caller had already
+ * added (and snapshotted undo for): a refused file left an empty layer and a pointless undo step
+ * behind. Reading first lets the caller add the layer only once there is something to put in it,
+ * exactly as the foreign-format imports already do.
+ */
+StickFigureData *LoadStickFigureData(const QString &name);
 
 void MergeStickFigures(StickFigure* main_stick_figure, StickData* main_stick,StickFigure* to_join);
 void SplitStickFigures(StickFigure* split, StickData* origin,StickFigure* branch);

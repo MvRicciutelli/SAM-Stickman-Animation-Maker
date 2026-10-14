@@ -125,11 +125,13 @@ void MyMainWindow::on_actionsave_triggered()
  * @details Loads a figure into a fresh layer of the current frame: snapshots undo,
  * adds an empty figure (Widget::AddStick()), fills it from file, then registers its
  * sticks in the frame's total_sticks z-order list and shows their handles
- * (MyView::AddHandles()). Native .stck goes through StickFigure::LoadStickFigure();
+ * (MyView::AddHandles()). Native .stck goes through LoadStickFigureData();
  * Pivot .stk (both dialects, auto-detected) and Stick Nodes .nodes are converted by
  * StkFormat and land through the same PopulateLiveStickFigure() bridge the .stck
- * path uses. Foreign files are converted BEFORE any UI mutation, so a corrupt file
- * leaves the animation untouched; conversion warnings are shown once, joined.
+ * path uses. Every file is read or converted BEFORE any UI mutation, so a corrupt file —
+ * or a native one saved by a newer version than this build reads (reported by
+ * MyView::ReportRejectedFile()) — leaves the animation untouched; conversion warnings
+ * are shown once, joined.
  * A *.marlib is a different kind of file (a whole library, not one figure): it replaces
  * the open library buffer instead (MyView::LoadLibrary(), same as the Libraries tab's own
  * "Load library" button) and switches to the Libraries tab so the loaded entries are
@@ -174,9 +176,19 @@ void MyMainWindow::on_actionload_triggered()
             QMessageBox::information(this, tr("Import notes"), import_warnings.join("\n"));
         return;
     }
+    // il file si legge PRIMA di toccare animazione e undo, come per i formati stranieri qui
+    // sopra: un file rifiutato (aperto male, o salvato da una versione più nuova) non deve
+    // lasciare dietro un layer vuoto e un passo di undo inutile
+    StickFigureData *native_data = LoadStickFigureData(file_name);
+    if(!native_data){
+        view->ReportRejectedFile(file_name);
+        return;
+    }
     view->StoreUndo();
     central_w->AddStick();
-    view->my_animation->CurrentFrame()->CurrentStickFigure()->LoadStickFigure(file_name);
+    PopulateLiveStickFigure(view->my_animation->CurrentFrame()->CurrentStickFigure(),
+                            *native_data, true, true);
+    delete native_data;
     view->ReportMissingTextFonts(); // font dei text stick assenti su questa macchina
     for(StickData*s:view->my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
         view->my_animation->CurrentFrame()->total_sticks.append(s);
@@ -217,9 +229,16 @@ void MyMainWindow::on_actionload_animation_triggered()
     // la dialog non deve cancellare la cronologia undo o il path dell'animazione corrente
     if(QFile::exists(file_name)){
         view->ExitDrawMode(); // caricare ricostruisce tutto: chiudi il disegno per non lasciare draw_target penzolante
-        view->ClearUndo();
+        // il load è atomico: un file rifiutato (salvato da una versione più nuova, illeggibile)
+        // lascia intatti animazione, undo e animation_path. Quest'ultimo soprattutto: con il path
+        // già puntato al file rifiutato, autosave e "Save" lo sovrascriverebbero con
+        // l'animazione ancora aperta
+        if(!view->my_animation->LoadAnimation(file_name)){
+            view->ReportRejectedFile(file_name);
+            return;
+        }
         animation_path = file_name;
-        view->my_animation->LoadAnimation(file_name);
+        view->ClearUndo();
         view->ReportMissingTextFonts(); // font dei text stick assenti su questa macchina
         // Animation::operator>> gia' applica W/H/my_rect dal file caricato; se il file e'
         // corrotto puo' interrompersi lasciando frame_list vuota, quindi va controllata qui
