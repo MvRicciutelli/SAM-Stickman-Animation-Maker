@@ -39,20 +39,14 @@ ImageExport *exporter = nullptr;
 QString avi_export_folder;
 QStringList ffmpeg_options;
 /**
- * @details Builds the menu/window from the .ui file and launches a CheckUpdate worker
- * that pings the update site in the background; if a newer build exists it fires
- * UpdatePresent(). `view` and `central_w` are wired up by the startup code that creates
- * this window (see DoConnections()), not here.
+ * @details Builds the menu/window from the .ui file. `view` and `central_w` are wired up
+ * by the startup code that creates this window (see DoConnections()), not here.
  */
 MyMainWindow::MyMainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MyMainWindow)
 {
     ui->setupUi(this);
-    CheckUpdate* check = new CheckUpdate();
-    QObject::connect(check, &CheckUpdate::UpdatePresent,this, &MyMainWindow::UpdatePresent);
-    check->start();
-
 }
 
 
@@ -515,14 +509,6 @@ void MyMainWindow::AutoSave()
     on_actionsave_animation_current_triggered();
 }
 
-/**
- * @details Shown when the background CheckUpdate worker reports a newer build is
- * available (fired from the constructor's connection).
- */
-void MyMainWindow::UpdatePresent(QString ver)
-{
-    QMessageBox::about(this,"Old version Alert", "A newer version of this Software is available at Marionetta's website for download!");
-}
 // se questa funzione è stata chiamata per l'auto render avi, chiama una funzione che apra il processo
 // stessa cosa se originariamente l'esportazione delle immagini dovrà invece essere usata da ffmpeg
 /**

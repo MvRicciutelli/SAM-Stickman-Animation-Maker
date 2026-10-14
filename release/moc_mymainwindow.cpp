@@ -45,9 +45,10 @@ static constexpr auto qt_meta_stringdata_CLASSMyMainWindowENDCLASS = QtMocHelper
     "option_val",
     "StartFFMPEGRender",
     "options",
+    "StartMediaFoundationRender",
+    "file",
+    "fps",
     "AutoSave",
-    "UpdatePresent",
-    "ver",
     "ImageRenderOver",
     "option",
     "on_actionsave_triggered",
@@ -60,35 +61,40 @@ static constexpr auto qt_meta_stringdata_CLASSMyMainWindowENDCLASS = QtMocHelper
     "on_actionAnimation_Options_triggered",
     "on_actionExport_video_using_FFMPEG_triggered",
     "on_actionExport_as_image_sequence_triggered",
+    "on_actionExport_as_mp4_triggered",
     "on_actionAbout_triggered",
+    "on_actionAboutQt_triggered",
     "on_actionTerms_and_Conditions_triggered"
 );
 #else  // !QT_MOC_HAS_STRING_DATA
 struct qt_meta_stringdata_CLASSMyMainWindowENDCLASS_t {
-    uint offsetsAndSizes[46];
+    uint offsetsAndSizes[52];
     char stringdata0[13];
     char stringdata1[19];
     char stringdata2[1];
     char stringdata3[11];
     char stringdata4[18];
     char stringdata5[8];
-    char stringdata6[9];
-    char stringdata7[14];
+    char stringdata6[27];
+    char stringdata7[5];
     char stringdata8[4];
-    char stringdata9[16];
-    char stringdata10[7];
-    char stringdata11[24];
+    char stringdata9[9];
+    char stringdata10[16];
+    char stringdata11[7];
     char stringdata12[24];
-    char stringdata13[34];
+    char stringdata13[24];
     char stringdata14[34];
-    char stringdata15[38];
-    char stringdata16[42];
-    char stringdata17[39];
-    char stringdata18[37];
-    char stringdata19[45];
-    char stringdata20[44];
-    char stringdata21[25];
-    char stringdata22[40];
+    char stringdata15[34];
+    char stringdata16[38];
+    char stringdata17[42];
+    char stringdata18[39];
+    char stringdata19[37];
+    char stringdata20[45];
+    char stringdata21[44];
+    char stringdata22[33];
+    char stringdata23[25];
+    char stringdata24[27];
+    char stringdata25[40];
 };
 #define QT_MOC_LITERAL(ofs, len) \
     uint(sizeof(qt_meta_stringdata_CLASSMyMainWindowENDCLASS_t::offsetsAndSizes) + ofs), len 
@@ -100,23 +106,26 @@ Q_CONSTINIT static const qt_meta_stringdata_CLASSMyMainWindowENDCLASS_t qt_meta_
         QT_MOC_LITERAL(33, 10),  // "option_val"
         QT_MOC_LITERAL(44, 17),  // "StartFFMPEGRender"
         QT_MOC_LITERAL(62, 7),  // "options"
-        QT_MOC_LITERAL(70, 8),  // "AutoSave"
-        QT_MOC_LITERAL(79, 13),  // "UpdatePresent"
-        QT_MOC_LITERAL(93, 3),  // "ver"
-        QT_MOC_LITERAL(97, 15),  // "ImageRenderOver"
-        QT_MOC_LITERAL(113, 6),  // "option"
-        QT_MOC_LITERAL(120, 23),  // "on_actionsave_triggered"
-        QT_MOC_LITERAL(144, 23),  // "on_actionload_triggered"
-        QT_MOC_LITERAL(168, 33),  // "on_actionsave_animation_trigg..."
-        QT_MOC_LITERAL(202, 33),  // "on_actionload_animation_trigg..."
-        QT_MOC_LITERAL(236, 37),  // "on_actionexport_as_AVI_file_t..."
-        QT_MOC_LITERAL(274, 41),  // "on_actionsave_animation_curre..."
-        QT_MOC_LITERAL(316, 38),  // "on_actionNew_Blank_Animation_..."
-        QT_MOC_LITERAL(355, 36),  // "on_actionAnimation_Options_tr..."
-        QT_MOC_LITERAL(392, 44),  // "on_actionExport_video_using_F..."
-        QT_MOC_LITERAL(437, 43),  // "on_actionExport_as_image_sequ..."
-        QT_MOC_LITERAL(481, 24),  // "on_actionAbout_triggered"
-        QT_MOC_LITERAL(506, 39)   // "on_actionTerms_and_Conditions..."
+        QT_MOC_LITERAL(70, 26),  // "StartMediaFoundationRender"
+        QT_MOC_LITERAL(97, 4),  // "file"
+        QT_MOC_LITERAL(102, 3),  // "fps"
+        QT_MOC_LITERAL(106, 8),  // "AutoSave"
+        QT_MOC_LITERAL(115, 15),  // "ImageRenderOver"
+        QT_MOC_LITERAL(131, 6),  // "option"
+        QT_MOC_LITERAL(138, 23),  // "on_actionsave_triggered"
+        QT_MOC_LITERAL(162, 23),  // "on_actionload_triggered"
+        QT_MOC_LITERAL(186, 33),  // "on_actionsave_animation_trigg..."
+        QT_MOC_LITERAL(220, 33),  // "on_actionload_animation_trigg..."
+        QT_MOC_LITERAL(254, 37),  // "on_actionexport_as_AVI_file_t..."
+        QT_MOC_LITERAL(292, 41),  // "on_actionsave_animation_curre..."
+        QT_MOC_LITERAL(334, 38),  // "on_actionNew_Blank_Animation_..."
+        QT_MOC_LITERAL(373, 36),  // "on_actionAnimation_Options_tr..."
+        QT_MOC_LITERAL(410, 44),  // "on_actionExport_video_using_F..."
+        QT_MOC_LITERAL(455, 43),  // "on_actionExport_as_image_sequ..."
+        QT_MOC_LITERAL(499, 32),  // "on_actionExport_as_mp4_triggered"
+        QT_MOC_LITERAL(532, 24),  // "on_actionAbout_triggered"
+        QT_MOC_LITERAL(557, 26),  // "on_actionAboutQt_triggered"
+        QT_MOC_LITERAL(584, 39)   // "on_actionTerms_and_Conditions..."
     },
     "MyMainWindow",
     "GetAnimationParams",
@@ -124,9 +133,10 @@ Q_CONSTINIT static const qt_meta_stringdata_CLASSMyMainWindowENDCLASS_t qt_meta_
     "option_val",
     "StartFFMPEGRender",
     "options",
+    "StartMediaFoundationRender",
+    "file",
+    "fps",
     "AutoSave",
-    "UpdatePresent",
-    "ver",
     "ImageRenderOver",
     "option",
     "on_actionsave_triggered",
@@ -139,7 +149,9 @@ Q_CONSTINIT static const qt_meta_stringdata_CLASSMyMainWindowENDCLASS_t qt_meta_
     "on_actionAnimation_Options_triggered",
     "on_actionExport_video_using_FFMPEG_triggered",
     "on_actionExport_as_image_sequence_triggered",
+    "on_actionExport_as_mp4_triggered",
     "on_actionAbout_triggered",
+    "on_actionAboutQt_triggered",
     "on_actionTerms_and_Conditions_triggered"
 };
 #undef QT_MOC_LITERAL
@@ -152,7 +164,7 @@ Q_CONSTINIT static const uint qt_meta_data_CLASSMyMainWindowENDCLASS[] = {
       12,       // revision
        0,       // classname
        0,    0, // classinfo
-      17,   14, // methods
+      19,   14, // methods
        0,    0, // properties
        0,    0, // enums/sets
        0,    0, // constructors
@@ -160,30 +172,34 @@ Q_CONSTINIT static const uint qt_meta_data_CLASSMyMainWindowENDCLASS[] = {
        0,       // signalCount
 
  // slots: name, argc, parameters, tag, flags, initial metatype offsets
-       1,    1,  116,    2, 0x0a,    1 /* Public */,
-       4,    1,  119,    2, 0x0a,    3 /* Public */,
-       6,    0,  122,    2, 0x0a,    5 /* Public */,
-       7,    1,  123,    2, 0x0a,    6 /* Public */,
-       9,    1,  126,    2, 0x0a,    8 /* Public */,
-      11,    0,  129,    2, 0x08,   10 /* Private */,
-      12,    0,  130,    2, 0x08,   11 /* Private */,
-      13,    0,  131,    2, 0x08,   12 /* Private */,
-      14,    0,  132,    2, 0x08,   13 /* Private */,
-      15,    0,  133,    2, 0x08,   14 /* Private */,
-      16,    0,  134,    2, 0x08,   15 /* Private */,
-      17,    0,  135,    2, 0x08,   16 /* Private */,
-      18,    0,  136,    2, 0x08,   17 /* Private */,
-      19,    0,  137,    2, 0x08,   18 /* Private */,
-      20,    0,  138,    2, 0x08,   19 /* Private */,
-      21,    0,  139,    2, 0x08,   20 /* Private */,
-      22,    0,  140,    2, 0x08,   21 /* Private */,
+       1,    1,  128,    2, 0x0a,    1 /* Public */,
+       4,    1,  131,    2, 0x0a,    3 /* Public */,
+       6,    2,  134,    2, 0x0a,    5 /* Public */,
+       9,    0,  139,    2, 0x0a,    8 /* Public */,
+      10,    1,  140,    2, 0x0a,    9 /* Public */,
+      12,    0,  143,    2, 0x08,   11 /* Private */,
+      13,    0,  144,    2, 0x08,   12 /* Private */,
+      14,    0,  145,    2, 0x08,   13 /* Private */,
+      15,    0,  146,    2, 0x08,   14 /* Private */,
+      16,    0,  147,    2, 0x08,   15 /* Private */,
+      17,    0,  148,    2, 0x08,   16 /* Private */,
+      18,    0,  149,    2, 0x08,   17 /* Private */,
+      19,    0,  150,    2, 0x08,   18 /* Private */,
+      20,    0,  151,    2, 0x08,   19 /* Private */,
+      21,    0,  152,    2, 0x08,   20 /* Private */,
+      22,    0,  153,    2, 0x08,   21 /* Private */,
+      23,    0,  154,    2, 0x08,   22 /* Private */,
+      24,    0,  155,    2, 0x08,   23 /* Private */,
+      25,    0,  156,    2, 0x08,   24 /* Private */,
 
  // slots: parameters
     QMetaType::Void, QMetaType::Int,    3,
     QMetaType::Void, QMetaType::QStringList,    5,
+    QMetaType::Void, QMetaType::QString, QMetaType::Int,    7,    8,
     QMetaType::Void,
-    QMetaType::Void, QMetaType::QString,    8,
-    QMetaType::Void, QMetaType::Int,   10,
+    QMetaType::Void, QMetaType::Int,   11,
+    QMetaType::Void,
+    QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void,
@@ -215,11 +231,12 @@ Q_CONSTINIT const QMetaObject MyMainWindow::staticMetaObject = { {
         // method 'StartFFMPEGRender'
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
         QtPrivate::TypeAndForceComplete<QStringList, std::false_type>,
-        // method 'AutoSave'
-        QtPrivate::TypeAndForceComplete<void, std::false_type>,
-        // method 'UpdatePresent'
+        // method 'StartMediaFoundationRender'
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
         QtPrivate::TypeAndForceComplete<QString, std::false_type>,
+        QtPrivate::TypeAndForceComplete<int, std::false_type>,
+        // method 'AutoSave'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
         // method 'ImageRenderOver'
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
         QtPrivate::TypeAndForceComplete<int, std::false_type>,
@@ -243,7 +260,11 @@ Q_CONSTINIT const QMetaObject MyMainWindow::staticMetaObject = { {
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
         // method 'on_actionExport_as_image_sequence_triggered'
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'on_actionExport_as_mp4_triggered'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
         // method 'on_actionAbout_triggered'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'on_actionAboutQt_triggered'
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
         // method 'on_actionTerms_and_Conditions_triggered'
         QtPrivate::TypeAndForceComplete<void, std::false_type>
@@ -259,8 +280,8 @@ void MyMainWindow::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id
         switch (_id) {
         case 0: _t->GetAnimationParams((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
         case 1: _t->StartFFMPEGRender((*reinterpret_cast< std::add_pointer_t<QStringList>>(_a[1]))); break;
-        case 2: _t->AutoSave(); break;
-        case 3: _t->UpdatePresent((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1]))); break;
+        case 2: _t->StartMediaFoundationRender((*reinterpret_cast< std::add_pointer_t<QString>>(_a[1])),(*reinterpret_cast< std::add_pointer_t<int>>(_a[2]))); break;
+        case 3: _t->AutoSave(); break;
         case 4: _t->ImageRenderOver((*reinterpret_cast< std::add_pointer_t<int>>(_a[1]))); break;
         case 5: _t->on_actionsave_triggered(); break;
         case 6: _t->on_actionload_triggered(); break;
@@ -272,8 +293,10 @@ void MyMainWindow::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id
         case 12: _t->on_actionAnimation_Options_triggered(); break;
         case 13: _t->on_actionExport_video_using_FFMPEG_triggered(); break;
         case 14: _t->on_actionExport_as_image_sequence_triggered(); break;
-        case 15: _t->on_actionAbout_triggered(); break;
-        case 16: _t->on_actionTerms_and_Conditions_triggered(); break;
+        case 15: _t->on_actionExport_as_mp4_triggered(); break;
+        case 16: _t->on_actionAbout_triggered(); break;
+        case 17: _t->on_actionAboutQt_triggered(); break;
+        case 18: _t->on_actionTerms_and_Conditions_triggered(); break;
         default: ;
         }
     }
@@ -298,13 +321,13 @@ int MyMainWindow::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 17)
+        if (_id < 19)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 17;
+        _id -= 19;
     } else if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
-        if (_id < 17)
+        if (_id < 19)
             *reinterpret_cast<QMetaType *>(_a[0]) = QMetaType();
-        _id -= 17;
+        _id -= 19;
     }
     return _id;
 }

@@ -343,13 +343,13 @@ and "Serialization" sections describe the current, post-2c architecture.
 
 **Status: in progress (2026-07-12).** Class renames done: `myView` →
 `MyView`, `myMainWindow` → `MyMainWindow` (+ `.ui` `<class>` tag),
-`mySleeper` → `MySleeper`, `checkUpdate` → `CheckUpdate`, `imageExport` →
+`mySleeper` → `MySleeper`, `imageExport` →
 `ImageExport`, `ffmpegExport` → `FfmpegExport` (+ `.ui`), `animationOptions`
 → `AnimationOptions` (+ `.ui`), `advancedTab` → `AdvancedTab` (+ `.ui`),
 each with their own hand-written members renamed too (e.g.
-`updatePresent`→`UpdatePresent`, `centralW`→`central_w`,
+`centralW`→`central_w`,
 `advancedRectTab`→`advanced_rect_tab`). Confined so far to: `sleeper.*`,
-`checkupdate.*`, `imageexport.*`, `ffmpegexport.*`, `animationoptions.*`,
+`imageexport.*`, `ffmpegexport.*`, `animationoptions.*`,
 `advancedtab.*`, `mymainwindow.*`, `main.cpp`, plus the touched
 cross-references in `widget.cpp`/`animation.cpp`/`tests/*`. Verified via a
 real 64-bit MinGW build (`/c/Qt/Tools/mingw1120_64`, matching Qt 6.6.1's
@@ -618,7 +618,7 @@ scattered across six structural phases.
    counterpart, so it's a plain rename.
 4. Rename remaining old-style member variables and function names file by
    file. Suggested order: leaf/low-dependency files first
-   (`sleeper.cpp`/`checkupdate.cpp`/`imageexport.cpp`/`ffmpegexport.cpp`),
+   (`sleeper.cpp`/`imageexport.cpp`/`ffmpegexport.cpp`),
    then work up to the files most other code depends on
    (`animation.cpp`, `myview.cpp`, `widget.cpp`) last, so each step's blast
    radius is as small as possible.

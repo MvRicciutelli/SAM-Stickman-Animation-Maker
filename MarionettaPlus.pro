@@ -31,7 +31,6 @@ SOURCES += \
     animation.cpp \
     animationoptions.cpp \
     brushpicker.cpp \
-    checkupdate.cpp \
     ffmpegexport.cpp \
     frame.cpp \
     framedata.cpp \
@@ -61,7 +60,6 @@ HEADERS += \
     animation.h \
     animationoptions.h \
     brushpicker.h \
-    checkupdate.h \
     ffmpegexport.h \
     frame.h \
     framedata.h \
@@ -104,8 +102,7 @@ DISTFILES += \
     resources/Add_multiline_00003.png \
     resources/add_poly_00001.png \
     resources/add_poly_00002.png \
-    resources/add_poly_00003.png \
-    version.exe
+    resources/add_poly_00003.png
 # Media Foundation: encoder H.264 fornito da Windows, usato da mfvideo.cpp per l'mp4
 # senza ffmpeg (mfuuid porta i GUID MF_MT_*/MFVideoFormat_*)
 win32: LIBS += -lmfplat -lmfreadwrite -lmfuuid -lole32

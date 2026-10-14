@@ -5,7 +5,6 @@
 #include "myview.h"
 #include "widget.h"
 #include <QObject>
-#include <checkupdate.h>
 namespace Ui {
 class MyMainWindow;
 }
@@ -29,7 +28,7 @@ class MyMainWindow : public QMainWindow
 
 public:
     /**
-     * @brief Sets up the UI and starts the background update check.
+     * @brief Sets up the UI.
      * @param parent parent widget (Qt ownership).
      */
     explicit MyMainWindow(QWidget *parent = nullptr);
@@ -93,12 +92,6 @@ public slots:
      * @brief Autosave slot (bound to view->AutoSaveTrigger): saves to the current path.
      */
     void AutoSave();
-
-    /**
-     * @brief Shows the "newer version available" notice (bound to CheckUpdate).
-     * @param ver the available version string.
-     */
-    void UpdatePresent(QString ver);
 
     /**
      * @brief Called when the ImageExport thread finishes: frees it and dispatches to the

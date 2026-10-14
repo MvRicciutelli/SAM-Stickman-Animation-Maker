@@ -1344,6 +1344,19 @@ empty `QFontDatabase::families()` — anything font-dependent must skip
   to one tile would leave a fragment of outline. Not a limitation worth lifting
   unless someone actually wants a one-instance stroke.
 
+## Release installer
+
+`installer/build-installer.ps1` builds Release in a sibling `build-MarionettaPlus-installer`,
+stages `installer/out/app` (exe + `windeployqt` + LICENSE/NOTICE/LICENSES; `-SkipInstaller`
+stops there, a portable folder) and compiles `installer/MarionettaPlus.iss` with Inno Setup 6.
+Version = `VERSION` in the `.pro` — the About box's string is a separate copy and must be
+bumped by hand. The install is **per-user on purpose** (`PrivilegesRequired=lowest`): the
+app extracts `image2Avi.exe` next to its own exe at run time, which fails under Program Files.
+Bundled content is whatever sits in `installer/content/`, seeded into
+`Documents\MarionettaPlus\` with `onlyifdoesntexist` — a user's existing `defaultLib.marlib`
+is never replaced, so new stock figures for existing users belong in a separately named
+`.marlib`. FFmpeg is never bundled.
+
 ## Tooling
 
 - This project has `tokensave` initialized (`.tokensave/`). Use

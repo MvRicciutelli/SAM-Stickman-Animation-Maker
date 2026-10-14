@@ -15,3 +15,6 @@ ui_*.h
 # I testi di licenza devono stare nel repo: la regola *.txt sopra li escluderebbe,
 # e la LGPLv3 sezione 4(b) richiede che accompagnino il programma distribuito.
 !LICENSES/*.txt
+
+# build-installer.ps1 output
+installer/out/
