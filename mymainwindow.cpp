@@ -58,7 +58,7 @@ MyMainWindow::~MyMainWindow()
 /**
  * @details Saves the current figure alone to a file: native .stck
  * (StickFigure::SaveStickFigure()), Pivot .stk through StkFormat::ExportStk(), Stick Nodes
- * .nodes through StkFormat::ExportNodes(), or a self-contained *.marlib holding just this
+ * .nodes through StkFormat::ExportNodes(), or a self-contained *.samlib holding just this
  * one figure (MyView::SaveStickFigureAsLibrary(), so it can be dropped straight into
  * someone else's Libraries tab) — the selected filter (not the extension, which both Pivot
  * dialects share) picks the format. Export warnings about degraded features are shown once,
@@ -76,13 +76,13 @@ void MyMainWindow::on_actionsave_triggered()
     QString selected_filter;
     QString file_name = QFileDialog::getSaveFileName(this,tr("Save StickFigure"),
                        my_stick_figures_folder.path(),
-                       "Stickfigure (*.stck);;Pivot 5 figure (*.stk);;Pivot 2 figure - Stick Nodes compatible (*.stk);;Stick Nodes figure (*.nodes);;Marionetta Library (*.marlib)",
+                       "Stickfigure (*.stck);;Pivot 5 figure (*.stk);;Pivot 2 figure - Stick Nodes compatible (*.stk);;Stick Nodes figure (*.nodes);;SAM Library (*.samlib)",
                        &selected_filter);
     if(file_name.length()<=1 || !view->my_animation->CurrentFrame()->CurrentStickFigure())
         return;
-    if(selected_filter.contains("Marionetta Library")){
-        if(!file_name.endsWith(".marlib", Qt::CaseInsensitive))
-            file_name += ".marlib";
+    if(selected_filter.contains("SAM Library")){
+        if(!file_name.endsWith(".samlib", Qt::CaseInsensitive))
+            file_name += ".samlib";
         view->SaveStickFigureAsLibrary(file_name, view->my_animation->CurrentFrame()->CurrentStickFigure());
         return;
     }
@@ -126,7 +126,7 @@ void MyMainWindow::on_actionsave_triggered()
  * or a native one saved by a newer version than this build reads (reported by
  * MyView::ReportRejectedFile()) — leaves the animation untouched; conversion warnings
  * are shown once, joined.
- * A *.marlib is a different kind of file (a whole library, not one figure): it replaces
+ * A *.samlib is a different kind of file (a whole library, not one figure): it replaces
  * the open library buffer instead (MyView::LoadLibrary(), same as the Libraries tab's own
  * "Load library" button) and switches to the Libraries tab so the loaded entries are
  * immediately visible, rather than adding anything to the current frame.
@@ -136,11 +136,11 @@ void MyMainWindow::on_actionload_triggered()
 
     QString file_name = QFileDialog::getOpenFileName(this,tr("Load StickFigure"),
                        my_stick_figures_folder.path(),
-                       "Stickfigure (*.stck);;Pivot Animator figure (*.stk);;Stick Nodes figure (*.nodes);;Marionetta Library (*.marlib);;All files (*)");
+                       "Stickfigure (*.stck);;Pivot Animator figure (*.stk);;Stick Nodes figure (*.nodes);;SAM Library (*.samlib *.marlib);;All files (*)");
     if(!QFile::exists(file_name))
         return;
     QString suffix = QFileInfo(file_name).suffix().toLower();
-    if(suffix == "marlib"){
+    if(suffix == "samlib" || suffix == "marlib"){ // .marlib: estensione pre-rebrand, stesso formato
         view->LoadLibrary(file_name);
         my_tab_widget->setCurrentWidget(library_tab);
         return;
@@ -191,7 +191,7 @@ void MyMainWindow::on_actionload_triggered()
 }
 
 /**
- * @details "Save As" for the whole animation (*.mAnim, Animation::SaveAnimation()).
+ * @details "Save As" for the whole animation (*.sam, Animation::SaveAnimation()).
  * On success it records the path in the global `animation_path` (so later "Save" and
  * autosave target it) and resets op_count. See the inline note on why animation_path is
  * only written when the user actually confirms a file.
@@ -199,7 +199,7 @@ void MyMainWindow::on_actionload_triggered()
 void MyMainWindow::on_actionsave_animation_triggered()
 {
     QString file_name = QFileDialog::getSaveFileName(this,tr("Save Animation"),
-                       my_animations_folder.path(), "Marionetta Animation (*.mAnim)");
+                       my_animations_folder.path(), "SAM Animation (*.sam)");
     // animation_path va scritto solo qui dentro: se l'utente annulla la dialog, file_name e'
     // vuoto e non deve invalidare il path del file gia' aperto (rompe autosave e "Save")
     if(file_name.length()>1){
@@ -210,7 +210,7 @@ void MyMainWindow::on_actionsave_animation_triggered()
 }
 
 /**
- * @details Loads a whole .mAnim animation, replacing the current document: clears undo
+ * @details Loads a whole .sam animation, replacing the current document: clears undo
  * (stale frames must not be restorable onto the new document), records the path, then
  * shows frame 0. A corrupt file can leave frame_list empty, so that is checked before
  * MoveToFrame().
@@ -218,7 +218,7 @@ void MyMainWindow::on_actionsave_animation_triggered()
 void MyMainWindow::on_actionload_animation_triggered()
 {
     QString file_name = QFileDialog::getOpenFileName(this,tr("Load Animation"),
-                       my_animations_folder.path(), "Marionetta Animation (*.mAnim)");
+                       my_animations_folder.path(), "SAM Animation (*.sam *.mAnim)");
     // ClearUndo/animation_path vanno toccati solo se l'utente conferma un file valido: annullare
     // la dialog non deve cancellare la cronologia undo o il path dell'animazione corrente
     if(QFile::exists(file_name)){
@@ -293,7 +293,7 @@ void MyMainWindow::ExportAvi(){
                     <<QString::number(W)
                     <<QString::number(H)
                     <<QString::number(view->my_animation->frame_list.count());
-    // la path in cui si trova l'eseguibile di marionetta
+    // la path in cui si trova l'eseguibile di SAM
     QString exe_path = QCoreApplication::applicationDirPath();
     // estrai il file exporter di avi
     QFile::copy(":/image2Avi.exe",exe_path+"/image2Avi.exe");
@@ -639,8 +639,8 @@ void MyMainWindow::closeEvent(QCloseEvent *event)
  */
 void MyMainWindow::on_actionAbout_triggered()
 {
-    QMessageBox::about(this, "About MarionettaPlus",
-        "<b>MarionettaPlus 0.9.0</b><br>"
+    QMessageBox::about(this, "About SAM",
+        "<b>SAM - Stickman Animation Maker 0.9.0</b><br>"
         "Frame-by-frame stickfigure animation studio.<br><br>"
 
         "Draw and rig stick figures from segments, circles, tapers, polygons, text and "
@@ -667,10 +667,7 @@ void MyMainWindow::on_actionAbout_triggered()
         "and dynamically linked under the GNU Lesser General Public License version 3. "
         "Copies of the LGPLv3 and the GPLv3 it refers to are supplied in the LICENSES "
         "folder, and you may replace the Qt libraries with your own build of them. "
-        "Choose Help / About Qt to see the version in use.<br><br>"
-
-        "Website: https://sites.google.com/view/marionetta/home<br>"
-        "Facebook: https://www.facebook.com/Marionetta-StickFigure-Animation-Studio-2330682093680488"
+        "Choose Help / About Qt to see the version in use."
         );
 }
 

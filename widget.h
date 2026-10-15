@@ -102,14 +102,14 @@ public:
     Frame *SetUpFrame(int pos);
 
     /**
-     * @brief Ensures the per-user MarionettaPlus folders (documents root, libraries,
+     * @brief Ensures the per-user SAM folders (documents root, libraries,
      *        temp render, animations, stick figures, video export) exist, creating any
      *        that are missing.
      */
     void CreatePaths();
 
     /**
-     * @brief Rebuilds the library list widget from every *.marlib file found in the
+     * @brief Rebuilds the library list widget from every *.samlib file found in the
      *        libraries folder.
      */
     void DetectLibraries();

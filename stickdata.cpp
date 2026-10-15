@@ -17,7 +17,7 @@ bool RejectNewerVersion(QDataStream &stream, const char *what, qint32 found, qin
         return false;
     if (file_load_error.isEmpty())
         file_load_error = QCoreApplication::translate("FileVersion",
-            "This file was saved by a newer version of Marionetta (%1 format version %2; this "
+            "This file was saved by a newer version of SAM (%1 format version %2; this "
             "version reads up to %3). Update the program to open it.")
             .arg(QString::fromLatin1(what)).arg(found).arg(supported);
     stream.setStatus(QDataStream::ReadCorruptData);
@@ -626,7 +626,7 @@ void InterpolateStickData(StickData &target, const StickData &start, const Stick
 /**
  * @details Moved verbatim from StickFigure.cpp; this operator was already pure-data (no
  * flag guards) and is the single write path for undo snapshots, copy/paste, the library
- * and .mAnim/.stck files. The field order IS the on-disk format — never reorder it.
+ * and .sam/.stck files. The field order IS the on-disk format — never reorder it.
  * Image-family types append their extra block; IMAGE additionally streams every image
  * variant plus the index of the displayed one.
  */

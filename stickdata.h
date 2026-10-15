@@ -428,7 +428,7 @@ void ClearStickImagePool();
  * @brief File-wide table of distinct images, so a repeated one is written once.
  *
  * Without it every record inlines its own copy of its pixels: the same picture, texture
- * or brush tip is re-encoded once per stick PER FRAME, which is what made a .mAnim grow
+ * or brush tip is re-encoded once per stick PER FRAME, which is what made a .sam grow
  * to hundreds of megabytes. With a table installed the record writes a qint32 index into
  * @c images instead, and the container writes the table once.
  *

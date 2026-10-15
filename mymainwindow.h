@@ -16,7 +16,7 @@ class MyMainWindow;
  * MyMainWindow is the shell around the editor. Its `view` is the MyView canvas (the
  * document lives there, see myview.h) and `central_w` is the Widget with the toolbar
  * and side panels (widget.h). This class itself only adds the menu-bar actions —
- * save/load a single figure (*.stck) or a whole animation (*.mAnim), the New/Options
+ * save/load a single figure (*.stck) or a whole animation (*.sam), the New/Options
  * commands, and the three video/image export paths — plus the autosave and
  * close-with-unsaved-changes handling. The heavy lifting is delegated: model edits to
  * `view`/`view->my_animation`, rendering to the ImageExport thread, encoding to the

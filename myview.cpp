@@ -4698,7 +4698,7 @@ void MyView::SaveLibrary(QString file_name){
     // selezionata, quindi senza questo controllo distruggerebbe l'unica copia
     if(refused_library_files.contains(QFileInfo(file_name).absoluteFilePath())){
         QMessageBox::warning(this, tr("Library not saved"),
-                             tr("\"%1\" was saved by a newer version of Marionetta and could not be "
+                             tr("\"%1\" was saved by a newer version of SAM and could not be "
                                 "opened, so it will not be overwritten. Save to a different file "
                                 "name instead.").arg(QFileInfo(file_name).fileName()));
         return;
@@ -4712,7 +4712,7 @@ void MyView::SaveLibrary(QString file_name){
     file.close();
 }
 /**
- * @details Builds a throwaway one-figure FrameData (the same record type a *.marlib file
+ * @details Builds a throwaway one-figure FrameData (the same record type a *.samlib file
  * holds) and writes it out — the currently-open library buffer (stick_library_buffer) is
  * never touched, so this can't disturb whatever the Libraries tab has loaded.
  */

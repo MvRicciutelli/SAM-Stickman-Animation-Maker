@@ -1,7 +1,7 @@
-MarionettaPlus
+SAM - Stickman Animation Maker
 Copyright (C) 2026 Matteo Vittorio Ricciutelli. All rights reserved.
 
-MarionettaPlus is distributed free of charge under the PolyForm Strict
+SAM is distributed free of charge under the PolyForm Strict
 License 1.0.0, reproduced verbatim below, together with the additional
 permissions granted at the end of this file.
 
@@ -83,7 +83,7 @@ these permissions prevail.
 
 ## 1. Works you create with the program
 
-Using MarionettaPlus to create animations, images, videos or other works,
+Using SAM to create animations, images, videos or other works,
 and copying, publishing, distributing, selling or otherwise commercially
 exploiting those works, is use for a permitted purpose. Works you create
 with the program are yours; the license above governs the program itself,
@@ -91,7 +91,7 @@ not its output.
 
 ## 2. Qt and other LGPL-licensed components
 
-"The software" in the license above means only the MarionettaPlus source
+"The software" in the license above means only the SAM source
 code and executable authored by the copyright holder. It does not cover the
 Qt libraries, which are copyright The Qt Company Ltd. and are licensed
 separately under the GNU Lesser General Public License version 3. See
@@ -102,9 +102,9 @@ required by section 4 of the LGPLv3, you are expressly permitted to:
 
   a) modify, rebuild and replace the Qt libraries distributed with this
      program with your own versions of them;
-  b) relink or otherwise combine MarionettaPlus with those modified
+  b) relink or otherwise combine SAM with those modified
      libraries, and use the result; and
-  c) reverse engineer MarionettaPlus to the extent necessary to debug
+  c) reverse engineer SAM to the extent necessary to debug
      modifications made under (a) and (b).
 
 Nothing in the license above is intended to restrict, and shall not be read

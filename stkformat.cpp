@@ -546,7 +546,7 @@ bool IsFlatPaint(const QBrush &brush)
  * so the pattern/gradient/image fills have to be dropped on the way out. They are dropped
  * to something recognizable rather than to QBrush::color(), which for a gradient or a
  * texture brush is an unset default (black) and would turn every gradient-filled figure
- * into a black one. The native formats (.mAnim, .stck, .marlib) keep the real brush — see
+ * into a black one. The native formats (.sam, .stck, .samlib) keep the real brush — see
  * StickData::brush.
  *
  * ponytail: first stop / box-filter average. Both are approximations of "what colour is
@@ -1152,7 +1152,7 @@ double NormalizeDegrees(double degrees)
 /**
  * @brief Serializes one v403/b72 node record — every field of that build, in the
  *        exact stream order of §2.9, with neutral values for the features
- *        MarionettaPlus has no data for (no statics/stretch/curves/locks/gradients;
+ *        SAM has no data for (no statics/stretch/curves/locks/gradients;
  *        multipliers written as their NEUTRAL value, not 0, so a reader that applies
  *        them anyway cannot zero the figure out).
  */

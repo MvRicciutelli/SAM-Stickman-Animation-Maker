@@ -1,6 +1,6 @@
 # Foreign Stickfigure Formats — Implementation Manifest
 
-How MarionettaPlus imports and exports Pivot Animator `.stk` and Stick Nodes
+How SAM imports and exports Pivot Animator `.stk` and Stick Nodes
 `.nodes` stickfigures. All conversion code lives in `stkformat.h` / `stkformat.cpp`
 (pure model layer, no scene/widget dependency); the only UI entry points are the
 two file dialogs in `mymainwindow.cpp` (`on_actionload_triggered` /

@@ -64,10 +64,10 @@
 // Deve restare allineata al file LICENSE (PolyForm Strict 1.0.0 + i permessi aggiuntivi):
 // se le due divergono, il programma dichiara a schermo condizioni diverse da quelle sotto
 // cui e' distribuito. Il punto 5 non e' una cortesia ma un requisito della sezione 4 LGPLv3.
-QString license = "MarionettaPlus - License terms\r\n\
+QString license = "SAM - Stickman Animation Maker - License terms\r\n\
 Copyright (C) 2026 Matteo Vittorio Ricciutelli. All rights reserved.\r\n\
 \r\n\
-MarionettaPlus is distributed free of charge under the PolyForm Strict License\r\n\
+SAM is distributed free of charge under the PolyForm Strict License\r\n\
 1.0.0. The complete terms are in the LICENSE file supplied with the program;\r\n\
 the summary below is provided for convenience and does not replace them.\r\n\
 By accepting, you agree to the following.\r\n\
@@ -82,9 +82,7 @@ By accepting, you agree to the following.\r\n\
    including commercially. These terms govern the program, not its output.\r\n\
 \r\n\
 3. Redistribution. You may not redistribute the program - by upload, p2p, ftp,\r\n\
-   email or any other means - without the author's written authorization. You\r\n\
-   may freely share links to the official sources instead:\r\n\
-       https://sites.google.com/view/marionetta/home\r\n\
+   email or any other means - without the author's written authorization.\r\n\
    To request authorization to distribute, contact the author by email at\r\n\
    matteoricciutelli(at)mail.com.\r\n\
 \r\n\
@@ -953,11 +951,11 @@ Widget::Widget(QWidget *parent)
         }
     });
     //json read
-    if(!QFile::exists(lib_folder.path()+"/defaultLib.marlib")){
-        view->SaveLibrary(lib_folder.path()+"/defaultLib.marlib");
+    if(!QFile::exists(lib_folder.path()+"/defaultLib.samlib")){
+        view->SaveLibrary(lib_folder.path()+"/defaultLib.samlib");
     }
     else{
-        view->LoadLibrary(lib_folder.path()+"/defaultLib.marlib");
+        view->LoadLibrary(lib_folder.path()+"/defaultLib.samlib");
     }
     QString jsonConfigPath = program_folder.path()+"/config.json";
     if(!QFile::exists(jsonConfigPath)){
@@ -1109,54 +1107,54 @@ void Widget::CreateJson(QString path ){
  */
 void Widget::CreatePaths(){
     QString  path = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    program_folder = QDir(path+"/MarionettaPlus");
+    program_folder = QDir(path+"/SAM");
     if(program_folder.exists()){
         qDebug("folder located");
     }
     else{
         qDebug("folder created");
-        program_folder.mkpath(path+"/MarionettaPlus");
+        program_folder.mkpath(path+"/SAM");
     }
-    lib_folder = QDir(path+"/MarionettaPlus/Libraries");
+    lib_folder = QDir(path+"/SAM/Libraries");
     if(!lib_folder.exists()){
         qDebug("library folder created");
-        lib_folder.mkpath(path+"/MarionettaPlus/Libraries");
+        lib_folder.mkpath(path+"/SAM/Libraries");
     }
-    brush_folder = QDir(path+"/MarionettaPlus/Brushes");
+    brush_folder = QDir(path+"/SAM/Brushes");
     if(!brush_folder.exists()){
         qDebug("brush folder created");
-        brush_folder.mkpath(path+"/MarionettaPlus/Brushes");
+        brush_folder.mkpath(path+"/SAM/Brushes");
     }
-    pattern_folder = QDir(path+"/MarionettaPlus/myPatterns");
+    pattern_folder = QDir(path+"/SAM/myPatterns");
     if(!pattern_folder.exists()){
         qDebug("pattern folder created");
-        pattern_folder.mkpath(path+"/MarionettaPlus/myPatterns");
+        pattern_folder.mkpath(path+"/SAM/myPatterns");
     }
-    temp_render_folder = QDir(path+"/MarionettaPlus/temporaryRender");
+    temp_render_folder = QDir(path+"/SAM/temporaryRender");
     if(!temp_render_folder.exists()){
         qDebug("temporary render folder created");
-        temp_render_folder.mkpath(path+"/MarionettaPlus/temporaryRender");
+        temp_render_folder.mkpath(path+"/SAM/temporaryRender");
     }
-    my_animations_folder = QDir(path+"/MarionettaPlus/myAnimations");
+    my_animations_folder = QDir(path+"/SAM/myAnimations");
     if(!my_animations_folder.exists()){
         qDebug("my_animation folder created");
-        my_animations_folder.mkpath(path+"/MarionettaPlus/myAnimations");
+        my_animations_folder.mkpath(path+"/SAM/myAnimations");
     }
-    my_stick_figures_folder = QDir(path+"/MarionettaPlus/myStickFigures");
+    my_stick_figures_folder = QDir(path+"/SAM/myStickFigures");
     if(!my_stick_figures_folder.exists()){
         qDebug("Stickfigure folder created");
-        my_stick_figures_folder.mkpath(path+"/MarionettaPlus/myStickFigures");
+        my_stick_figures_folder.mkpath(path+"/SAM/myStickFigures");
     }
 
-    my_video_export_folder = QDir(path+"/MarionettaPlus/myExportedVideos");
+    my_video_export_folder = QDir(path+"/SAM/myExportedVideos");
     if(!my_video_export_folder.exists()){
         qDebug("Stickfigure folder created");
-        my_video_export_folder.mkpath(path+"/MarionettaPlus/myExportedVideos");
+        my_video_export_folder.mkpath(path+"/SAM/myExportedVideos");
     }
 }
 /**
  * @details Iterates every entry in the libraries folder and adds one list item per
- * *.marlib file found, storing its full path as the item's user-role data (read back by
+ * *.samlib file found, storing its full path as the item's user-role data (read back by
  * on_libraryList_currentRowChanged() and friends). Called at startup and after any
  * operation that adds/removes/renames a library file, since the list widget has no
  * other way to notice filesystem changes made outside the app.
@@ -1166,7 +1164,8 @@ void Widget::DetectLibraries(){
     while (dirIt.hasNext()) {
         dirIt.next();
         if (QFileInfo(dirIt.filePath()).isFile()){
-            if (QFileInfo(dirIt.filePath()).suffix() == "marlib"){
+            QString suffix = QFileInfo(dirIt.filePath()).suffix();
+            if (suffix == "samlib" || suffix == "marlib"){ // .marlib: estensione pre-rebrand, stesso formato
                 QListWidgetItem * item = new QListWidgetItem(my_library_list_widget);
                 QVariant newData(QVariant::fromValue(dirIt.filePath()));
                 item->setData(Qt::UserRole,newData);
@@ -1704,11 +1703,11 @@ void Widget::on_imgRotationSlider_sliderReleased()
 
 
 
-/// @details Saves the current (in-memory, not yet on disk) library buffer as a new *.marlib file, then refreshes the library file list to include it.
+/// @details Saves the current (in-memory, not yet on disk) library buffer as a new *.samlib file, then refreshes the library file list to include it.
 void Widget::on_saveLibraryBtn_clicked()
 {
-    QString file_name = QFileDialog::getSaveFileName(this,tr("save marionetta library"),
-                       lib_folder.path(),"Marionetta Library(*.marlib)");
+    QString file_name = QFileDialog::getSaveFileName(this,tr("save SAM library"),
+                       lib_folder.path(),"SAM Library(*.samlib)");
     if(file_name.length()>0){
         view->SaveLibrary(file_name);
         my_library_list_widget->clear();
@@ -1740,11 +1739,11 @@ void Widget::on_addItemToLibBtn_clicked()
     view->AddStickFigureToLibrary(name);
 }
 
-/// @details Replaces the current library buffer with the contents of the chosen *.marlib file.
+/// @details Replaces the current library buffer with the contents of the chosen *.samlib file.
 void Widget::on_loadLibraryBtn_clicked()
 {
-    QString file_name = QFileDialog::getOpenFileName(this,tr("load marionetta library"),
-                       lib_folder.path(),"Marionetta Library(*.marlib)");
+    QString file_name = QFileDialog::getOpenFileName(this,tr("load SAM library"),
+                       lib_folder.path(),"SAM Library(*.samlib *.marlib)");
     if(QFile::exists(file_name)){
         view->LoadLibrary(file_name);
     }
@@ -1830,7 +1829,7 @@ void Widget::on_currentLibrary_itemDoubleClicked(QListWidgetItem *item)
     item->setData(Qt::DisplayRole, text);
 }
 
-/// @details Re-saves the open library buffer back to the *.marlib file it was loaded from.
+/// @details Re-saves the open library buffer back to the *.samlib file it was loaded from.
 void Widget::on_saveCurrentLibraryBtn_clicked()
 {
     QString file_name = "";
@@ -2864,14 +2863,14 @@ void Widget::on_setMasterNodeBtn_clicked()
 
 /**
  * @details Saves the currently-open library first (so its in-progress edits aren't
- * lost), then creates a brand new, empty *.marlib file at the chosen path and switches
+ * lost), then creates a brand new, empty *.samlib file at the chosen path and switches
  * to it as the open library.
  */
 void Widget::on_createNewLibraryBtn_clicked()
 {
     on_saveCurrentLibraryBtn_clicked();
-    QString file_name = QFileDialog::getSaveFileName(this,tr("create a new marionetta library"),
-                       lib_folder.path(),"Marionetta Library(*.marlib)");
+    QString file_name = QFileDialog::getSaveFileName(this,tr("create a new SAM library"),
+                       lib_folder.path(),"SAM Library(*.samlib)");
     if(file_name.length()>0){
         view->ClearCurrentLib();
         view->SaveLibrary(file_name);
@@ -3210,7 +3209,7 @@ void Widget::on_moveStickDown_clicked()
 }
 
 /**
- * @details Confirms before deleting the *.marlib file itself; the list row is removed
+ * @details Confirms before deleting the *.samlib file itself; the list row is removed
  * either way (via the `removeLibraryGoto` label) whether the on-disk file existed and
  * was actually deleted or had already gone missing out from under the app.
  */

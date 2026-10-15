@@ -43,7 +43,7 @@ public:
     Frame *SetupFrame(int pos);
     void SaveAnimation(QString file_name);
     /**
-     * @brief Replaces the open animation with the contents of a .mAnim file — or leaves it
+     * @brief Replaces the open animation with the contents of a .sam file — or leaves it
      *        completely untouched when the file is refused.
      * @param name path of the file.
      * @return true when loaded. False means nothing at all was changed (frames, canvas size and

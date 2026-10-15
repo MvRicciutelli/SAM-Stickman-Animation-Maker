@@ -1,15 +1,15 @@
 <#
 .SYNOPSIS
-  Builds MarionettaPlus in Release, stages it with the Qt/MinGW runtime and compiles
-  the Inno Setup installer: installer\out\MarionettaPlus-<version>-setup.exe
+  Builds SAM - Stickman Animation Maker in Release, stages it with the Qt/MinGW runtime and compiles
+  the Inno Setup installer: installer\out\SAM-<version>-setup.exe
 
 .DESCRIPTION
   Bundled content = whatever sits in installer\content\ (Brushes, myPatterns,
-  Libraries, myStickFigures). The installer seeds it into Documents\MarionettaPlus\,
+  Libraries, myStickFigures). The installer seeds it into Documents\SAM\,
   the folder Widget::CreatePaths() reads, and never overwrites a file the user
   already has there. FFmpeg is NOT bundled (see NOTICE.md).
 
-  Version comes from VERSION in MarionettaPlus.pro.
+  Version comes from VERSION in SAM.pro.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File installer\build-installer.ps1
@@ -25,7 +25,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $root    = Split-Path $PSScriptRoot -Parent
-$build   = Join-Path (Split-Path $root -Parent) 'build-MarionettaPlus-installer'
+$build   = Join-Path (Split-Path $root -Parent) 'build-SAM-installer'
 $out     = Join-Path $PSScriptRoot 'out'
 $app     = Join-Path $out 'app'
 $content = Join-Path $PSScriptRoot 'content'
@@ -51,8 +51,8 @@ foreach ($tool in "$QtDir\bin\qmake.exe", "$QtDir\bin\windeployqt.exe", "$MinGWD
     if (-not (Test-Path $tool)) { throw "Not found: $tool (check -QtDir / -MinGWDir)" }
 }
 
-$version = (Select-String -Path "$root\MarionettaPlus.pro" -Pattern '^\s*VERSION\s*=\s*(\S+)').Matches[0].Groups[1].Value
-Write-Host "== MarionettaPlus $version"
+$version = (Select-String -Path "$root\SAM.pro" -Pattern '^\s*VERSION\s*=\s*(\S+)').Matches[0].Groups[1].Value
+Write-Host "== SAM - Stickman Animation Maker $version"
 
 # windeployqt trova il runtime MinGW tramite il g++ sul PATH
 $env:PATH = "$QtDir\bin;$MinGWDir\bin;$env:PATH"
@@ -61,7 +61,7 @@ Write-Host "== Building (Release) in $build"
 New-Item -ItemType Directory -Force $build | Out-Null
 Push-Location $build
 try {
-    Exec qmake "$root\MarionettaPlus.pro" -spec win32-g++
+    Exec qmake "$root\SAM.pro" -spec win32-g++
     Exec mingw32-make -f Makefile.Release "-j$env:NUMBER_OF_PROCESSORS"
 } finally {
     Pop-Location
@@ -70,11 +70,11 @@ try {
 Write-Host "== Staging $app"
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 New-Item -ItemType Directory -Force $app | Out-Null
-Copy-Item "$build\release\MarionettaPlus.exe" $app
+Copy-Item "$build\release\SAM.exe" $app
 # widgets-only, raster painting, no networking: the software GL rasterizer (20 MB), the
 # D3D compiler and the TLS/network plugins are dead weight
 Exec windeployqt --release --no-translations --no-opengl-sw --no-system-d3d-compiler `
-     --skip-plugin-types 'tls,networkinformation' "$app\MarionettaPlus.exe"
+     --skip-plugin-types 'tls,networkinformation' "$app\SAM.exe"
 # LGPLv3 4(b): the license texts must accompany the program (NOTICE.md)
 Copy-Item "$root\LICENSE", "$root\NOTICE.md" $app
 Copy-Item "$root\LICENSES" $app -Recurse
@@ -86,5 +86,5 @@ if ($SkipInstaller) {
 
 Write-Host "== Compiling installer"
 Exec $Iscc /Q "/DAppVersion=$version" "/DAppDir=$app" "/DContentDir=$content" `
-     "/DIconFile=$root\marionettaIcon_00001.ico" "/O$out" "$PSScriptRoot\MarionettaPlus.iss"
-Write-Host "== Done: $out\MarionettaPlus-$version-setup.exe"
+     "/DIconFile=$root\samIcon.ico" "/O$out" "$PSScriptRoot\SAM.iss"
+Write-Host "== Done: $out\SAM-$version-setup.exe"

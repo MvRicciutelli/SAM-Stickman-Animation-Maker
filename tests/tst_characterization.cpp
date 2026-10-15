@@ -2283,7 +2283,7 @@ private slots:
         QString frame_name = "keyframe A";
         view->my_animation->frame_list[frame_count - 1]->name = frame_name;
 
-        QString path = QDir::temp().filePath("marionetta_phase0_test.mAnim");
+        QString path = QDir::temp().filePath("sam_phase0_test.sam");
         view->my_animation->SaveAnimation(path);
 
         // replicates the load flow in mymainwindow.cpp: clear undo, load, land on frame 0
@@ -2321,7 +2321,7 @@ private slots:
 
         // save + reload the library file: this is the path where a missing placeholder int
         // used to desync the whole byte stream (see Frame's operator<< libFlag comment)
-        QString path = QDir::temp().filePath("marionetta_phase0_test.marlib");
+        QString path = QDir::temp().filePath("sam_phase0_test.samlib");
         view->SaveLibrary(path);
         view->LoadLibrary(path);
 
@@ -2344,7 +2344,7 @@ private slots:
     // Files saved by a NEWER build: every versioned record is refused, never misread.
     // A version above the supported one used to be taken for "the newest I know" and its extra
     // fields were read as the start of the next record, desyncing the stream. These pin that each
-    // loader (stick record, .stck, .mAnim, .marlib) refuses it, says why through file_load_error,
+    // loader (stick record, .stck, .sam, .samlib) refuses it, says why through file_load_error,
     // and — the part that keeps the program alive — leaves what is open untouched.
     // ------------------------------------------------------------------------------------
 
@@ -2380,7 +2380,7 @@ private slots:
         AddFrame();
         DrawStick(QPointF(120, 100), QPointF(120, 200));
         StickFigure *figure = CurrentStickFigure();
-        const QString path = QDir::temp().filePath("marionetta_newer_figure.stck");
+        const QString path = QDir::temp().filePath("sam_newer_figure.stck");
 
         figure->SaveStickFigure(path);
         StickFigureData *ok = LoadStickFigureData(path);
@@ -2403,7 +2403,7 @@ private slots:
         QVERIFY(!file_load_error.isEmpty());
 
         // an unreadable path is a refusal too, not a crash
-        QVERIFY(LoadStickFigureData(QDir::temp().filePath("marionetta_no_such_dir/x.stck")) == nullptr);
+        QVERIFY(LoadStickFigureData(QDir::temp().filePath("sam_no_such_dir/x.stck")) == nullptr);
         QVERIFY(!file_load_error.isEmpty());
 
         // and a refusal must not poison the next, valid load
@@ -2420,7 +2420,7 @@ private slots:
         AddFrame();
         DrawStick(QPointF(200, 100), QPointF(200, 220));
         Animation *animation = view->my_animation;
-        const QString path = QDir::temp().filePath("marionetta_newer_animation.mAnim");
+        const QString path = QDir::temp().filePath("sam_newer_animation.sam");
 
         const QList<Frame*> frames_before = animation->frame_list;
         Frame *current_before = animation->current_frame;
@@ -2453,7 +2453,7 @@ private slots:
         expect_untouched();
 
         // 3) not a file at all
-        QVERIFY(!animation->LoadAnimation(QDir::temp().filePath("marionetta_no_such_dir/x.mAnim")));
+        QVERIFY(!animation->LoadAnimation(QDir::temp().filePath("sam_no_such_dir/x.sam")));
         expect_untouched();
 
         // a refusal must not poison the next, valid load
@@ -2471,7 +2471,7 @@ private slots:
         AddFrame();
         DrawStick(QPointF(300, 100), QPointF(300, 200));
         QVERIFY(view->AddStickFigureToLibrary("keep me") != nullptr);
-        const QString path = QDir::temp().filePath("marionetta_newer_library.marlib");
+        const QString path = QDir::temp().filePath("sam_newer_library.samlib");
 
         // build a library file whose stick is newer, then put the buffer back to normal
         StickData *library_stick = stick_library_buffer->stick_figures.last()->stick_list[0];
@@ -2505,7 +2505,7 @@ private slots:
         after.close();
 
         // a file that loads fine lifts nothing but is itself unaffected by the refusal list
-        const QString good = QDir::temp().filePath("marionetta_good_library.marlib");
+        const QString good = QDir::temp().filePath("sam_good_library.samlib");
         view->SaveLibrary(good);
         QVERIFY(view->LoadLibrary(good));
         QVERIFY(file_load_error.isEmpty());
@@ -5056,7 +5056,7 @@ private slots:
         }
         QVERIFY(one_image_bytes > 20000); // se comprimesse, la misura sotto non direbbe nulla
 
-        const QString path = QDir::temp().filePath("marionetta_imagetable_test.mAnim");
+        const QString path = QDir::temp().filePath("sam_imagetable_test.sam");
         qint64 size_with_one = 0, size_with_five = 0;
         for(int frame = 0; frame < 5; frame++){
             AddFrame();

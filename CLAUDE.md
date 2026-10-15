@@ -1,8 +1,8 @@
-# MarionettaPlus
+# SAM - Stickman Animation Maker
 
 Qt5/C++ desktop app (qmake project) for drawing and frame-by-frame animating
 stick figures, with video export via ffmpeg. Windows/MinGW 6.6.1 Qt kit.
-Build directories (`build-MarionettaPlus-*-Debug/Release`) live as siblings
+Build directories (`build-SAM-*-Debug/Release`) live as siblings
 of this folder, not inside it (qmake shadow build).
 
 ## Data model
@@ -981,6 +981,10 @@ than tidy one up.
 
 ## Serialization
 
+`.sam` (animation) and `.samlib` (library) were `.mAnim`/`.marlib` before the rebrand from
+MarionettaPlus. Only the extension changed, not a byte of the format, so the open dialogs,
+File > Load StickFigure and `Widget::DetectLibraries()` accept both; saves write the new one.
+
 Since refactor Phase 1a/2a/2b/2c, every layer's persistent state lives in a
 `*Data` class with no scene/widget dependency, mirroring the live class it
 was extracted from:
@@ -1015,19 +1019,19 @@ row, shown by `Frame::UpdateLabel()`) travels through `Clone()`/
 `FrameData::operator<<` deliberately ignores it: the names are written as
 a trailer at the END of `Animation::operator<<` instead, gated on the new
 animation format `version = 2`. A trailer is ignorable, so every existing
-version-1 `.mAnim` (and every `.marlib`, which never carries names) still
+version-1 `.sam` (and every `.samlib`, which never carries names) still
 loads unchanged. `Animation::LoadAnimation()` resets `version` to the current
 format after reading, so re-saving an old file writes a complete current
 one rather than an old header with new content.
 
 ### Files from a newer version are refused, not misread
 
-Three versions are on the wire and each is checked: the `.mAnim` header
+Three versions are on the wire and each is checked: the `.sam` header
 (`Animation::CURRENT_VERSION`, 3), `StickFigureData::version` (1) and `StickData::version`
 (`StickData::CURRENT_VERSION`, 6). `FrameData` has none. **Raising a format means raising its
 `CURRENT_VERSION` constant** — the in-class default of `version` is that constant, so a writer
 and the reader's limit cannot drift apart. The stick record is the one that matters most: it
-went 2→6 while the file header stayed at 3, so a newer build's `.mAnim` can hold a too-new
+went 2→6 while the file header stayed at 3, so a newer build's `.sam` can hold a too-new
 stick under a perfectly supported header, discoverable only mid-stream.
 
 `RejectNewerVersion()` (`stickdata.h`) is called right after each `version` read. It puts the
@@ -1094,8 +1098,8 @@ border-brush tip, and by far the heaviest at ~900 KB encoded).
   `ClearStickImagePool()` — called from `MyView::ReportMissingTextFonts()`,
   *before* its early return, because that is already the "a load just
   finished" hook every load path calls (same convention as
-  `missing_text_fonts`). One choke point covers `.mAnim`, `.stck` and
-  `.marlib`.
+  `missing_text_fonts`). One choke point covers `.sam`, `.stck` and
+  `.samlib`.
 - **`operator<<` encoded an independent copy per record.** Fixed by
   `ImageTable` (`stickdata.h`) + animation format **`version = 3`**: the
   distinct images are written ONCE, ahead of the frames, and records write a
@@ -1106,7 +1110,7 @@ border-brush tip, and by far the heaviest at ~900 KB encoded).
 `InstallImageTable()` installs/removes the table and returns the previous
 one — **always restore it**, or a dangling table outlives its stack frame.
 With none installed, records inline their pixels exactly as before, which
-is what keeps `.stck`/`.marlib` byte-compatible; only `.mAnim` uses a table.
+is what keeps `.stck`/`.samlib` byte-compatible; only `.sam` uses a table.
 The write is **two passes** (frames into a scratch `QByteArray` first,
 filling the table as a side effect, then table + payload) because the table
 must be complete yet sit *before* the records that need it — a
@@ -1162,7 +1166,7 @@ from data that isn't there.
 
 The live classes (`StickFigure`, `Frame`) keep thin `operator<<`/
 `operator>>` wrappers (used only by the single-`.stck`-file and whole-
-`.mAnim`-file paths) that delegate to the data operators, plus explicit
+`.sam`-file paths) that delegate to the data operators, plus explicit
 **bridge functions** that replace what the old flag-guarded shared
 operators used to do implicitly:
 - `ExtractStickFigureData(figure)` / `PopulateLiveStickFigure(target, data,
@@ -1299,7 +1303,7 @@ empty `QFontDatabase::families()` — anything font-dependent must skip
 - Frame/layer list widgets have no native "grow bottom-to-top" mode in Qt;
   a scroll-to-latest-change behavior was proposed as a pragmatic
   alternative but never implemented.
-- `Animation::current_frame` is never persisted — loading a `.mAnim` file
+- `Animation::current_frame` is never persisted — loading a `.sam` file
   always lands on frame 0 regardless of which frame was current when it
   was saved. Flagged during the serialization audit; whether load should
   instead restore the saved current frame is an open design question, not
@@ -1346,16 +1350,16 @@ empty `QFontDatabase::families()` — anything font-dependent must skip
 
 ## Release installer
 
-`installer/build-installer.ps1` builds Release in a sibling `build-MarionettaPlus-installer`,
+`installer/build-installer.ps1` builds Release in a sibling `build-SAM-installer`,
 stages `installer/out/app` (exe + `windeployqt` + LICENSE/NOTICE/LICENSES; `-SkipInstaller`
-stops there, a portable folder) and compiles `installer/MarionettaPlus.iss` with Inno Setup 6.
+stops there, a portable folder) and compiles `installer/SAM.iss` with Inno Setup 6.
 Version = `VERSION` in the `.pro` — the About box's string is a separate copy and must be
 bumped by hand. The install is **per-user on purpose** (`PrivilegesRequired=lowest`): the
 app extracts `image2Avi.exe` next to its own exe at run time, which fails under Program Files.
 Bundled content is whatever sits in `installer/content/`, seeded into
-`Documents\MarionettaPlus\` with `onlyifdoesntexist` — a user's existing `defaultLib.marlib`
+`Documents\SAM\` with `onlyifdoesntexist` — a user's existing `defaultLib.samlib`
 is never replaced, so new stock figures for existing users belong in a separately named
-`.marlib`. FFmpeg is never bundled.
+`.samlib`. FFmpeg is never bundled.
 
 ## Tooling
 

@@ -44,7 +44,7 @@ public:
      * Carried by Clone()/ExtractFrameData()/PopulateLiveFrame() so undo, copy and paste
      * keep it, but deliberately NOT written by this class's operator<</operator>>: it is
      * persisted at the end of the animation file instead (Animation::operator<<, format
-     * version 2), which keeps every version-1 .mAnim/.marlib file loadable as-is.
+     * version 2), which keeps every version-1 .sam/.samlib file loadable as-is.
      */
     QString name;
 };

@@ -1,4 +1,4 @@
-# MarionettaPlus — Architecture Refactor Plan
+# SAM - Stickman Animation Maker — Architecture Refactor Plan
 
 **Read `CLAUDE.md` first.** It documents the *current* architecture and its
 known pain points (the flag-guard system, shared serialization operators,
@@ -153,7 +153,7 @@ Before renaming anything, check it isn't one of these:
   `connect(&obj, SIGNAL(foo()), &other, SLOT(bar()))` string form is not —
   it fails silently at runtime if a rename misses one string literal.
 - **Qt container/API surface itself** (`QList`, `QGraphicsItem`, etc.) is
-  obviously out of scope — this only concerns MarionettaPlus's own symbols.
+  obviously out of scope — this only concerns SAM's own symbols.
 
 ## Target shape (end state, conceptual)
 

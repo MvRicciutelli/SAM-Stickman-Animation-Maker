@@ -5654,7 +5654,7 @@ QPushButton:pressed{
              <item>
               <widget class="QLabel" name="label_2">
                <property name="text">
-                <string>Marionetta ©  2021 M.V.R.</string>
+                <string>SAM ©  2021 M.V.R.</string>
                </property>
               </widget>
              </item>

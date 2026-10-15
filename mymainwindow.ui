@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Marionetta V0.9.0</string>
+   <string>SAM - Stickman Animation Maker V0.9.0</string>
   </property>
   <property name="styleSheet">
    <string notr="true">/*

@@ -6,8 +6,8 @@ CONFIG += c++11
 
 VERSION = 0.9.0
 QMAKE_TARGET_COMPANY = "Matteo Vittorio Ricciutelli"
-QMAKE_TARGET_PRODUCT = "MarionettaPlus"
-QMAKE_TARGET_DESCRIPTION = "Stickfigure animation software"
+QMAKE_TARGET_PRODUCT = "SAM - Stickman Animation Maker"
+QMAKE_TARGET_DESCRIPTION = "SAM - Stickman Animation Maker"
 QMAKE_TARGET_COPYRIGHT = "Copyright (C) 2026 Matteo Vittorio Ricciutelli"
 
 # The following define makes your compiler emit warnings if you use
@@ -107,4 +107,4 @@ DISTFILES += \
 # senza ffmpeg (mfuuid porta i GUID MF_MT_*/MFVideoFormat_*)
 win32: LIBS += -lmfplat -lmfreadwrite -lmfuuid -lole32
 
-RC_ICONS = marionettaIcon_00001.ico
+RC_ICONS = samIcon.ico

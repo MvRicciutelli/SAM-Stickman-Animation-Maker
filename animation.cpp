@@ -555,7 +555,7 @@ QDataStream &operator<<(QDataStream& stream, const Animation& my_animation){
     return stream;
 }
 /**
- * @brief Everything an .mAnim file holds, read into pure data: no scene, no widget, no live frame.
+ * @brief Everything a .sam file holds, read into pure data: no scene, no widget, no live frame.
  * @details Parsing first and applying second is what lets LoadAnimation() refuse a file without
  * having changed anything. Owns its frames.
  */

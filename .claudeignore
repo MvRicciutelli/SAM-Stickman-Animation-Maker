@@ -1,7 +1,7 @@
 # Qt Creator per-machine project state — not source, and there are 5 stale
 # copies of this file from different machines/checkouts
-MarionettaPlus.pro.user
-MarionettaPlus.pro.user.*
+SAM.pro.user
+SAM.pro.user.*
 
 # Shadow build output, if ever created alongside the project instead of as a sibling
 build-*/

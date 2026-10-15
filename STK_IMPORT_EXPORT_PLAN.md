@@ -1,8 +1,8 @@
 # STK Import/Export Plan
 
 Goal: import Pivot Animator `.stk` and Stick Nodes `.nodes` stickfigure files into
-MarionettaPlus (converting them to `StickFigureData`/live `StickFigure`), and export
-MarionettaPlus stickfigures as `.stk` and `.nodes` (newest dialect only, §9.6).
+SAM (converting them to `StickFigureData`/live `StickFigure`), and export
+SAM stickfigures as `.stk` and `.nodes` (newest dialect only, §9.6).
 Conversion is **conservative and defensive**: any foreign feature with no local
 equivalent is ignored (or approximated by a plain stick) with a warning; any local
 feature with no foreign equivalent is exported as a plain stick with a warning.
@@ -298,7 +298,7 @@ figure).
 
 ---
 
-## 3. The local model (MarionettaPlus) — relevant recap
+## 3. The local model (SAM) — relevant recap
 
 - `StickFigureData` ([stickfiguredata.h](stickfiguredata.h)): `name`,
   `QList<StickData*> stick_list`, `master_stick`, `current_stick`.
@@ -542,7 +542,7 @@ namespace StkFormat {
     stream.
 - English Doxygen per project convention; `snake_case` locals, `UpperPascalCase`
   functions.
-- Add to `MarionettaPlus.pro` `SOURCES`/`HEADERS`, and to `tests/tests.pro` (it links
+- Add to `SAM.pro` `SOURCES`/`HEADERS`, and to `tests/tests.pro` (it links
   model sources directly).
 
 ### 6.2 UI integration ([mymainwindow.cpp](mymainwindow.cpp#L61-L90))
@@ -776,7 +776,7 @@ be a dialect).
   pattern.
 - **First pass degrades to**: rejected by the defensive rules (unknown variant).
 - **Full implementation**: investigation item only — obtain a sample, decide
-  whether a mapping even makes sense (MarionettaPlus has no text primitive; nearest
+  whether a mapping even makes sense (SAM has no text primitive; nearest
   approximations are an IMAGE stick with rasterized text, or plain refusal with a
   clearer message "this STK contains a Pivot text object"). Low priority; do the
   clearer-error-message part for free in the §4.0 sniffer if the signature is easy

@@ -97,7 +97,7 @@ void EmptyDirectory(QString path);
  * @brief Path of the ffmpeg executable the user pointed the app at.
  * @return that path when it still exists, otherwise an empty string.
  *
- * ffmpeg is not shipped with MarionettaPlus (see NOTICE.md) - it is the optional, advanced
+ * ffmpeg is not shipped with SAM (see NOTICE.md) - it is the optional, advanced
  * half of video export, located by the user through FfmpegExport's "Locate FFmpeg" button.
  * An empty return is not fatal: mp4 export goes through Windows' own encoder (mfvideo.h).
  */

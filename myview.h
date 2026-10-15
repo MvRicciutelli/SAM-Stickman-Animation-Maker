@@ -511,13 +511,13 @@ public:
      * filled but ReportMissingTextFonts() — skipped on this path — would have drained: left
      * behind, the pool would pin the refused file's images and a stale font list would show up
      * in the next, unrelated load's prompt. Called by every load entry point when its loader
-     * says no (LoadLibrary() here; the .mAnim/.stck handlers in mymainwindow.cpp).
+     * says no (LoadLibrary() here; the .sam/.stck handlers in mymainwindow.cpp).
      */
     void ReportRejectedFile(const QString &file_name);
 
     /**
      * @brief Loads a stick-figure library file into the buffer and its list widget.
-     * @param file_name .marlib file to read.
+     * @param file_name .samlib file to read.
      * @param mode 0 (default) rebuilds the widget entries; non-zero loads data only
      *        (legacy path, currently unused).
      * @return true when loaded. False when the file could not be opened (silently) or was
@@ -540,11 +540,11 @@ public:
     StickFigure *AddStickFigureToLibrary(const QString &name = QString());
 
     /**
-     * @brief Saves ONE figure as a new, self-contained *.marlib file (a FrameData holding
+     * @brief Saves ONE figure as a new, self-contained *.samlib file (a FrameData holding
      * just that figure) — independent of, and without touching, the currently-open library
-     * buffer (stick_library_buffer). Used by File > Save StickFigure's "Marionetta Library"
+     * buffer (stick_library_buffer). Used by File > Save StickFigure's "SAM Library"
      * filter, so a single figure can be handed off as a ready-to-load mini-library.
-     * @param file_name destination *.marlib path.
+     * @param file_name destination *.samlib path.
      * @param figure live figure to export; no-op if null or empty.
      */
     void SaveStickFigureAsLibrary(const QString &file_name, StickFigure *figure);
@@ -654,7 +654,7 @@ public:
         UpdateSelectionDecorations(true);
     }
 
-    QSet<QString> refused_library_files; ///< absolute paths of .marlib files LoadLibrary() refused as too new this session; SaveLibrary() will not overwrite them
+    QSet<QString> refused_library_files; ///< absolute paths of .samlib files LoadLibrary() refused as too new this session; SaveLibrary() will not overwrite them
     QList<StickFigure*> multi_selection; ///< the selected figures (UI state; cleared on frame change/undo restore)
     QList<StickFigureData*> multi_copy_buffer; ///< copy buffer for a multi-selection (pure data)
     bool multi_widget_sync = false; ///< raised while THIS code drives the layer list's selection, so Widget's itemSelectionChanged handler can tell echo from user input

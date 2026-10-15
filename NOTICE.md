@@ -1,6 +1,6 @@
 # Third-party notices
 
-MarionettaPlus itself is distributed under the PolyForm Strict License 1.0.0 —
+SAM itself is distributed under the PolyForm Strict License 1.0.0 —
 see [LICENSE](LICENSE). It is a proprietary (source-available, noncommercial)
 application, which the LGPLv3 expressly permits for a work that merely links
 against LGPL libraries. The notices below cover the third-party components it
@@ -8,7 +8,7 @@ is built with.
 
 ## Qt
 
-MarionettaPlus is built against **Qt 6.6.1** (`core`, `gui`, `widgets`), used
+SAM is built against **Qt 6.6.1** (`core`, `gui`, `widgets`), used
 under the **GNU Lesser General Public License v3** (LGPLv3). The full license
 text is included at [LICENSES/LGPLv3.txt](LICENSES/LGPLv3.txt), together with
 the [GPLv3](LICENSES/GPLv3.txt) it incorporates by reference — LGPLv3 §4(b)
@@ -29,8 +29,8 @@ requires both to accompany the combined work.
   execution), and **Help ▸ About Qt** shows Qt's own version and license
   information at runtime.
 - Users are expressly permitted to modify, rebuild and replace the Qt
-  libraries, to relink MarionettaPlus against their own build of them, and to
-  reverse engineer MarionettaPlus as far as needed to debug such changes —
+  libraries, to relink SAM against their own build of them, and to
+  reverse engineer SAM as far as needed to debug such changes —
   see "Additional permissions" in [LICENSE](LICENSE). LGPLv3 §4 requires that
   the application's own terms not restrict this, so that grant is a
   compliance requirement rather than a courtesy.
@@ -50,12 +50,12 @@ a source-distribution requirement on this project.
 FFmpeg is **not bundled**, and no FFmpeg code or binary is distributed with this
 project. It is the optional, advanced half of video export: the user points the app
 at their own installation through the export dialog's "Locate FFmpeg" button, and
-MarionettaPlus then runs that executable as a **subprocess** — it links no FFmpeg
+SAM then runs that executable as a **subprocess** — it links no FFmpeg
 code and shares no address space with it, so FFmpeg's licence attaches to the user's
 own executable alone and never to this project.
 
 MP4 export does not involve FFmpeg at all (see "Windows Media Foundation" below), so
-a MarionettaPlus install with no FFmpeg anywhere on the system still exports video.
+a SAM install with no FFmpeg anywhere on the system still exports video.
 The wmv, avi and gif formats are FFmpeg's, and are disabled until one is located.
 
 Should a build ever be shipped alongside the application, it would have to be an
