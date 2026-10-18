@@ -191,9 +191,11 @@ private slots:
 
     void on_zoomInBtn_clicked();
 
-    void on_zoomOutBtn_clicked();
-
     void on_resetZoomBtn_clicked();
+
+    void on_rotateViewBtn_clicked();
+
+    void on_panViewBtn_clicked();
 
     void on_drawImageBtn_clicked();
 

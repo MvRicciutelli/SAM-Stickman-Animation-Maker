@@ -172,12 +172,14 @@ public:
     /// The newest record format this build reads AND writes; operator>> refuses anything above
     /// it (RejectNewerVersion()), because a newer record's extra fields would be read as the
     /// start of the next record and desync the whole stream.
-    static constexpr qint32 CURRENT_VERSION = 6;
+    static constexpr qint32 CURRENT_VERSION = 8;
     qint32 version = CURRENT_VERSION; ///< serialization format version of this record; 2 adds the
                                      ///< IK fields below, 3 adds TEXT's text_v_stretch, 4 adds
                                      ///< brush_follows_stick, 5 adds texture_tiled, 6 adds
-                                     ///< stroke_brush — all gated in operator<</operator>> so
-                                     ///< files saved before those fields existed still load
+                                     ///< stroke_brush, 7 adds MULTILINE's vertex_parents, 8 its
+                                     ///< vertex_caps — all gated in operator<</operator>> so files saved before
+                                     ///< those fields existed still load (and operator>> then
+                                     ///< raises the record to CURRENT_VERSION)
     qint32 stick_type = StickType::LINE;///< StickType value; drives painting and serialization
     /**
      * @brief True only for the invisible bridge stick MergeStickFigures() creates to
@@ -289,6 +291,51 @@ public:
      *        MULTILINE the two endpoint entries exist but have no corner to smooth.
      */
     QList<float> vertex_curvatures;
+
+    /**
+     * @brief MULTILINE only: the vertex each virtual vertex hangs from (P1 = -1), which is
+     *        what lets the path branch. Edges are (parent, child); the main line is P2's
+     *        ancestry back to P1. Empty for a plain chain — always read it through
+     *        MultilineParents(), which also falls back to the chain for an invalid list.
+     *        Serialized only from record version 7 on.
+     */
+    QList<qint32> vertex_parents;
+
+    /// How a MULTILINE vertex is drawn: as a corner it is pointed (miter, falling back to a
+    /// bevel past QPen's miter limit), rounded or cut off flat; as an end it is round for
+    /// CAP_ROUND and flat otherwise.
+    enum VertexCap { CAP_SHARP = 0, CAP_ROUND = 1, CAP_BEVEL = 2 };
+
+    /**
+     * @brief MULTILINE only: VertexCap of each virtual vertex. Read it through
+     *        MultilineCaps(); empty (older records) means the historical look. Serialized
+     *        only from record version 8 on.
+     */
+    QList<qint32> vertex_caps;
+
+    /**
+     * @brief The MULTILINE's VertexCap per virtual vertex: vertex_caps when it matches the
+     *        current vertex count, otherwise the historical look — sharp corners, round
+     *        branch origins, and ends following the pen's cap style.
+     */
+    QList<qint32> MultilineCaps() const;
+
+    /**
+     * @brief The MULTILINE's vertex tree as a full parent list (one entry per virtual
+     *        vertex, P1 = -1): vertex_parents when it is a valid tree over the current
+     *        vertex count, the plain chain (i-1) otherwise.
+     */
+    QList<qint32> MultilineParents() const;
+
+    /**
+     * @brief Re-roots a parent-list tree at @p new_root by flipping the parent pointers on
+     *        the path from it to the old root. Only edge directions change, never which
+     *        vertices are connected.
+     * @param parents a valid tree (see MultilineParents()).
+     * @param new_root index of the vertex that becomes the root.
+     * @return the re-rooted parent list.
+     */
+    static QList<qint32> ReRootTree(QList<qint32> parents, int new_root);
 
     // ------- TEXT only. Placement reuses the IMAGE fields (img_offset for the h/v -----
     // ------- offset, img_angle_offset for the extra rotation), so the offset panel ----

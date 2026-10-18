@@ -134,6 +134,86 @@ fills the inner overlap that rule produces (odd-even left a hole). A miter merel
 to the limit is wrong: it bends both edges toward the tip and thins both segments.
 `MultilineSharpTurnKeepsAFullWidthBand` pins it by rendering.
 
+### MULTILINE branches
+
+A MULTILINE is a **tree** of vertices, not only a chain: `StickData::vertex_parents` (record
+`version >= 7`) holds each virtual vertex's parent (P1 = -1), an edge is `(parent, child)`, and
+the main line is P2's ancestry back to P1 — so P1/P2, rotation and scaling are untouched. It is
+empty for a plain chain, and **every reader goes through `MultilineParents()`**, which returns
+the stored list only if it is a valid tree over the CURRENT vertex count and the chain `i-1`
+otherwise. That one guard is what keeps a corrupt file, or any code that edits `polygon_points`
+without the parents (imports, `ConvertStick()`), from ever handing a cycle to a tree walk. Fetch
+it BEFORE changing `polygon_points`, since it validates against the count.
+
+Branch vertices are always inserted at the END of the interior (just before P2), so only P2
+shifts: a branch tip the drawing session keeps extending stays valid across appends
+(`BranchMultilineVertex()`). `AddPolygonPoint()` splits the edge INTO its index.
+
+**`DeletePolygonPoint()` takes every branch growing out of the vertex along**, as specified:
+the rest of its own branch, every branch it is the origin of, and their branches in turn. A
+vertex `u` goes if the first main-line vertex above it is the deleted one. Only the main line
+closes up: its child on the main line reattaches to a hub, which is its parent, or for P1 that
+child itself. When an endpoint would collapse onto the other one (a one-edge main line with
+branches), that end goes to the highest remaining index. When fewer than 2 vertices would be
+left, it refuses and changes nothing, and `MyView::DeleteVertex()` deletes the whole stick.
+That helper is the one rule behind Alt+click (in AND out of a drawing session) and the Delete
+key. The key first removes every Ctrl-selected vertex in the frame, as one undo step
+(`DeleteSelectedVertices()`), and only falls back to deleting sticks when none is selected.
+Alt+click used to be handled only outside a session. Since a plain handle click reopens one,
+it looked simply broken. `StickData::ReRootTree()` re-roots after a deletion, and after a
+master change reverses the array (`ReanchorVertexScenePositions()`).
+
+`paint()` splits the tree into polylines (`next[v]` follows the main line, any other child opens
+a branch) and runs the outline code above per polyline. **A branch starts flat AT its junction,
+and the junction is round by default, so its disc is the join.** The first cut started a branch
+at the midpoint of the junction's incoming edge, to get a miter at the fork. That carried the
+incoming edge past the junction, and wherever the main line does not continue straight (a
+corner, an endpoint) a branch turning back by more than 90° stuck out as a spike. A flat start
+plus a disc stays inside the junction's radius at every angle. All bands and discs go into ONE
+`QPainterPath` filled once with `WindingFill`. Every band has the same orientation, so overlaps
+add up instead of cancelling, and a semi-transparent line does not darken at a fork. The discs
+go in **reversed**: `addEllipse()` runs clockwise and the bands counter-clockwise, so an
+unreversed disc cancels to a hole.
+
+**Per-vertex caps: `StickData::vertex_caps`** (record `version >= 8`), a `VertexCap` per virtual
+vertex. `CAP_SHARP` gives a corner a miter, falling back to a bevel past QPen's miter limit as
+before, and an end a flat stop. `CAP_BEVEL` always uses the bevel construction. `CAP_ROUND` uses
+the bevel construction plus a disc, which on an end is a round cap. Read the list through
+`MultilineCaps()`. It returns the historical look when the list is missing or the wrong size:
+sharp corners, round branch origins, and ends following `pen.capStyle()`. Old lines therefore
+render unchanged, and that is also why the separately drawn RoundCap ellipses are gone. They were
+the historical ends, and now they are discs in the same path, so no double alpha. Every vertex
+operation keeps the list parallel, exactly like widths and curvatures:
+- `AppendMultilineVertex(pt, cap)` takes the new end's cap; the old end keeps its own.
+- **`BranchMultilineVertex()` forces `CAP_ROUND` on the new vertex AND on the one it hangs
+  from** (spec: no spikes at forks).
+- A split vertex copies the cap of the edge it lands on.
+- Deletions and the master-change reversal permute the list.
+
+Read it, like the parents, before touching `polygon_points`. The panel's "Vertex cap" combo
+(inside `vertex_width_row`, which now holds the two MULTILINE-only rows) calls
+`MyView::SetVertexCap()`. That sets `my_vertex_cap` for the next vertices drawn and, as one undo
+step, the cap of the Ctrl-selected vertices. Like the width and curvature sliders, the combo
+does not echo a selected vertex's own cap.
+
+The DRAWMULTI tool: mid-session, a click within `PolyPickRadius()` of a handle only picks
+`poly_branch_from`, with no data change and no undo step. The next clicks grow the branch, and
+the P2 handle goes back to the main line. On a finished line, a handle press defers its
+`StoreUndo()` to the first move past `QApplication::startDragDistance()`. A release with no drag
+reopens the session (`poly_session_resumed`) from that vertex, so a plain click leaves no empty
+undo step. In a resumed session Esc only ends it; in a fresh one Esc still deletes the stick.
+The `.stk` exporter emits edges parent-first (BFS) and hangs each from its parent vertex's joint.
+`.nodes` keeps index order, so P2's node stays `last_node_of`, and references the parent vertex's
+node (forward references are fine, since the tree is written from children lists).
+
+`DrawBranchedMultilineViaRealMouseEvents` (real clicks, plus a render probe through the fake
+tip→P2 edge a flat-chain render would draw), `MultilineBranchJoinHasNoSpike` (the spike
+geometry, rendered semi-transparent: no spike, no hole, no double alpha at the fork),
+`MultilineBranchTopologyEdits`, `DeleteMultilineVerticesWithAltAndDeleteKey`,
+`MultilineVertexCapsRender` (each cap's corner and end, rendered), `MultilineVertexCapDrawingAndSelection`, the branch in
+`ChangeMasterKeepsMultilineShape` and the branched half of `StkAndNodesExportMultilineChain`
+pin it. Each was checked to fail with its piece neutralized.
+
 ### Converting a stick's type
 
 `MyView::ConvertStick()` turns any stick type into any other, in place, as one
@@ -152,6 +232,35 @@ The UI is a single "Convert to" row (combo + button; `convert_type_combo` in `ui
 its parent is the row). A widget has one parent, so `Animation::UpdateTab()` moves that row
 to the top of the first advanced panel of whatever type it is showing, and preselects that
 type.
+
+### View navigation: zoom view, rotate view, pan view, reset
+
+`ZOOMVIEW` (the `zoomInBtn`, now a drag tool: right/up zooms in, left/down out, 200 px = x2,
+Shift snaps the absolute level to 10% steps; the zoom-out button is gone) and
+`ROTATEVIEW`/`PANVIEW` change only the `QGraphicsView`
+transform and scroll position. No `StoreUndo()`, no figure moves, and nothing a render reads:
+icons, onion skins and `ImageExport` all build their own scene, and the preview's resolution
+comes from `sqrt(|det|)`, which ignores rotation. Do not confuse them with `ROTATESCENE`/`MOVESCENE`,
+which move every figure in the frame. Rotation and zoom pivot on the **canvas centre**, which
+stays at the screen spot it had at the press (`TurnAndZoomView()`). QGraphicsView itself only
+anchors on the viewport centre, so the canvas is scrolled back after each step. The target is
+that latched spot, never the previous step's position. The first cut re-centred through
+`centerOn()` every move, and since it truncates, the canvas crept ~½ px per event: "it scales
+and moves at the same time". Shift snaps the **absolute** angle (`ViewAngle()`, read back from
+the transform) to 15° steps. Pan scrolls the
+bars by the exact pixel delta, as `ScrollHandDrag` does. Re-mapping a centre through the
+transform on every move drifted.
+
+**Why `UnlockViewNavigation()` exists:** whenever the scene rect fits the viewport, QGraphicsView
+centres it itself. That swallowed a pan entirely and made a rotation pivot on the canvas instead
+of the screen. Each drag press therefore sets the **view's** own `sceneRect` (never the scene's)
+to the scene rect plus a few viewport diagonals around the current centre. The zoom calls it
+on EVERY move, not just the press, since zooming out shrinks that room back to fitting.
+`ViewZoom()` is `sqrt(|det|)` (rotation-proof), and the tool keeps the global `zoom_lvl` in step
+for the middle-drag zoom. `ResetView()`
+(the reset-zoom button) clears it with `setSceneRect(QRectF())` together with the zoom and the
+rotation. `ViewRotateAndPanLeaveTheDocumentUntouched` pins all of it, and was checked to fail
+with the unlock removed from either press.
 
 ### Fill and stroke: pattern, gradient, image
 
@@ -1028,11 +1137,18 @@ one rather than an old header with new content.
 
 Three versions are on the wire and each is checked: the `.sam` header
 (`Animation::CURRENT_VERSION`, 3), `StickFigureData::version` (1) and `StickData::version`
-(`StickData::CURRENT_VERSION`, 6). `FrameData` has none. **Raising a format means raising its
+(`StickData::CURRENT_VERSION`, 8). `FrameData` has none. **Raising a format means raising its
 `CURRENT_VERSION` constant** — the in-class default of `version` is that constant, so a writer
 and the reader's limit cannot drift apart. The stick record is the one that matters most: it
-went 2→6 while the file header stayed at 3, so a newer build's `.sam` can hold a too-new
+went 2→8 while the file header stayed at 3, so a newer build's `.sam` can hold a too-new
 stick under a perfectly supported header, discoverable only mid-stream.
+
+**A stick record read from an older version is raised to `CURRENT_VERSION` at the end of
+`operator>>`.** `operator<<` gates every newer field on the record's own `version`, and
+`CopyFrom()` copies it, so a record used to keep the version it was read with forever: a stick
+from an old file that was then branched, tiled or given a brush border silently dropped that
+on the next save. Once read, the fields the old file lacked hold their defaults, i.e. the record
+IS a complete current one — the same reasoning `Animation::LoadAnimation()` applies to the header.
 
 `RejectNewerVersion()` (`stickdata.h`) is called right after each `version` read. It puts the
 stream into `ReadCorruptData` — every loop that already bails on `status() != Ok` then stops
@@ -1235,8 +1351,8 @@ before it is displayed must therefore null-check `linked_item` —
 ## Tests
 
 `tests/tests.pro` is a standalone qmake QtTest project (characterization
-suite, REFACTOR_PLAN.md Phase 0, 120 tests as of the file-version guards —
-119 passing plus the one font-dependent skip). Note the slots share
+suite, REFACTOR_PLAN.md Phase 0, 127 tests as of the view navigation tools —
+126 passing plus the one font-dependent skip). Note the slots share
 ONE animation and run in declaration order: a test that leaves the current
 frame somewhere other than the last one breaks every later test that
 assumes `AddFrame()` appends (see the closing `MoveToFrame()` in

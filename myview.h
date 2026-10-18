@@ -39,7 +39,10 @@
 #define DRAWMULTI 22    ///< draw a multi-line stick (StickData::MULTILINE): every click extends
                         ///< the path until Enter/double click (finalize) or Esc (cancel = the
                         ///< stick is deleted); on an existing multi-line it inserts a vertex at
-                        ///< the middle of the nearest segment, drag adjusts, Alt+click deletes
+                        ///< the middle of the nearest segment, drag adjusts, Alt+click deletes.
+                        ///< Clicking a vertex handle (mid-session, or on a finished line
+                        ///< without dragging) makes the next clicks grow a BRANCH from it;
+                        ///< the P2 handle goes back to extending the main line
 #define DRAWFREEHAND 24 ///< draw an invisible 2-click stick, then enter draw mode to paint a
                         ///< raster image on it (StickData::FREEHAND); id == the stick type,
                         ///< same tool-id==type convention DRAWIMG/IMAGE use
@@ -47,6 +50,10 @@
                         ///< free-end click, then a prompt for the paragraph. The skeleton
                         ///< is only visible during the 2-click preview; id == the stick
                         ///< type, same convention as DRAWIMG/DRAWFREEHAND
+#define PANVIEW 26      ///< drag to pan the VIEW: only the viewport moves, the frame is untouched
+#define ROTATEVIEW 27   ///< drag to rotate the VIEW about the viewport centre (Shift: 15° steps);
+                        ///< unlike ROTATESCENE no figure moves, renders/exports never see it
+#define ZOOMVIEW 28     ///< drag to zoom the VIEW: right/up = in, left/down = out (Shift: 10% steps)
 #define DRAW_IK 23      ///< creates/edits inverse-kinematics chains (StickData::IK_START/
                         ///< IK_NODE/IK_TARGET_ON/IK_TARGET_OFF): first click on an eligible
                         ///< stick's start handle begins a chain, second click on a
@@ -135,6 +142,26 @@ public:
      */
     void SetTool(int new_tool);
 
+    /**
+     * @brief Back to the default view: 1:1 zoom, no rotation, no pan (canvas centred).
+     *
+     * View-only, like the PANVIEW/ROTATEVIEW tools: nothing in the document changes.
+     * Called by the "Reset zoom" button.
+     */
+    void ResetView();
+
+    /**
+     * @brief The view's current rotation.
+     * @return degrees, clockwise on screen (QGraphicsView::rotate()'s sense), in (-180, 180].
+     */
+    qreal ViewAngle() const;
+
+    /**
+     * @brief The view's current zoom.
+     * @return the scale factor (1 = 1:1), whatever the rotation.
+     */
+    qreal ViewZoom() const;
+
     Animation * my_animation; ///< the document root: owns the frame list (animation.h)
 
     /**
@@ -149,6 +176,7 @@ public:
 
     QPen    my_pen;   ///< current pen pushed onto newly drawn sticks and applied by SetGraphics()
     QBrush  my_brush; ///< current brush, same role as my_pen; both edited from widget.cpp's panels
+    qint32  my_vertex_cap = StickData::CAP_ROUND; ///< StickData::VertexCap given to the vertices DRAWMULTI draws (branch vertices are always round)
     /**
      * @brief Current value of StickData::brush_follows_stick: same role as my_pen/my_brush,
      *        i.e. what a newly drawn stick inherits and what SetGraphics() applies.
@@ -454,6 +482,14 @@ public:
      * them from the same snapshots.
      */
     QString GenerateInbetweens(int start_index, int count);
+
+    /**
+     * @brief The multiline panel's "Vertex cap" choice: becomes the cap of the vertices
+     *        drawn from now on and, as one undo step, of the vertices Ctrl-selected on the
+     *        current MULTILINE.
+     * @param cap a StickData::VertexCap.
+     */
+    void SetVertexCap(qint32 cap);
 
     /**
      * @brief Turns a stick into another stick type, in place and as one undo step.
@@ -805,6 +841,10 @@ private:
     bool poly_session_active = false; ///< true between the base line's completion and Enter/Esc/double-click/close-click
     bool poly_session_extends = false;///< session started on an existing polygon: clicks insert at the nearest edge instead of appending
     int poly_drag_idx = -1;           ///< vertex being dragged by the DRAWPOLY tool; -1 when none
+    int poly_branch_from = -1;        ///< DRAWMULTI session: vertex the next click branches from; -1 = extend the main line at P2
+    bool poly_session_resumed = false;///< DRAWMULTI session reopened on a finished line (a handle click): Esc ends it instead of deleting the stick
+    bool poly_drag_needs_undo = false;///< DRAWMULTI handle pressed but not dragged yet: the undo snapshot waits for a real drag, a plain click reopens the session
+    QPoint poly_press_pos;            ///< viewport position of that press, for the drag threshold
     bool poly_vertex_drag = false;    ///< true while a Ctrl-drag of the selected vertices (NOTOOL/CLAMP) is in progress
 
     // ------- DRAW_IK tool state. Like the POLYGON session above, no StickData* is ------
@@ -1126,11 +1166,50 @@ private:
     void DeleteWholeStick(StickData *stick);
 
     /**
+     * @brief Deletes one vertex of a POLYGON/MULTILINE (a MULTILINE vertex takes the
+     *        branches growing out of it along); deletes the whole stick instead when a
+     *        MULTILINE would be left with a single vertex. The caller takes the undo snapshot.
+     * @return false when the whole stick was deleted.
+     */
+    bool DeleteVertex(StickData *stick, int vertex_idx);
+
+    /**
+     * @brief Delete key: removes every vertex Ctrl-selected in the current frame, as one
+     *        undo step.
+     * @return false when no vertex was selected (the key then deletes sticks as before).
+     */
+    bool DeleteSelectedVertices();
+
+    /**
      * @brief Zoom-aware pick radius for vertices/edges: handle_size screen pixels
      *        converted to scene units, so "very close" feels the same at any zoom.
      * @return the radius in scene coordinates.
      */
     float PolyPickRadius();
+
+    /**
+     * @brief Makes the view pannable/rotatable about the viewport centre at any zoom.
+     *
+     * QGraphicsView re-centres its scene rect whenever it fits the viewport, which swallows
+     * a pan and pivots a rotation on the canvas instead of the screen centre. This grows the
+     * VIEW's own scene rect (never the scene's, which icons and exports read) to a few
+     * viewport diagonals around the current centre, so it cannot fit at any angle.
+     * Called at the press of a PANVIEW/ROTATEVIEW drag; ResetView() undoes it.
+     */
+    void UnlockViewNavigation();
+
+    /**
+     * @brief One ROTATEVIEW/ZOOMVIEW step, pivoting on the CANVAS centre: it stays at
+     *        view_pivot_screen, the screen spot it had when the drag was pressed.
+     * @param degrees rotation to add, clockwise.
+     * @param factor zoom multiplier (1 = none).
+     */
+    void TurnAndZoomView(qreal degrees, qreal factor);
+
+    QPoint view_drag_last;        ///< PANVIEW: cursor position at the previous move; ZOOMVIEW: at the press
+    QPoint view_pivot_screen;     ///< ROTATEVIEW/ZOOMVIEW: the canvas centre's viewport position at the press
+    qreal view_rotate_offset = 0; ///< ROTATEVIEW: view angle minus cursor angle (about the pivot) at the press
+    qreal view_zoom_start = 1;    ///< ZOOMVIEW: ViewZoom() at the press
 
     /**
      * @brief Ends a DRAWPOLY point-adding session: clears the session flags and the

@@ -259,16 +259,42 @@ Widget::Widget(QWidget *parent)
     advanced_vertex_tab = new QWidget();
     {
         QVBoxLayout *rows = new QVBoxLayout(advanced_vertex_tab);
+        // vertex_width_row raccoglie le righe solo-MULTILINE (larghezza e giunto): una sola
+        // cosa da nascondere per i POLYGON (Animation::UpdateTab())
         vertex_width_row = new QWidget(advanced_vertex_tab);
-        QHBoxLayout *width_row_layout = new QHBoxLayout(vertex_width_row);
+        QVBoxLayout *multiline_rows = new QVBoxLayout(vertex_width_row);
+        multiline_rows->setContentsMargins(0, 0, 0, 0);
+        QWidget *width_line = new QWidget(vertex_width_row);
+        QHBoxLayout *width_row_layout = new QHBoxLayout(width_line);
         width_row_layout->setContentsMargins(0, 0, 0, 0);
-        width_row_layout->addWidget(new QLabel(tr("Vertex width"), vertex_width_row));
-        vertex_width_slider = new QSlider(Qt::Horizontal, vertex_width_row);
+        width_row_layout->addWidget(new QLabel(tr("Vertex width"), width_line));
+        vertex_width_slider = new QSlider(Qt::Horizontal, width_line);
         vertex_width_slider->setRange(0, W);
-        QSpinBox *width_spin = new QSpinBox(vertex_width_row);
+        QSpinBox *width_spin = new QSpinBox(width_line);
         width_spin->setRange(0, W);
         width_row_layout->addWidget(vertex_width_slider, 1);
         width_row_layout->addWidget(width_spin);
+        multiline_rows->addWidget(width_line);
+        // giunto/estremità dei vertici: quello dei prossimi vertici disegnati E dei vertici
+        // selezionati con Ctrl (MyView::SetVertexCap()); i vertici di un ramo nascono tondi
+        QWidget *cap_line = new QWidget(vertex_width_row);
+        QHBoxLayout *cap_row_layout = new QHBoxLayout(cap_line);
+        cap_row_layout->setContentsMargins(0, 0, 0, 0);
+        cap_row_layout->addWidget(new QLabel(tr("Vertex cap"), cap_line));
+        QComboBox *cap_combo = new QComboBox(cap_line);
+        cap_combo->addItem(tr("Sharp"), int(StickData::CAP_SHARP));
+        cap_combo->addItem(tr("Round"), int(StickData::CAP_ROUND));
+        cap_combo->addItem(tr("Bevel"), int(StickData::CAP_BEVEL));
+        // lo stesso default di MyView::my_vertex_cap (la view qui non esiste ancora), scelto
+        // prima del connect così non lo rimanda indietro
+        cap_combo->setCurrentIndex(cap_combo->findData(int(StickData::CAP_ROUND)));
+        cap_combo->setToolTip(tr("How the vertices you draw next end or turn a corner; also "
+                                 "applied to the vertices selected with Ctrl. Branch vertices "
+                                 "are always drawn round, so forks never spike."));
+        cap_row_layout->addWidget(cap_combo, 1);
+        multiline_rows->addWidget(cap_line);
+        connect(cap_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                [this, cap_combo](int){ view->SetVertexCap(cap_combo->currentData().toInt()); });
         rows->addWidget(vertex_width_row);
 
         QWidget *curve_row = new QWidget(advanced_vertex_tab);
@@ -1566,36 +1592,30 @@ void Widget::on_PlayButton_clicked()
 
 }
 
-/**
- * @details `zoom_lvl` tracks the view's current absolute scale factor (QGraphicsView::
- * scale() is relative to the current transform, not absolute), so each handler must
- * first undo the old scale (`1/zoom_lvl`) before applying the new one. MoveToFrame()
- * afterward re-centers the view on the current frame at the new zoom.
- */
+/// @details Switches to the view-zoom tool: drag right/up to zoom in, left/down to zoom out,
+/// Shift for 10% steps. Was a one-shot "zoom x2" button, with a twin for zoom out.
 void Widget::on_zoomInBtn_clicked()
 {
-    view->scale(1/zoom_lvl,1/zoom_lvl);
-    zoom_lvl*=2;
-    view->scale(zoom_lvl,zoom_lvl);
-    view->MoveToFrame(view->my_animation->CurrentFrame());
+    view->SetTool(ZOOMVIEW);
 }
 
-/// @details See on_zoomInBtn_clicked() for why the scale is un-applied before re-applying.
-void Widget::on_zoomOutBtn_clicked()
-{
-
-    view->scale(1/zoom_lvl,1/zoom_lvl);
-    zoom_lvl/=2;
-    view->scale(zoom_lvl,zoom_lvl);
-    view->MoveToFrame(view->my_animation->CurrentFrame());
-}
-
-/// @details Returns the canvas to 1:1 zoom.
+/// @details Returns the view to 1:1 zoom with no rotation and no pan (MyView::ResetView()).
 void Widget::on_resetZoomBtn_clicked()
 {
-    view->scale(1/zoom_lvl,1/zoom_lvl);
-    zoom_lvl = 1.0;
+    view->ResetView();
     view->MoveToFrame(view->my_animation->CurrentFrame());
+}
+
+/// @details Switches to the view-rotation tool: drag to turn the viewport, Shift for 15° steps.
+void Widget::on_rotateViewBtn_clicked()
+{
+    view->SetTool(ROTATEVIEW);
+}
+
+/// @details Switches to the view-pan tool: drag to move the viewport over the canvas.
+void Widget::on_panViewBtn_clicked()
+{
+    view->SetTool(PANVIEW);
 }
 
 /**

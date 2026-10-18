@@ -154,7 +154,8 @@ public:
      * @param scene_point click position in scene coordinates.
      * @param insert_idx virtual insertion index; -1 (default) appends (POLYGON) /
      *        inserts before P2 (MULTILINE). MULTILINE endpoints cannot be displaced:
-     *        the index is clamped to the interior range.
+     *        the index is clamped to the interior range, and the new vertex splits the
+     *        edge that ends in vertex insert_idx (StickData::vertex_parents).
      * @return true on success.
      */
     bool AddPolygonPoint(const QPointF &scene_point, int insert_idx = -1);
@@ -163,9 +164,19 @@ public:
      * @brief MULTILINE only: extends the path — the current P2 becomes an interior
      *        vertex and the new point becomes the path's end (my_line.p2()).
      * @param scene_point the new endpoint.
+     * @param cap StickData::VertexCap of the new endpoint (the old one keeps its own).
      * @return true on success.
      */
-    bool AppendMultilineVertex(const QPointF &scene_point);
+    bool AppendMultilineVertex(const QPointF &scene_point, qint32 cap = StickData::CAP_ROUND);
+
+    /**
+     * @brief MULTILINE only: adds a branch vertex hanging from an existing vertex, without
+     *        touching P1/P2 (the main line extends through AppendMultilineVertex()).
+     * @param from_idx virtual index of the vertex the new one hangs from; P2 is refused.
+     * @param scene_point the new vertex, in scene coordinates.
+     * @return the new vertex's virtual index (it stays valid across later appends), or -1.
+     */
+    int BranchMultilineVertex(int from_idx, const QPointF &scene_point);
 
     /**
      * @brief Finds the vertex nearest to a scene position.
@@ -197,8 +208,8 @@ public:
 
     /**
      * @brief Where a new vertex should be inserted so it lands on the nearest edge.
-     *        POLYGON edges include the closing edge; MULTILINE edges are the open
-     *        chain only.
+     *        POLYGON edges include the closing edge; MULTILINE edges are its tree's
+     *        (parent, child) pairs.
      * @param scene_pos position to test.
      * @param dist_out optional out: distance from scene_pos to that edge, scene units.
      * @return virtual insertion index (see AddPolygonPoint()).
@@ -209,9 +220,13 @@ public:
      * @brief Shows/moves the transient next-vertex preview that follows the mouse
      *        during a DRAWPOLY session; paint() renders it as one more vertex.
      * @param scene_pos current mouse position.
-     * @param insert_idx where the vertex would be inserted (see NearestEdgeInsertIndex).
+     * @param insert_idx where the vertex would be inserted (see NearestEdgeInsertIndex);
+     *        ignored for a MULTILINE, whose preview always goes after the last vertex.
+     * @param preview_parent MULTILINE only: the vertex the preview hangs from; -1 = P2.
+     * @param preview_cap MULTILINE only: the StickData::VertexCap the click would give it.
      */
-    void SetPolygonPreview(const QPointF &scene_pos, int insert_idx);
+    void SetPolygonPreview(const QPointF &scene_pos, int insert_idx, int preview_parent = -1,
+                           qint32 preview_cap = StickData::CAP_ROUND);
 
     /**
      * @brief Hides the next-vertex preview and repaints.
@@ -393,6 +408,8 @@ public:
     QSet<int> selected_vertices;      ///< vertices picked with Ctrl(+Shift) on the select tool; drawn orange
     bool poly_preview_active = false; ///< true while the next-vertex preview follows the mouse
     int poly_preview_idx = 0;         ///< insertion position of the preview vertex
+    int poly_preview_parent = -1;     ///< MULTILINE: vertex the preview hangs from; -1 = P2
+    qint32 poly_preview_cap = StickData::CAP_ROUND; ///< MULTILINE: VertexCap the preview is drawn with
     QPointF poly_preview_point;       ///< preview vertex, normalized stick-local coords
 
     /**
@@ -453,6 +470,12 @@ private:
      *        re-normalizes polygon_points).
      */
     void RebuildMultilineFrame(const QPointF &new_p1, const QPointF &new_p2);
+
+    /**
+     * @brief MULTILINE: writes a whole virtual vertex list (scene coordinates) back —
+     *        first/last become my_line's P1/P2, the rest the normalized interior.
+     */
+    void SetMultilineVertices(const QPolygonF &scene_verts);
 
     /**
      * @brief Draws the red/orange vertex preview squares over `verts` (shared by the

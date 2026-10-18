@@ -138,6 +138,9 @@ class TestCharacterization : public QObject
         if (middle_type == StickData::MULTILINE) {
             mid->vertex_widths << 3 << 4 << 5 << 6;        // per-vertex incl. endpoints
             mid->vertex_curvatures << 0.1f << 0.2f << 0.3f << 0.4f;
+            // con un ramo: P1->(130,180)->P2 è la linea principale, (170,220) pende da P1.
+            // Lo scambio p1<->p2 rovescia gli indici: i LATI devono restare gli stessi
+            mid->vertex_parents = {-1, 0, 0, 1};
         }
 
         StickData *gc = new StickData();
@@ -163,10 +166,25 @@ class TestCharacterization : public QObject
             return v;
         };
         QList<QPointF> before = scene_verts(mid);
+        // a multiline's edges as unordered pairs of scene points (rounded, to compare them)
+        auto scene_edges = [&](StickData *s) {
+            QList<QPointF> v = scene_verts(s);
+            QList<qint32> parents = s->MultilineParents();
+            QSet<QString> edges;
+            auto key = [](QPointF p) { return QString("%1,%2").arg(qRound(p.x())).arg(qRound(p.y())); };
+            for (int i = 1; i < v.count(); i++) {
+                QString a = key(v[i]), b = key(v[parents[i]]);
+                edges.insert(a < b ? a + "|" + b : b + "|" + a);
+            }
+            return edges;
+        };
+        QSet<QString> edges_before = scene_edges(mid);
 
         fig->SetMaster(gc);
         QCOMPARE(fig->master_stick, gc); // the change actually happened
 
+        if (middle_type == StickData::MULTILINE)
+            QCOMPARE(scene_edges(mid), edges_before); // the branch still hangs from the same vertex
         QList<QPointF> after = scene_verts(mid);
         // the shape occupies the same scene points (order may reverse for a multiline —
         // same visual polyline), so compare as an unordered set within tolerance
@@ -493,7 +511,9 @@ private slots:
             QDataStream in(&old_bytes, QIODevice::ReadOnly);
             in >> old_loaded;
         }
-        QCOMPARE(old_loaded.version, qint32(2));
+        // letto, il record sale al formato corrente: un nuovo salvataggio scrive ogni campo
+        // (rimasto alla 2, avrebbe di nuovo saltato quelli nati dopo)
+        QCOMPARE(old_loaded.version, StickData::CURRENT_VERSION);
         QCOMPARE(old_loaded.text, source.text);
         QCOMPARE(old_loaded.text_v_stretch, qint32(100)); // default, non letto dal file
 
@@ -2850,6 +2870,230 @@ private slots:
         view->SetTool(NOTOOL);
     }
 
+    // DRAWMULTI branches, end to end: a click on a vertex handle makes the next clicks grow
+    // a branch from that vertex — mid-session, and on a finished line when the handle is
+    // clicked without being dragged (a drag still moves the vertex, and leaves no session
+    // open). Rendered, the branch hangs from its vertex: drawn as the flat chain, the line
+    // would run a fake edge from the branch tip to P2 through the "unpainted" probe
+    void DrawBranchedMultilineViaRealMouseEvents()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        view->SetTool(DRAWMULTI);
+        auto click = [this](QPointF p) {
+            QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(p));
+        };
+        auto index_of = [](const QPolygonF &v, QPointF p) {
+            for (int i = 0; i < v.count(); i++)
+                if (QLineF(v[i], p).length() < 0.01) return i;
+            return -1;
+        };
+        auto top_command = [this]() { return view->undo_stack.command(view->undo_stack.index() - 1); };
+
+        click(QPointF(100, 100));
+        click(QPointF(200, 100));
+        click(QPointF(300, 100));
+        click(QPointF(200, 100)); // maniglia del vertice interno: origine del ramo, nessun dato toccato
+        click(QPointF(200, 200));
+        click(QPointF(200, 300)); // il ramo prosegue dal suo ultimo punto
+        QTest::keyClick(view, Qt::Key_Return);
+
+        StickData *ml = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(ml->stick_type, (qint32)StickData::MULTILINE);
+        QVERIFY(QLineF(ml->my_line.p1(), QPointF(100, 100)).length() < 0.01);
+        QVERIFY(QLineF(ml->my_line.p2(), QPointF(300, 100)).length() < 0.01);
+        QPolygonF verts = ml->view->SceneVertices();
+        QCOMPARE(verts.count(), 5);
+        QCOMPARE(ml->vertex_widths.count(), 5);
+        QList<qint32> parents = ml->MultilineParents();
+        int junction = index_of(verts, QPointF(200, 100));
+        int b1 = index_of(verts, QPointF(200, 200));
+        int b2 = index_of(verts, QPointF(200, 300));
+        QVERIFY(junction > 0 && b1 > 0 && b2 > 0);
+        QCOMPARE(parents[junction], 0);
+        QCOMPARE(parents[verts.count() - 1], junction); // main line: P1 -> (200,100) -> P2
+        QCOMPARE(parents[b1], junction);
+        QCOMPARE(parents[b2], b1);
+
+        {
+            StickData copy;
+            copy.CopyFrom(*ml);
+            copy.pen = QPen(Qt::black, 8, Qt::SolidLine, Qt::FlatCap);
+            copy.vertex_widths = {8, 8, 8, 8, 8};
+            QGraphicsScene render_scene;
+            render_scene.setSceneRect(0, 0, 400, 400);
+            render_scene.addItem(new StickGraphicsItem(&copy)); // la scena possiede la view
+            QImage img(400, 400, QImage::Format_ARGB32);
+            img.fill(Qt::white);
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 400, 400), QRectF(0, 0, 400, 400));
+            painter.end();
+            auto painted = [&img](int x, int y) { return img.pixelColor(x, y) != QColor(Qt::white); };
+            QVERIFY2(painted(200, 250), "the branch is not drawn");
+            QVERIFY2(painted(150, 100) && painted(250, 100), "the main line is not drawn");
+            QVERIFY2(!painted(250, 200), "drawn as a flat chain: a fake edge runs from the branch tip to P2");
+        }
+
+        // one undo removes the last branch point, redo brings it back
+        view->undo_stack.undo();
+        ml = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(ml->view->SceneVertices().count(), 4);
+        QCOMPARE(index_of(ml->view->SceneVertices(), QPointF(200, 300)), -1);
+        view->undo_stack.redo();
+        ml = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(ml->view->SceneVertices().count(), 5);
+
+        // finished line: clicking the P1 handle without dragging reopens the session (and
+        // takes no undo step), the next click branches from P1, Esc keeps the line
+        int sticks = CurrentStickFigure()->stick_list.count();
+        const QUndoCommand *top = top_command();
+        click(QPointF(100, 100));
+        QCOMPARE(top_command(), top);
+        click(QPointF(100, 200));
+        QTest::keyClick(view, Qt::Key_Escape);
+        QCOMPARE(CurrentStickFigure()->stick_list.count(), sticks);
+        ml = CurrentStickFigure()->stick_list.last();
+        verts = ml->view->SceneVertices();
+        QCOMPARE(verts.count(), 6);
+        int b3 = index_of(verts, QPointF(100, 200));
+        QVERIFY(b3 > 0);
+        QCOMPARE(ml->MultilineParents()[b3], 0);
+        QVERIFY(QLineF(ml->my_line.p2(), QPointF(300, 100)).length() < 0.01);
+
+        // a real drag still moves the vertex, as one undo step, and opens no session: a
+        // click far away then starts a NEW line instead of adding to this one
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(200, 200)));
+        QTest::mouseMove(view->viewport(), view->mapFromScene(QPointF(230, 230)));
+        QTest::mouseMove(view->viewport(), view->mapFromScene(QPointF(260, 240)));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(QPointF(260, 240)));
+        verts = ml->view->SceneVertices();
+        QVERIFY(index_of(verts, QPointF(260, 240)) > 0);
+        QCOMPARE(index_of(verts, QPointF(200, 200)), -1);
+        QVERIFY(top_command() != top);
+        click(QPointF(600, 500));
+        QCOMPARE(ml->view->SceneVertices().count(), 6);
+        QTest::keyClick(view, Qt::Key_Escape); // annulla la nuova linea appena iniziata
+        QCOMPARE(CurrentStickFigure()->stick_list.count(), sticks);
+
+        view->SetTool(NOTOOL);
+    }
+
+    // Deleting multiline vertices, end to end: Alt+click works mid-session too (it used to
+    // be ignored there, and a plain handle click reopens a session, so it looked broken),
+    // a vertex takes the branches growing out of it along (branches of branches too), and
+    // Ctrl-selected vertices go with the Delete key — the whole stick once one vertex would
+    // be left
+    void DeleteMultilineVerticesWithAltAndDeleteKey()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        view->SetTool(DRAWMULTI);
+        auto click = [this](QPointF p, Qt::KeyboardModifiers mods = Qt::NoModifier) {
+            QTest::mouseClick(view->viewport(), Qt::LeftButton, mods, view->mapFromScene(p));
+        };
+        auto index_of = [](const QPolygonF &v, QPointF p) {
+            for (int i = 0; i < v.count(); i++)
+                if (QLineF(v[i], p).length() < 0.01) return i;
+            return -1;
+        };
+        int sticks = CurrentStickFigure()->stick_list.count();
+        click(QPointF(100, 100));
+        click(QPointF(200, 100));
+        click(QPointF(300, 100));
+        click(QPointF(200, 100)); // branch from J...
+        click(QPointF(200, 200));
+        click(QPointF(200, 300));
+        click(QPointF(200, 200)); // ...and a branch of the branch, from B1
+        click(QPointF(260, 200));
+        StickData *ml = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(ml->view->SceneVertices().count(), 6);
+
+        // mid-session Alt+click on B1: B1, the rest of its branch and its own branch go
+        click(QPointF(200, 200), Qt::AltModifier);
+        QPolygonF verts = ml->view->SceneVertices();
+        QCOMPARE(verts.count(), 3);
+        for (QPointF gone : {QPointF(200, 200), QPointF(200, 300), QPointF(260, 200)})
+            QCOMPARE(index_of(verts, gone), -1);
+        // the session is still open and resumes the main line
+        click(QPointF(400, 100));
+        QTest::keyClick(view, Qt::Key_Return);
+        QVERIFY(QLineF(ml->my_line.p2(), QPointF(400, 100)).length() < 0.01);
+        QCOMPARE(ml->view->SceneVertices().count(), 4);
+
+        // finished line: Alt+click on J closes the main line over it
+        click(QPointF(200, 100), Qt::AltModifier);
+        verts = ml->view->SceneVertices();
+        QCOMPARE(verts.count(), 3);
+        QCOMPARE(index_of(verts, QPointF(200, 100)), -1);
+
+        // Ctrl-select + Delete: one vertex...
+        view->SetTool(NOTOOL);
+        click(QPointF(300, 100), Qt::ControlModifier);
+        QCOMPARE(ml->view->selected_vertices.count(), 1);
+        QTest::keyClick(view, Qt::Key_Delete);
+        QCOMPARE(CurrentStickFigure()->stick_list.count(), sticks + 1); // a vertex, not the stick
+        QCOMPARE(ml->view->SceneVertices().count(), 2);
+        QVERIFY(ml->view->selected_vertices.isEmpty());
+        // ...one undo brings it back
+        view->undo_stack.undo();
+        ml = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(ml->view->SceneVertices().count(), 3);
+        // two vertices of a three-vertex line: one would be left, so the stick goes whole
+        click(QPointF(300, 100), Qt::ControlModifier);
+        click(QPointF(400, 100), Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(ml->view->selected_vertices.count(), 2);
+        QTest::keyClick(view, Qt::Key_Delete);
+        QCOMPARE(CurrentStickFigure()->stick_list.count(), sticks);
+    }
+
+    // The "Vertex cap" choice (MyView::SetVertexCap(), what the multiline panel's combo
+    // calls): the vertices drawn next get it, every vertex a branch involves comes out round
+    // whatever it is, and with vertices Ctrl-selected it also changes theirs, as one undo step
+    void MultilineVertexCapDrawingAndSelection()
+    {
+        struct Restore { MyView *v; ~Restore() { v->my_vertex_cap = StickData::CAP_ROUND; } } restore{view};
+        AddFrame();
+        view->resize(800, 600);
+        auto click = [this](QPointF p, Qt::KeyboardModifiers mods = Qt::NoModifier) {
+            QTest::mouseClick(view->viewport(), Qt::LeftButton, mods, view->mapFromScene(p));
+        };
+        const qint32 S = StickData::CAP_SHARP, R = StickData::CAP_ROUND, B = StickData::CAP_BEVEL;
+        view->SetVertexCap(S);
+        view->SetTool(DRAWMULTI);
+        click(QPointF(100, 100));
+        click(QPointF(200, 100));
+        click(QPointF(300, 150));
+        QTest::keyClick(view, Qt::Key_Return);
+        StickData *ml = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(ml->MultilineCaps(), (QList<qint32>{S, S, S}));
+
+        // a branch from J: J and the branch vertex round, the rest untouched
+        click(QPointF(200, 100)); // handle click without drag: reopens the session from J
+        click(QPointF(200, 200));
+        QTest::keyClick(view, Qt::Key_Return);
+        QCOMPARE(ml->MultilineCaps(), (QList<qint32>{S, R, R, S}));
+
+        // Ctrl-select P2 and pick Bevel: P2 changes, one undo puts it back
+        view->SetTool(NOTOOL);
+        click(QPointF(300, 150), Qt::ControlModifier);
+        QCOMPARE(ml->view->selected_vertices.count(), 1);
+        view->SetVertexCap(B);
+        QCOMPARE(ml->MultilineCaps(), (QList<qint32>{S, R, R, B}));
+        view->undo_stack.undo();
+        ml = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(ml->MultilineCaps(), (QList<qint32>{S, R, R, S}));
+        QCOMPARE(view->my_vertex_cap, B); // the choice itself is not undone: it is the drawing setting
+
+        // and the next line is drawn with it
+        view->SetTool(DRAWMULTI);
+        click(QPointF(100, 400));
+        click(QPointF(200, 400));
+        click(QPointF(300, 450));
+        QTest::keyClick(view, Qt::Key_Return);
+        QCOMPARE(CurrentStickFigure()->stick_list.last()->MultilineCaps(), (QList<qint32>{B, B, B}));
+        view->SetTool(NOTOOL);
+    }
+
     void ChangeMasterKeepsPolygonShape()   { ChangeMasterKeepsVertexShape(StickData::POLYGON); }
     void ChangeMasterKeepsMultilineShape() { ChangeMasterKeepsVertexShape(StickData::MULTILINE); }
 
@@ -3346,6 +3590,233 @@ private slots:
         QVERIFY2(painted(250, 195) && painted(250, 205), "first segment pinched: the band twisted");
         QVERIFY2(painted(198, 224) && painted(202, 236), "second segment is not full width");
         QVERIFY(!painted(250, 180)); // outside the band
+    }
+
+    // MULTILINE branch topology at the data level: removing a fork vertex reattaches its
+    // children to its parent; removing an endpoint of a one-edge main line hands that end to
+    // another vertex (both ends would otherwise land on the same one); the parent list
+    // survives the stream — also for a record read from an older version and saved again —
+    // and an invalid (cyclic / out-of-range) list reads as the plain chain
+    void MultilineBranchTopologyEdits()
+    {
+        StickData fork, no_p2, no_p1; // prima della scena: le view vanno distrutte per prime
+        QGraphicsScene render_scene;
+        auto setup = [&render_scene](StickData &m, QPointF p1, QPointF p2) {
+            m.stick_type = StickData::MULTILINE;
+            m.my_line = QLineF(p1, p2);
+            m.vertex_widths << 4 << 4;
+            m.vertex_curvatures << 0 << 0;
+            StickGraphicsItem *item = new StickGraphicsItem(&m); // la scena possiede la view
+            render_scene.addItem(item);
+            return item;
+        };
+        auto index_of = [](const QPolygonF &v, QPointF p) {
+            for (int i = 0; i < v.count(); i++)
+                if (QLineF(v[i], p).length() < 0.01) return i;
+            return -1;
+        };
+
+        // P1(0,0) - J(100,0) - P2(200,0), branch J - B(100,100)
+        StickGraphicsItem *f = setup(fork, QPointF(0, 0), QPointF(100, 0));
+        QVERIFY(f->AppendMultilineVertex(QPointF(200, 0)));
+        QCOMPARE(f->BranchMultilineVertex(1, QPointF(100, 100)), 2);
+        QCOMPARE(f->BranchMultilineVertex(3, QPointF(0, 50)), -1); // P2 grows through AppendMultilineVertex
+        QCOMPARE(fork.MultilineParents(), (QList<qint32>{-1, 0, 1, 1}));
+        QVERIFY(QLineF(fork.my_line.p2(), QPointF(200, 0)).length() < 0.01);
+        // splitting the branch edge keeps the branch hanging from J
+        QCOMPARE(f->NearestEdgeInsertIndex(QPointF(102, 50)), 2);
+        QVERIFY(f->AddPolygonPoint(QPointF(100, 50), 2));
+        QCOMPARE(fork.MultilineParents(), (QList<qint32>{-1, 0, 1, 2, 1}));
+        // removing a branch vertex takes the rest of its branch along
+        QVERIFY(f->DeletePolygonPoint(2));
+        QCOMPARE(fork.MultilineParents(), (QList<qint32>{-1, 0, 1}));
+        QCOMPARE(index_of(f->SceneVertices(), QPointF(100, 100)), -1);
+        QCOMPARE(f->BranchMultilineVertex(1, QPointF(100, 100)), 2); // back to the fork
+        QCOMPARE(fork.MultilineParents(), (QList<qint32>{-1, 0, 1, 1}));
+
+        // stream round trip; a v6 record has no parents on the wire, but once read it is a
+        // current record and a re-save keeps the branch
+        QByteArray bytes;
+        { QDataStream out(&bytes, QIODevice::WriteOnly); out << fork; }
+        StickData loaded;
+        { QDataStream in(&bytes, QIODevice::ReadOnly); in >> loaded; }
+        QCOMPARE(loaded.vertex_parents, fork.vertex_parents);
+        StickData old_record;
+        old_record.CopyFrom(fork);
+        old_record.version = 6;
+        QByteArray old_bytes;
+        { QDataStream out(&old_bytes, QIODevice::WriteOnly); out << old_record; }
+        StickData old_loaded;
+        { QDataStream in(&old_bytes, QIODevice::ReadOnly); in >> old_loaded; }
+        QVERIFY(old_loaded.vertex_parents.isEmpty());
+        QCOMPARE(old_loaded.polygon_points.count(), fork.polygon_points.count());
+        QCOMPARE(old_loaded.version, StickData::CURRENT_VERSION);
+        old_loaded.vertex_parents = fork.vertex_parents; // branched after loading
+        QByteArray resaved;
+        { QDataStream out(&resaved, QIODevice::WriteOnly); out << old_loaded; }
+        StickData reloaded;
+        { QDataStream in(&resaved, QIODevice::ReadOnly); in >> reloaded; }
+        QCOMPARE(reloaded.vertex_parents, fork.vertex_parents);
+
+        // removing the fork vertex J: the branch starting there goes too, and the main line
+        // closes up over J (P2 now hangs from P1)
+        QVERIFY(f->DeletePolygonPoint(1));
+        QPolygonF v = f->SceneVertices();
+        QCOMPARE(v.count(), 2);
+        QCOMPARE(index_of(v, QPointF(100, 100)), -1);
+        QVERIFY(QLineF(fork.my_line.p1(), QPointF(0, 0)).length() < 0.01);
+        QVERIFY(QLineF(fork.my_line.p2(), QPointF(200, 0)).length() < 0.01);
+
+        // one-edge main line P1(0,0)-P2(100,0) with a branch P1-B(0,100): removing P2 makes
+        // the branch tip the new P2...
+        StickGraphicsItem *s2 = setup(no_p2, QPointF(0, 0), QPointF(100, 0));
+        QCOMPARE(s2->BranchMultilineVertex(0, QPointF(0, 100)), 1);
+        QVERIFY(s2->DeletePolygonPoint(2));
+        QCOMPARE(s2->SceneVertices().count(), 2);
+        QVERIFY(QLineF(no_p2.my_line.p1(), QPointF(0, 0)).length() < 0.01);
+        QVERIFY(QLineF(no_p2.my_line.p2(), QPointF(0, 100)).length() < 0.01);
+        // ...while removing P1 would take its branch along and leave P2 alone: refused,
+        // nothing changes (MyView then deletes the whole stick)
+        StickGraphicsItem *s1 = setup(no_p1, QPointF(0, 0), QPointF(100, 0));
+        QCOMPARE(s1->BranchMultilineVertex(0, QPointF(0, 100)), 1);
+        QVERIFY(!s1->DeletePolygonPoint(0));
+        QCOMPARE(s1->SceneVertices().count(), 3);
+        // a branch of a branch goes with its origin: P1-J-P2, J-B1-B2, B1-C
+        QVERIFY(s1->AppendMultilineVertex(QPointF(200, 0)));      // P1(0,0) B(0,100) J(100,0) P2(200,0)
+        int b1 = s1->BranchMultilineVertex(2, QPointF(100, 100));
+        int b2 = s1->BranchMultilineVertex(b1, QPointF(100, 200));
+        s1->BranchMultilineVertex(b1, QPointF(150, 100));
+        QCOMPARE(s1->SceneVertices().count(), 7);
+        QVERIFY(s1->DeletePolygonPoint(b1));
+        v = s1->SceneVertices();
+        QCOMPARE(v.count(), 4);
+        for (QPointF gone : {QPointF(100, 100), QPointF(100, 200), QPointF(150, 100)})
+            QCOMPARE(index_of(v, gone), -1);
+        Q_UNUSED(b2);
+
+        // an invalid list never reaches a tree walk: it reads as the plain chain
+        StickData invalid;
+        invalid.stick_type = StickData::MULTILINE;
+        invalid.polygon_points << QPointF(0, 0.3) << QPointF(0, 0.6);
+        const QList<qint32> chain{-1, 0, 1, 2};
+        invalid.vertex_parents = {-1, 2, 1, 0}; // cycle 1 <-> 2
+        QCOMPARE(invalid.MultilineParents(), chain);
+        invalid.vertex_parents = {-1, 0, 7, 1}; // out of range
+        QCOMPARE(invalid.MultilineParents(), chain);
+        invalid.vertex_parents = {-1, 0, 1};    // stale size
+        QCOMPARE(invalid.MultilineParents(), chain);
+    }
+
+    // Per-vertex caps (StickData::vertex_caps), rendered on a 90° corner P1(100,200) ->
+    // J(200,200) -> P2(200,100), half width 10, whose outer corner is the bottom-right one:
+    // SHARP keeps the miter tip, BEVEL cuts it along the chord (200,210)-(210,200), ROUND
+    // replaces it with the disc of radius 10 — and the inner side stays full for all three
+    // (a forced bevel runs its inner edge through the vertex). A ROUND end gets a cap, the
+    // others stop flat. Also: the historical defaults for a record without the list, and
+    // the version-8 round trip
+    void MultilineVertexCapsRender()
+    {
+        auto render = [](qint32 corner_cap, qint32 end_cap) {
+            StickData m;
+            m.stick_type = StickData::MULTILINE;
+            m.my_line = QLineF(100, 200, 200, 100);
+            m.vertex_widths << 20 << 20 << 20;
+            m.vertex_curvatures << 0 << 0 << 0;
+            m.vertex_caps << end_cap << corner_cap << end_cap;
+            m.pen = QPen(Qt::black, 20, Qt::SolidLine, Qt::FlatCap);
+            QGraphicsScene render_scene;
+            render_scene.setSceneRect(0, 0, 400, 400);
+            StickGraphicsItem *item = new StickGraphicsItem(&m); // la scena possiede la view
+            render_scene.addItem(item);
+            m.polygon_points << m.PolygonTransform().inverted().map(QPointF(200, 200));
+            item->Refresh(0);
+            QImage img(400, 400, QImage::Format_ARGB32_Premultiplied);
+            img.fill(Qt::transparent);
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 400, 400), QRectF(0, 0, 400, 400));
+            painter.end();
+            return img;
+        };
+        auto painted = [](const QImage &img, int x, int y) { return qAlpha(img.pixel(x, y)) > 0; };
+        QImage sharp = render(StickData::CAP_SHARP, StickData::CAP_SHARP);
+        QImage bevel = render(StickData::CAP_BEVEL, StickData::CAP_BEVEL);
+        QImage round = render(StickData::CAP_ROUND, StickData::CAP_ROUND);
+        QVERIFY2(painted(sharp, 208, 208), "SHARP lost its miter tip");
+        QVERIFY2(!painted(bevel, 208, 208) && !painted(bevel, 206, 206), "BEVEL did not cut the corner");
+        QVERIFY2(painted(bevel, 203, 203), "BEVEL cut inside its chord");
+        QVERIFY2(!painted(round, 208, 208) && painted(round, 206, 206), "ROUND is not the disc");
+        for (const QImage *img : {&sharp, &bevel, &round})
+            QVERIFY2(painted(*img, 196, 196) && painted(*img, 150, 192) && painted(*img, 192, 150),
+                     "the inner side of the corner is notched");
+        QVERIFY2(painted(round, 94, 200) && painted(round, 200, 94), "a ROUND end has no cap");
+        QVERIFY2(!painted(sharp, 94, 200) && !painted(bevel, 94, 200), "a flat end grew a cap");
+
+        // historical defaults: sharp corners, round branch origins, ends after the pen cap
+        StickData legacy;
+        legacy.stick_type = StickData::MULTILINE;
+        legacy.polygon_points << QPointF(0, 0.3) << QPointF(0.2, 0.5);
+        legacy.vertex_parents = {-1, 0, 1, 1};               // J(1) forks: branch 2, P2 3
+        legacy.pen.setCapStyle(Qt::FlatCap);
+        const qint32 S = StickData::CAP_SHARP, R = StickData::CAP_ROUND;
+        QCOMPARE(legacy.MultilineCaps(), (QList<qint32>{S, R, S, S}));
+        legacy.pen.setCapStyle(Qt::RoundCap);
+        QCOMPARE(legacy.MultilineCaps(), (QList<qint32>{R, R, R, R}));
+        legacy.vertex_caps = {S, S};                          // stale size: ignored
+        QCOMPARE(legacy.MultilineCaps(), (QList<qint32>{R, R, R, R}));
+
+        // version 8 round trip; a version 7 record carries none
+        StickData capped;
+        capped.CopyFrom(legacy);
+        capped.vertex_caps = {S, R, qint32(StickData::CAP_BEVEL), S};
+        QByteArray bytes;
+        { QDataStream out(&bytes, QIODevice::WriteOnly); out << capped; }
+        StickData loaded;
+        { QDataStream in(&bytes, QIODevice::ReadOnly); in >> loaded; }
+        QCOMPARE(loaded.vertex_caps, capped.vertex_caps);
+        QCOMPARE(loaded.vertex_parents, capped.vertex_parents);
+        capped.version = 7;
+        QByteArray old_bytes;
+        { QDataStream out(&old_bytes, QIODevice::WriteOnly); out << capped; }
+        StickData old_loaded;
+        { QDataStream in(&old_bytes, QIODevice::ReadOnly); in >> old_loaded; }
+        QVERIFY(old_loaded.vertex_caps.isEmpty());
+        QCOMPARE(old_loaded.vertex_parents, capped.vertex_parents);
+    }
+
+    // A branch leaving a vertex where the main line TURNS, and turning back on it sharply:
+    // joined to the incoming edge with a sharp miter (the first cut), that edge was carried
+    // past the vertex — where the main line no longer goes — and stuck out as a spike. The
+    // branch now starts flat at its vertex with a round disc as the join. Semi-transparent
+    // on purpose: the disc lives in the bands' single path with their winding, so it neither
+    // punches a hole (opposite winding cancels) nor darkens the fork (a second fill would)
+    void MultilineBranchJoinHasNoSpike()
+    {
+        StickData m;
+        m.stick_type = StickData::MULTILINE;
+        m.my_line = QLineF(100, 200, 200, 100);              // P1 -> P2; the corner J (200,200) is interior
+        m.vertex_widths << 16 << 16 << 16 << 16;
+        m.vertex_curvatures << 0 << 0 << 0 << 0;
+        m.pen = QPen(QColor(0, 0, 0, 128), 16, Qt::SolidLine, Qt::FlatCap);
+        QGraphicsScene render_scene;
+        render_scene.setSceneRect(0, 0, 400, 400);
+        StickGraphicsItem *item = new StickGraphicsItem(&m); // la scena possiede la view
+        render_scene.addItem(item);
+        QTransform inv = m.PolygonTransform().inverted();
+        m.polygon_points << inv.map(QPointF(200, 200)) << inv.map(QPointF(120, 260));
+        m.vertex_parents = {-1, 0, 1, 1};                    // J <- P1, branch <- J, P2 <- J
+        item->Refresh(0);
+        QImage img(400, 400, QImage::Format_ARGB32_Premultiplied);
+        img.fill(Qt::transparent);
+        QPainter painter(&img);
+        render_scene.render(&painter, QRectF(0, 0, 400, 400), QRectF(0, 0, 400, 400));
+        painter.end();
+        auto alpha = [&img](int x, int y) { return qAlpha(img.pixel(x, y)); };
+        const int once = alpha(150, 200); // the straight main line, painted once
+        QVERIFY(qAbs(once - 128) <= 2);
+        QVERIFY2(alpha(216, 195) == 0, "a spike sticks out of the fork");
+        QVERIFY2(qAbs(alpha(160, 230) - once) <= 2, "the branch is not drawn");
+        QVERIFY2(qAbs(alpha(205, 195) - once) <= 2, "the join disc cancels the band: a hole at the fork");
+        QVERIFY2(qAbs(alpha(195, 204) - once) <= 2, "the fork is painted twice: darker than the line");
     }
 
     // Bug 3: the ROTATE tool pivots on the HANDLE (master origin + pivot_offset), not on
@@ -4087,6 +4558,49 @@ private slots:
         QVERIFY2(nodes_back, qPrintable(error));
         check_chain(nodes_back);
         delete nodes_back;
+
+        // with a branch (30,40)->(30,100) (vertex_parents): both formats hang its segment off
+        // the joint at (30,40), not off the end of the chain
+        auto build_branched = [&build_figure](StickFigureData &figure) {
+            build_figure(figure);
+            StickData *multi = figure.stick_list.first();
+            multi->polygon_points.append(multi->PolygonTransform().inverted().map(QPointF(30, 100)));
+            multi->vertex_widths.insert(3, 5.0f);
+            multi->vertex_curvatures << 0.0f;
+            multi->vertex_parents = {-1, 0, 1, 1, 2}; // P1, (30,40), (80,10), branch, P2
+        };
+        auto check_branch = [](StickFigureData *imported) {
+            QCOMPARE(imported->stick_list.count(), 4);
+            QPointF origin = imported->stick_list[0]->my_line.p1();
+            StickData *branch = nullptr;
+            for (StickData *s : imported->stick_list)
+                if (QLineF(s->my_line.p2() - origin, QPointF(30, 100)).length() < 0.1)
+                    branch = s;
+            QVERIFY2(branch, "the branch segment is missing");
+            QVERIFY2(QLineF(branch->my_line.p1() - origin, QPointF(30, 40)).length() < 0.1,
+                     "the branch does not start at its vertex");
+            QVERIFY(branch->parent);
+            QVERIFY2(QLineF(branch->parent->my_line.p2() - origin, QPointF(30, 40)).length() < 0.1,
+                     "the branch hangs from the wrong joint");
+        };
+        StickFigureData stk_branched;
+        build_branched(stk_branched);
+        QString stk_branched_path = stk_temp_dir.filePath("multiline_branched.stk");
+        QVERIFY2(StkFormat::ExportStk(stk_branched_path, stk_branched, StkFormat::PIVOT5, &warnings, &error),
+                 qPrintable(error));
+        StickFigureData *stk_branched_back = StkFormat::ImportStk(stk_branched_path, QPointF(0, 0), &warnings, &error);
+        QVERIFY2(stk_branched_back, qPrintable(error));
+        check_branch(stk_branched_back);
+        delete stk_branched_back;
+        StickFigureData nodes_branched;
+        build_branched(nodes_branched);
+        QString nodes_branched_path = stk_temp_dir.filePath("multiline_branched.nodes");
+        QVERIFY2(StkFormat::ExportNodes(nodes_branched_path, nodes_branched, &warnings, &error),
+                 qPrintable(error));
+        StickFigureData *nodes_branched_back = StkFormat::ImportNodes(nodes_branched_path, QPointF(0, 0), &warnings, &error);
+        QVERIFY2(nodes_branched_back, qPrintable(error));
+        check_branch(nodes_branched_back);
+        delete nodes_branched_back;
 
         QVERIFY(warnings.join(" ").contains("multi-line"));
     }
@@ -5313,6 +5827,120 @@ private slots:
         };
         QVERIFY2(alpha_at(QPointF(300, 200)) > 0, "the ghost is not where the stick was");
         QCOMPARE(alpha_at(QPointF(300, 200) + QPointF(40, 0)), 0);
+    }
+
+    // The view-only navigation tools (ROTATEVIEW/PANVIEW) and ResetView(), driven by real mouse
+    // events: they move the VIEW and nothing else — the stick, the undo stack and the scene's own
+    // rect (what icons and exports render) stay as they were. The pan runs zoomed out, where the
+    // whole canvas fits the viewport: there QGraphicsView re-centres the scene by itself, which
+    // swallows a pan unless UnlockViewNavigation() has made room for it.
+    void ViewRotateAndPanLeaveTheDocumentUntouched()
+    {
+        struct Restore {
+            MyView *v;
+            ~Restore(){ v->ResetView(); v->SetTool(NOTOOL); }
+        } restore{view};
+        AddFrame();
+        view->resize(800, 600);
+        DrawStick(QPointF(400, 100), QPointF(400, 200));
+        const QLineF line = CurrentStickFigure()->stick_list[0]->my_line;
+        const int undo_count = view->undo_stack.count();
+        const QRectF scene_rect = scene->sceneRect();
+        QWidget *vp = view->viewport();
+        // QTest::mouseMove() takes no modifiers, and Shift is the point of the snap
+        auto move = [vp](QPoint pos, Qt::KeyboardModifiers mods){
+            QMouseEvent ev(QEvent::MouseMove, pos, vp->mapToGlobal(pos), Qt::NoButton, Qt::LeftButton, mods);
+            QCoreApplication::sendEvent(vp, &ev);
+        };
+
+        const QPointF probe(400, 200);
+        view->ResetView();
+        const QPoint home = view->mapFromScene(probe); // where the probe sits un-navigated
+
+        // rotation and zoom pivot on the CANVAS centre, so first push the canvas off the screen
+        // centre: a pivot on the viewport centre (the first cut) then visibly moves the canvas
+        const QPointF canvas_centre = my_rect->sceneBoundingRect().center();
+        auto pan_by = [&](QPoint d){
+            view->SetTool(PANVIEW);
+            const QPoint p = vp->rect().center();
+            QTest::mousePress(vp, Qt::LeftButton, Qt::NoModifier, p);
+            move(p + d, Qt::NoModifier);
+            QTest::mouseRelease(vp, Qt::LeftButton, Qt::NoModifier, p + d);
+        };
+        pan_by(QPoint(120, 80));
+
+        view->SetTool(ROTATEVIEW);
+        // a click with no drag: makes the room (scroll bars may appear and shrink the viewport)
+        // and turns nothing, so the pivot measured next is the one the drag turns about
+        QTest::mouseClick(vp, Qt::LeftButton, Qt::NoModifier, vp->rect().center());
+        QVERIFY(qAbs(view->ViewAngle()) < 1e-9);
+        const QPoint c = view->mapFromScene(canvas_centre);
+        QVERIFY2(QLineF(c, vp->rect().center()).length() > 50, "the canvas is not off-centre: nothing to tell apart");
+        QTest::mousePress(vp, Qt::LeftButton, Qt::NoModifier, c + QPoint(200, 0));
+        move(c + QPoint(141, 141), Qt::NoModifier);
+        move(c + QPoint(0, 200), Qt::NoModifier);
+        QVERIFY2(qAbs(view->ViewAngle() - 90) < 0.5, "the view did not turn with the cursor");
+        QVERIFY2(QLineF(view->mapFromScene(canvas_centre), c).length() <= 2,
+                 "the rotation did not pivot on the canvas centre");
+        const QPoint at_110 = c + QPoint(-68, 188); // ~109.9° from where the drag started
+        move(at_110, Qt::NoModifier);
+        QVERIFY(qAbs(view->ViewAngle() - 109.9) < 0.5);
+        move(at_110, Qt::ShiftModifier);
+        QVERIFY2(qAbs(view->ViewAngle() - 105) < 1e-6, "Shift did not snap to a 15° step");
+        QTest::mouseRelease(vp, Qt::LeftButton, Qt::NoModifier, at_110);
+
+        view->ResetView();
+        QVERIFY(view->transform().isIdentity());
+        QCOMPARE(view->sceneRect(), scene->sceneRect()); // the room for panning is gone again
+        QVERIFY(QLineF(view->mapFromScene(probe), home).length() <= 1);
+
+        view->scale(0.1, 0.1); // the whole canvas fits: the case a pan used to do nothing in
+        view->SetTool(PANVIEW);
+        const QPoint p0 = vp->rect().center();
+        QTest::mousePress(vp, Qt::LeftButton, Qt::NoModifier, p0);
+        const QPoint before = view->mapFromScene(probe); // after the press: it makes the room
+        move(p0 + QPoint(30, 20), Qt::NoModifier);
+        move(p0 + QPoint(60, 40), Qt::NoModifier);
+        QTest::mouseRelease(vp, Qt::LeftButton, Qt::NoModifier, p0 + QPoint(60, 40));
+        QCOMPARE(view->mapFromScene(probe), before + QPoint(60, 40));
+        view->ResetView(); // zoom AND pan
+        QVERIFY(view->transform().isIdentity());
+        QVERIFY(QLineF(view->mapFromScene(probe), home).length() <= 1);
+
+        extern float zoom_lvl; // test_globals.cpp; the middle-drag zoom reads it
+        // zoom: 200 px right doubles, back to the press restores, left/down shrinks; Shift
+        // snaps the ABSOLUTE level to 10% steps. The canvas centre stays where it was on screen,
+        // also through a burst of small moves (the first cut drifted ~half a pixel per event).
+        pan_by(QPoint(-90, 60));
+        view->SetTool(ZOOMVIEW);
+        const QPoint z0 = vp->rect().center();
+        QTest::mousePress(vp, Qt::LeftButton, Qt::NoModifier, z0);
+        const QPoint pivot = view->mapFromScene(canvas_centre); // after the press: it makes the room
+        QVERIFY(QLineF(pivot, vp->rect().center()).length() > 50);
+        move(z0 + QPoint(200, 0), Qt::NoModifier);
+        QVERIFY2(qAbs(view->ViewZoom() - 2) < 1e-6, "dragging right did not zoom in");
+        QCOMPARE(zoom_lvl, 2.0f);
+        QVERIFY2(QLineF(view->mapFromScene(canvas_centre), pivot).length() <= 2,
+                 "the zoom did not pivot on the canvas centre");
+        for(int i = 0; i < 60; i++)
+            move(z0 + QPoint(i % 2 ? 7 : -5, 0), Qt::NoModifier);
+        QVERIFY2(QLineF(view->mapFromScene(canvas_centre), pivot).length() <= 2,
+                 "the canvas drifted over many small zoom steps");
+        move(z0, Qt::NoModifier);
+        QVERIFY(qAbs(view->ViewZoom() - 1) < 1e-6);
+        move(z0 + QPoint(0, 200), Qt::NoModifier); // down = out
+        QVERIFY2(qAbs(view->ViewZoom() - 0.5) < 1e-6, "dragging down did not zoom out");
+        move(z0 + QPoint(-30, 0), Qt::NoModifier); // 2^-0.15 = 0.9013
+        QVERIFY(qAbs(view->ViewZoom() - 0.9013) < 1e-3);
+        move(z0 + QPoint(-30, 0), Qt::ShiftModifier);
+        QVERIFY2(qAbs(view->ViewZoom() - 0.9) < 1e-9, "Shift did not snap to a 10% step");
+        QTest::mouseRelease(vp, Qt::LeftButton, Qt::NoModifier, z0 + QPoint(-30, 0));
+        view->ResetView();
+        QCOMPARE(zoom_lvl, 1.0f);
+
+        QCOMPARE(CurrentStickFigure()->stick_list[0]->my_line, line);
+        QCOMPARE(view->undo_stack.count(), undo_count);
+        QCOMPARE(scene->sceneRect(), scene_rect);
     }
 };
 

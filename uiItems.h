@@ -65,7 +65,7 @@ extern std::function<void(StickData *)> refresh_text_panel;
 extern QWidget * advanced_ik_tab;       ///< "IK properties" panel, shown only when the selected stick has an IK role (built in Widget's ctor)
 extern QCheckBox * ik_active_check;     ///< the "Chain active" toggle inside advanced_ik_tab (IK_TARGET_ON <-> IK_TARGET_OFF)
 extern QWidget * library_tab;           ///< the "Libraries" tab page in my_tab_widget; UpdateTab() must never strip it while rebuilding the per-stick-type advanced tabs
-extern QWidget * vertex_width_row;      ///< the "Vertex width" row inside it (hidden for POLYGON)
+extern QWidget * vertex_width_row;      ///< the MULTILINE-only rows inside it — "Vertex width" and "Vertex cap" (hidden for POLYGON)
 extern QSlider * vertex_width_slider;
 extern QSlider * vertex_curve_slider;
 extern AdvancedLineWidget* advanced_line_tab;

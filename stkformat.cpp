@@ -679,22 +679,32 @@ bool ResolveExportSegments(const StickFigureData &figure, QList<ExportSegment> *
                     curvature_warned = true;
                 }
             }
-            int previous_joint = seg.parent_joint;
-            for (int v = 0; v + 1 < verts.count(); v++) {
+            // un segmento per lato (genitore, figlio) dell'albero dei vertici, emessi genitore
+            // prima del figlio (visita in ampiezza): ogni lato si aggancia al giunto del suo
+            // vertice di partenza, quindi i rami escono dal vertice da cui pendono
+            QList<qint32> parents = stick->MultilineParents();
+            QList<QList<int>> kids(verts.count());
+            for (int v = 1; v < verts.count(); v++)
+                kids[parents[v]] << v;
+            QList<int> order{0};
+            for (int k = 0; k < order.count(); k++)
+                order += kids[order[k]];
+            QVector<int> joint(verts.count(), seg.parent_joint);
+            for (int v : order.mid(1)) {
                 ExportSegment link;
-                QLineF edge(verts[v], verts[v + 1]);
-                link.parent_joint = previous_joint;
+                QLineF edge(verts[parents[v]], verts[v]);
+                link.parent_joint = joint[parents[v]];
                 link.length = edge.length();
                 link.angle = qAtan2(edge.dy(), edge.dx());
                 link.type = 0;
                 link.color = pen_color;
-                double width_a = stick->vertex_widths.value(v, pen_width);
-                double width_b = stick->vertex_widths.value(v + 1, pen_width);
+                double width_a = stick->vertex_widths.value(parents[v], pen_width);
+                double width_b = stick->vertex_widths.value(v, pen_width);
                 link.thickness = (width_a + width_b) / 2.0;
                 segments->append(link);
-                previous_joint = segments->count(); // il giunto appena creato
+                joint[v] = segments->count(); // il giunto appena creato
             }
-            joint_of.insert(stick, previous_joint); // i figli si agganciano in coda alla catena
+            joint_of.insert(stick, joint[verts.count() - 1]); // i figli si agganciano a P2
             continue;
         }
 
@@ -1640,19 +1650,24 @@ bool StkFormat::ExportNodes(const QString &path, const StickFigureData &figure,
                     curvature_warned = true;
                 }
             }
-            int previous = parent;
+            // un nodo per vertice (P1 escluso), in ordine di indice così P2 resta l'ultimo,
+            // cioè last_node_of; il nodo pende da quello del suo vertice genitore (un rimando
+            // in avanti va bene: l'albero si scrive dai children, non dall'ordine)
+            QList<qint32> parents = stick->MultilineParents();
+            const int base = nodes.count(); // nodo del vertice v = base + v - 1
             for (int v = 1; v < verts.count(); v++) {
+                int up = parents[v];
                 NodeExport link;
                 link.type = 0;
                 link.draw_index = (v == 1) ? draw_rank[i] : next_draw++;
-                QPointF from = (v == 1) ? parent_pos : verts[v - 1];
+                QPointF from = (up == 0) ? parent_pos : verts[up];
                 QPointF off = verts[v] - from;
                 link.local_x = float(off.x());
                 link.local_y = float(off.y());
                 link.length = QLineF(QPointF(0, 0), off).length();
                 link.global_angle_deg = (link.length > 0)
                         ? NormalizeDegrees(qAtan2(off.y(), off.x()) * 180.0 / M_PI) : 0.0;
-                double width_a = stick->vertex_widths.value(v - 1, pen_width);
+                double width_a = stick->vertex_widths.value(up, pen_width);
                 double width_b = stick->vertex_widths.value(v, pen_width);
                 link.thickness = rounded_thickness((width_a + width_b) / 2.0);
                 link.trap_start = float(link.thickness);
@@ -1660,8 +1675,7 @@ bool StkFormat::ExportNodes(const QString &path, const StickFigureData &figure,
                 link.color = pen_color;
                 link.outline_color = pen_color;
                 nodes.append(link);
-                parent_node.append(previous);
-                previous = nodes.count() - 1;
+                parent_node.append(up == 0 ? parent : base + up - 1);
             }
             continue;
         }

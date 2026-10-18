@@ -18,6 +18,8 @@
 #include <QShortcut>
 #include <QTabletEvent>
 #include <QRandomGenerator>
+#include <QApplication>
+#include <QScrollBar>
 #include "uiItems.h"
 #include "framepresenter.h"
 
@@ -147,6 +149,72 @@ void MyView::SetTool(int new_tool)
     // spostata dall'utente con Ctrl-trascina (una NUOVA selezione la ricentra da sé, via
     // UpdateMultiSelectionUI(true)). Prima, passare a ROTATE/SCALE la riportava al centro.
     UpdateSelectionDecorations(false);
+}
+
+/**
+ * @details resetTransform() drops zoom and rotation at once; clearing the view's own scene
+ * rect makes it follow the scene's again, which is what removes the room
+ * UnlockViewNavigation() made for panning. Centring on the canvas is the un-panned state,
+ * the same one the Widget constructor starts from.
+ */
+void MyView::ResetView()
+{
+    resetTransform();
+    zoom_lvl = 1.0;
+    setSceneRect(QRectF());
+    centerOn(my_rect->sceneBoundingRect().center());
+}
+
+/// @details Read back from the transform rather than tracked, so zoom changes (which scale
+/// m11/m12 alike) and ResetView() need no bookkeeping.
+qreal MyView::ViewAngle() const
+{
+    return atan2(transform().m12(), transform().m11()) * 180.0 / M_PI;
+}
+
+/// @details sqrt(|det|): a rotation leaves the determinant alone, so this is the zoom at any angle.
+qreal MyView::ViewZoom() const
+{
+    return sqrt(qAbs(transform().determinant()));
+}
+
+/// @details r is two diagonals of the visible area: one drag can't move the mouse much
+/// farther than a screen, and a pan past it just stops at the scroll limit until the next
+/// press re-centres the room. The scene's rect stays inside, so the scroll bars still
+/// reach the whole canvas.
+void MyView::UnlockViewNavigation()
+{
+    QRectF visible = mapToScene(viewport()->rect()).boundingRect();
+    QPointF centre = visible.center();
+    qreal r = 2 * QLineF(visible.topLeft(), visible.bottomRight()).length();
+    // ponytail: a canvas resize/load while panned leaves this rect on the old canvas until
+    // the next PANVIEW/ROTATEVIEW press or ResetView(); hook sceneRectChanged if it shows
+    setSceneRect(scene()->sceneRect().united(QRectF(centre.x() - r, centre.y() - r, 2*r, 2*r)));
+    centerOn(centre);
+}
+
+/// @details Angle of `p` around `centre`, clockwise on screen like rotate().
+static qreal AngleAround(QPoint centre, QPoint p)
+{
+    QPoint d = p - centre;
+    return atan2(d.y(), d.x()) * 180.0 / M_PI;
+}
+
+/// @details QGraphicsView turns and scales about the viewport centre (its anchor), so the
+/// canvas is put back afterwards by scrolling. The target is the spot latched at the press,
+/// NOT the previous step's position: re-reading a rounded position every step (as the first
+/// cut did through centerOn(), which truncates) walked the canvas off by ~half a pixel per
+/// mouse event. Unlocking before AND after: before, so Qt has nothing to re-centre mid-step;
+/// after, so the scroll has room at the new zoom.
+void MyView::TurnAndZoomView(qreal degrees, qreal factor)
+{
+    UnlockViewNavigation();
+    rotate(degrees);
+    scale(factor, factor);
+    UnlockViewNavigation();
+    QPoint drift = mapFromScene(my_rect->sceneBoundingRect().center()) - view_pivot_screen;
+    horizontalScrollBar()->setValue(horizontalScrollBar()->value() + drift.x());
+    verticalScrollBar()->setValue(verticalScrollBar()->value() + drift.y());
 }
 
 /**
@@ -514,6 +582,24 @@ void MyView::mousePressEvent(QMouseEvent *event)
                 StoreUndo();
                 break;
             }
+            // strumenti di sola vista: nessuno StoreUndo, il documento non cambia
+            case(PANVIEW):
+            {
+                UnlockViewNavigation();
+                view_drag_last = event->pos();
+                break;
+            }
+            case(ROTATEVIEW):
+            case(ZOOMVIEW):
+            {
+                // perno = centro della tela, fermo nel punto dello schermo in cui è ora
+                UnlockViewNavigation();
+                view_pivot_screen = mapFromScene(my_rect->sceneBoundingRect().center());
+                view_rotate_offset = ViewAngle() - AngleAround(view_pivot_screen, event->pos());
+                view_drag_last = event->pos();
+                view_zoom_start = ViewZoom();
+                break;
+            }
             case(ROTATESCENE):
             {
                 StoreUndo();
@@ -672,31 +758,65 @@ void MyView::mousePressEvent(QMouseEvent *event)
                     DrawCmd(&coord,(int)tool);
                     poly_session_active = true;
                     poly_session_extends = false;
+                    poly_session_resumed = false;
+                    poly_branch_from = -1;
                     break;
                 }
                 StickData *session = PolySessionStick(StickData::MULTILINE);
                 if(poly_session_active && session != nullptr){
+                    int last = session->view->SceneVertices().length() - 1;
+                    if(poly_branch_from >= last)
+                        poly_branch_from = -1; // indice non più valido: torna alla linea principale
+                    float dist = 0;
+                    int vertex_idx = session->view->SelectPolygonPoint(coord, &dist);
+                    // Alt+click su una maniglia: cancella il vertice (con i rami che ne partono)
+                    // anche a sessione aperta, come fuori sessione. Gli indici cambiano, quindi
+                    // il prossimo punto riprende dalla linea principale
+                    if(event->modifiers() & Qt::AltModifier){
+                        if(vertex_idx >= 0 && dist <= radius){
+                            StoreUndo();
+                            session->view->ClearPolygonPreview();
+                            poly_branch_from = -1;
+                            if(!DeleteVertex(session, vertex_idx))
+                                FinishPolygonSession(); // lo stick intero non c'è più
+                        }
+                        break;
+                    }
+                    // click su una maniglia: il prossimo punto parte da lì (P2 = riprendi la
+                    // linea principale). Nessuna modifica ai dati, quindi niente undo
+                    if(vertex_idx >= 0 && dist <= radius){
+                        poly_branch_from = vertex_idx == last ? -1 : vertex_idx;
+                        session->view->SetPolygonPreview(coord, last + 1, poly_branch_from,
+                                                         poly_branch_from < 0 ? my_vertex_cap
+                                                                              : qint32(StickData::CAP_ROUND));
+                        break;
+                    }
                     session->view->ClearPolygonPreview();
                     StoreUndo(); // granularità per-vertice, come per il poligono
-                    session->view->AppendMultilineVertex(coord);
+                    if(poly_branch_from < 0)
+                        session->view->AppendMultilineVertex(coord, my_vertex_cap);
+                    else // il ramo prosegue dal vertice appena aggiunto
+                        poly_branch_from = session->view->BranchMultilineVertex(poly_branch_from, coord);
                     break;
                 }
                 poly_session_active = false; // sessione orfana: riparti pulito
                 // vertice esistente: Alt = cancella (sotto i 2 vertici sparisce lo stick
-                // intero), altrimenti trascina
+                // intero), altrimenti trascina — o, se il mouse si rilascia senza trascinare,
+                // riapre la sessione per un ramo da quel vertice (mouseReleaseEvent)
                 int vertex_idx = -1;
                 StickData *hit = FindPolygonVertex(coord, &vertex_idx, StickData::MULTILINE);
                 if(hit != nullptr){
-                    StoreUndo();
-                    my_animation->UpdateSelection(hit);
                     if(event->modifiers() & Qt::AltModifier){
-                        if(hit->view->SceneVertices().length() <= 2)
-                            DeleteWholeStick(hit); // resterebbe 1 vertice: via tutto lo stick
-                        else
-                            hit->view->DeletePolygonPoint(vertex_idx);
+                        StoreUndo();
+                        DeleteVertex(hit, vertex_idx);
                     }
                     else{
+                        // lo snapshot aspetta il primo vero trascinamento (mouseMoveEvent):
+                        // un semplice click non deve lasciare un passo di undo vuoto
+                        my_animation->UpdateSelection(hit);
                         poly_drag_idx = vertex_idx;
+                        poly_drag_needs_undo = true;
+                        poly_press_pos = event->pos();
                     }
                     break;
                 }
@@ -708,7 +828,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
                     StoreUndo();
                     my_animation->UpdateSelection(edge_hit);
                     QPolygonF verts = edge_hit->view->SceneVertices();
-                    QPointF mid = (verts[insert_idx - 1] + verts[insert_idx % verts.length()]) / 2.0;
+                    QPointF mid = (verts[edge_hit->MultilineParents()[insert_idx]] + verts[insert_idx]) / 2.0;
                     edge_hit->view->AddPolygonPoint(mid, insert_idx);
                     poly_drag_idx = insert_idx; // il trascinamento aggiusta subito la posizione
                     break;
@@ -837,6 +957,9 @@ void MyView::keyPressEvent(QKeyEvent *event)
         case(Qt::Key_Cancel):
         case(Qt::Key_Delete):
         {
+            // vertici selezionati con Ctrl: Canc cancella quelli, non lo stick
+            if(DeleteSelectedVertices())
+                break;
             // con una selezione multipla il tasto Canc elimina tutte le figure selezionate
             if(MultiSelectionActive()){
                 DeleteMultiSelection();
@@ -937,7 +1060,10 @@ void MyView::keyPressEvent(QKeyEvent *event)
                     }
                     else if(poly_session_active)
                     {
-                        StickData *session = PolySessionStick(StickData::MULTILINE);
+                        // una sessione riaperta su una linea già finita (click su una
+                        // maniglia) aggiunge solo rami: Esc la chiude, non butta la linea
+                        StickData *session = poly_session_resumed ? nullptr
+                                                                  : PolySessionStick(StickData::MULTILINE);
                         FinishPolygonSession();
                         if(session != nullptr){
                             StoreUndo();
@@ -1119,6 +1245,7 @@ void MyView::DrawCmd(QPointF* point, int mode)
                 // larghezza/curvatura per i due estremi iniziali (indici virtuali 0 e 1)
                 new_stick->vertex_widths << my_pen.widthF() << my_pen.widthF();
                 new_stick->vertex_curvatures << 0.0f << 0.0f;
+                new_stick->vertex_caps << my_vertex_cap << my_vertex_cap;
             }
             else if(mode == DRAWTEXT){
                 // il testo arriva al 3° passo (dopo il 2° click, sotto): finché è vuoto lo
@@ -2025,6 +2152,97 @@ void MyView::DeleteWholeStick(StickData *stick)
 }
 
 /**
+ * @details The one vertex-deletion rule shared by Alt+click (in and out of a drawing
+ * session) and the Delete key: StickGraphicsItem::DeletePolygonPoint() refuses to leave a
+ * MULTILINE with a single vertex, and then the stick goes as a whole. The stick is made
+ * current first because DeleteWholeStick() works on the current figure. The caller has
+ * already taken the undo snapshot.
+ */
+bool MyView::DeleteVertex(StickData *stick, int vertex_idx)
+{
+    my_animation->UpdateSelection(stick);
+    if(stick->view->DeletePolygonPoint(vertex_idx))
+        return true;
+    if(stick->stick_type == StickData::MULTILINE){
+        DeleteWholeStick(stick);
+        return false;
+    }
+    return true;
+}
+
+/**
+ * @details Delete-key half of the Ctrl vertex selection (NOTOOL/CLAMP, mousePressEvent):
+ * one undo step for every selected vertex of every stick in the frame. Each deletion
+ * remaps the stick's own selection set (DeletePolygonPoint()), and a MULTILINE vertex takes
+ * its branches along — selected vertices among them simply drop out of the set.
+ */
+bool MyView::DeleteSelectedVertices()
+{
+    if(my_animation->current_frame == nullptr || my_animation->current_frame->stick_figures.isEmpty())
+        return false;
+    QList<StickData*> holders;
+    for(StickData *s : my_animation->CurrentFrame()->total_sticks)
+        if(IsVertexStick(s) && s->view && !s->view->selected_vertices.isEmpty())
+            holders << s;
+    if(holders.isEmpty())
+        return false;
+    StoreUndo();
+    for(StickData *s : holders){
+        // uno stick cancellato per intero si porta via i suoi figli, che possono essere qui
+        if(!my_animation->CurrentFrame()->total_sticks.contains(s))
+            continue;
+        while(!s->view->selected_vertices.isEmpty()){
+            int idx = *s->view->selected_vertices.begin();
+            int before = s->view->selected_vertices.size();
+            if(!DeleteVertex(s, idx))
+                break; // lo stick intero è sparito, con la sua selezione
+            // cancellato, il vertice esce da solo dalla selezione (rimappata); se è rimasto
+            // dov'era il cancellamento è stato rifiutato: toglilo, o il ciclo non finisce
+            if(s->view->selected_vertices.size() >= before)
+                s->view->selected_vertices.remove(idx);
+        }
+    }
+    StickFigure *fig = my_animation->CurrentFrame()->CurrentStickFigure();
+    if(fig != nullptr){
+        fig->UpdateIcon();
+        if(fig->linked_item)
+            fig->linked_item->setIcon(*fig->stick_figure_icon);
+    }
+    my_animation->current_frame->UpdateIcon();
+    return true;
+}
+
+/**
+ * @details One control, two roles (spec): the next vertices drawn, and the vertices already
+ * selected. Here rather than in the Widget lambda so the model half is reachable from the
+ * test binary, which does not link widget.cpp.
+ */
+void MyView::SetVertexCap(qint32 cap)
+{
+    my_vertex_cap = cap;
+    if(my_animation->current_frame == nullptr || my_animation->current_frame->stick_figures.isEmpty())
+        return;
+    StickData *cs = my_animation->CurrentFrame()->CurrentStick();
+    if(cs == nullptr || cs->stick_type != StickData::MULTILINE || !cs->view
+            || cs->view->selected_vertices.isEmpty())
+        return;
+    StoreUndo();
+    QList<qint32> caps = cs->MultilineCaps();
+    for(int idx : cs->view->selected_vertices)
+        if(idx >= 0 && idx < caps.length())
+            caps[idx] = cap;
+    cs->vertex_caps = caps;
+    cs->view->Refresh(0);
+    StickFigure *fig = my_animation->CurrentFrame()->CurrentStickFigure();
+    if(fig != nullptr){
+        fig->UpdateIcon();
+        if(fig->linked_item)
+            fig->linked_item->setIcon(*fig->stick_figure_icon);
+    }
+    my_animation->current_frame->UpdateIcon();
+}
+
+/**
  * @details Called by the "Convert to" row of the advanced panels (Widget's ctor, moved
  * between panels by Animation::UpdateTab()). Destructive on purpose (spec): everything only
  * the old type reads is dropped before the new type is seeded, so nothing stale can resurface
@@ -2052,6 +2270,8 @@ void MyView::ConvertStick(StickData *stick, int new_type, const QImage &image,
     stick->polygon_points.clear();
     stick->vertex_widths.clear();
     stick->vertex_curvatures.clear();
+    stick->vertex_parents.clear();
+    stick->vertex_caps.clear();
     stick->text.clear();
     stick->img_offset = QPointF(0, 0);
     stick->img_angle_offset = 0;
@@ -2126,6 +2346,7 @@ void MyView::FinishPolygonSession()
 {
     poly_session_active = false;
     poly_session_extends = false;
+    poly_branch_from = -1;
     // il null-check serve: ChangeTool() chiama qui a ogni SetTool(), anche prima che
     // esista il primo frame (fixture dei test / avvio)
     if(my_animation->current_frame == nullptr || my_animation->current_frame->stick_figures.isEmpty())
@@ -3530,6 +3751,20 @@ void MyView::mouseReleaseEvent(QMouseEvent *event)
     }
     if(event->button()==Qt::LeftButton){
         is_pressed = false;
+        // DRAWMULTI: maniglia premuta e rilasciata senza trascinare = riapri la sessione
+        // perché i prossimi click facciano crescere un ramo da quel vertice (P2: la linea
+        // principale riprende ad allungarsi)
+        if(tool == DRAWMULTI && poly_drag_needs_undo && poly_drag_idx >= 0){
+            StickData *line = PolySessionStick(StickData::MULTILINE);
+            if(line != nullptr){
+                int last = line->view->SceneVertices().length() - 1;
+                poly_session_active = true;
+                poly_session_extends = false;
+                poly_session_resumed = true;
+                poly_branch_from = poly_drag_idx >= last ? -1 : poly_drag_idx;
+            }
+        }
+        poly_drag_needs_undo = false;
         poly_drag_idx = -1;      // fine di un eventuale trascinamento di vertice (DRAWPOLY)
         poly_vertex_drag = false; // fine di un eventuale Ctrl-drag della selezione vertici
         multi_dragging = false;
@@ -3836,6 +4071,14 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                 break;
             // trascinamento di un vertice esistente
             if(is_pressed && poly_drag_idx >= 0){
+                if(poly_drag_needs_undo){
+                    // sotto la soglia di drag è ancora un click (che riapre la sessione al
+                    // rilascio): solo oltre si prende lo snapshot e il vertice si sposta
+                    if((event->pos() - poly_press_pos).manhattanLength() < QApplication::startDragDistance())
+                        break;
+                    StoreUndo();
+                    poly_drag_needs_undo = false;
+                }
                 session->view->EditPolygonPoint(poly_drag_idx, coord);
                 break;
             }
@@ -3848,7 +4091,12 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                     insert_idx = session->view->NearestEdgeInsertIndex(coord);
                 else
                     insert_idx = session->polygon_points.length();
-                session->view->SetPolygonPreview(coord, insert_idx);
+                // DRAWMULTI: l'anteprima pende dal vertice da cui partirà il prossimo punto
+                // (i vertici di un ramo sono sempre tondi, gli altri hanno il giunto scelto)
+                session->view->SetPolygonPreview(coord, insert_idx,
+                                                 tool == DRAWMULTI ? poly_branch_from : -1,
+                                                 poly_branch_from >= 0 ? qint32(StickData::CAP_ROUND)
+                                                                       : my_vertex_cap);
             }
             break;
         }
@@ -3873,6 +4121,42 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         {
             if(is_pressed)
                 ApplySelectionScale(); // stessa scala delle maniglie della transformation box
+            break;
+        }
+        case(PANVIEW):
+        {
+            if(is_pressed){
+                // scorre delle barre del delta esatto in pixel (come ScrollHandDrag): rimappare
+                // un centro attraverso la trasformazione a ogni passo derivava per arrotondamento
+                QPoint delta = event->pos() - view_drag_last;
+                view_drag_last = event->pos();
+                horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
+                verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
+            }
+            break;
+        }
+        case(ROTATEVIEW):
+        {
+            if(is_pressed){
+                qreal target = view_rotate_offset + AngleAround(view_pivot_screen, event->pos());
+                if(event->modifiers() & Qt::ShiftModifier)
+                    target = qRound(target / 15.0) * 15.0; // scatti da 15° dell'angolo ASSOLUTO
+                TurnAndZoomView(target - ViewAngle(), 1);
+            }
+            break;
+        }
+        case(ZOOMVIEW):
+        {
+            if(is_pressed){
+                // destra/su = ingrandisci, sinistra/giù = riduci; 200 px di trascinamento = x2
+                QPoint d = event->pos() - view_drag_last;
+                qreal target = view_zoom_start * pow(2.0, (d.x() - d.y()) / 200.0);
+                if(event->modifiers() & Qt::ShiftModifier)
+                    target = qRound(target * 10) / 10.0; // scatti del 10% del livello ASSOLUTO
+                target = qBound(0.1, target, 50.0); // ponytail: limiti arbitrari, solo per non degenerare
+                TurnAndZoomView(0, target / ViewZoom());
+                zoom_lvl = target; // il middle-drag zoom e il reset leggono questo
+            }
             break;
         }
         case(MOVESCENE):

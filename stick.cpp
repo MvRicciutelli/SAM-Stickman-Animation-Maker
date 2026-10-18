@@ -525,51 +525,99 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         PaintVertexSquares(painter, poly);
     }
     else if(data->stick_type == StickData::MULTILINE){
-        QPolygonF chain = ScenePolygon(); // P1 + interni + P2 (+ anteprima)
+        QPolygonF chain = ScenePolygon(); // P1 + interni + P2 (+ anteprima in coda)
         if(chain.size() >= 2){
-            // spezzata a larghezza variabile per vertice, con smussi di curvatura:
-            // 1) densifica la linea centrale (campiona una quadratica agli angoli con
-            //    curvatura > 0), portandosi dietro la larghezza per punto
-            QList<QPointF> center;
-            QList<float> widths;
-            // l'anteprima del prossimo vertice è inserita nella chain ma non ha una
-            // voce nelle liste larghezza/curvatura: rimappa l'indice (QList::value con
-            // indice -1 restituisce il default, quindi l'anteprima eredita la penna)
-            auto data_idx_of = [this](int i) -> int {
-                if(poly_preview_active && i == poly_preview_idx) return -1;
-                return (poly_preview_active && i > poly_preview_idx) ? i-1 : i;
+            const int n = chain.size();
+            // l'anteprima del prossimo vertice è in coda alla chain ma non ha una voce nelle
+            // liste larghezza/curvatura: QList::value con indice -1 restituisce il default,
+            // quindi l'anteprima eredita la penna
+            const int preview_at = poly_preview_active ? n - 1 : -1;
+            auto width_at = [this, preview_at](int idx) -> float {
+                return data->vertex_widths.value(idx == preview_at ? -1 : idx, data->pen.widthF());
             };
-            auto width_at = [this, &data_idx_of](int idx) -> float {
-                return data->vertex_widths.value(data_idx_of(idx), data->pen.widthF());
+            auto curvature_at = [this, preview_at](int idx) -> float {
+                return qBound(0.0f, data->vertex_curvatures.value(idx == preview_at ? -1 : idx, 0.0f), 1.0f);
             };
-            auto curvature_at = [this, &data_idx_of](int idx) -> float {
-                return qBound(0.0f, data->vertex_curvatures.value(data_idx_of(idx), 0.0f), 1.0f);
-            };
-            center.append(chain[0]);
-            widths.append(width_at(0));
-            for(int i = 1; i < chain.size() - 1; i++){
-                float c = curvature_at(i);
-                QLineF in(chain[i-1], chain[i]);
-                QLineF out(chain[i], chain[i+1]);
-                float r = c * 0.5f * qMin(in.length(), out.length());
-                if(c <= 0.001f || r < 0.5f){
-                    center.append(chain[i]);
-                    widths.append(width_at(i));
-                    continue;
+            // albero dei vertici (vertex_parents): l'anteprima pende da poly_preview_parent
+            QList<qint32> parent = data->MultilineParents();
+            if(poly_preview_active)
+                parent << qBound(0, poly_preview_parent, n - 2);
+            const int p2 = poly_preview_active ? n - 2 : n - 1;
+            // giunto/estremità di ogni vertice (StickData::VertexCap); l'anteprima ha il suo
+            QList<qint32> caps = data->MultilineCaps();
+            if(poly_preview_active)
+                caps << poly_preview_cap;
+            QList<QList<int>> kids(n);
+            for(int i = 1; i < n; i++)
+                kids[parent[i]] << i;
+            // l'albero si disegna a polilinee: next[v] è il figlio che prosegue quella di v —
+            // sulla linea principale (gli antenati di P2) quello verso P2, altrove il primo.
+            // Ogni altro figlio apre un ramo che comincia dal vertice da cui pende
+            QVector<int> next(n, -1);
+            for(int v = 0; v < n; v++)
+                if(!kids[v].isEmpty())
+                    next[v] = kids[v].first();
+            for(int v = p2; v > 0; v = parent[v])
+                next[parent[v]] = v;
+            QList<QList<int>> lines;
+            QList<int> starts{0}, junctions{-1};
+            for(int k = 0; k < starts.size(); k++){
+                QList<int> line;
+                if(junctions[k] >= 0)
+                    line << junctions[k];
+                for(int v = starts[k]; v >= 0; v = next[v]){
+                    line << v;
+                    for(int c : kids[v]){
+                        if(c != next[v]){
+                            starts << c;
+                            junctions << v;
+                        }
+                    }
                 }
-                // smusso: entra a distanza r prima del vertice, esce r dopo; quadratica
-                // con il vertice come punto di controllo
-                QPointF a = in.pointAt(1.0 - r / in.length());
-                QPointF b = out.pointAt(r / out.length());
-                for(int s = 0; s <= 6; s++){
-                    qreal u = s / 6.0;
-                    QPointF q = (1-u)*(1-u)*a + 2*(1-u)*u*chain[i] + u*u*b;
-                    center.append(q);
-                    widths.append(width_at(i));
-                }
+                lines << line;
             }
-            center.append(chain[chain.size()-1]);
-            widths.append(width_at(chain.size()-1));
+            // 1) densifica la linea centrale di una polilinea (campiona una quadratica agli
+            //    angoli con curvatura > 0), portandosi dietro larghezza e giunto per punto (i
+            //    campioni di uno smusso sono già curvi: spigolo vivo)
+            auto densify = [&](const QList<int> &line, QList<QPointF> &center, QList<float> &widths,
+                               QList<qint32> &joins){
+                QList<QPointF> pts;
+                QList<float> w, curv;
+                for(int v : line){
+                    pts << chain[v];
+                    w << width_at(v);
+                    curv << curvature_at(v);
+                }
+                center.append(pts[0]);
+                widths.append(w[0]);
+                joins.append(caps[line.first()]);
+                for(int i = 1; i < pts.size() - 1; i++){
+                    float c = curv[i];
+                    QLineF in(pts[i-1], pts[i]);
+                    QLineF out(pts[i], pts[i+1]);
+                    float r = c * 0.5f * qMin(in.length(), out.length());
+                    if(c <= 0.001f || r < 0.5f){
+                        center.append(pts[i]);
+                        widths.append(w[i]);
+                        joins.append(caps[line[i]]);
+                        continue;
+                    }
+                    // smusso: entra a distanza r prima del vertice, esce r dopo; quadratica
+                    // con il vertice come punto di controllo
+                    QPointF a = in.pointAt(1.0 - r / in.length());
+                    QPointF b = out.pointAt(r / out.length());
+                    for(int s = 0; s <= 6; s++){
+                        qreal u = s / 6.0;
+                        QPointF q = (1-u)*(1-u)*a + 2*(1-u)*u*pts[i] + u*u*b;
+                        center.append(q);
+                        widths.append(w[i]);
+                        joins.append(StickData::CAP_SHARP);
+                    }
+                }
+                center.append(pts.last());
+                widths.append(w.last());
+                joins.append(caps[line.last()]);
+            };
             // 2) contorno: per ogni punto densificato sposta a destra/sinistra lungo la
             //    bisettrice dell'angolo, poi riempi. La bisettrice viene dai versori dei due
             //    segmenti: la corda prev->next (usata un tempo) è pesata dalle lunghezze, e a
@@ -580,40 +628,51 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
                 return len < 1e-6 ? QPointF(0,0) : (to - from) / len;
             };
             auto perp = [](QPointF u) { return QPointF(-u.y(), u.x()); }; // normale sinistra
-            QPolygonF left, right;
-            for(int k = 0; k < center.size(); k++){
-                QPointF c = center[k];
-                qreal h = widths[k]/2.0;
-                QPointF u_in  = k > 0 ? unit(center[k-1], c) : QPointF(0,0);
-                QPointF u_out = k < center.size()-1 ? unit(c, center[k+1]) : QPointF(0,0);
-                QPointF t = u_in + u_out;
-                qreal t_len = QLineF(QPointF(0,0), t).length();
-                if(t_len < 1e-6) // inversione secca a 180° (o punti coincidenti)
-                    t = !u_in.isNull() ? u_in : (!u_out.isNull() ? u_out : QPointF(1,0));
-                else
-                    t /= t_len;
-                QPointF n = perp(t);
-                // coseno di metà svolta: 1 agli estremi e sui tratti dritti
-                qreal cos_half = u_in.isNull() ? 1.0 : QPointF::dotProduct(n, perp(u_in));
-                if(cos_half >= 0.25){
-                    // spigolo vivo (miter): per restare a metà larghezza da ENTRAMBI i segmenti
-                    // il punto va a h / cos(metà svolta), non a h, che strozzava gli angoli
-                    left  << c + n * (h / cos_half);
-                    right << c - n * (h / cos_half);
-                    continue;
+            auto band = [&unit, &perp](const QList<QPointF> &center, const QList<float> &widths,
+                                       const QList<qint32> &joins) -> QPolygonF {
+                QPolygonF left, right;
+                for(int k = 0; k < center.size(); k++){
+                    QPointF c = center[k];
+                    qreal h = widths[k]/2.0;
+                    QPointF u_in  = k > 0 ? unit(center[k-1], c) : QPointF(0,0);
+                    QPointF u_out = k < center.size()-1 ? unit(c, center[k+1]) : QPointF(0,0);
+                    QPointF t = u_in + u_out;
+                    qreal t_len = QLineF(QPointF(0,0), t).length();
+                    if(t_len < 1e-6) // inversione secca a 180° (o punti coincidenti)
+                        t = !u_in.isNull() ? u_in : (!u_out.isNull() ? u_out : QPointF(1,0));
+                    else
+                        t /= t_len;
+                    QPointF n = perp(t);
+                    // coseno di metà svolta: 1 agli estremi e sui tratti dritti
+                    qreal cos_half = u_in.isNull() ? 1.0 : QPointF::dotProduct(n, perp(u_in));
+                    // giunto tondo o smussato: lo spigolo è sempre il bevel qui sotto (il tondo
+                    // ci aggiunge un disco); agli estremi (cos_half = 1) non c'è spigolo
+                    bool interior = !u_in.isNull() && !u_out.isNull();
+                    bool sharp = joins[k] == StickData::CAP_SHARP || !interior;
+                    if(sharp && cos_half >= 0.25){
+                        // spigolo vivo (miter): per restare a metà larghezza da ENTRAMBI i segmenti
+                        // il punto va a h / cos(metà svolta), non a h, che strozzava gli angoli
+                        left  << c + n * (h / cos_half);
+                        right << c - n * (h / cos_half);
+                        continue;
+                    }
+                    // svolta più stretta del miterLimit di default di QPen (2 larghezze): come fa
+                    // QPainterPathStroker, smusso (bevel) sul lato esterno e lato interno che passa
+                    // per il vertice — la sovrapposizione che ne nasce la riempie il WindingFill.
+                    // Un miter accorciato a un punto solo, invece, piegava entrambi i bordi verso
+                    // la punta e assottigliava i due segmenti
+                    QPointF n_in = perp(u_in), n_out = perp(u_out);
+                    qreal s = QPointF::dotProduct(n, u_out - u_in) > 0 ? 1.0 : -1.0; // lato interno
+                    QPolygonF &inner = s > 0 ? left : right;
+                    QPolygonF &outer = s > 0 ? right : left;
+                    inner << c + s*n_in*h << c << c + s*n_out*h;
+                    outer << c - s*n_in*h << c - s*n_out*h;
                 }
-                // svolta più stretta del miterLimit di default di QPen (2 larghezze): come fa
-                // QPainterPathStroker, smusso (bevel) sul lato esterno e lato interno che passa
-                // per il vertice — la sovrapposizione che ne nasce la riempie il WindingFill.
-                // Un miter accorciato a un punto solo, invece, piegava entrambi i bordi verso
-                // la punta e assottigliava i due segmenti
-                QPointF n_in = perp(u_in), n_out = perp(u_out);
-                qreal s = QPointF::dotProduct(n, u_out - u_in) > 0 ? 1.0 : -1.0; // lato interno
-                QPolygonF &inner = s > 0 ? left : right;
-                QPolygonF &outer = s > 0 ? right : left;
-                inner << c + s*n_in*h << c << c + s*n_out*h;
-                outer << c - s*n_in*h << c - s*n_out*h;
-            }
+                QPolygonF outline = left;
+                for(int k = right.size()-1; k >= 0; k--)
+                    outline << right[k];
+                return outline;
+            };
             // il contorno di una spezzata È il suo riempimento: prendi tutto il brush della
             // penna, non solo il colore, così una penna a pattern/gradiente si vede anche
             // qui. Resta ingrigito durante l'onion render, perché QPen::setColor() (sopra)
@@ -621,25 +680,58 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
             // il contorno a pennello timbra la LINEA CENTRALE: la larghezza per vertice non
             // sopravvive (un dab ha una taglia sola), il che è esattamente ciò che scegliere un
             // pennello al posto della penna significa
+            QList<QList<QPointF>> centers;
+            QList<QList<float>> center_widths;
+            QList<QList<qint32>> center_joins;
             QPainterPath spine;
-            spine.moveTo(center.first());
-            for(int k = 1; k < center.size(); k++)
-                spine.lineTo(center[k]);
+            for(const QList<int> &line : lines){
+                QList<QPointF> center;
+                QList<float> widths;
+                QList<qint32> joins;
+                densify(line, center, widths, joins);
+                spine.moveTo(center.first());
+                for(int i = 1; i < center.size(); i++)
+                    spine.lineTo(center[i]);
+                centers << center;
+                center_widths << widths;
+                center_joins << joins;
+            }
             if(!StrokeWithBrush(painter, spine)){
                 QBrush stroke = painter->pen().brush();
                 painter->setPen(Qt::NoPen);
                 painter->setBrush(stroke);
-                QPolygonF outline = left;
-                for(int k = right.size()-1; k >= 0; k--)
-                    outline << right[k];
-                // WindingFill: negli angoli stretti il lato interno si sovrappone a sé stesso, e
-                // con l'OddEvenFill di default la sovrapposizione restava un buco
-                painter->drawPolygon(outline, Qt::WindingFill);
-                // estremità arrotondate come i cap RoundCap di uno stick normale
-                if(data->pen.capStyle() == Qt::RoundCap){
-                    painter->drawEllipse(center.first(), widths.first()/2.0, widths.first()/2.0);
-                    painter->drawEllipse(center.last(),  widths.last()/2.0,  widths.last()/2.0);
+                // tutte le bande in UN path riempito una volta sola: hanno tutte lo stesso verso
+                // (lato sinistro all'andata, destro al ritorno), quindi con il WindingFill le
+                // sovrapposizioni si sommano invece di annullarsi e una linea semitrasparente
+                // non si scurisce agli attacchi dei rami. WindingFill anche perché negli angoli
+                // stretti il lato interno si sovrappone a sé stesso, e con l'OddEvenFill la
+                // sovrapposizione restava un buco
+                QPainterPath bands;
+                bands.setFillRule(Qt::WindingFill);
+                for(int k = 0; k < lines.size(); k++){
+                    const QList<QPointF> &center = centers[k];
+                    const QList<float> &widths = center_widths[k];
+                    const QList<qint32> &joins = center_joins[k];
+                    bands.addPolygon(band(center, widths, joins));
+                    bands.closeSubpath();
+                    // ogni vertice CAP_ROUND — angolo, estremità o attacco di un ramo — è un disco
+                    // della sua larghezza. Un ramo parte piatto DAL vertice, e il disco (di
+                    // default ce l'ha ogni vertice di un ramo) ne è il giunto: raccordarlo a
+                    // spigolo vivo con il lato entrante allungava quel lato oltre il vertice, e
+                    // dove la linea madre non prosegue dritta sporgeva una spina. I dischi vanno
+                    // nello stesso path con lo stesso verso delle bande: addEllipse() gira in
+                    // senso orario, le bande al contrario, e nel WindingFill i due si
+                    // annullerebbero in un buco. Nello stesso path non raddoppiano nemmeno
+                    // l'alpha dove coprono la banda, come facevano i cap disegnati a parte
+                    for(int i = 0; i < center.size(); i++){
+                        if(joins[i] != StickData::CAP_ROUND)
+                            continue;
+                        QPainterPath disc;
+                        disc.addEllipse(center[i], widths[i]/2.0, widths[i]/2.0);
+                        bands.addPath(disc.toReversed());
+                    }
                 }
+                painter->drawPath(bands);
             }
             painter->setPen(data->pen);
             painter->setBrush(Qt::NoBrush);
@@ -1057,16 +1149,22 @@ QPolygonF StickGraphicsItem::SceneVertices() const
 /// endpoint edit never drags the rest of the path along.
 void StickGraphicsItem::RebuildMultilineFrame(const QPointF &new_p1, const QPointF &new_p2)
 {
-    QTransform old_t = data->PolygonTransform();
-    QList<QPointF> scene_points;
-    for(const QPointF &pt : data->polygon_points)
-        scene_points.append(old_t.map(pt));
-    data->my_line = QLineF(new_p1, new_p2);
+    QPolygonF verts = SceneVertices();
+    verts.first() = new_p1;
+    verts.last() = new_p2;
+    SetMultilineVertices(verts);
+}
+
+/// @details The one place a MULTILINE's frame is rebuilt from scene positions: my_line and
+/// img_angle first, then the interior normalized through the NEW transform.
+void StickGraphicsItem::SetMultilineVertices(const QPolygonF &scene_verts)
+{
+    data->my_line = QLineF(scene_verts.first(), scene_verts.last());
     data->img_angle = float(-atan2(data->my_line.dx(), data->my_line.dy())*180/M_PI);
     QTransform inverse = data->PolygonTransform().inverted();
     data->polygon_points.clear();
-    for(const QPointF &scene_pt : scene_points)
-        data->polygon_points.append(inverse.map(scene_pt));
+    for(int i = 1; i < scene_verts.size() - 1; i++)
+        data->polygon_points.append(inverse.map(scene_verts[i]));
 }
 
 /// @details Converts the click to normalized local coordinates through
@@ -1083,13 +1181,26 @@ bool StickGraphicsItem::AddPolygonPoint(const QPointF &scene_point, int insert_i
         // indice virtuale: gli interni occupano 1..count(); default in coda agli interni
         if(insert_idx < 1 || insert_idx > data->polygon_points.length() + 1)
             insert_idx = data->polygon_points.length() + 1;
+        // il nuovo vertice spezza il lato genitore->insert_idx: prende il genitore di quel
+        // vertice, che a sua volta pende dal nuovo (letto PRIMA di toccare polygon_points).
+        // Il giunto lo copia dal vertice del lato in cui cade
+        QList<qint32> caps = data->MultilineCaps();
+        caps.insert(insert_idx, caps[insert_idx]);
+        QList<qint32> parents = data->MultilineParents();
+        qint32 up = parents[insert_idx];
+        for(qint32 &p : parents)
+            if(p >= insert_idx) p++;
+        parents.insert(insert_idx, up >= insert_idx ? up + 1 : up);
+        parents[insert_idx + 1] = insert_idx;
+        data->vertex_parents = parents;
         data->polygon_points.insert(insert_idx - 1,
                                     data->PolygonTransform().inverted().map(scene_point));
-        float width_before = data->vertex_widths.value(insert_idx - 1, data->pen.widthF());
+        float width_before = data->vertex_widths.value(up, data->pen.widthF());
         float width_after  = data->vertex_widths.value(insert_idx, data->pen.widthF());
         data->vertex_widths.insert(qMin(insert_idx, (int)data->vertex_widths.length()),
                                    (width_before + width_after) / 2);
         data->vertex_curvatures.insert(qMin(insert_idx, (int)data->vertex_curvatures.length()), 0.0f);
+        data->vertex_caps = caps;
     }
     else{
         if(insert_idx < 0 || insert_idx > data->polygon_points.length())
@@ -1105,27 +1216,53 @@ bool StickGraphicsItem::AddPolygonPoint(const QPointF &scene_point, int insert_i
 }
 
 /// @details MULTILINE drawing: each click extends the path — the old free end becomes
-/// an interior vertex (keeping its width) and the click becomes the new my_line.p2().
-bool StickGraphicsItem::AppendMultilineVertex(const QPointF &scene_point)
+/// an interior vertex (keeping its width and cap) and the click becomes the new my_line.p2().
+bool StickGraphicsItem::AppendMultilineVertex(const QPointF &scene_point, qint32 cap)
 {
     if(data->stick_type != StickData::MULTILINE) return false;
-    QTransform old_t = data->PolygonTransform();
-    QList<QPointF> scene_points;
-    for(const QPointF &pt : data->polygon_points)
-        scene_points.append(old_t.map(pt));
-    scene_points.append(data->my_line.p2()); // il vecchio estremo diventa interno
-    data->my_line.setP2(scene_point);
-    data->img_angle = float(-atan2(data->my_line.dx(), data->my_line.dy())*180/M_PI);
-    QTransform inverse = data->PolygonTransform().inverted();
-    data->polygon_points.clear();
-    for(const QPointF &scene_pt : scene_points)
-        data->polygon_points.append(inverse.map(scene_pt));
+    QList<qint32> caps = data->MultilineCaps();
+    caps.append(cap);
+    data->vertex_caps = caps;
+    // il vecchio estremo diventa interno senza cambiare indice; il nuovo P2 pende da lui
+    QList<qint32> parents = data->MultilineParents();
+    parents.append(parents.length() - 1);
+    data->vertex_parents = parents;
+    QPolygonF verts = SceneVertices();
+    verts << scene_point;
+    SetMultilineVertices(verts);
     // il nuovo estremo eredita larghezza dall'estremo precedente, curvatura zero
     data->vertex_widths.append(data->vertex_widths.value(data->vertex_widths.length() - 1,
                                                          data->pen.widthF()));
     data->vertex_curvatures.append(0.0f);
     Refresh(1);
     return true;
+}
+
+/// @details The branch vertex goes at the END of the interior (just before P2), so only P2
+/// shifts by one: every index below it — including a branch tip a drawing session keeps
+/// extending — stays valid. Width inherited from the vertex it hangs from, curvature zero.
+/// Every vertex a branch involves — the new one and the one it hangs from — is made round
+/// (spec): a sharp corner where a branch forks off is exactly what produces spikes.
+int StickGraphicsItem::BranchMultilineVertex(int from_idx, const QPointF &scene_point)
+{
+    if(data->stick_type != StickData::MULTILINE) return -1;
+    QList<qint32> caps = data->MultilineCaps();
+    QList<qint32> parents = data->MultilineParents();
+    int last = parents.length() - 1; // P2
+    if(from_idx < 0 || from_idx >= last) return -1;
+    caps[from_idx] = StickData::CAP_ROUND;
+    caps.insert(last, StickData::CAP_ROUND);
+    data->vertex_caps = caps;
+    for(qint32 &p : parents)
+        if(p >= last) p++; // solo i figli di P2
+    parents.insert(last, from_idx);
+    data->vertex_parents = parents;
+    data->polygon_points.append(data->PolygonTransform().inverted().map(scene_point));
+    float w = data->vertex_widths.value(from_idx, data->pen.widthF());
+    data->vertex_widths.insert(qMin(last, (int)data->vertex_widths.length()), w);
+    data->vertex_curvatures.insert(qMin(last, (int)data->vertex_curvatures.length()), 0.0f);
+    Refresh(1);
+    return last;
 }
 
 /// @details Nearest-vertex lookup in scene units, so the caller can compare the
@@ -1174,33 +1311,100 @@ bool StickGraphicsItem::EditPolygonPoint(int index, const QPointF &scene_pos)
     return true;
 }
 
-/// @details Removes a vertex; any resulting count is legal here (MyView deletes the
-/// whole stick when a MULTILINE drops below 2 vertices, per spec). Deleting a
-/// MULTILINE endpoint promotes its neighbor to being the new P1/P2. Keeps the
-/// selection set consistent by shifting the indices above the removed one.
+/// @details Removes a vertex. A MULTILINE vertex takes every branch growing out of it
+/// along (the rest of its own branch, the branches it is the origin of, theirs in turn):
+/// only the main line closes up over a removed vertex, and removing an endpoint promotes
+/// its neighbor on the main line to being the new P1/P2. Returns false, removing nothing,
+/// when fewer than 2 vertices would be left — MyView then deletes the whole stick. Keeps
+/// the selection set consistent by remapping (MULTILINE) or shifting (POLYGON) the
+/// surviving indices.
 bool StickGraphicsItem::DeletePolygonPoint(int index)
 {
     if(!HasEditableVertices(data)) return false;
     if(data->stick_type == StickData::MULTILINE){
-        int last = data->polygon_points.length() + 1;
-        if(index < 0 || index > last) return false;
         QPolygonF verts = SceneVertices();
-        if(verts.length() <= 2) return false; // sotto i 2 vertici ci pensa il chiamante (cancella lo stick)
+        QList<qint32> parents = data->MultilineParents();
+        int n = verts.length(), last = n - 1;
+        if(index < 0 || index > last) return false;
+        // 1) cosa sparisce: il vertice e tutto ciò che ne discende FUORI dalla linea
+        //    principale (P2 e i suoi antenati), cioè ogni ramo che ha origine da lui — e i
+        //    rami dei rami. La linea principale oltre il vertice resta
+        QVector<bool> on_main(n, false);
+        for(int v = last; v >= 0; v = parents[v])
+            on_main[v] = true;
+        QVector<bool> removed(n, false);
+        int left = n;
+        for(int u = 0; u < n; u++){
+            int up = u;
+            if(u != index){
+                if(on_main[u]) continue;
+                up = parents[u];
+                while(up != index && !on_main[up])
+                    up = parents[up];
+            }
+            if(up == index){
+                removed[u] = true;
+                left--;
+            }
+        }
+        if(left < 2) return false; // resterebbe un vertice solo: ci pensa il chiamante (cancella lo stick)
+        // 2) la linea principale si richiude sopra il vertice: il suo figlio sulla linea si
+        //    riattacca a un "hub" — il genitore, o per P1 quel figlio stesso, che diventa la radice
+        int hub = parents[index];
         if(index == 0){
-            data->polygon_points.removeFirst(); // il primo interno diventa il nuovo P1
-            RebuildMultilineFrame(verts[1], data->my_line.p2());
+            hub = last;
+            while(parents[hub] != 0)
+                hub = parents[hub];
         }
-        else if(index == last){
-            data->polygon_points.removeLast(); // l'ultimo interno diventa il nuovo P2
-            RebuildMultilineFrame(data->my_line.p1(), verts[verts.length() - 2]);
+        for(int i = 0; i < n; i++)
+            if(parents[i] == index && !removed[i] && i != hub)
+                parents[i] = hub;
+        if(index == 0)
+            parents[hub] = -1;
+        // 3) l'estremo tolto passa all'hub; se così P1 e P2 coincidessero (linea principale
+        //    di un solo lato, con rami appesi), l'estremo va al vertice rimasto di indice più alto
+        int new_p1 = index == 0 ? hub : 0;
+        int new_p2 = index == last ? hub : last;
+        if(new_p1 == new_p2){
+            int other = last;
+            while(removed[other] || other == hub)
+                other--;
+            (index == 0 ? new_p1 : new_p2) = other;
         }
-        else{
-            data->polygon_points.removeAt(index - 1);
+        parents = StickData::ReRootTree(parents, new_p1);
+        // 4) nuovo ordine: P1, gli altri nell'ordine attuale, P2; liste parallele al seguito
+        QList<int> order;
+        order << new_p1;
+        for(int i = 0; i < n; i++)
+            if(!removed[i] && i != new_p1 && i != new_p2)
+                order << i;
+        order << new_p2;
+        QVector<int> new_of(n, -1);
+        for(int k = 0; k < order.length(); k++)
+            new_of[order[k]] = k;
+        QList<qint32> caps = data->MultilineCaps();
+        QPolygonF new_verts;
+        QList<float> widths, curvatures;
+        QList<qint32> new_parents, new_caps;
+        for(int old : order){
+            new_verts << verts[old];
+            widths << data->vertex_widths.value(old, data->pen.widthF());
+            curvatures << data->vertex_curvatures.value(old, 0.0f);
+            new_parents << (parents[old] < 0 ? -1 : new_of[parents[old]]);
+            new_caps << caps[old];
         }
-        if(index < data->vertex_widths.length())
-            data->vertex_widths.removeAt(index);
-        if(index < data->vertex_curvatures.length())
-            data->vertex_curvatures.removeAt(index);
+        data->vertex_widths = widths;
+        data->vertex_curvatures = curvatures;
+        data->vertex_parents = new_parents;
+        data->vertex_caps = new_caps;
+        SetMultilineVertices(new_verts);
+        QSet<int> remapped;
+        for(int idx : selected_vertices)
+            if(idx >= 0 && idx < n && new_of[idx] >= 0)
+                remapped.insert(new_of[idx]);
+        selected_vertices = remapped;
+        Refresh(1);
+        return true;
     }
     else{
         if(index < 0 || index >= data->polygon_points.length()) return false;
@@ -1244,15 +1448,26 @@ int StickGraphicsItem::NearestEdgeInsertIndex(const QPointF &scene_pos, float *d
         if(dist_out) *dist_out = 0;
         return n;
     }
-    bool closed = data->stick_type == StickData::POLYGON;
-    int edge_count = closed ? n : n - 1;
     int best_idx = n;
     float best_dist = -1;
-    for(int i = 0; i < edge_count; i++){
-        float d = DistanceFromSegment(scene_pos, verts[i], verts[(i+1) % n]);
-        if(best_dist < 0 || d < best_dist){
-            best_dist = d;
-            best_idx = i+1;
+    if(data->stick_type == StickData::MULTILINE){
+        // i lati di una multilinea sono le coppie (genitore, figlio) del suo albero
+        QList<qint32> parents = data->MultilineParents();
+        for(int i = 1; i < n; i++){
+            float d = DistanceFromSegment(scene_pos, verts[parents[i]], verts[i]);
+            if(best_dist < 0 || d < best_dist){
+                best_dist = d;
+                best_idx = i;
+            }
+        }
+    }
+    else{
+        for(int i = 0; i < n; i++){ // anche il lato di chiusura
+            float d = DistanceFromSegment(scene_pos, verts[i], verts[(i+1) % n]);
+            if(best_dist < 0 || d < best_dist){
+                best_dist = d;
+                best_idx = i+1;
+            }
         }
     }
     if(dist_out)
@@ -1264,11 +1479,18 @@ int StickGraphicsItem::NearestEdgeInsertIndex(const QPointF &scene_pos, float *d
 /// StickData, so undo snapshots and saves taken mid-gesture can't capture it. The
 /// index is virtual; a MULTILINE drawing session passes one past the last vertex (the
 /// next click extends the path).
-void StickGraphicsItem::SetPolygonPreview(const QPointF &scene_pos, int insert_idx)
+void StickGraphicsItem::SetPolygonPreview(const QPointF &scene_pos, int insert_idx, int preview_parent,
+                                          qint32 preview_cap)
 {
+    poly_preview_cap = preview_cap;
     if(!HasEditableVertices(data)) return;
     poly_preview_active = true;
-    poly_preview_idx = qBound(0, insert_idx, (int)SceneVertices().length());
+    int n = SceneVertices().length();
+    // la multilinea non inserisce l'anteprima a metà: la appende e la fa pendere da
+    // preview_parent (P2 di default), così il paint la tratta come un vertice dell'albero
+    bool multiline = data->stick_type == StickData::MULTILINE;
+    poly_preview_idx = multiline ? n : qBound(0, insert_idx, n);
+    poly_preview_parent = (multiline && preview_parent >= 0 && preview_parent < n) ? preview_parent : n - 1;
     poly_preview_point = data->PolygonTransform().inverted().map(scene_pos);
     Refresh(1);
 }
@@ -1286,9 +1508,12 @@ void StickGraphicsItem::ClearPolygonPreview()
 QPolygonF StickGraphicsItem::ScenePolygon() const
 {
     QPolygonF poly = SceneVertices();
+    // la multilinea tiene l'anteprima sempre in coda: è ciò su cui paint() costruisce il
+    // genitore dell'anteprima, che non deve poter cadere a metà dell'albero
+    int at = data->stick_type == StickData::MULTILINE ? poly.length()
+                                                      : qBound(0, poly_preview_idx, (int)poly.length());
     if(poly_preview_active && HasEditableVertices(data))
-        poly.insert(qBound(0, poly_preview_idx, (int)poly.length()),
-                    data->PolygonTransform().map(poly_preview_point));
+        poly.insert(at, data->PolygonTransform().map(poly_preview_point));
     return poly;
 }
 

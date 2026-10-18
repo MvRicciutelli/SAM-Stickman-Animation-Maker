@@ -319,6 +319,8 @@ void StickData::CopyFrom(const StickData &source)
     polygon_points = source.polygon_points;
     vertex_widths = source.vertex_widths;
     vertex_curvatures = source.vertex_curvatures;
+    vertex_parents = source.vertex_parents;
+    vertex_caps = source.vertex_caps;
     text = source.text;
     text_font = source.text_font;
     text_align = source.text_align;
@@ -380,6 +382,74 @@ QTransform StickData::PolygonTransform() const
     t.translate(img_offset.x(), img_offset.y());
     t.scale(len, len);
     return t;
+}
+
+/**
+ * @details The one guard every tree walk relies on: a parent list from a corrupt file, or
+ * left stale by code that edited polygon_points without it (imports, ConvertStick), must
+ * never reach a walk that would loop on a cycle or index out of range — it reads as the
+ * plain chain instead.
+ */
+QList<qint32> StickData::MultilineParents() const
+{
+    const int n = polygon_points.size() + 2;
+    bool valid = vertex_parents.size() == n && vertex_parents[0] == -1;
+    // ponytail: O(n²) walk to the root per vertex; fine for hand-drawn vertex counts
+    for (int i = 1; valid && i < n; i++) {
+        int cur = i;
+        for (int steps = 0; valid && cur != 0; steps++) {
+            cur = vertex_parents[cur];
+            valid = cur >= 0 && cur < n && steps < n;
+        }
+    }
+    if (valid)
+        return vertex_parents;
+    QList<qint32> chain;
+    for (int i = 0; i < n; i++)
+        chain << i - 1;
+    return chain;
+}
+
+/**
+ * @details The defaults reproduce how a MULTILINE looked before vertex caps existed, so a
+ * record without the list (an older file, or a list left stale by code that changed the
+ * vertex count) renders exactly as it did: a corner is sharp, a branch origin round (it
+ * was always joined with a disc) and an end follows the pen's cap style.
+ */
+QList<qint32> StickData::MultilineCaps() const
+{
+    const int n = polygon_points.size() + 2;
+    if (vertex_caps.size() == n)
+        return vertex_caps;
+    QList<qint32> parents = MultilineParents();
+    QVector<int> kids(n, 0);
+    for (int i = 1; i < n; i++)
+        kids[parents[i]]++;
+    const qint32 end_cap = pen.capStyle() == Qt::RoundCap ? CAP_ROUND : CAP_SHARP;
+    QList<qint32> caps;
+    for (int i = 0; i < n; i++) {
+        bool origin = kids[i] >= 2 || (i == n - 1 && kids[i] >= 1);
+        bool end = i == 0 || kids[i] == 0;
+        caps << (origin ? CAP_ROUND : end ? end_cap : CAP_SHARP);
+    }
+    return caps;
+}
+
+/**
+ * @details Classic re-root: walking up from the new root, each vertex adopts the one it
+ * came from as its parent. Used when an endpoint deletion or a master change makes a
+ * different vertex P1.
+ */
+QList<qint32> StickData::ReRootTree(QList<qint32> parents, int new_root)
+{
+    int prev = -1;
+    for (int cur = new_root; cur >= 0; ) {
+        int next = parents[cur];
+        parents[cur] = prev;
+        prev = cur;
+        cur = next;
+    }
+    return parents;
 }
 
 /**
@@ -713,6 +783,18 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
             stream << (qint32)stick_data.vertex_widths.length();
             for (float w : stick_data.vertex_widths)
                 stream << w;
+            if (stick_data.version >= 7) {
+                // rami: il genitore di ogni vertice virtuale (vuota = catena semplice)
+                stream << (qint32)stick_data.vertex_parents.length();
+                for (qint32 p : stick_data.vertex_parents)
+                    stream << p;
+            }
+            if (stick_data.version >= 8) {
+                // tipo di giunto/estremità per vertice (vuota = l'aspetto storico)
+                stream << (qint32)stick_data.vertex_caps.length();
+                for (qint32 c : stick_data.vertex_caps)
+                    stream << c;
+            }
         }
         if (stick_data.stick_type == StickData::TEXT) {
             // QFont ha i suoi operatori di stream: famiglia, corpo, grassetto, corsivo,
@@ -854,6 +936,31 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
                     break;
                 stick_data.vertex_widths.append(w);
             }
+            if (stick_data.version >= 7) {
+                // nessuna validazione qui: MultilineParents() ripiega sulla catena da sé
+                qint32 num_parents = 0;
+                stream >> num_parents;
+                for (qint32 i = 0; i < num_parents; i++) {
+                    qint32 p = 0;
+                    stream >> p;
+                    if (stream.status() != QDataStream::Ok)
+                        break;
+                    stick_data.vertex_parents.append(p);
+                }
+            }
+            if (stick_data.version >= 8) {
+                qint32 num_caps = 0;
+                stream >> num_caps;
+                for (qint32 i = 0; i < num_caps; i++) {
+                    qint32 c = 0;
+                    stream >> c;
+                    if (stream.status() != QDataStream::Ok)
+                        break;
+                    // un valore sconosciuto (file corrotto) si disegna come spigolo vivo
+                    stick_data.vertex_caps.append(c >= StickData::CAP_SHARP && c <= StickData::CAP_BEVEL
+                                                  ? c : qint32(StickData::CAP_SHARP));
+                }
+            }
         }
         if (stick_data.stick_type == StickData::TEXT) {
             stream >> stick_data.text;
@@ -878,5 +985,10 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
             }
         }
     }
+    // i campi più nuovi della versione letta valgono ora il loro default: il record è
+    // completo nel formato corrente. Lasciarlo alla versione del file faceva sì che
+    // operator<< saltasse quei campi al prossimo salvataggio, perdendo ciò che vi si è
+    // impostato dopo il caricamento (rami, texture_tiled, stroke_brush...)
+    stick_data.version = StickData::CURRENT_VERSION;
     return stream;
 }

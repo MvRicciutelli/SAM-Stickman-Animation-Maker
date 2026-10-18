@@ -41,6 +41,16 @@ static void ReanchorVertexScenePositions(StickData *s, QList<QPointF> scene_pts)
         std::reverse(scene_pts.begin(), scene_pts.end());
         std::reverse(s->vertex_widths.begin(), s->vertex_widths.end());
         std::reverse(s->vertex_curvatures.begin(), s->vertex_curvatures.end());
+        QList<qint32> caps = s->MultilineCaps(); // materializzata: i default dipendono dall'albero
+        std::reverse(caps.begin(), caps.end());
+        s->vertex_caps = caps;
+        // e anche i rami: stessi lati, indici rovesciati, albero ri-radicato sul nuovo P1
+        QList<qint32> parents = s->MultilineParents();
+        int n = parents.length();
+        QList<qint32> reversed(n);
+        for(int i = 0; i < n; i++)
+            reversed[n-1-i] = parents[i] < 0 ? -1 : n-1-parents[i];
+        s->vertex_parents = StickData::ReRootTree(reversed, 0);
     }
     // img_angle deve tornare a tracciare la direzione della (nuova) spina, come dopo un
     // disegno/Manipulate (stessa formula). Se lo lasciassimo sfasato di 180° dallo scambio

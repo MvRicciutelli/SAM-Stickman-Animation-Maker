@@ -597,23 +597,23 @@ QPushButton:pressed{
                       </size>
                      </property>
                      <property name="toolTip">
-                      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Zoom in Scene&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Zoom View&lt;/span&gt;&lt;/p&gt;&lt;p&gt;Click and drag right/up to zoom in, left/down to zoom out; hold Shift for 10% steps. Only the display changes: the frame and the render are unchanged.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
                      </property>
                      <property name="styleSheet">
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/zoomin_00001.png);
+    background-image: url(:/resources/scalescene_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/zoomin_00002.png);
+    background-image: url(:/resources/scalescene_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/zoomin_00003.png);
+    background-image: url(:/resources/scalescene_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -624,7 +624,7 @@ QPushButton:pressed{
                     </widget>
                    </item>
                    <item>
-                    <widget class="QPushButton" name="zoomOutBtn">
+                    <widget class="QPushButton" name="rotateViewBtn">
                      <property name="minimumSize">
                       <size>
                        <width>50</width>
@@ -638,23 +638,64 @@ QPushButton:pressed{
                       </size>
                      </property>
                      <property name="toolTip">
-                      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Zoom out Scene&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Rotate View&lt;/span&gt;&lt;/p&gt;&lt;p&gt;Click and drag to rotate the view, hold Shift to snap to 15° steps. Only the display turns: the frame and the render are unchanged.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
                      </property>
                      <property name="styleSheet">
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/zoomout_00001.png);
+    background-image: url(:/resources/scenerotate_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/zoomout_00002.png);
+    background-image: url(:/resources/scenerotate_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/zoomout_00003.png);
+    background-image: url(:/resources/scenerotate_00003.png);
+    background-repeat: no-repeat;
+}
+</string>
+                     </property>
+                     <property name="text">
+                      <string/>
+                     </property>
+                    </widget>
+                   </item>
+                   <item>
+                    <widget class="QPushButton" name="panViewBtn">
+                     <property name="minimumSize">
+                      <size>
+                       <width>50</width>
+                       <height>50</height>
+                      </size>
+                     </property>
+                     <property name="maximumSize">
+                      <size>
+                       <width>50</width>
+                       <height>50</height>
+                      </size>
+                     </property>
+                     <property name="toolTip">
+                      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Pan View&lt;/span&gt;&lt;/p&gt;&lt;p&gt;Click and drag to move the view. Only the display moves: the frame and the render are unchanged.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                     </property>
+                     <property name="styleSheet">
+                      <string notr="true">QPushButton {
+    qproperty-icon: url(&quot; &quot;); /* empty image */
+    qproperty-iconSize: 16px 16px; /* space for the background image */
+    background-image: url(:/resources/movescene_00001.png);
+    background-repeat: no-repeat;
+	border: 0px solid #5A5A5A;
+}
+QPushButton:hover{
+    background-image: url(:/resources/movescene_00002.png);
+    background-repeat: no-repeat;
+	background-color: rgb(25, 25, 25)
+}
+QPushButton:pressed{
+    background-image: url(:/resources/movescene_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -679,23 +720,23 @@ QPushButton:pressed{
                       </size>
                      </property>
                      <property name="toolTip">
-                      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Reset Zoom Level&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Reset View&lt;/span&gt;&lt;/p&gt;&lt;p&gt;Resets zoom, rotation and pan.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
                      </property>
                      <property name="styleSheet">
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/resetzoom_00001.png);
+    background-image: url(:/resources/scenereset_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/resetzoom_00002.png);
+    background-image: url(:/resources/scenereset_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/resetzoom_00003.png);
+    background-image: url(:/resources/scenereset_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1056,6 +1097,47 @@ QPushButton:pressed{
                     </widget>
                    </item>
                    <item>
+                    <widget class="QPushButton" name="generateInbetweenBtn">
+                     <property name="minimumSize">
+                      <size>
+                       <width>50</width>
+                       <height>50</height>
+                      </size>
+                     </property>
+                     <property name="maximumSize">
+                      <size>
+                       <width>50</width>
+                       <height>50</height>
+                      </size>
+                     </property>
+                     <property name="toolTip">
+                      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Generate Inbetween Frames&lt;/span&gt;&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-style:italic;&quot;&gt;Note&lt;/span&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;: &lt;/span&gt;&lt;span style=&quot; font-weight:600; text-decoration: underline;&quot;&gt;start&lt;/span&gt;&lt;span style=&quot; font-weight:600;&quot;&gt; and &lt;/span&gt;&lt;span style=&quot; font-weight:600; text-decoration: underline;&quot;&gt;end&lt;/span&gt;&lt;span style=&quot; font-weight:600;&quot;&gt; frame must contain the &lt;/span&gt;&lt;span style=&quot; font-weight:600; text-decoration: underline;&quot;&gt;same&lt;/span&gt;&lt;span style=&quot; font-weight:600;&quot;&gt; stickfigures&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                     </property>
+                     <property name="styleSheet">
+                      <string notr="true">QPushButton {
+    qproperty-icon: url(&quot; &quot;); /* empty image */
+    qproperty-iconSize: 16px 16px; /* space for the background image */
+    background-image: url(:/resources/interpolate_00001.png);
+    background-repeat: no-repeat;
+	border: 0px solid #5A5A5A;
+}
+QPushButton:hover{
+    background-image: url(:/resources/interpolate_00002.png);
+    background-repeat: no-repeat;
+	background-color: rgb(25, 25, 25)
+}
+QPushButton:pressed{
+    background-image: url(:/resources/interpolate_00003.png);
+    background-repeat: no-repeat;
+}
+</string>
+                     </property>
+                     <property name="text">
+                      <string/>
+                     </property>
+                    </widget>
+                   </item>
+                   <item>
                     <widget class="QPushButton" name="PlayButton">
                      <property name="minimumSize">
                       <size>
@@ -1150,47 +1232,6 @@ QPushButton:hover{
 }
 QPushButton:pressed{
     background-image: url(:/resources/pasteFrame_00003.png);
-    background-repeat: no-repeat;
-}
-</string>
-                     </property>
-                     <property name="text">
-                      <string/>
-                     </property>
-                    </widget>
-                   </item>
-                   <item>
-                    <widget class="QPushButton" name="generateInbetweenBtn">
-                     <property name="minimumSize">
-                      <size>
-                       <width>50</width>
-                       <height>50</height>
-                      </size>
-                     </property>
-                     <property name="maximumSize">
-                      <size>
-                       <width>50</width>
-                       <height>50</height>
-                      </size>
-                     </property>
-                     <property name="toolTip">
-                      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Generate Inbetween Frames&lt;/span&gt;&lt;/p&gt;&lt;p&gt;&lt;span style=&quot; font-style:italic;&quot;&gt;Note&lt;/span&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;: &lt;/span&gt;&lt;span style=&quot; font-weight:600; text-decoration: underline;&quot;&gt;start&lt;/span&gt;&lt;span style=&quot; font-weight:600;&quot;&gt; and &lt;/span&gt;&lt;span style=&quot; font-weight:600; text-decoration: underline;&quot;&gt;end&lt;/span&gt;&lt;span style=&quot; font-weight:600;&quot;&gt; frame must contain the &lt;/span&gt;&lt;span style=&quot; font-weight:600; text-decoration: underline;&quot;&gt;same&lt;/span&gt;&lt;span style=&quot; font-weight:600;&quot;&gt; stickfigures&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-                     </property>
-                     <property name="styleSheet">
-                      <string notr="true">QPushButton {
-    qproperty-icon: url(&quot; &quot;); /* empty image */
-    qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/interpolate_00001.png);
-    background-repeat: no-repeat;
-	border: 0px solid #5A5A5A;
-}
-QPushButton:hover{
-    background-image: url(:/resources/interpolate_00002.png);
-    background-repeat: no-repeat;
-	background-color: rgb(25, 25, 25)
-}
-QPushButton:pressed{
-    background-image: url(:/resources/interpolate_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2903,23 +2944,23 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/scalescene_00001.png);
+    background-image: url(:/resources/scale_camera_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/scalescene_00002.png);
+    background-image: url(:/resources/scale_camera_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/scalescene_00003.png);
+    background-image: url(:/resources/scale_camera_00003.png);
     background-repeat: no-repeat;
 }
 </string>
                                </property>
                                <property name="text">
-                                <string>Scale </string>
+                                <string/>
                                </property>
                               </widget>
                              </item>
@@ -2944,17 +2985,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/movescene_00001.png);
+    background-image: url(:/resources/move_camera_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/movescene_00002.png);
+    background-image: url(:/resources/move_camera_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/movescene_00003.png);
+    background-image: url(:/resources/move_camera_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2985,23 +3026,23 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/scenerotate_00001.png);
+    background-image: url(:/resources/rotate_camera_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/scenerotate_00002.png);
+    background-image: url(:/resources/rotate_camera_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/scenerotate_00003.png);
+    background-image: url(:/resources/rotate_camera_00003.png);
     background-repeat: no-repeat;
 }
 </string>
                                </property>
                                <property name="text">
-                                <string>Rotate</string>
+                                <string/>
                                </property>
                               </widget>
                              </item>
@@ -4487,7 +4528,7 @@ QPushButton:pressed{
                    <bool>false</bool>
                   </property>
                   <property name="title">
-                   <string>Frame</string>
+                   <string>Viewport</string>
                   </property>
                   <layout class="QGridLayout" name="gridLayout_2">
                    <item row="0" column="0">
@@ -5654,7 +5695,7 @@ QPushButton:pressed{
              <item>
               <widget class="QLabel" name="label_2">
                <property name="text">
-                <string>SAM ©  2021 M.V.R.</string>
+                <string>SAM © 2021 M.V.R.</string>
                </property>
               </widget>
              </item>

@@ -200,15 +200,24 @@
         <file>resources/play_00001.png</file>
         <file>resources/play_00002.png</file>
         <file>resources/play_00003.png</file>
-        <file>resources/resetzoom_00001.png</file>
-        <file>resources/resetzoom_00002.png</file>
-        <file>resources/resetzoom_00003.png</file>
+        <file>resources/scenereset_00001.png</file>
+        <file>resources/scenereset_00002.png</file>
+        <file>resources/scenereset_00003.png</file>
         <file>resources/zoomout_00001.png</file>
         <file>resources/zoomout_00002.png</file>
         <file>resources/zoomout_00003.png</file>
         <file>resources/zoomin_00003.png</file>
         <file>resources/zoomin_00001.png</file>
         <file>resources/zoomin_00002.png</file>
+        <file>resources/rotate_camera_00001.png</file>
+        <file>resources/rotate_camera_00002.png</file>
+        <file>resources/rotate_camera_00003.png</file>
+        <file>resources/move_camera_00001.png</file>
+        <file>resources/move_camera_00002.png</file>
+        <file>resources/move_camera_00003.png</file>
+        <file>resources/scale_camera_00001.png</file>
+        <file>resources/scale_camera_00002.png</file>
+        <file>resources/scale_camera_00003.png</file>
         <file>resources/onion_00001.png</file>
         <file>resources/onion_00002.png</file>
         <file>resources/onion_00003.png</file>
