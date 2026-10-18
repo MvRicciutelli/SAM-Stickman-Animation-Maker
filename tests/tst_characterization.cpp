@@ -21,6 +21,7 @@
 #include "brushpicker.h"
 #include "mfvideo.h"
 #include "imageexport.h"
+#include "updatecheck.h"
 
 extern QGraphicsScene *scene;
 extern QGraphicsRectItem *my_rect;
@@ -5941,6 +5942,21 @@ private slots:
         QCOMPARE(CurrentStickFigure()->stick_list[0]->my_line, line);
         QCOMPARE(view->undo_stack.count(), undo_count);
         QCOMPARE(scene->sceneRect(), scene_rect);
+    }
+
+    // The startup update check prompts only for a strictly newer release: numeric comparison
+    // (0.10 > 0.9, which a string compare gets wrong), optional "v" prefix, trailing zeros
+    // ignored, and a tag that is not a version never triggers the prompt.
+    void UpdateCheckComparesReleaseTags()
+    {
+        QVERIFY(IsNewerRelease("v1.0.0", "0.9.0"));
+        QVERIFY(IsNewerRelease("0.9.1", "0.9.0"));
+        QVERIFY(IsNewerRelease("v0.10.0", "0.9.0"));
+        QVERIFY(!IsNewerRelease("v0.9.0", "0.9.0"));
+        QVERIFY(!IsNewerRelease("v0.9", "0.9.0"));
+        QVERIFY(!IsNewerRelease("v0.8.5", "0.9.0"));
+        QVERIFY(!IsNewerRelease("", "0.9.0"));
+        QVERIFY(!IsNewerRelease("latest", "0.9.0"));
     }
 };
 

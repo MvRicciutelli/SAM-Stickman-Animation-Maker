@@ -2,9 +2,14 @@ QT       += core gui
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
+# network: the startup update check (updatecheck.cpp)
+QT += network
+
 CONFIG += c++11
 
 VERSION = 0.9.0
+# one source of truth for the version: the About box and the update check read APP_VERSION
+DEFINES += APP_VERSION=\\\"$$VERSION\\\"
 QMAKE_TARGET_COMPANY = "Matteo Vittorio Ricciutelli"
 QMAKE_TARGET_PRODUCT = "SAM - Stickman Animation Maker"
 QMAKE_TARGET_DESCRIPTION = "SAM - Stickman Animation Maker"
@@ -48,6 +53,7 @@ SOURCES += \
     stickfiguredata.cpp \
     stkformat.cpp \
     textureoptionsdialog.cpp \
+    updatecheck.cpp \
     widget.cpp
 
 HEADERS += \
@@ -77,6 +83,7 @@ HEADERS += \
     stkformat.h \
     style.h \
     textureoptionsdialog.h \
+    updatecheck.h \
     uiItems.h \
     widget.h
 

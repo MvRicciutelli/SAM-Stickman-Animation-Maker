@@ -15,6 +15,7 @@
 #include <QAction>
 #include "stkformat.h"
 #include "uiItems.h"
+#include "updatecheck.h"
 extern QDir program_folder;
 extern qint32 W;
 extern qint32 H;
@@ -47,6 +48,7 @@ MyMainWindow::MyMainWindow(QWidget *parent) :
     ui(new Ui::MyMainWindow)
 {
     ui->setupUi(this);
+    CheckForUpdate(this); // in background: a prompt only if GitHub has a newer release
 }
 
 
@@ -640,7 +642,7 @@ void MyMainWindow::closeEvent(QCloseEvent *event)
 void MyMainWindow::on_actionAbout_triggered()
 {
     QMessageBox::about(this, "About SAM",
-        "<b>SAM - Stickman Animation Maker 0.9.0</b><br>"
+        "<b>SAM - Stickman Animation Maker " APP_VERSION "</b><br>"
         "Frame-by-frame stickfigure animation studio.<br><br>"
 
         "Draw and rig stick figures from segments, circles, tapers, polygons, text and "

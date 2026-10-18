@@ -1351,8 +1351,8 @@ before it is displayed must therefore null-check `linked_item` —
 ## Tests
 
 `tests/tests.pro` is a standalone qmake QtTest project (characterization
-suite, REFACTOR_PLAN.md Phase 0, 127 tests as of the view navigation tools —
-126 passing plus the one font-dependent skip). Note the slots share
+suite, REFACTOR_PLAN.md Phase 0, 128 tests as of the update check —
+127 passing plus the one font-dependent skip). Note the slots share
 ONE animation and run in declaration order: a test that leaves the current
 frame somewhere other than the last one breaks every later test that
 assumes `AddFrame()` appends (see the closing `MoveToFrame()` in
@@ -1469,8 +1469,17 @@ empty `QFontDatabase::families()` — anything font-dependent must skip
 `installer/build-installer.ps1` builds Release in a sibling `build-SAM-installer`,
 stages `installer/out/app` (exe + `windeployqt` + LICENSE/NOTICE/LICENSES; `-SkipInstaller`
 stops there, a portable folder) and compiles `installer/SAM.iss` with Inno Setup 6.
-Version = `VERSION` in the `.pro` — the About box's string is a separate copy and must be
-bumped by hand. The install is **per-user on purpose** (`PrivilegesRequired=lowest`): the
+Version = `VERSION` in the `.pro`, the one source of truth: it reaches the code as
+`APP_VERSION`, which the About box and the update check both read.
+
+**Update check** (`updatecheck.h/.cpp`, called from `MyMainWindow`'s constructor): asks
+GitHub's `releases/latest` in the background, and if its tag is newer (`IsNewerRelease()`:
+numeric, optional `v`, trailing zeros ignored) offers to open the release page in the browser.
+No download, no self-install, on purpose. Silent on every failure. **The releases must be
+public**: the app has no GitHub login, and a token in the exe is what got the previous update
+check removed (`version.exe` shipped MySQL credentials). While the repo is private GitHub answers
+404 and the check never prompts. So a release is: bump `VERSION`, build the installer, publish a
+GitHub release tagged `v<VERSION>` with the installer attached. The install is **per-user on purpose** (`PrivilegesRequired=lowest`): the
 app extracts `image2Avi.exe` next to its own exe at run time, which fails under Program Files.
 Bundled content is whatever sits in `installer/content/`, seeded into
 `Documents\SAM\` with `onlyifdoesntexist` — a user's existing `defaultLib.samlib`
