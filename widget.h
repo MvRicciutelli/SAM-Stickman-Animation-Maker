@@ -417,6 +417,15 @@ private:
     void BuildStyleTabs();
 
     /**
+     * @brief Puts the tools column, the canvas, the Style column and the layers column into
+     *        one horizontal splitter, each side column inside its own scroll area, so the
+     *        columns can be resized and still be used on a short or narrow screen.
+     *
+     * Must run after BuildStyleTabs(), which fills the Style column.
+     */
+    void BuildResizableSidebars();
+
+    /**
      * @brief Opens the chooser for one StyleKind and makes the result the current fill or
      *        stroke.
      * @param for_fill true → the fill (view->my_brush), false → the stroke (the brush

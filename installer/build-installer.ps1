@@ -71,10 +71,11 @@ Write-Host "== Staging $app"
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 New-Item -ItemType Directory -Force $app | Out-Null
 Copy-Item "$build\release\SAM.exe" $app
-# widgets-only, raster painting, no networking: the software GL rasterizer (20 MB), the
-# D3D compiler and the TLS/network plugins are dead weight
+# widgets-only, raster painting: the software GL rasterizer (20 MB), the D3D compiler and the
+# network-information plugins are dead weight. The TLS plugins are NOT: the startup update check
+# (updatecheck.cpp) talks HTTPS to GitHub, and without a TLS backend it fails silently forever.
 Exec windeployqt --release --no-translations --no-opengl-sw --no-system-d3d-compiler `
-     --skip-plugin-types 'tls,networkinformation' "$app\SAM.exe"
+     --skip-plugin-types 'networkinformation' "$app\SAM.exe"
 # LGPLv3 4(b): the license texts must accompany the program (NOTICE.md)
 Copy-Item "$root\LICENSE", "$root\NOTICE.md" $app
 Copy-Item "$root\LICENSES" $app -Recurse

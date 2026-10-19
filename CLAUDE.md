@@ -300,6 +300,14 @@ enablement from `Animation::UpdateSliders()`/`UpdateStyleControls()`. The tab
 labels are short because the column is 150 px wide — anything longer and the
 tab bar switches to scroll arrows.
 
+The bottom row (tools column | canvas | Style column | layers column) is one
+`QSplitter` built by `Widget::BuildResizableSidebars()`, with each side column inside
+a `QScrollArea`. It lifts the .ui's fixed column widths and the minimum sizes that kept
+the window from going below about 1600x1000: `bottomframe` 600 px high, `viewBox`
+800x500. The canvas has the only stretch factor, so resizing the window only changes
+the canvas width and the columns keep theirs. `groupBox_9` (it held tools + canvas) is
+deleted there. The top bar (frame strip + draw tools) is still fixed height.
+
 `ApplyStyleBrush()` takes the `StyleKind` as an argument (defaulting to -1 =
 work it out from the brush) for one reason: a pattern and an image are BOTH
 `Qt::TexturePattern`, so re-syncing the combo from the brush alone could only

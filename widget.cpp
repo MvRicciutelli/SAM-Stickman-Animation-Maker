@@ -39,6 +39,8 @@
 #include <QFontComboBox>
 #include <QTextEdit>
 #include <QSplitter>
+#include <QScrollArea>
+#include <QStyle>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QRadioButton>
@@ -953,6 +955,7 @@ Widget::Widget(QWidget *parent)
 
     BuildStyleCombos(); // dopo che view esiste: legge my_brush/my_pen per i due segnacolore
     BuildStyleTabs();   // e subito dopo: raggruppa le caselle che BuildStyleCombos() ha creato
+    BuildResizableSidebars();
 
     AddFrame();
     num = scene->items();
@@ -2217,6 +2220,54 @@ void Widget::BuildStyleTabs()
     style_tabs->addTab(depth_tab, tr("Depth"));
     style_tabs->setTabToolTip(0, tr("Fill and border"));
     ui->verticalLayout_20->insertWidget(0, style_tabs);
+}
+
+/// @details The .ui fixes each side column's width and gives the bottom frame a 600 px
+/// minimum height, which is what made the window unusable below roughly 1600x1000: the
+/// columns could neither shrink nor scroll. The columns are moved, not rebuilt, so every
+/// `ui->` pointer and connection stays valid.
+void Widget::BuildResizableSidebars()
+{
+    const int scroll_bar = style()->pixelMetric(QStyle::PM_ScrollBarExtent);
+    QSplitter *split = new QSplitter(Qt::Horizontal, ui->bottomframe);
+    QList<int> sizes;
+    auto add_column = [&](QWidget *column){
+        // i limiti fissi del .ui impedirebbero sia di allargare la colonna sia di farla
+        // scorrere: senza minimo esplicito l'area di scorrimento usa quello del contenuto
+        column->setMinimumSize(0, 0);
+        column->setMaximumWidth(QWIDGETSIZE_MAX);
+        QScrollArea *area = new QScrollArea;
+        area->setWidget(column);
+        area->setWidgetResizable(true);
+        area->setFrameShape(QFrame::NoFrame);
+        split->addWidget(area);
+        split->setCollapsible(split->count() - 1, false);
+        // posto per la barra verticale fin dall'inizio, o la sua comparsa farebbe comparire
+        // anche quella orizzontale
+        sizes << column->sizeHint().width() + scroll_bar;
+    };
+    add_column(ui->toolsFrame);
+    ui->viewBox->setMinimumSize(0, 0); // era 800x500: la vista scorre già da sé
+    split->addWidget(ui->viewFrame);
+    split->setCollapsible(1, false);
+    split->setStretchFactor(1, 1); // lo spazio in più va alla tela, non alle colonne
+    sizes << ui->viewFrame->sizeHint().width();
+    add_column(ui->groupBox_3);
+    add_column(ui->layersFrame);
+    split->setSizes(sizes);
+    // le maniglie di default sono invisibili: una riga fissa che si accende al passaggio
+    // del mouse mostra dove trascinare
+    split->setObjectName("sidebarSplitter");
+    split->setHandleWidth(7);
+    split->setStyleSheet("#sidebarSplitter::handle { background: palette(mid); margin: 0 2px; }"
+                         "#sidebarSplitter::handle:hover { background: palette(highlight); margin: 0; }");
+    // la lista layer e il nome erano limitati alla larghezza fissa della loro colonna
+    ui->stickLayerView->setMaximumWidth(QWIDGETSIZE_MAX);
+    ui->stickFigureNameText->setMaximumWidth(QWIDGETSIZE_MAX);
+
+    ui->horizontalLayout_4->addWidget(split);
+    delete ui->groupBox_9; // vuoto: teneva solo la colonna strumenti e la tela
+    ui->bottomframe->setMinimumHeight(0);
 }
 
 /// @details See the header. Every branch either applies a brush through ApplyStyleBrush()
