@@ -119,7 +119,10 @@ private:
     void Populate(const QString &collection);
     /** @brief Rebuilds the collection combo by scanning the folder for .abr files. */
     void Rescan();
-    /** @brief Copies the chosen .abr files into the folder and selects the last one. */
+    /**
+     * @brief Copies the chosen .abr files into the folder, converts the chosen Krita .bundle
+     *        files into `.mbrush` collections (ImportKritaBundle()), and selects the last one.
+     */
     void Import();
 
     QString brushes_path;
@@ -182,5 +185,18 @@ private:
     QLabel *preview = nullptr;
     BrushPicker *picker = nullptr;
 };
+
+/**
+ * @brief Converts a Krita resource bundle into a `.mbrush` collection.
+ * @param bundle_path the .bundle file.
+ * @param mbrush_path the collection to write (replaced if it exists).
+ * @param skipped receives how many presets could not be converted (see LoadKritaBundleBrushes()).
+ * @return the number of presets written; 0 writes nothing.
+ *
+ * A converted preset is exactly a saved brush — stamp plus parameters — so the result opens,
+ * edits and deletes like any "Save brush" collection, and the parameters ride along as
+ * BrushPicker::presetChosen() does for a saved tip.
+ */
+int ImportKritaBundle(const QString &bundle_path, const QString &mbrush_path, int *skipped = nullptr);
 
 #endif // BRUSHPICKER_H

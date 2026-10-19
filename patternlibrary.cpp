@@ -1,6 +1,8 @@
 #include "patternlibrary.h"
 #include "abrbrush.h"
+#include "kritabundle.h"
 
+#include <QCollator>
 #include <QComboBox>
 #include <QDir>
 #include <QDirIterator>
@@ -9,12 +11,36 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPushButton>
+#include <QSet>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
 namespace {
+
+/// Loose tiles: every image in one folder is one collection, which is how CC0 packs ship.
+const QStringList IMAGE_FILTERS = { "*.png", "*.jpg", "*.jpeg", "*.bmp" };
+
+/// @details Natural order ("pattern_2" before "pattern_10"), the order a pack's file names are
+/// written for. An unreadable file is skipped, the same rule LoadPat() follows per tile.
+QList<PatPattern> LoadImageFolder(const QString &folder)
+{
+    QStringList files = QDir(folder).entryList(IMAGE_FILTERS, QDir::Files);
+    QCollator natural;
+    natural.setNumericMode(true);
+    natural.setCaseSensitivity(Qt::CaseInsensitive);
+    std::sort(files.begin(), files.end(), natural);
+    QList<PatPattern> patterns;
+    for(const QString &file : files){
+        const QImage tile(folder + "/" + file);
+        if(!tile.isNull())
+            patterns.append({ QFileInfo(file).completeBaseName(),
+                              tile.convertToFormat(QImage::Format_ARGB32) });
+    }
+    return patterns;
+}
 
 /**
  * @details A 64x64 thumbnail that reads correctly for both size extremes a .pat library
@@ -141,20 +167,32 @@ void PatternLibrary::EmitCurrent()
 }
 
 /// @details See the header. The recursive walk (and the relative-path label) is what makes
-/// a hand-made folder tree under myPatterns usable without any UI for folders.
+/// a hand-made folder tree under myPatterns usable without any UI for folders. A folder of
+/// images is listed by its own path, the patterns folder itself (loose images at the top) by
+/// its name.
 void PatternLibrary::Rescan()
 {
     const QString previous = collection_combo->currentData().toString();
     collection_combo->blockSignals(true);
     collection_combo->clear();
     QDir root(folder_path);
-    QDirIterator it(folder_path, QStringList() << "*.pat", QDir::Files,
+    QDirIterator it(folder_path, QStringList() << "*.pat" << IMAGE_FILTERS, QDir::Files,
                     QDirIterator::Subdirectories);
     QStringList files;
-    while(it.hasNext()){ it.next(); files << it.filePath(); }
+    QSet<QString> image_folders;
+    while(it.hasNext()){
+        it.next();
+        if(it.fileName().endsWith(QLatin1String(".pat"), Qt::CaseInsensitive))
+            files << it.filePath();
+        else
+            image_folders.insert(it.fileInfo().absolutePath());
+    }
+    files << image_folders.values();
     files.sort(Qt::CaseInsensitive);
-    for(const QString &file : files)
-        collection_combo->addItem(root.relativeFilePath(file), file);
+    for(const QString &file : files){
+        const QString label = root.relativeFilePath(file);
+        collection_combo->addItem(label.isEmpty() || label == "." ? root.dirName() : label, file);
+    }
     const int index = collection_combo->findData(previous);
     collection_combo->setCurrentIndex(index >= 0 ? index : 0);
     collection_combo->blockSignals(false);
@@ -166,8 +204,9 @@ void PatternLibrary::Rescan()
 void PatternLibrary::Populate(const QString &collection)
 {
     tile_grid->clear();
-    const QList<PatPattern> patterns = collection.isEmpty() ? QList<PatPattern>()
-                                                            : LoadPat(collection);
+    const QList<PatPattern> patterns = collection.isEmpty()        ? QList<PatPattern>()
+                                     : QFileInfo(collection).isDir() ? LoadImageFolder(collection)
+                                                                     : LoadPat(collection);
     for(const PatPattern &pattern : patterns){
         QListWidgetItem *item = new QListWidgetItem(TilePreview(pattern.tile), pattern.name);
         item->setData(Qt::UserRole, pattern.tile);
@@ -184,13 +223,42 @@ void PatternLibrary::Populate(const QString &collection)
 
 /// @details Overwrites a same-named library on purpose (re-importing a file the user has
 /// edited outside the app should replace it, not silently keep the old copy) — the same
-/// rule the .abr brush import follows.
+/// rule the .abr brush import follows. Loose images go into an "Imported" folder, so they
+/// make one collection together; a Krita bundle's patterns are written out as PNGs into a
+/// folder named after the bundle, since nothing here reads the bundle itself.
 void PatternLibrary::ImportFiles()
 {
     const QStringList sources = QFileDialog::getOpenFileNames(this, tr("Import patterns"),
-                                    QString(), tr("Photoshop patterns (*.pat)"));
+                                    QString(), tr("Patterns (*.pat *.png *.jpg *.jpeg *.bmp *.bundle);;"
+                                                  "Photoshop patterns (*.pat);;"
+                                                  "Images (*.png *.jpg *.jpeg *.bmp);;"
+                                                  "Krita bundles (*.bundle)"));
     QString last;
     for(const QString &source : sources){
+        if(source.endsWith(QLatin1String(".bundle"), Qt::CaseInsensitive)){
+            const QString folder = folder_path + "/" + QFileInfo(source).completeBaseName();
+            const QList<PatPattern> patterns = LoadKritaBundlePatterns(source);
+            QDir().mkpath(folder);
+            for(const PatPattern &pattern : patterns)
+                pattern.tile.save(folder + "/" + pattern.name + ".png");
+            if(patterns.isEmpty())
+                QMessageBox::information(this, tr("Import patterns"),
+                                         tr("%1 holds no patterns.").arg(QFileInfo(source).fileName()));
+            else
+                last = QFileInfo(folder).absoluteFilePath();   // la forma con cui Rescan() la elenca
+            continue;
+        }
+        if(!source.endsWith(QLatin1String(".pat"), Qt::CaseInsensitive)){
+            const QString folder = folder_path + "/" + tr("Imported");
+            QDir().mkpath(folder);
+            const QString destination = folder + "/" + QFileInfo(source).fileName();
+            if(QFileInfo(source).absoluteFilePath() != QFileInfo(destination).absoluteFilePath()){
+                QFile::remove(destination);
+                QFile::copy(source, destination);
+            }
+            last = QFileInfo(folder).absoluteFilePath();
+            continue;
+        }
         const QString destination = folder_path + "/" + QFileInfo(source).fileName();
         if(QFileInfo(source).absoluteFilePath() != QFileInfo(destination).absoluteFilePath()){
             QFile::remove(destination);

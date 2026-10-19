@@ -1,5 +1,13 @@
 <RCC>
     <qresource prefix="/">
+        <file>NOTICE.md</file>
+        <file>LICENSE</file>
+        <file>LICENSES/Qt-third-party-notices.txt</file>
+        <file>LICENSES/winpthreads-COPYING.txt</file>
+        <file>LICENSES/MinGW-w64-runtime-COPYING.txt</file>
+        <file>LICENSES/GCC-RUNTIME-LIBRARY-EXCEPTION.txt</file>
+        <file>LICENSES/LGPLv3.txt</file>
+        <file>LICENSES/GPLv3.txt</file>
         <file>resources/freccia_00001.png</file>
         <file>resources/freccia_00002.png</file>
         <file>resources/freccia_00003.png</file>

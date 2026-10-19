@@ -11,6 +11,12 @@ charge. You may not redistribute it or modify it without the author's
 written authorization, which you may request at the contact address in the
 program's About dialog. The program comes with no warranty of any kind.
 
+These terms cover SAM itself only. The third-party libraries distributed with
+it (Qt, the MinGW runtime) and the third-party brushes and patterns the
+installer places in Documents\SAM keep their own licenses, listed in
+NOTICE.md and in the LICENSES folder; nothing here restricts what those
+licenses allow.
+
 ================================================================================
 
 # PolyForm Strict License 1.0.0

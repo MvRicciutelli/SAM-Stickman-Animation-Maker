@@ -32,12 +32,18 @@ WizardStyle=modern
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
+; AppDir includes LICENSE, NOTICE.md and LICENSES\: the license texts and notices the bundled
+; libraries require to accompany the binaries (see NOTICE.md) - they must stay in this copy.
 Source: "{#AppDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Bundled brushes/patterns/libraries/stick figures go where Widget::CreatePaths() looks.
 ; They become the user's documents: never overwrite one they already have (they may have
 ; edited it, e.g. "My brushes.mbrush"), never remove them on uninstall.
-Source: "{#ContentDir}\*"; DestDir: "{userdocs}\SAM"; Excludes: ".gitkeep"; \
+Source: "{#ContentDir}\*"; DestDir: "{userdocs}\SAM"; Excludes: ".gitkeep,*.txt"; \
     Flags: recursesubdirs createallsubdirs onlyifdoesntexist uninsneveruninstall skipifsourcedoesntexist
+; ...except their credits and license files, which are always brought up to date: they must
+; describe the packs as shipped, and nobody edits them.
+Source: "{#ContentDir}\*.txt"; DestDir: "{userdocs}\SAM"; \
+    Flags: recursesubdirs createallsubdirs ignoreversion uninsneveruninstall skipifsourcedoesntexist
 
 [Icons]
 Name: "{autoprograms}\SAM - Stickman Animation Maker"; Filename: "{app}\SAM.exe"

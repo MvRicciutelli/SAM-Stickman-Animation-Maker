@@ -22,6 +22,10 @@
 #include "mfvideo.h"
 #include "imageexport.h"
 #include "updatecheck.h"
+#include "kritabundle.h"
+#include <QComboBox>
+#include <QListWidget>
+#include <QtCore/private/qzipwriter_p.h>
 
 extern QGraphicsScene *scene;
 extern QGraphicsRectItem *my_rect;
@@ -5712,6 +5716,141 @@ private slots:
 
         picker.DeleteBrush(false);
         QVERIFY(!QFile::exists(file));
+    }
+
+    // Import di un .bundle di Krita (kritabundle.cpp): uno ZIP di preset .kpp (un PNG con l'XML
+    // nel chunk di testo "preset") e delle punte che nominano. Costruito qui byte per byte, così
+    // ogni mappatura è inchiodata a un valore che può venire solo dal file: il grigio di un .gbr
+    // È la copertura, una punta PNG dipinge dove è scura, spaziatura/angolo/scala/opacità x flow
+    // passano, e i motori e le gomme senza equivalente sono contati come saltati, non indovinati.
+    // La lettura passa dal .mbrush scritto, cioè dalla griglia del picker che lo ricarica.
+    void KritaBundleImportConvertsPresetsAndTips()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        // GIMP brush v2, 6x4, grigio 200 ovunque tranne il primo pixel
+        QByteArray gbr;
+        {
+            QDataStream s(&gbr, QIODevice::WriteOnly);
+            s.setByteOrder(QDataStream::BigEndian);
+            s << quint32(28 + 4) << quint32(2) << quint32(6) << quint32(4) << quint32(1);
+            s.writeRawData("GIMP", 4);
+            s << quint32(10);
+            s.writeRawData("tip", 4);
+            for(int i = 0; i < 6 * 4; i++)
+                s << quint8(i == 0 ? 0 : 200);
+        }
+        // GIMP pattern 2x1 RGB: rosso, blu
+        QByteArray pat;
+        {
+            QDataStream s(&pat, QIODevice::WriteOnly);
+            s.setByteOrder(QDataStream::BigEndian);
+            s << quint32(24 + 3) << quint32(1) << quint32(2) << quint32(1) << quint32(3);
+            s.writeRawData("GPAT", 4);
+            s.writeRawData("p1", 3);
+            s << quint8(255) << quint8(0) << quint8(0) << quint8(0) << quint8(0) << quint8(255);
+        }
+        auto png = [](const QImage &image){
+            QByteArray out;
+            QBuffer buffer(&out);
+            buffer.open(QIODevice::WriteOnly);
+            image.save(&buffer, "PNG");
+            return out;
+        };
+        QImage dot(10, 10, QImage::Format_RGB32);
+        dot.fill(Qt::white);
+        dot.setPixel(3, 3, qRgb(0, 0, 0));
+        auto kpp = [&png](const QString &name, const QString &paintop, const QString &brush,
+                          const QString &extra = QString()){
+            QImage thumb(4, 4, QImage::Format_ARGB32);
+            thumb.fill(Qt::white);
+            thumb.setText("preset", QString("<Preset name=\"%1\" paintopid=\"%2\"><param type=\"string\" "
+                                            "name=\"brush_definition\"><![CDATA[%3]]></param>%4</Preset>")
+                                        .arg(name, paintop, brush, extra));
+            return png(thumb);
+        };
+        auto param = [](const QString &name, const QString &value){
+            return QString("<param type=\"internal\" name=\"%1\"><![CDATA[%2]]></param>").arg(name, value);
+        };
+
+        const QString bundle = dir.filePath("Test pack.bundle");
+        {
+            QZipWriter zip(bundle);
+            zip.addFile("mimetype", "application/x-krita-resourcebundle");
+            zip.addFile("brushes/tip.gbr", gbr);
+            zip.addFile("brushes/dot.png", png(dot));
+            zip.addFile("patterns/p1.pat", pat);
+            zip.addFile("patterns/p2.png", png(dot));
+            zip.addFile("paintoppresets/a.kpp", kpp("A gbr", "paintbrush",
+                "<Brush type=\"gbr_brush\" filename=\"tip.gbr\" scale=\"5\" spacing=\"0.3\" angle=\"1.5708\"/>",
+                param("OpacityValue", "0.5") + param("FlowValue", "0.5") + param("PressureRotation", "true")
+                + param("RotationSensor", "<params id=\"fuzzy\"/>") + param("RotationValue", "0.4")));
+            zip.addFile("paintoppresets/b.kpp", kpp("B png", "paintbrush",
+                "<Brush type=\"png_brush\" filename=\"dot.png\" scale=\"1\" spacing=\"0.05\" angle=\"0\"/>"));
+            zip.addFile("paintoppresets/c.kpp", kpp("C auto", "paintbrush",
+                "<Brush type=\"auto_brush\" spacing=\"2\" angle=\"0\"><MaskGenerator type=\"circle\" "
+                "diameter=\"40\" ratio=\"0.5\" hfade=\"0.3\"/></Brush>"));
+            zip.addFile("paintoppresets/d.kpp", kpp("D smudge", "colorsmudge",
+                "<Brush type=\"png_brush\" filename=\"dot.png\"/>"));
+            zip.addFile("paintoppresets/e.kpp", kpp("E eraser", "paintbrush",
+                "<Brush type=\"png_brush\" filename=\"dot.png\"/>", param("CompositeOp", "erase")));
+            zip.addFile("paintoppresets/f.kpp", kpp("F Krita's own tip", "paintbrush",
+                "<Brush type=\"png_brush\" filename=\"not_in_the_bundle.png\"/>"));
+        }
+
+        const QString collection = dir.filePath("Test pack.mbrush");
+        int skipped = -1;
+        QCOMPARE(ImportKritaBundle(bundle, collection, &skipped), 3);
+        QCOMPARE(skipped, 3);
+        QCOMPARE(ImportKritaBundle(dir.filePath("nope.bundle"), dir.filePath("nope.mbrush")), 0);
+        QVERIFY(!QFile::exists(dir.filePath("nope.mbrush")));
+
+        BrushPicker picker(dir.path());
+        QComboBox *combo = picker.findChild<QComboBox*>();
+        QListWidget *grid = picker.findChild<QListWidget*>();
+        QVERIFY(combo && grid);
+        QList<BrushPreset> seen;
+        QObject::connect(&picker, &BrushPicker::presetChosen, &picker,
+                         [&seen](const BrushPreset &p){ seen << p; });
+        combo->setCurrentIndex(combo->findData(collection));   // Populate() seleziona la riga 0
+        QCOMPARE(grid->count(), 3);
+        grid->setCurrentRow(1);
+        grid->setCurrentRow(2);
+        QCOMPARE(seen.size(), 3);
+        auto stamp = [grid](int row){ return grid->item(row)->data(Qt::UserRole).value<QImage>(); };
+
+        QCOMPARE(seen[0].name, QStringLiteral("A gbr"));
+        QCOMPARE(seen[0].size, 30);          // 6 px x scala 5
+        QCOMPARE(seen[0].spacing, 30);
+        QCOMPARE(seen[0].angle, 90);
+        QCOMPARE(seen[0].opacity, 25);       // opacità 0.5 x flow 0.5
+        QCOMPARE(seen[0].angle_jitter, 40);
+        QCOMPARE(stamp(0).size(), QSize(6, 4));
+        QCOMPARE(qAlpha(stamp(0).pixel(0, 0)), 0);
+        QCOMPARE(qAlpha(stamp(0).pixel(1, 0)), 200);
+
+        QCOMPARE(seen[1].name, QStringLiteral("B png"));
+        QCOMPARE(seen[1].size, 10);
+        QCOMPARE(seen[1].spacing, 5);
+        QCOMPARE(seen[1].angle_jitter, 0);
+        QCOMPARE(qAlpha(stamp(1).pixel(3, 3)), 255);  // il nero dipinge...
+        QCOMPARE(qAlpha(stamp(1).pixel(0, 0)), 0);    // ...il bianco no
+
+        QCOMPARE(seen[2].name, QStringLiteral("C auto"));
+        QCOMPARE(seen[2].size, 40);
+        QCOMPARE(seen[2].spacing, 200);
+        QCOMPARE(seen[2].hardness, 30);
+        QCOMPARE(seen[2].roundness, 50);
+        QCOMPARE(stamp(2).size(), QSize(128, 128));
+
+        const QList<PatPattern> patterns = LoadKritaBundlePatterns(bundle);
+        QCOMPARE(patterns.size(), 2);
+        QCOMPARE(patterns[0].name, QStringLiteral("p1"));
+        QCOMPARE(patterns[0].tile.size(), QSize(2, 1));
+        QCOMPARE(patterns[0].tile.pixel(0, 0), qRgb(255, 0, 0));
+        QCOMPARE(patterns[0].tile.pixel(1, 0), qRgb(0, 0, 255));
+        QCOMPARE(patterns[1].tile.size(), QSize(10, 10));
     }
 
     // mfvideo.cpp: l'mp4 lo encoda Media Foundation (l'encoder H.264 di Windows), non ffmpeg.

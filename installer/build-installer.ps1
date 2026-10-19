@@ -50,6 +50,22 @@ if (-not $SkipInstaller) {
 foreach ($tool in "$QtDir\bin\qmake.exe", "$QtDir\bin\windeployqt.exe", "$MinGWDir\bin\mingw32-make.exe") {
     if (-not (Test-Path $tool)) { throw "Not found: $tool (check -QtDir / -MinGWDir)" }
 }
+# The notices the shipped components' licenses require to travel with the binaries (NOTICE.md).
+# A missing one is a license violation, not a cosmetic gap: stop instead of shipping without it.
+$notices = 'LICENSE', 'NOTICE.md', 'LICENSES\LGPLv3.txt', 'LICENSES\GPLv3.txt',
+           'LICENSES\Qt-third-party-notices.txt', 'LICENSES\winpthreads-COPYING.txt',
+           'LICENSES\MinGW-w64-runtime-COPYING.txt', 'LICENSES\GCC-RUNTIME-LIBRARY-EXCEPTION.txt',
+           'installer\content\Brushes\Bundled brushes - credits and licenses.txt',
+           'installer\content\myPatterns\Kenney Pattern Pack\License.txt',
+           'installer\content\myPatterns\n4 Seamless Pattern Pack\License.txt'
+foreach ($f in $notices) {
+    if (-not (Test-Path "$root\$f")) { throw "Missing license notice: $f (see NOTICE.md)" }
+}
+# Qt-third-party-notices.txt lists what is inside THIS Qt build, and kritabundle.cpp uses Qt-private
+# API: another Qt version needs both re-checked (regenerate the notices from its *-attribution-*.html)
+if ($QtDir -notmatch '[\\/]6\.6\.1[\\/]') {
+    throw "Qt $QtDir is not 6.6.1: regenerate LICENSES\Qt-third-party-notices.txt for it and update NOTICE.md first."
+}
 
 $version = (Select-String -Path "$root\SAM.pro" -Pattern '^\s*VERSION\s*=\s*(\S+)').Matches[0].Groups[1].Value
 Write-Host "== SAM - Stickman Animation Maker $version"
@@ -76,7 +92,8 @@ Copy-Item "$build\release\SAM.exe" $app
 # (updatecheck.cpp) talks HTTPS to GitHub, and without a TLS backend it fails silently forever.
 Exec windeployqt --release --no-translations --no-opengl-sw --no-system-d3d-compiler `
      --skip-plugin-types 'networkinformation' "$app\SAM.exe"
-# LGPLv3 4(b): the license texts must accompany the program (NOTICE.md)
+# LGPLv3 4(b), and the notice clauses of the code inside Qt and the MinGW runtime: the license
+# texts must accompany the program (NOTICE.md)
 Copy-Item "$root\LICENSE", "$root\NOTICE.md" $app
 Copy-Item "$root\LICENSES" $app -Recurse
 

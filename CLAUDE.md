@@ -762,6 +762,29 @@ skin is stamped rather than traced (both checked to fail with the respective cod
 neutralised), the version-6 round trip, and that the three derived numbers come back from
 the pen.
 
+### Image-folder patterns and Krita bundles
+
+**A folder of `.png`/`.jpg`/`.jpeg`/`.bmp` files under `myPatterns` is a pattern collection**, next
+to the `.pat` files (`PatternLibrary::Rescan()`), because that is how free packs ship. Tiles load
+in natural order (`QCollator` numeric mode, so `pattern_2` comes before `pattern_10`). "Import
+patterns" copies loose images into an `Imported` folder.
+
+**A Krita `.bundle` is converted on import, never read in place**, because nothing else here
+understands it (`kritabundle.h/cpp`, ZIP through Qt's private `QZipReader`, hence
+`QT += core-private` in both .pro files). "Import brush" writes its presets as a `.mbrush` of the
+same name through `ImportKritaBundle()` (`brushpicker.h`), so the result is an ordinary user
+collection. "Import patterns" writes the bundle's `patterns/` as PNGs into a folder. Only the
+`paintbrush` engine converts. The tip can be an auto brush, which becomes `MakeRoundBrush()`, or a
+hard rectangle, or a `.gbr`, the first cell of a `.gih`, or a `.png` inside the bundle. Coverage:
+a 1-byte `.gbr` **is** the mask (255 = paint); an image tip paints where it is **dark**
+(alpha × (255 − grey)), Krita's rule. Mapped: size (diameter, or tip size × `scale`), spacing ×100,
+angle (radians → degrees), opacity × flow, and a **random** (`fuzzy`/`fuzzystroke`) rotation, size
+or opacity sensor as the jitter. Pressure, tilt and drawing-angle sensors are not jitter.
+Erasers, other engines and tips the bundle doesn't carry (Krita's own) are counted as skipped and
+reported in one message. Tips are capped at 512 px, since draw mode's size stops at 500.
+`KritaBundleImportConvertsPresetsAndTips` builds a bundle byte by byte (`QZipWriter`) and reads
+the result back through the picker. It was checked to fail with the darkness rule neutralised.
+
 ### Tiling: `StickData::texture_tiled`
 
 Record `version >= 5`, default true, **fill only**, and toggled by the **"Tile
@@ -1359,8 +1382,8 @@ before it is displayed must therefore null-check `linked_item` —
 ## Tests
 
 `tests/tests.pro` is a standalone qmake QtTest project (characterization
-suite, REFACTOR_PLAN.md Phase 0, 128 tests as of the update check —
-127 passing plus the one font-dependent skip). Note the slots share
+suite, REFACTOR_PLAN.md Phase 0, 129 tests as of the Krita bundle import —
+128 passing plus the one font-dependent skip). Note the slots share
 ONE animation and run in declaration order: a test that leaves the current
 frame somewhere other than the last one breaks every later test that
 assumes `AddFrame()` appends (see the closing `MoveToFrame()` in
@@ -1493,6 +1516,42 @@ Bundled content is whatever sits in `installer/content/`, seeded into
 `Documents\SAM\` with `onlyifdoesntexist` — a user's existing `defaultLib.samlib`
 is never replaced, so new stock figures for existing users belong in a separately named
 `.samlib`. FFmpeg is never bundled.
+
+**Bundled brushes and patterns are third-party CC0 packs, and they stay outside SAM's license.**
+The packs are Kenney Pattern Pack, n4's Seamless Pattern Pack, Popple (`.abr`), David Revoy
+2023-01, Nylnook v1.1 and v2 Generic Pen. The last three are `.mbrush` files that the app's own
+`ImportKritaBundle()` produced from the original bundles. LICENSE's preamble, NOTICE.md and the
+credits files next to the packs all say that SAM's license does not cover them. Two licensing
+facts drive the choices:
+- Some Revoy/Nylnook tips are byte-identical to Krita's default tips, which Krita's data README
+  puts under CC BY 3.0. They are credited that way, and CC BY forbids adding restrictions, which
+  is exactly why the packs must not fall under PolyForm.
+- Nylnook's "Airbrush" was deleted from the bundled v1.1 because its `cazu-spray.gbr` is Pablo
+  Cazorla's, with no verifiable license.
+
+Add a pack only with its license verified, and with a row in NOTICE.md plus a license file
+beside it.
+
+**Qt's LGPL does not cover the code Qt bundles.** zlib, libpng, FreeType, HarfBuzz, PCRE2,
+libjpeg-turbo and the rest keep their authors' licenses, and most of those require a notice
+with every binary copy. That is why `LICENSES/Qt-third-party-notices.txt` exists: it was
+generated from `C:\Qt\Docs\Qt-6.6.1\qt*\*-attribution-*.html`. NOTICE.md's "Third-party code
+inside the Qt libraries" section carries the sentences FreeType's FTL and the IJG license want
+in the documentation, a license → component table, and the MPL-2.0 source pointer for the Public
+Suffix List inside `Qt6Network`. `libwinpthread` is MIT/BSD, not under the GCC exception, so its
+COPYING ships too.
+
+These notices ship in three places:
+- **The app:** NOTICE.md, LICENSE and every `LICENSES/*.txt` are compiled in (`myres.qrc`).
+  Help ▸ Third-party notices shows them, one tab per text, and a NOTICE.md link to a file
+  switches to its tab.
+- **The install folder:** `build-installer.ps1` copies LICENSE, NOTICE.md and `LICENSES\` next
+  to the exe. It **refuses to build** if any required notice file is missing, or if `-QtDir` is
+  not 6.6.1, since the notices file and kritabundle's private-API use are both tied to that
+  build. On a Qt upgrade, regenerate the notices and update the table.
+- **The documents folder:** `SAM.iss` installs content `*.txt` (credits and license files) with
+  plain `ignoreversion` rather than `onlyifdoesntexist`, so they always describe the packs as
+  shipped.
 
 ## Tooling
 

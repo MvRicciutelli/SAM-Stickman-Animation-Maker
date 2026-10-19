@@ -130,6 +130,13 @@ private slots:
      */
     void on_actionAboutQt_triggered();
 
+    /**
+     * @brief Shows NOTICE.md (compiled in as a resource) — the bundled brushes and patterns with
+     *        their authors and licenses, and the third-party software SAM is built with — plus,
+     *        one tab each, the full license texts it cites (the LICENSES folder).
+     */
+    void on_actionThirdPartyNotices_triggered();
+
     void on_actionTerms_and_Conditions_triggered();
 
 private:

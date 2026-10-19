@@ -1,0 +1,73 @@
+Brushes bundled with SAM - Stickman Animation Maker
+===================================================
+
+These brush collections are third-party works. They are NOT part of SAM and are NOT
+covered by SAM's own license (PolyForm Strict): each one remains under the license
+stated below, and you may use, copy, modify and share it under those terms, inside
+or outside SAM.
+
+The .mbrush files were produced by SAM's own "Import brush" converter from the Krita
+.bundle files named below. The conversion keeps each preset's brush tip, size,
+spacing, tip angle, opacity and random rotation/size/opacity; Krita's pressure
+curves, textures, blending modes and the smudge, eraser, particle, deform and
+experiment engines have no equivalent in SAM and were left out. Original files are
+available from the sources listed.
+
+
+Popple Cartography Brushes 2.1.abr
+----------------------------------
+"Popple: A Free 18th Century Cartography Brush Set for Fantasy Maps", version 2.1,
+by K. M. Alexander - https://kmalexander.com
+License: Creative Commons CC0 1.0 Universal (public domain dedication)
+         https://creativecommons.org/publicdomain/zero/1.0/
+Included unmodified, together with the author's own ReadMe
+("Popple Cartography Brushes 2.1 - ReadMe.txt").
+
+
+David Revoy 2023-01.mbrush
+--------------------------
+"Krita brushes 2023-01 bundle" (deevad-bundle_23-01) by David Revoy
+https://www.davidrevoy.com/article953/krita-brushes-2023-01-bundle
+License: Creative Commons CC0 1.0 Universal, as stated in the article's License
+section ("These brushes are licensed under CC-0 Public domain. You are free to do
+commercial work with them, to reshare them, to fork them, to reuse them, to include
+them in your software.") and in the bundle's own metadata.
+Converted: 30 of the bundle's 38 presets.
+
+
+Nylnook v1.1.mbrush
+-------------------
+"Nylnook Brushes Presets v1.1" by Camille Bissuel (Nylnook)
+https://github.com/nylnook/nylnook-krita-brushes
+License: Creative Commons CC0 1.0 Universal ("CC-0 / Public Domain. Credit Camille
+Bissuel if needed.")
+Converted: 16 of the bundle's 25 presets. The "Nylnook Airbrush" preset was left
+out on purpose: its tip (cazu-spray.gbr) comes from Pablo Cazorla's brush set,
+which carries no license of its own that could be verified.
+
+
+Nylnook v2 Generic Pen.mbrush
+-----------------------------
+"Nylnook Krita Brushes Presets Pack v2 - Generic Pen" by Camille Bissuel (Nylnook)
+https://github.com/nylnook/nylnook-krita-brushes
+License: Creative Commons CC0 1.0 Universal.
+Converted: 18 of the bundle's 25 presets. (The pack's "Art Pen" variant differs only
+in reading the stylus barrel rotation, which SAM does not use, so it is not bundled
+separately.)
+
+
+Brush tips shared with Krita's default resources
+------------------------------------------------
+Several tips in the David Revoy and Nylnook v1.1 collections are identical to tips
+distributed with Krita's default resources (for example chalk_chisel_random_small,
+impressionism_brush, random-debris, scratches_rough, splats_large, A_concrete,
+A_eroded-cercle-anim, A_mineral-cristal, Z_Triangle_shape_1). Krita's resource
+bundles label them CC0, while Krita's data README states that the .gbr/.gih/.vbr
+brushes shipped with Krita come from David Revoy's "Chaos and Evolutions" brush set
+and Ramon Miranda's "GIMP Paint Studio" and are licensed under Creative Commons
+Attribution 3.0 Unported (https://creativecommons.org/licenses/by/3.0/), attributed
+to David Revoy (www.davidrevoy.com) and the Blender Foundation (www.blender.org).
+To satisfy either reading, those tips are credited here accordingly: they are by
+David Revoy and Ramon Miranda, used under CC BY 3.0, and were converted (format
+change, and downscaled to at most 512 px) from Krita's file formats into SAM's.
+No other terms are imposed on them.

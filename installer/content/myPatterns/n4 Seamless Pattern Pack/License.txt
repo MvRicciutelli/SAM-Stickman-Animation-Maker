@@ -1,0 +1,14 @@
+Seamless Pattern Pack
+=====================
+
+By n4 - https://opengameart.org/content/seamless-pattern-pack (posted 21 January 2012)
+
+License: Creative Commons CC0 1.0 Universal (public domain dedication)
+         https://creativecommons.org/publicdomain/zero/1.0/
+
+The author's note: "Public Domain = ultimate freedom. You don't have to but it would be
+nice if you include my nick in your credits or whatever."
+
+The image files are unmodified. Bundled with SAM - Stickman Animation Maker, sorted into
+subfolders by subject so each one shows up as its own collection in the pattern library.
+This pack is not part of SAM and is not covered by SAM's own license; it remains CC0.

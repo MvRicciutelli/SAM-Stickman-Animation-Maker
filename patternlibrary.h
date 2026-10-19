@@ -30,8 +30,9 @@ class QSpinBox;
  * @brief Floating, non-modal grid of pattern tiles read from the user's .pat libraries.
  *
  * Deliberately shaped after the .abr brush grid in Widget's constructor (collection combo
- * box + icon grid + Import/Refresh): each .pat file is one "collection", listed by its
- * path relative to the patterns folder so real subfolders show up as a prefix.
+ * box + icon grid + Import/Refresh): each .pat file is one "collection", and so is each
+ * folder holding .png/.jpg/.bmp tiles (the way free packs ship), listed by its path relative
+ * to the patterns folder so real subfolders show up as a prefix.
  */
 class PatternLibrary : public QDialog
 {
@@ -39,7 +40,8 @@ class PatternLibrary : public QDialog
 public:
     /**
      * @brief Builds the window and fills the collection list from @p patterns_path.
-     * @param patterns_path the myPatterns folder to scan, recursively, for *.pat files —
+     * @param patterns_path the myPatterns folder to scan, recursively, for *.pat files and
+     *        folders of image tiles —
      *        passed in rather than read from a global so the class has no dependency on
      *        widget.cpp's file-scope QDir set.
      * @param parent owner window; also the window this one floats above (Qt::Tool).
@@ -73,7 +75,8 @@ signals:
 
 private:
     /**
-     * @brief Rebuilds the collection combo box by walking the patterns folder for *.pat.
+     * @brief Rebuilds the collection combo box by walking the patterns folder for *.pat files
+     *        and for folders that hold image tiles.
      *
      * Preserves the current selection when the same file is still there, so an Import or
      * Refresh does not throw the user back to the first collection.
@@ -82,14 +85,15 @@ private:
 
     /**
      * @brief Fills the grid with the tiles of one collection.
-     * @param collection absolute path of a .pat file; empty (or unreadable/undecodable)
+     * @param collection absolute path of a .pat file or of a folder of images; empty (or
+     *        unreadable/undecodable)
      *        leaves a single disabled placeholder item explaining what to do.
      */
     void Populate(const QString &collection);
 
     /**
-     * @brief Copies user-picked .pat files into the patterns folder, then shows the last
-     *        one imported.
+     * @brief Copies user-picked .pat files and images into the patterns folder, extracts the
+     *        patterns of Krita bundles, then shows the last one imported.
      *
      * Importing means copying, exactly like the .abr brush import: the folder is the
      * library, so a pattern stays available in later sessions without the original file.
@@ -105,7 +109,7 @@ private:
     void EmitCurrent();
 
     QString folder_path;         ///< the myPatterns folder this window lists (never empty)
-    QComboBox *collection_combo; ///< one entry per .pat file found; UserData = its full path
+    QComboBox *collection_combo; ///< one entry per .pat file or image folder; UserData = its full path
     QListWidget *tile_grid;      ///< icon-mode preview grid; each item's UserRole = its QImage tile
 
     /**

@@ -1,4 +1,5 @@
 #include "brushpicker.h"
+#include "kritabundle.h"
 #include <myview.h>          // MakeRoundBrush(): il generatore della punta tonda integrata
 #include <QColorDialog>
 #include <QComboBox>
@@ -121,6 +122,19 @@ bool SaveUserBrushes(const QString &path, const QList<SavedTip> &tips)
 }
 
 } // namespace
+
+int ImportKritaBundle(const QString &bundle_path, const QString &mbrush_path, int *skipped)
+{
+    const KritaBundleBrushes bundle = LoadKritaBundleBrushes(bundle_path);
+    if(skipped)
+        *skipped = bundle.skipped;
+    QList<SavedTip> tips;
+    for(const KritaBrush &brush : bundle.brushes)
+        tips.append({ brush.params, brush.stamp });
+    if(tips.isEmpty() || !SaveUserBrushes(mbrush_path, tips))
+        return 0;
+    return tips.size();
+}
 
 BrushPicker::BrushPicker(const QString &brushes_path, QWidget *parent)
     : QWidget(parent), brushes_path(brushes_path)
@@ -286,12 +300,28 @@ void BrushPicker::Rescan()
 }
 
 /// @details Importing means copying into the folder, the same rule the pattern library follows.
+/// A Krita bundle cannot be read as it is, so it is converted once into a `.mbrush` of the same
+/// name instead, and the user is told how much of it made the trip.
 void BrushPicker::Import()
 {
     const QStringList files = QFileDialog::getOpenFileNames(this, tr("Import brushes"),
-                                  QString(), tr("Photoshop brushes (*.abr)"));
+                                  QString(), tr("Brushes (*.abr *.bundle);;Photoshop brushes (*.abr);;"
+                                                "Krita bundles (*.bundle)"));
     QString last;
     for(const QString &src : files){
+        if(src.endsWith(QLatin1String(".bundle"), Qt::CaseInsensitive)){
+            const QString dest = brushes_path + "/" + QFileInfo(src).completeBaseName() + USER_BRUSH_EXT;
+            int skipped = 0;
+            const int converted = ImportKritaBundle(src, dest, &skipped);
+            if(converted)
+                last = dest;
+            if(!converted || skipped)
+                QMessageBox::information(this, tr("Import brushes"),
+                    tr("%1: %2 brush(es) converted, %3 left out. Only Krita's pixel-brush presets "
+                       "carry over; smudge, eraser, particle and other engines have no "
+                       "equivalent here.").arg(QFileInfo(src).fileName()).arg(converted).arg(skipped));
+            continue;
+        }
         QString dest = brushes_path + "/" + QFileInfo(src).fileName();
         if(QFileInfo(src).absoluteFilePath() != QFileInfo(dest).absoluteFilePath()){
             QFile::remove(dest);      // sovrascrivi un omonimo esistente

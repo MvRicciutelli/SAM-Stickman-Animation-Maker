@@ -10,6 +10,13 @@
 #include <animationoptions.h>
 #include <ffmpegexport.h>
 #include <QMessageBox>
+#include <QDesktopServices>
+#include <QDialogButtonBox>
+#include <QFontDatabase>
+#include <QPlainTextEdit>
+#include <QTabWidget>
+#include <QTextBrowser>
+#include <QVBoxLayout>
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
@@ -669,8 +676,66 @@ void MyMainWindow::on_actionAbout_triggered()
         "and dynamically linked under the GNU Lesser General Public License version 3. "
         "Copies of the LGPLv3 and the GPLv3 it refers to are supplied in the LICENSES "
         "folder, and you may replace the Qt libraries with your own build of them. "
-        "Choose Help / About Qt to see the version in use."
+        "Choose Help / About Qt to see the version in use.<br><br>"
+
+        "The brushes and patterns installed with SAM are free third-party collections "
+        "by Kenney, n4, K. M. Alexander, David Revoy and Camille Bissuel (Nylnook), "
+        "under their own CC0 / CC BY licenses and not under SAM's. Choose "
+        "Help / Third-party notices for the full credits and the other components."
         );
+}
+
+/**
+ * @details NOTICE.md and the license texts it cites are compiled in rather than read from beside
+ * the exe, so they are there in a development build too and cannot go missing from an install —
+ * several of those licenses require their notice to travel with every binary copy. One tab per
+ * text; a link in NOTICE.md to one of them switches to its tab, any other link opens the browser.
+ */
+void MyMainWindow::on_actionThirdPartyNotices_triggered()
+{
+    auto read = [](const QString &path){
+        QFile file(path);
+        file.open(QIODevice::ReadOnly);
+        return QString::fromUtf8(file.readAll());
+    };
+    QDialog dialog(this);
+    dialog.setWindowTitle("Third-party notices");
+    dialog.resize(820, 640);
+    QVBoxLayout *col = new QVBoxLayout(&dialog);
+    QTabWidget *tabs = new QTabWidget(&dialog);
+    QTextBrowser *notice = new QTextBrowser(tabs);
+    notice->setOpenLinks(false);
+    notice->setMarkdown(read(":/NOTICE.md"));
+    tabs->addTab(notice, "Notices");
+    const struct { const char *title; const char *file; } texts[] = {
+        { "SAM license",           "LICENSE" },
+        { "Qt components",         "LICENSES/Qt-third-party-notices.txt" },
+        { "winpthreads",           "LICENSES/winpthreads-COPYING.txt" },
+        { "MinGW-w64 runtime",     "LICENSES/MinGW-w64-runtime-COPYING.txt" },
+        { "GCC runtime exception", "LICENSES/GCC-RUNTIME-LIBRARY-EXCEPTION.txt" },
+        { "LGPLv3",                "LICENSES/LGPLv3.txt" },
+        { "GPLv3",                 "LICENSES/GPLv3.txt" } };
+    for(const auto &text : texts){
+        QPlainTextEdit *view = new QPlainTextEdit(read(QString(":/") + text.file), tabs);
+        view->setReadOnly(true);
+        view->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+        view->setProperty("file", text.file);
+        tabs->addTab(view, text.title);
+    }
+    connect(notice, &QTextBrowser::anchorClicked, &dialog, [tabs](const QUrl &url){
+        if(!url.isRelative()){
+            QDesktopServices::openUrl(url);
+            return;
+        }
+        for(int i = 1; i < tabs->count(); i++)
+            if(tabs->widget(i)->property("file").toString() == url.path())
+                tabs->setCurrentIndex(i);
+    });
+    col->addWidget(tabs);
+    QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    col->addWidget(buttons);
+    dialog.exec();
 }
 
 

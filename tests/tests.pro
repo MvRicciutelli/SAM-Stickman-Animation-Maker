@@ -1,4 +1,4 @@
-QT += core gui widgets testlib
+QT += core gui widgets testlib core-private
 CONFIG += c++17 console
 CONFIG -= app_bundle
 TEMPLATE = app
@@ -29,6 +29,7 @@ SOURCES += \
     ../gradientdialog.cpp \
     ../mfvideo.cpp \
     ../imageexport.cpp \
+    ../kritabundle.cpp \
     ../framepresenter.cpp \
     ../myview.cpp \
     ../stick.cpp \
@@ -55,6 +56,7 @@ HEADERS += \
     ../stickfiguredata.h \
     ../mfvideo.h \
     ../imageexport.h \
+    ../kritabundle.h \
     ../stkformat.h \
     ../style.h \
     ../uiItems.h

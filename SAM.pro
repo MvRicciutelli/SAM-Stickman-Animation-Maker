@@ -4,6 +4,8 @@ greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
 # network: the startup update check (updatecheck.cpp)
 QT += network
+# core-private: QZipReader, to read Krita .bundle files (kritabundle.cpp)
+QT += core-private
 
 CONFIG += c++11
 
@@ -42,6 +44,7 @@ SOURCES += \
     framepresenter.cpp \
     gradientdialog.cpp \
     imageexport.cpp \
+    kritabundle.cpp \
     main.cpp \
     mfvideo.cpp \
     mymainwindow.cpp \
@@ -72,6 +75,7 @@ HEADERS += \
     framepresenter.h \
     gradientdialog.h \
     imageexport.h \
+    kritabundle.h \
     mfvideo.h \
     mymainwindow.h \
     myview.h \

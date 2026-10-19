@@ -331,6 +331,7 @@ QMenu::separator {
     </property>
     <addaction name="actionAbout"/>
     <addaction name="actionAboutQt"/>
+    <addaction name="actionThirdPartyNotices"/>
     <addaction name="actionTerms_and_Conditions"/>
    </widget>
    <addaction name="menufile"/>
@@ -405,6 +406,11 @@ QMenu::separator {
   <action name="actionAboutQt">
    <property name="text">
     <string>About Qt</string>
+   </property>
+  </action>
+  <action name="actionThirdPartyNotices">
+   <property name="text">
+    <string>Third-party notices</string>
    </property>
   </action>
  </widget>
