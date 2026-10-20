@@ -104,7 +104,7 @@ if ($SkipInstaller) {
 
 Write-Host "== Compiling installer"
 Exec $Iscc /Q "/DAppVersion=$version" "/DAppDir=$app" "/DContentDir=$content" `
-     "/DIconFile=$root\samIcon.ico" "/O$out" "$PSScriptRoot\SAM.iss"
+     "/DIconFile=$root\resources\samIcon.ico" "/O$out" "$PSScriptRoot\SAM.iss"
 # the asset to attach to the GitHub release: README's Download button links to
 # releases/latest/download/SAM-Setup.exe, which only works if the name never changes
 Copy-Item "$out\SAM-$version-setup.exe" "$out\SAM-Setup.exe"

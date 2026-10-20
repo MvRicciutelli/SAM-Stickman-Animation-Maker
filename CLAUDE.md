@@ -5,6 +5,14 @@ stick figures, with video export via ffmpeg. Windows/MinGW 6.6.1 Qt kit.
 Build directories (`build-SAM-*-Debug/Release`) live as siblings
 of this folder, not inside it (qmake shadow build).
 
+Layout: C++ sources and headers in `src/` (on the include path, so `<myview.h>` works),
+Designer forms in `ui/`, design documents (`REFACTOR_PLAN.md`, `STK_IMPORT_EXPORT_PLAN.md`,
+`FOREIGN_FORMATS_MANIFEST.md`) in `docs/`, and icons plus `image2Avi.exe` in `resources/`
+(that one through a qrc alias, so it is still `:/image2Avi.exe`). `SAM.pro`, `myres.qrc` and
+the license files stay at the root, so the root listing stays short and the README sits
+near the top of the GitHub page. Generated files (moc/uic output, `SAM.pro.user*`) are not
+tracked.
+
 ## Data model
 
 `Animation` owns `QList<Frame*> frame_list`.
@@ -1357,8 +1365,8 @@ before it is displayed must therefore null-check `linked_item` —
 - Refactored/new code (from refactor Phase 1 on): plain, navigable C++ (no
   clever tricks), English Doxygen on every touched symbol — `@brief`/
   `@param`/`@return` in headers, `@details` (the symbol's relevance) in
-  source files. See REFACTOR_PLAN.md "Code style requirements".
-- Naming (realized by REFACTOR_PLAN.md Phase 7): variables — locals,
+  source files. See docs/REFACTOR_PLAN.md "Code style requirements".
+- Naming (realized by docs/REFACTOR_PLAN.md Phase 7): variables — locals,
   parameters, member fields — are `snake_case`; functions and classes are
   `UpperPascalCase`. Exceptions, never renamed: Qt virtual overrides
   (`paint`, `boundingRect`, `mousePressEvent`, etc.), Designer auto-connect
@@ -1382,7 +1390,7 @@ before it is displayed must therefore null-check `linked_item` —
 ## Tests
 
 `tests/tests.pro` is a standalone qmake QtTest project (characterization
-suite, REFACTOR_PLAN.md Phase 0, 129 tests as of the Krita bundle import —
+suite, docs/REFACTOR_PLAN.md Phase 0, 129 tests as of the Krita bundle import —
 128 passing plus the one font-dependent skip). Note the slots share
 ONE animation and run in declaration order: a test that leaves the current
 frame somewhere other than the last one breaks every later test that

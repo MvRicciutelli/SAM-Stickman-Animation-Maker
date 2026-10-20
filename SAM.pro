@@ -28,78 +28,82 @@ DEFINES += QT_DEPRECATED_WARNINGS
 # You can also select to disable deprecated APIs only up to a certain version of Qt.
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
+# sources in src/, Designer forms in ui/: the repo root stays short so the
+# README shows near the top of the GitHub page
+INCLUDEPATH += $$PWD/src
+
 SOURCES += \
-    StickFigure.cpp \
-    abrbrush.cpp \
-    advancedcirclewidget.cpp \
-    advancedlinewidget.cpp \
-    advancedtab.cpp \
-    advancedtaperwidget.cpp \
-    animation.cpp \
-    animationoptions.cpp \
-    brushpicker.cpp \
-    ffmpegexport.cpp \
-    frame.cpp \
-    framedata.cpp \
-    framepresenter.cpp \
-    gradientdialog.cpp \
-    imageexport.cpp \
-    kritabundle.cpp \
-    main.cpp \
-    mfvideo.cpp \
-    mymainwindow.cpp \
-    myview.cpp \
-    patternlibrary.cpp \
-    sleeper.cpp \
-    stick.cpp \
-    stickdata.cpp \
-    stickfiguredata.cpp \
-    stkformat.cpp \
-    textureoptionsdialog.cpp \
-    updatecheck.cpp \
-    widget.cpp
+    src/StickFigure.cpp \
+    src/abrbrush.cpp \
+    src/advancedcirclewidget.cpp \
+    src/advancedlinewidget.cpp \
+    src/advancedtab.cpp \
+    src/advancedtaperwidget.cpp \
+    src/animation.cpp \
+    src/animationoptions.cpp \
+    src/brushpicker.cpp \
+    src/ffmpegexport.cpp \
+    src/frame.cpp \
+    src/framedata.cpp \
+    src/framepresenter.cpp \
+    src/gradientdialog.cpp \
+    src/imageexport.cpp \
+    src/kritabundle.cpp \
+    src/main.cpp \
+    src/mfvideo.cpp \
+    src/mymainwindow.cpp \
+    src/myview.cpp \
+    src/patternlibrary.cpp \
+    src/sleeper.cpp \
+    src/stick.cpp \
+    src/stickdata.cpp \
+    src/stickfiguredata.cpp \
+    src/stkformat.cpp \
+    src/textureoptionsdialog.cpp \
+    src/updatecheck.cpp \
+    src/widget.cpp
 
 HEADERS += \
-    StickFigure.h \
-    abrbrush.h \
-    advancedcirclewidget.h \
-    advancedlinewidget.h \
-    advancedtab.h \
-    advancedtaperwidget.h \
-    animation.h \
-    animationoptions.h \
-    brushpicker.h \
-    ffmpegexport.h \
-    frame.h \
-    framedata.h \
-    framepresenter.h \
-    gradientdialog.h \
-    imageexport.h \
-    kritabundle.h \
-    mfvideo.h \
-    mymainwindow.h \
-    myview.h \
-    patternlibrary.h \
-    sleeper.h \
-    stick.h \
-    stickdata.h \
-    stickfiguredata.h \
-    stkformat.h \
-    style.h \
-    textureoptionsdialog.h \
-    updatecheck.h \
-    uiItems.h \
-    widget.h
+    src/StickFigure.h \
+    src/abrbrush.h \
+    src/advancedcirclewidget.h \
+    src/advancedlinewidget.h \
+    src/advancedtab.h \
+    src/advancedtaperwidget.h \
+    src/animation.h \
+    src/animationoptions.h \
+    src/brushpicker.h \
+    src/ffmpegexport.h \
+    src/frame.h \
+    src/framedata.h \
+    src/framepresenter.h \
+    src/gradientdialog.h \
+    src/imageexport.h \
+    src/kritabundle.h \
+    src/mfvideo.h \
+    src/mymainwindow.h \
+    src/myview.h \
+    src/patternlibrary.h \
+    src/sleeper.h \
+    src/stick.h \
+    src/stickdata.h \
+    src/stickfiguredata.h \
+    src/stkformat.h \
+    src/style.h \
+    src/textureoptionsdialog.h \
+    src/updatecheck.h \
+    src/uiItems.h \
+    src/widget.h
 
 FORMS += \
-    advancedcirclewidget.ui \
-    advancedlinewidget.ui \
-    advancedtab.ui \
-    advancedtaperwidget.ui \
-    animationoptions.ui \
-    ffmpegexport.ui \
-    mymainwindow.ui \
-    widget.ui
+    ui/advancedcirclewidget.ui \
+    ui/advancedlinewidget.ui \
+    ui/advancedtab.ui \
+    ui/advancedtaperwidget.ui \
+    ui/animationoptions.ui \
+    ui/ffmpegexport.ui \
+    ui/mymainwindow.ui \
+    ui/widget.ui
 
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin
@@ -118,4 +122,4 @@ DISTFILES += \
 # senza ffmpeg (mfuuid porta i GUID MF_MT_*/MFVideoFormat_*)
 win32: LIBS += -lmfplat -lmfreadwrite -lmfuuid -lole32
 
-RC_ICONS = samIcon.ico
+RC_ICONS = resources/samIcon.ico

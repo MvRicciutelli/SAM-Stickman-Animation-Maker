@@ -4,7 +4,7 @@ CONFIG -= app_bundle
 TEMPLATE = app
 TARGET = tst_characterization
 
-INCLUDEPATH += ..
+INCLUDEPATH += ../src
 
 # absolute path of this directory, so the tests find data/ regardless of the
 # shadow-build working directory
@@ -16,56 +16,56 @@ DEFINES += TESTS_SOURCE_DIR=\\\"$$PWD\\\"
 SOURCES += \
     tst_characterization.cpp \
     test_globals.cpp \
-    ../abrbrush.cpp \
-    ../StickFigure.cpp \
-    ../advancedcirclewidget.cpp \
-    ../advancedlinewidget.cpp \
-    ../advancedtab.cpp \
-    ../advancedtaperwidget.cpp \
-    ../animation.cpp \
-    ../brushpicker.cpp \
-    ../frame.cpp \
-    ../framedata.cpp \
-    ../gradientdialog.cpp \
-    ../mfvideo.cpp \
-    ../imageexport.cpp \
-    ../kritabundle.cpp \
-    ../framepresenter.cpp \
-    ../myview.cpp \
-    ../stick.cpp \
-    ../stickdata.cpp \
-    ../stickfiguredata.cpp \
-    ../stkformat.cpp
+    ../src/abrbrush.cpp \
+    ../src/StickFigure.cpp \
+    ../src/advancedcirclewidget.cpp \
+    ../src/advancedlinewidget.cpp \
+    ../src/advancedtab.cpp \
+    ../src/advancedtaperwidget.cpp \
+    ../src/animation.cpp \
+    ../src/brushpicker.cpp \
+    ../src/frame.cpp \
+    ../src/framedata.cpp \
+    ../src/gradientdialog.cpp \
+    ../src/mfvideo.cpp \
+    ../src/imageexport.cpp \
+    ../src/kritabundle.cpp \
+    ../src/framepresenter.cpp \
+    ../src/myview.cpp \
+    ../src/stick.cpp \
+    ../src/stickdata.cpp \
+    ../src/stickfiguredata.cpp \
+    ../src/stkformat.cpp
 
 HEADERS += \
-    ../abrbrush.h \
-    ../StickFigure.h \
-    ../advancedcirclewidget.h \
-    ../advancedlinewidget.h \
-    ../advancedtab.h \
-    ../advancedtaperwidget.h \
-    ../animation.h \
-    ../brushpicker.h \
-    ../frame.h \
-    ../framedata.h \
-    ../framepresenter.h \
-    ../gradientdialog.h \
-    ../myview.h \
-    ../stick.h \
-    ../stickdata.h \
-    ../stickfiguredata.h \
-    ../mfvideo.h \
-    ../imageexport.h \
-    ../kritabundle.h \
-    ../stkformat.h \
-    ../style.h \
-    ../uiItems.h
+    ../src/abrbrush.h \
+    ../src/StickFigure.h \
+    ../src/advancedcirclewidget.h \
+    ../src/advancedlinewidget.h \
+    ../src/advancedtab.h \
+    ../src/advancedtaperwidget.h \
+    ../src/animation.h \
+    ../src/brushpicker.h \
+    ../src/frame.h \
+    ../src/framedata.h \
+    ../src/framepresenter.h \
+    ../src/gradientdialog.h \
+    ../src/myview.h \
+    ../src/stick.h \
+    ../src/stickdata.h \
+    ../src/stickfiguredata.h \
+    ../src/mfvideo.h \
+    ../src/imageexport.h \
+    ../src/kritabundle.h \
+    ../src/stkformat.h \
+    ../src/style.h \
+    ../src/uiItems.h
 
 # Media Foundation: l'encoder H.264 di Windows usato da mfvideo.cpp
 win32: LIBS += -lmfplat -lmfreadwrite -lmfuuid -lole32
 
 FORMS += \
-    ../advancedcirclewidget.ui \
-    ../advancedlinewidget.ui \
-    ../advancedtab.ui \
-    ../advancedtaperwidget.ui
+    ../ui/advancedcirclewidget.ui \
+    ../ui/advancedlinewidget.ui \
+    ../ui/advancedtab.ui \
+    ../ui/advancedtaperwidget.ui

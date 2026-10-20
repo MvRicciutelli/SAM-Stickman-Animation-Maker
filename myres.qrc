@@ -287,7 +287,7 @@
         <file>resources/tomaster_00002.png</file>
         <file>resources/tomaster_00003.png</file>
         <file>resources/tomaster_00001.png</file>
-        <file>image2Avi.exe</file>
+        <file alias="image2Avi.exe">resources/image2Avi.exe</file>
         <file>resources/clamp_00001.png</file>
         <file>resources/clamp_00002.png</file>
         <file>resources/clamp_00003.png</file>

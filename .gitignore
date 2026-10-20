@@ -20,3 +20,12 @@ ui_*.h
 
 # build-installer.ps1 output
 installer/out/
+
+# build output (moc/uic/rcc) and per-machine Qt Creator state: regenerated, never source
+build-*/
+/release/
+/debug/
+tests/release/
+tests/debug/
+SAM.pro.user*
+desktop.ini
