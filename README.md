@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  Free for personal use · Windows 10 and 11 (64-bit) ·
+  Free and open source · Windows 10 and 11 (64-bit) ·
   <a href="https://github.com/MvRicciutelli/SAM-Stickman-Animation-Maker/releases">all versions and what's new</a>
 </p>
 
