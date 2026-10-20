@@ -1510,7 +1510,9 @@ No download, no self-install, on purpose. Silent on every failure. **The release
 public**: the app has no GitHub login, and a token in the exe is what got the previous update
 check removed (`version.exe` shipped MySQL credentials). While the repo is private GitHub answers
 404 and the check never prompts. So a release is: bump `VERSION`, build the installer, publish a
-GitHub release tagged `v<VERSION>` with the installer attached. The install is **per-user on purpose** (`PrivilegesRequired=lowest`): the
+GitHub release tagged `v<VERSION>` with the installer attached **as `SAM-Setup.exe`** (the
+fixed-name copy `build-installer.ps1` writes next to the versioned one): README's Download button
+links to `releases/latest/download/SAM-Setup.exe`, so any other asset name breaks it. The install is **per-user on purpose** (`PrivilegesRequired=lowest`): the
 app extracts `image2Avi.exe` next to its own exe at run time, which fails under Program Files.
 Bundled content is whatever sits in `installer/content/`, seeded into
 `Documents\SAM\` with `onlyifdoesntexist` — a user's existing `defaultLib.samlib`
