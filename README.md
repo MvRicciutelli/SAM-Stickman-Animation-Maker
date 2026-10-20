@@ -9,6 +9,29 @@
   Draw and rig a figure, pose it frame by frame, then export a video.
 </p>
 
+<p align="center">
+  <a href="https://github.com/MvRicciutelli/SAM-Stickman-Animation-Maker/releases/latest/download/SAM-Setup.exe">
+    <img src="https://img.shields.io/badge/Download%20SAM-for%20Windows-2ea44f?style=for-the-badge&logo=windows&logoColor=white" alt="Download SAM for Windows" height="48">
+  </a>
+</p>
+
+<p align="center">
+  Free for personal use · Windows 10 and 11 (64-bit) ·
+  <a href="https://github.com/MvRicciutelli/SAM-Stickman-Animation-Maker/releases">all versions and what's new</a>
+</p>
+
+## How to install
+
+1. Click the green **Download SAM** button above. Your browser saves `SAM-Setup.exe`.
+2. Open the downloaded file. You don't need administrator rights.
+3. If Windows shows **"Windows protected your PC"**, click **More info**, then
+   **Run anyway**. Windows shows this for any program that isn't code-signed by a paid
+   certificate, not because something is wrong with it.
+4. Follow the installer, then start SAM from the Start menu.
+
+SAM checks for new versions when it starts and offers to open the download page when one
+is out.
+
 ---
 
 ## Features
@@ -17,10 +40,12 @@
 - Ten kinds of stick: line, rectangle, circle, taper, trapezoid, polygon, multi-line
   (with a width per vertex), image, freehand raster painting and text.
 - Any stick can be converted to any other kind in place.
-- Fills and borders can be solid colours, linear or radial gradients, Photoshop `.pat`
-  patterns or your own images. An on-canvas handle lets you aim and scale a texture.
+- Fills and borders can be solid colours, linear or radial gradients, patterns (Photoshop
+  `.pat` files or folders of PNG/JPG tiles) or your own images. An on-canvas handle lets you
+  aim and scale a texture.
 - Borders can be stamped with a brush tip instead of a pen. You can use Photoshop `.abr`
-  brushes or save your own.
+  brushes, import Krita `.bundle` brushes or save your own.
+- Comes with free brush and pattern packs (all CC0, see [NOTICE.md](NOTICE.md) for credits).
 
 **Rigging**
 - Each figure is a tree of sticks: moving a stick carries its children with it.
@@ -49,8 +74,8 @@
 
 ## Installing
 
-Run `SAM-<version>-setup.exe`. It installs for the current user only, so it needs no
-administrator rights, and puts the program in `%LOCALAPPDATA%\Programs\SAM`.
+The installer (see [How to install](#how-to-install)) works for the current user only,
+so it needs no administrator rights, and puts the program in `%LOCALAPPDATA%\Programs\SAM`.
 
 On first launch SAM creates its working folder in `Documents\SAM`:
 
@@ -60,7 +85,7 @@ On first launch SAM creates its working folder in `Documents\SAM`:
 | `myStickFigures`    | single saved figures (`.stck`)             |
 | `Libraries`         | figure libraries (`.samlib`)               |
 | `Brushes`           | brush tips (`.abr`, `.mbrush`)             |
-| `myPatterns`        | pattern packs (`.pat`)                     |
+| `myPatterns`        | pattern packs (`.pat`, folders of images)  |
 | `myExportedVideos`  | default destination for video export       |
 
 Uninstalling leaves this folder alone.
@@ -106,7 +131,9 @@ powershell -ExecutionPolicy Bypass -File installer\build-installer.ps1
 ```
 
 This builds Release, stages the program with its Qt and MinGW runtime and compiles
-`installer\out\SAM-<version>-setup.exe` with [Inno Setup 6](https://jrsoftware.org/isinfo.php).
+`installer\out\SAM-<version>-setup.exe` with [Inno Setup 6](https://jrsoftware.org/isinfo.php),
+plus an identical `SAM-Setup.exe`. That fixed-name copy is the one to attach to a GitHub
+release: the Download button above links to `releases/latest/download/SAM-Setup.exe`.
 Add `-SkipInstaller` to stop after staging: `installer\out\app` is then a portable
 folder. Anything placed in `installer\content\` (brushes, patterns, libraries,
 figures) is copied into the user's `Documents\SAM` on install, without overwriting
