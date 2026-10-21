@@ -416,17 +416,6 @@ private:
     void BuildResizableSidebars();
 
     /**
-     * @brief Lets every icon button shrink, down to half size, when its column or the top bar
-     *        is too small to hold it, instead of the column scrolling or the icon being
-     *        cropped. A side column shrinks all its buttons alike and only once everything
-     *        else in it (lists) is at its minimum; the top bar only narrows them. With room to
-     *        spare every button keeps its .ui size.
-     *
-     * Must run after BuildResizableSidebars(): it fits each column to its scroll area.
-     */
-    void LetIconButtonsShrink();
-
-    /**
      * @brief Opens the chooser for one StyleKind and makes the result the current fill or
      *        stroke.
      * @param for_fill true → the fill (view->my_brush), false → the stroke (the brush

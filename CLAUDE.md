@@ -310,50 +310,100 @@ tab bar switches to scroll arrows.
 
 The bottom row (tools column | canvas | Style column | layers column) is one
 `QSplitter` built by `Widget::BuildResizableSidebars()`, with each side column inside
-a `QScrollArea`. It lifts the .ui's fixed column widths and the minimum sizes that kept
-the window from going below about 1600x1000: `bottomframe` 600 px high, `viewBox`
-800x500. The canvas has the only stretch factor, so resizing the window only changes
-the canvas width and the columns keep theirs. `groupBox_9` (it held tools + canvas) is
-deleted there. The top bar (frame strip + draw tools) is still fixed height.
+a `QScrollArea`. It lifts the .ui's fixed column widths and the `viewBox`'s 800x500
+minimum, which kept the window from going below about 1600x1000 together with
+`bottomframe`'s old 600 px minimum (gone now, see below). `groupBox_9` (it held tools +
+canvas) is deleted there.
+
+**When the window narrows, the side columns give up their spare width before the canvas
+shrinks; when it widens, they get it back before the canvas grows** (`BottomRowSplitter`,
+widget.cpp). A column's spare width is what it has beyond what its content needs (its
+`minimumSizeHint()` plus a scrollbar). It grows back up to its starting width, or the width the
+user last dragged it to. The canvas still has the only stretch factor, and that alone did the
+opposite: every change of width went to the canvas until its minimum, so the canvas got
+crushed while the tools column kept a hundred unneeded pixels. No stretch factor can express
+the rule either, because a stretch factor applies to growing as well. Measured by dragging
+the window edge in 10 px steps, 1920 -> 1500 -> 1920: no drift.
 
 The .ui's icon buttons paint their 50 px PNGs through the stylesheet **`image:`** property,
 never `background-image:`. A background image is never scaled, so a button the layout
 shrank below 50 px showed a cropped corner of its icon. `image:` scales down to fit, keeping
 the aspect ratio, and renders identically at full size (measured with a throwaway probe).
 
-**Every icon button can shrink to half size when it doesn't fit** (`Widget::LetIconButtonsShrink()`,
-run after `BuildResizableSidebars()`). It does three things:
-- It gives each button a stylesheet `width`/`height` of its full size. That sets the
-  *preferred* size, not a limit. Without it the preferred size came from the empty `QIcon`
-  (48x12), so any row with no spare room sat at the minimum even on a big screen.
-- It lowers each button's minimum to 25, and clears the minimums of the rows and boxes
-  around it (55, 60, and 500 on `toolsTabWidget`). Several rows have a .ui maximum *below*
-  their minimum (min 55 / max 50). The minimum used to win, so the maximum is first raised to
-  it, or it would cap the buttons at full room.
-- In each side column, an `IconColumnFit` (widget.cpp) owns the heights. All of that column's
-  buttons stay rigid, so lists give way first exactly as before. When the column still
-  doesn't fit, it shrinks all of them by one common factor, and the column only scrolls below
-  half size.
+**Every icon button may shrink to half size when it doesn't fit.** That is set in widget.ui
+alone, with no code:
+- Each button gets a 25x25 minimum, a maximum of at least its full size, and a stylesheet
+  `width`/`height` at full size. That stylesheet size is the *preferred* size, not a limit.
+  Without it the preferred size came from the empty `QIcon` (48x12), so a row with no spare
+  room sat at 25 px even on a big screen.
+- The rows' and boxes' fixed minimums (55, 60, 65, 85, 130, 150, 160, 250, and 500 on
+  `toolsTabWidget`) are gone. Where a maximum sat below the minimum (min 55 / max 50, and
+  `topFrame` min 160 / max 140), the minimum used to win, so the maximum took its value.
+- So did the vertical size policies that forbid shrinking below the preferred size
+  (*Minimum*, *MinimumExpanding*): the Fill colour picker's row (`frame_22`), the Depth
+  group, and every top-bar container.
+- The lists (layers, library, image list) have a layout stretch of 1. A stretched item counts
+  at its minimum when space is short (`QLayoutStruct::smartSizeHint`), so lists give way
+  before buttons.
+- The onion-skin icon in the top bar is a `QLabel`, and `image:` scales on a label too
+  (measured). It shrinks like the buttons; fixed at 50 it held its whole row up.
 
-Qt's own layouts were tried first. They split a shortage evenly among everything that can
-shrink, level by level, so a list shrank together with the buttons, and the Style column's
-nested groups ended up at 25, 37 and 50 px. The top bar only narrows its buttons: its
-height is fixed by design.
+**The top bar and the canvas row share a shortage of height the default Qt way**: evenly, as
+soon as the canvas row can't have its preferred height (about 600 px, the canvas view's own).
+So the top bar starts shrinking at roughly a 900 px window and is at its floor by about 800.
+- A canvas-first rule was tried, with a stretch factor on the canvas row plus a minimum on it.
+  The top bar then stayed full size down to a 650 px window. And since Qt never shrinks a widget
+  below an explicit minimum, that minimum cut the window's bottom off below about 560 px.
+- Now nothing in the column has an explicit minimum except `drawtools` (below), so the bottom
+  is only cut off below about 370 px. `Widget`'s own .ui minimum (150) hides the real one from
+  the window.
 
-Two non-obvious things the fitter depends on:
-- A `QTabWidget` is as tall as its *tallest page, hidden or not*. The fixed 400 px panel of
-  the "advanced" page held the tools column at about 600 px on every tab. Hidden pages are
-  therefore set to `QSizePolicy::Ignored` on `currentChanged`, which `QStackedLayout` leaves
-  out of its minimum.
-- A height change climbs the widget tree one posted `LayoutRequest` per level, and
-  `sendPostedEvents()` deliberately defers events posted while it runs. So `Fit()` flushes once
-  per level before it reads `minimumSizeHint()`. A single flush read stale minimums, and the
-  factor oscillated between runs.
+The frame-tools part is compact. The global stylesheet gives every `QFrame` a 6 px
+`margin-top`, which nested five deep, so `frame_3` overrides it to 0 for itself and everything
+inside it. The rows' and containers' bottom margins (15, 15, 10) are 0, with 4 px between the
+two rows. Full size is 110 px instead of 160. Before, those margins didn't even fit the 160 px:
+the buttons' fixed 50 px minimum made them spill into them.
 
-Measured in the real window (1366x728): the layers column fits at 35 px after its list hits
-its minimum. The Style column needs 592 px even at half size, so it scrolls. At 1920x1040 the
-Style column fits at 37-41 px; before this change it fit only by clipping the Fill group.
-None of this is in the test suite, which does not link `widget.cpp`.
+`drawtools`:
+- It has a 10 px top layout margin, the convention of the other titled groups. Its old fixed
+  85 px height had been what kept its title clear of the buttons.
+- Its 57 px minimum is where its buttons are 39 px, which is as small as the frame buttons
+  get. Their floor comes from the frame strip (`frameListWidget`), whose minimum height is
+  83 px. Without it, the draw tools went down to 25 px next to 39 px frame tools.
+
+**The tools column's width came from its hidden pages.** A tab widget is as wide as its widest
+page. In the Edit and Libraries pages that was the lists, whose preferred width is Qt's
+default for a list (256 px), not anything about their contents. With their horizontal size
+policy *Ignored* they no longer count, and the column starts at 251 px instead of 327.
+
+The Style column's Paint/Depth tabs are built in code (`BuildStyleTabs()`), so their two fixes
+are code too:
+- Paint scrolls in its own `QScrollArea`, or as the taller page it would make Depth tall
+  enough that Depth's buttons never shrink.
+- The tab widget is inserted with stretch 1. A `QScrollArea`'s preferred height is capped at
+  24 lines of text (about 312 px), and the .ui's tail spacer split the spare height with it.
+
+**A `QTabWidget` is as tall as its tallest page, hidden or not**, and the column's scroll
+area only scrolls what reports itself taller than its viewport. The image panel (the
+"advanced" page) used to hold the tools column at 614 px on every tab, so the drawing tab's
+buttons never needed to shrink. Two .ui changes fixed it, and the column is now sized by the
+drawing and library tabs (389 px):
+- The image panel's contents sit in their own `QScrollArea` (`advancedScrollArea`). It reports
+  a small minimum and scrolls inside the tab. Setting the page's size policy to *Ignored*
+  instead would have hidden its real height from the column's scroll area as well, so the
+  page would be cut off instead of scrolling.
+- The rect and taper panels (`advancedtab.ui`, `advancedtaperwidget.ui`) had copied the image
+  panel's fixed 400 px box around one or two sliders. That minimum is gone (116 and 230 px
+  now).
+
+The old 500 px minimum on `toolsTabWidget` sat below the image panel's 614 and clipped it.
+The draw-mode panel (499 px, built in code) is still the tallest page while a FREEHAND stick
+is selected.
+
+What .ui options cannot do: Qt shares a shortage evenly at each layout level, so the Style
+column's nested groups end up with buttons of different sizes (25 to 50 px side by side at
+1920x1040). A code version (`IconColumnFit`, in git history) shrank a whole column's buttons
+alike.
 
 `ApplyStyleBrush()` takes the `StyleKind` as an argument (defaulting to -1 =
 work it out from the brush) for one reason: a pattern and an image are BOTH
