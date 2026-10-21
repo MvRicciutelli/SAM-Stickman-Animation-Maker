@@ -912,6 +912,7 @@ Widget::Widget(QWidget *parent)
     BuildStyleCombos(); // dopo che view esiste: legge my_brush/my_pen per i due segnacolore
     BuildStyleTabs();   // e subito dopo: raggruppa le caselle che BuildStyleCombos() ha creato
     BuildResizableSidebars();
+    LetIconButtonsShrink(); // dopo: si ferma alle aree di scorrimento delle colonne
 
     AddFrame();
     num = scene->items();
@@ -2192,6 +2193,141 @@ void Widget::BuildResizableSidebars()
     ui->horizontalLayout_4->addWidget(split);
     delete ui->groupBox_9; // vuoto: teneva solo la colonna strumenti e la tela
     ui->bottomframe->setMinimumHeight(0);
+}
+
+namespace {
+
+/**
+ * @brief Shrinks every icon button of one side column by the same factor, just enough for
+ *        the column to fit its scroll area, and never below half size: past that it scrolls.
+ * @details Qt's own layouts could do the shrinking, but they share a shortage out evenly
+ * among everything that can give way, one layout level at a time: a list gave up space
+ * together with the buttons instead of before them, and the Style column's nested groups
+ * ended up with buttons of three different sizes. Here the buttons stay rigid, so lists and
+ * the like give way first exactly as before, and only what is still missing comes out of the
+ * buttons, all of them alike. A column's minimum height is linear in the button height (each
+ * row of buttons is as tall as its tallest button plus fixed parts), so one measurement of it
+ * gives the factor; Fit() measures again after applying it, to confirm.
+ */
+class IconColumnFit : public QObject
+{
+public:
+    explicit IconColumnFit(QScrollArea *area) : QObject(area), area(area)
+    {
+        for(QPushButton *button : area->widget()->findChildren<QPushButton*>())
+            if(button->styleSheet().contains("image: url("))
+                full_heights.insert(button, button->minimumHeight());
+        // una QTabWidget è alta quanto la sua pagina più alta, anche se nascosta: la pagina
+        // "advanced" (pannello fisso da 400) teneva la colonna strumenti a ~600 px qualunque
+        // tab fosse aperta. Una pagina Ignored non conta nel minimo di QStackedLayout
+        for(QTabWidget *tabs : area->widget()->findChildren<QTabWidget*>()){
+            auto only_current_counts = [tabs]{
+                for(int i = 0; i < tabs->count(); i++){
+                    const QSizePolicy::Policy policy = i == tabs->currentIndex() ? QSizePolicy::Preferred
+                                                                                  : QSizePolicy::Ignored;
+                    tabs->widget(i)->setSizePolicy(policy, policy);
+                }
+            };
+            connect(tabs, &QTabWidget::currentChanged, this, only_current_counts);
+            only_current_counts();
+        }
+        area->viewport()->installEventFilter(this);
+        area->widget()->installEventFilter(this);
+    }
+
+protected:
+    bool eventFilter(QObject *, QEvent *event) override
+    {
+        // dopo l'evento, non durante; e non per gli eventi che provoca Fit() stesso
+        if((event->type() == QEvent::Resize || event->type() == QEvent::LayoutRequest) && !pending && !fitting){
+            pending = true;
+            QTimer::singleShot(0, this, [this]{ pending = false; Fit(); });
+        }
+        return false;
+    }
+
+private:
+    void Fit()
+    {
+        QHash<QWidget*, int> rows; // riga -> il suo bottone più alto, a grandezza piena
+        for(auto it = full_heights.cbegin(); it != full_heights.cend(); ++it)
+            if(it.key()->isVisibleTo(area->widget()))
+                rows[it.key()->parentWidget()] = qMax(rows.value(it.key()->parentWidget()), it.value());
+        int full = 0;
+        for(int height : rows)
+            full += height;
+        if(full == 0)
+            return;
+        fitting = true;
+        // Il modello è lineare, quindi di solito basta il primo giro
+        for(int round = 0; round < 4; round++){
+            // un cambio di altezza risale la gerarchia un livello per LayoutRequest, e
+            // sendPostedEvents() lascia al giro dopo gli eventi postati mentre gira: un giro per
+            // livello (la colonna più profonda ne ha 7), o il minimo letto è vecchio e il fattore
+            // oscillava
+            for(int level = 0; level < 16; level++)
+                QCoreApplication::sendPostedEvents(nullptr, QEvent::LayoutRequest);
+            // per difetto, non arrotondate: 2 px di troppo bastano a far comparire la barra
+            int now = 0;
+            for(int height : rows)
+                now += int(height * scale);
+            const int rest = area->widget()->minimumSizeHint().height() - now; // tutto tranne i bottoni
+            const double fit = qBound(0.5, double(area->viewport()->height() - rest) / full, 1.0);
+            int next = 0;
+            for(int height : rows)
+                next += int(height * fit);
+            if(next == now)
+                break;
+            scale = fit;
+            for(auto it = full_heights.cbegin(); it != full_heights.cend(); ++it)
+                it.key()->setFixedHeight(int(it.value() * scale));
+        }
+        fitting = false;
+    }
+
+    QScrollArea *area;
+    QHash<QPushButton*, int> full_heights;
+    double scale = 1;
+    bool pending = false;
+    bool fitting = false;
+};
+
+} // namespace
+
+/// @details The icons are painted with the stylesheet `image:` property, which scales down to
+/// the button, so a smaller button shows the whole icon instead of a cropped corner. Three
+/// things in the .ui held the buttons at 50 px: their own minimum, the minimum sizes of the
+/// rows and boxes around them (55, 60, and 500 for the tools tab), and a preferred size taken
+/// from the empty QIcon (48x12) instead of from the picture. The stylesheet `width`/`height`
+/// added here fix the last one: they set the preferred size, not a limit, so a row asks for
+/// full size and only gets narrower when the width really isn't there. Heights are the
+/// IconColumnFit's business inside the side columns, and fixed in the top bar, whose height is
+/// fixed by design while the canvas row absorbs the window's.
+void Widget::LetIconButtonsShrink()
+{
+    QSet<QScrollArea*> columns;
+    for(QPushButton *button : findChildren<QPushButton*>()){
+        if(!button->styleSheet().contains("image: url("))
+            continue;
+        const QSize full = button->minimumSize().expandedTo(QSize(50, 50)); // le icone sono 50x50
+        button->setStyleSheet(button->styleSheet() + QString("\nQPushButton { width: %1px; height: %2px; }")
+                              .arg(full.width()).arg(full.height()));
+        button->setMaximumSize(button->maximumSize().expandedTo(full));
+        button->setMinimumSize(25, full.height());
+        QWidget *column = button;
+        while(column != this && !qobject_cast<QScrollArea*>(column))
+            column = column->parentWidget();
+        if(column != this)
+            columns.insert(static_cast<QScrollArea*>(column));
+        for(QWidget *w = button->parentWidget(); w != column; w = w->parentWidget()){
+            // diverse righe del .ui hanno il massimo SOTTO il minimo (55 e 50): vinceva il
+            // minimo, e senza di lui il massimo taglierebbe i bottoni anche a spazio pieno
+            w->setMaximumSize(w->maximumSize().expandedTo(w->minimumSize()));
+            w->setMinimumSize(0, column != this ? 0 : w->minimumHeight());
+        }
+    }
+    for(QScrollArea *area : columns)
+        new IconColumnFit(area);
 }
 
 /// @details See the header. Every branch either applies a brush through ApplyStyleBrush()

@@ -321,6 +321,40 @@ never `background-image:`. A background image is never scaled, so a button the l
 shrank below 50 px showed a cropped corner of its icon. `image:` scales down to fit, keeping
 the aspect ratio, and renders identically at full size (measured with a throwaway probe).
 
+**Every icon button can shrink to half size when it doesn't fit** (`Widget::LetIconButtonsShrink()`,
+run after `BuildResizableSidebars()`). It does three things:
+- It gives each button a stylesheet `width`/`height` of its full size. That sets the
+  *preferred* size, not a limit. Without it the preferred size came from the empty `QIcon`
+  (48x12), so any row with no spare room sat at the minimum even on a big screen.
+- It lowers each button's minimum to 25, and clears the minimums of the rows and boxes
+  around it (55, 60, and 500 on `toolsTabWidget`). Several rows have a .ui maximum *below*
+  their minimum (min 55 / max 50). The minimum used to win, so the maximum is first raised to
+  it, or it would cap the buttons at full room.
+- In each side column, an `IconColumnFit` (widget.cpp) owns the heights. All of that column's
+  buttons stay rigid, so lists give way first exactly as before. When the column still
+  doesn't fit, it shrinks all of them by one common factor, and the column only scrolls below
+  half size.
+
+Qt's own layouts were tried first. They split a shortage evenly among everything that can
+shrink, level by level, so a list shrank together with the buttons, and the Style column's
+nested groups ended up at 25, 37 and 50 px. The top bar only narrows its buttons: its
+height is fixed by design.
+
+Two non-obvious things the fitter depends on:
+- A `QTabWidget` is as tall as its *tallest page, hidden or not*. The fixed 400 px panel of
+  the "advanced" page held the tools column at about 600 px on every tab. Hidden pages are
+  therefore set to `QSizePolicy::Ignored` on `currentChanged`, which `QStackedLayout` leaves
+  out of its minimum.
+- A height change climbs the widget tree one posted `LayoutRequest` per level, and
+  `sendPostedEvents()` deliberately defers events posted while it runs. So `Fit()` flushes once
+  per level before it reads `minimumSizeHint()`. A single flush read stale minimums, and the
+  factor oscillated between runs.
+
+Measured in the real window (1366x728): the layers column fits at 35 px after its list hits
+its minimum. The Style column needs 592 px even at half size, so it scrolls. At 1920x1040 the
+Style column fits at 37-41 px; before this change it fit only by clipping the Fill group.
+None of this is in the test suite, which does not link `widget.cpp`.
+
 `ApplyStyleBrush()` takes the `StyleKind` as an argument (defaulting to -1 =
 work it out from the brush) for one reason: a pattern and an image are BOTH
 `Qt::TexturePattern`, so re-syncing the combo from the brush alone could only
