@@ -660,8 +660,8 @@ void MyMainWindow::on_actionAbout_triggered()
         "Designed and created by Matteo Vittorio Ricciutelli.<br>"
         "Copyright (C) 2026 Matteo Vittorio Ricciutelli. All rights reserved.<br><br>"
 
-        "Distributed free of charge for personal, hobby, educational and other "
-        "noncommercial use under the PolyForm Strict License 1.0.0. Animations you "
+        "Distributed free of charge for any use, commercial included, under the "
+        "PolyForm Strict License 1.0.0 with additional permissions. Animations you "
         "create with this program are your own and may be used commercially. "
         "Redistributing or modifying the program itself requires the author's written "
         "authorization, which you may request by email at "
@@ -692,6 +692,13 @@ void MyMainWindow::on_actionAbout_triggered()
  * text; a link in NOTICE.md to one of them switches to its tab, any other link opens the browser.
  */
 void MyMainWindow::on_actionThirdPartyNotices_triggered()
+{
+    ShowNotices(0);
+}
+
+/// @details One dialog for the notices and the license, so the license text shown is the
+/// compiled-in LICENSE file itself and cannot drift from it.
+void MyMainWindow::ShowNotices(int tab)
 {
     auto read = [](const QString &path){
         QFile file(path);
@@ -731,6 +738,7 @@ void MyMainWindow::on_actionThirdPartyNotices_triggered()
             if(tabs->widget(i)->property("file").toString() == url.path())
                 tabs->setCurrentIndex(i);
     });
+    tabs->setCurrentIndex(tab);
     col->addWidget(tabs);
     QDialogButtonBox *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -749,30 +757,11 @@ void MyMainWindow::on_actionAboutQt_triggered()
     QMessageBox::aboutQt(this, "About Qt");
 }
 
-extern QString license;
-extern int terms_accepted;
 /**
- * @details Shows the terms via Widget::TermsAndConditions() and enforces acceptance: if
- * the user declines (terms_accepted==0) it asks once more, and quits the program if they
- * still refuse, otherwise loops back to re-present them.
+ * @details Read-only: the terms are accepted once, on the installer's license page
+ * (SAM.iss, LicenseFile), so there is nothing to accept or decline here.
  */
 void MyMainWindow::on_actionTerms_and_Conditions_triggered()
 {
-    //QMessageBox::information(this, " conditions",license);
-    license_info_begin:
-    my_widget->TermsAndConditions();
-    if(terms_accepted == 0){
-        QMessageBox* confirm =  new QMessageBox(QMessageBox::Question, "Warning",
-        " are you sure? (the program will be closed). \r\n" ,
-                                      QMessageBox::Yes|QMessageBox::No);
-        // exec() è modale/bloccante, quindi possiamo cancellare confirm subito dopo che è tornato,
-        // prima ancora di decidere cosa fare col risultato (altrimenti si perdeva un'istanza ad ogni "No")
-        int ret = confirm->exec();
-        delete confirm;
-        if(ret == QMessageBox::Yes){
-            exit(EXIT_FAILURE);
-        }else{
-            goto license_info_begin;
-        }
-    }
+    ShowNotices(1);
 }

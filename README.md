@@ -165,9 +165,9 @@ Architecture and design notes are in [CLAUDE.md](CLAUDE.md).
 
 Copyright (C) 2026 Matteo Vittorio Ricciutelli.
 
-SAM is **source-available, not open source**. It is free for personal, hobby,
-educational and other noncommercial use under the
-[PolyForm Strict License 1.0.0](LICENSE). The animations, images and videos you make
+SAM is **source-available, not open source**. It is free to use for any purpose,
+commercial included, under the [PolyForm Strict License 1.0.0](LICENSE) with the
+additional permissions listed there. The animations, images and videos you make
 with it are yours, including for commercial use.
 
 Redistributing SAM or modifying it requires the author's written permission. To

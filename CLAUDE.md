@@ -316,6 +316,11 @@ the window from going below about 1600x1000: `bottomframe` 600 px high, `viewBox
 the canvas width and the columns keep theirs. `groupBox_9` (it held tools + canvas) is
 deleted there. The top bar (frame strip + draw tools) is still fixed height.
 
+The .ui's icon buttons paint their 50 px PNGs through the stylesheet **`image:`** property,
+never `background-image:`. A background image is never scaled, so a button the layout
+shrank below 50 px showed a cropped corner of its icon. `image:` scales down to fit, keeping
+the aspect ratio, and renders identically at full size (measured with a throwaway probe).
+
 `ApplyStyleBrush()` takes the `StyleKind` as an argument (defaulting to -1 =
 work it out from the brush) for one reason: a pattern and an image are BOTH
 `Qt::TexturePattern`, so re-syncing the combo from the brush alone could only
@@ -1526,6 +1531,13 @@ Bundled content is whatever sits in `installer/content/`, seeded into
 `Documents\SAM\` with `onlyifdoesntexist` — a user's existing `defaultLib.samlib`
 is never replaced, so new stock figures for existing users belong in a separately named
 `.samlib`. FFmpeg is never bundled.
+
+**The license is accepted once, on the installer's license page** (`LicenseFile=` in
+`SAM.iss`). The app has no first-run prompt any more, and Help ▸ Terms and Conditions shows
+the compiled-in LICENSE read-only (the "SAM license" tab of the notices dialog). Use is
+allowed for any purpose, commercial included: that is additional permission 1 in LICENSE,
+layered on PolyForm Strict, whose own text stays verbatim. Keep the README, NOTICE.md and
+the About box summaries in step with it.
 
 **Bundled brushes and patterns are third-party CC0 packs, and they stay outside SAM's license.**
 The packs are Kenney Pattern Pack, n4's Seamless Pattern Pack, Popple (`.abr`), David Revoy

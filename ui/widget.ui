@@ -521,17 +521,17 @@ QMenu::separator {
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/undo_00001.png);
+    image: url(:/resources/undo_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/undo_00002.png);
+    image: url(:/resources/undo_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/undo_00003.png);
+    image: url(:/resources/undo_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -562,17 +562,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/redo_00001.png);
+    image: url(:/resources/redo_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/redo_00002.png);
+    image: url(:/resources/redo_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/redo_00003.png);
+    image: url(:/resources/redo_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -603,17 +603,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/scalescene_00001.png);
+    image: url(:/resources/scalescene_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/scalescene_00002.png);
+    image: url(:/resources/scalescene_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/scalescene_00003.png);
+    image: url(:/resources/scalescene_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -644,17 +644,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/scenerotate_00001.png);
+    image: url(:/resources/scenerotate_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/scenerotate_00002.png);
+    image: url(:/resources/scenerotate_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/scenerotate_00003.png);
+    image: url(:/resources/scenerotate_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -685,17 +685,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/movescene_00001.png);
+    image: url(:/resources/movescene_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/movescene_00002.png);
+    image: url(:/resources/movescene_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/movescene_00003.png);
+    image: url(:/resources/movescene_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -726,17 +726,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/scenereset_00001.png);
+    image: url(:/resources/scenereset_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/scenereset_00002.png);
+    image: url(:/resources/scenereset_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/scenereset_00003.png);
+    image: url(:/resources/scenereset_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -814,17 +814,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/cpyframe_00001.png);
+    image: url(:/resources/cpyframe_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/cpyframe_00002.png);
+    image: url(:/resources/cpyframe_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/cpyframe_00003.png);
+    image: url(:/resources/cpyframe_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -906,17 +906,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/freccia_00001.png);
+    image: url(:/resources/freccia_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/freccia_00002.png);
+    image: url(:/resources/freccia_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/freccia_00003.png);
+    image: url(:/resources/freccia_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -962,17 +962,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/clamp_00001.png);
+    image: url(:/resources/clamp_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/clamp_00002.png);
+    image: url(:/resources/clamp_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/clamp_00003.png);
+    image: url(:/resources/clamp_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1000,17 +1000,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/removeframe_00001.png);
+    image: url(:/resources/removeframe_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/removeframe_00002.png);
+    image: url(:/resources/removeframe_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/removeframe_00003.png);
+    image: url(:/resources/removeframe_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1038,17 +1038,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/blank_00001.png);
+    image: url(:/resources/blank_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/blank_00002.png);
+    image: url(:/resources/blank_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/blank_00003.png);
+    image: url(:/resources/blank_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1076,17 +1076,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/duplicate_00001.png);
+    image: url(:/resources/duplicate_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/duplicate_00002.png);
+    image: url(:/resources/duplicate_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/duplicate_00003.png);
+    image: url(:/resources/duplicate_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1117,17 +1117,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/interpolate_00001.png);
+    image: url(:/resources/interpolate_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/interpolate_00002.png);
+    image: url(:/resources/interpolate_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/interpolate_00003.png);
+    image: url(:/resources/interpolate_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1158,17 +1158,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/play_00001.png);
+    image: url(:/resources/play_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/play_00002.png);
+    image: url(:/resources/play_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/play_00003.png);
+    image: url(:/resources/play_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1221,17 +1221,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/pasteFrame_00001.png);
+    image: url(:/resources/pasteFrame_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/pasteFrame_00002.png);
+    image: url(:/resources/pasteFrame_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/pasteFrame_00003.png);
+    image: url(:/resources/pasteFrame_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1481,17 +1481,17 @@ QPushButton:pressed{
              <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/drawimg_00001.png);
+    image: url(:/resources/drawimg_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/drawimg_00002.png);
+    image: url(:/resources/drawimg_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/drawimg_00003.png);
+    image: url(:/resources/drawimg_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1528,17 +1528,17 @@ QPushButton:pressed{
              <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/addcircle_00001.png);
+    image: url(:/resources/addcircle_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/addcircle_00002.png);
+    image: url(:/resources/addcircle_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/addcircle_00003.png);
+    image: url(:/resources/addcircle_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1575,17 +1575,17 @@ QPushButton:pressed{
              <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/addtaper_00001.png);
+    image: url(:/resources/addtaper_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/addtaper_00002.png);
+    image: url(:/resources/addtaper_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/addtaper_00003.png);
+    image: url(:/resources/addtaper_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1622,17 +1622,17 @@ QPushButton:pressed{
              <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/freehand_00001.png);
+    image: url(:/resources/freehand_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/freehand_00002.png);
+    image: url(:/resources/freehand_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/freehand_00003.png);
+    image: url(:/resources/freehand_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1669,17 +1669,17 @@ QPushButton:pressed{
              <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/addtrap_00001.png);
+    image: url(:/resources/addtrap_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/addtrap_00002.png);
+    image: url(:/resources/addtrap_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/addtrap_00003.png);
+    image: url(:/resources/addtrap_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1716,17 +1716,17 @@ QPushButton:pressed{
              <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/addrect_00001.png);
+    image: url(:/resources/addrect_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/addrect_00002.png);
+    image: url(:/resources/addrect_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/addrect_00003.png);
+    image: url(:/resources/addrect_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1763,17 +1763,17 @@ QPushButton:pressed{
              <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/addline_00001.png);
+    image: url(:/resources/addline_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/addline_00002.png);
+    image: url(:/resources/addline_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/addline_00003.png);
+    image: url(:/resources/addline_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1813,17 +1813,17 @@ QPushButton:pressed{
              <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/add_poly_00001.png);
+    image: url(:/resources/add_poly_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/add_poly_00002.png);
+    image: url(:/resources/add_poly_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/add_poly_00003.png);
+    image: url(:/resources/add_poly_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1860,17 +1860,17 @@ QPushButton:pressed{
              <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/Add_multiline_00001.png);
+    image: url(:/resources/Add_multiline_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/Add_multiline_00002.png);
+    image: url(:/resources/Add_multiline_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/Add_multiline_00003.png);
+    image: url(:/resources/Add_multiline_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -1907,17 +1907,17 @@ QPushButton:pressed{
              <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/addtext_00001.png);
+    image: url(:/resources/addtext_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/addtext_00002.png);
+    image: url(:/resources/addtext_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/addtext_00003.png);
+    image: url(:/resources/addtext_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2154,17 +2154,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/tocenter_00001.png);
+    image: url(:/resources/tocenter_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/tocenter_00002.png);
+    image: url(:/resources/tocenter_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/tocenter_00003.png);
+    image: url(:/resources/tocenter_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2195,17 +2195,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/linkstickfigure_00001.png);
+    image: url(:/resources/linkstickfigure_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/linkstickfigure_00002.png);
+    image: url(:/resources/linkstickfigure_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/linkstickfigure_00003.png);
+    image: url(:/resources/linkstickfigure_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2236,17 +2236,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/unlinkstickfigure_00001.png);
+    image: url(:/resources/unlinkstickfigure_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/unlinkstickfigure_00002.png);
+    image: url(:/resources/unlinkstickfigure_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/unlinkstickfigure_00003.png);
+    image: url(:/resources/unlinkstickfigure_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2307,17 +2307,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/flipv_00001.png);
+    image: url(:/resources/flipv_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/flipv_00002.png);
+    image: url(:/resources/flipv_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/flipv_00003.png);
+    image: url(:/resources/flipv_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2348,17 +2348,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/fliph_00001.png);
+    image: url(:/resources/fliph_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/fliph_00002.png);
+    image: url(:/resources/fliph_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/fliph_00003.png);
+    image: url(:/resources/fliph_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2422,17 +2422,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/welder_00001.png);
+    image: url(:/resources/welder_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/welder_00002.png);
+    image: url(:/resources/welder_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/welder_00003.png);
+    image: url(:/resources/welder_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2463,17 +2463,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/chopchop_00001.png);
+    image: url(:/resources/chopchop_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/chopchop_00002.png);
+    image: url(:/resources/chopchop_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/chopchop_00003.png);
+    image: url(:/resources/chopchop_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2543,17 +2543,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/manipulator_00001.png);
+    image: url(:/resources/manipulator_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/manipulator_00002.png);
+    image: url(:/resources/manipulator_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/manipulator_00003.png);
+    image: url(:/resources/manipulator_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2584,17 +2584,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/tomaster_00001.png);
+    image: url(:/resources/tomaster_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/tomaster_00002.png);
+    image: url(:/resources/tomaster_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/tomaster_00003.png);
+    image: url(:/resources/tomaster_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2622,17 +2622,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/Ik_00001.png);
+    image: url(:/resources/Ik_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/Ik_00002.png);
+    image: url(:/resources/Ik_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/Ik_00003.png);
+    image: url(:/resources/Ik_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2702,17 +2702,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/elongate_00001.png);
+    image: url(:/resources/elongate_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/elongate_00002.png);
+    image: url(:/resources/elongate_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/elongate_00003.png);
+    image: url(:/resources/elongate_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2776,17 +2776,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/stickscale_00001.png);
+    image: url(:/resources/stickscale_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/stickscale_00002.png);
+    image: url(:/resources/stickscale_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/stickscale_00003.png);
+    image: url(:/resources/stickscale_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2860,17 +2860,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/stickrotate_00001.png);
+    image: url(:/resources/stickrotate_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/stickrotate_00002.png);
+    image: url(:/resources/stickrotate_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/stickrotate_00003.png);
+    image: url(:/resources/stickrotate_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2944,17 +2944,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/scale_camera_00001.png);
+    image: url(:/resources/scale_camera_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/scale_camera_00002.png);
+    image: url(:/resources/scale_camera_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/scale_camera_00003.png);
+    image: url(:/resources/scale_camera_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2985,17 +2985,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/move_camera_00001.png);
+    image: url(:/resources/move_camera_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/move_camera_00002.png);
+    image: url(:/resources/move_camera_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/move_camera_00003.png);
+    image: url(:/resources/move_camera_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -3026,17 +3026,17 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/rotate_camera_00001.png);
+    image: url(:/resources/rotate_camera_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/rotate_camera_00002.png);
+    image: url(:/resources/rotate_camera_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/rotate_camera_00003.png);
+    image: url(:/resources/rotate_camera_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -3887,17 +3887,17 @@ QPushButton:pressed{
                           <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/switchimg_00001.png);
+    image: url(:/resources/switchimg_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/switchimg_00002.png);
+    image: url(:/resources/switchimg_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/switchimg_00003.png);
+    image: url(:/resources/switchimg_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -3928,17 +3928,17 @@ QPushButton:pressed{
                           <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/openimg_00001.png);
+    image: url(:/resources/openimg_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/openimg_00002.png);
+    image: url(:/resources/openimg_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/openimg_00003.png);
+    image: url(:/resources/openimg_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -3969,17 +3969,17 @@ QPushButton:pressed{
                           <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/removeimg_00001.png);
+    image: url(:/resources/removeimg_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/removeimg_00002.png);
+    image: url(:/resources/removeimg_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/removeimg_00003.png);
+    image: url(:/resources/removeimg_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -4063,17 +4063,17 @@ QPushButton:pressed{
                           <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/openlib_00001.png);
+    image: url(:/resources/openlib_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/openlib_00002.png);
+    image: url(:/resources/openlib_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/openlib_00003.png);
+    image: url(:/resources/openlib_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -4104,17 +4104,17 @@ QPushButton:pressed{
                           <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/savecurrentlib_00001.png);
+    image: url(:/resources/savecurrentlib_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/savecurrentlib_00002.png);
+    image: url(:/resources/savecurrentlib_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/savecurrentlib_00003.png);
+    image: url(:/resources/savecurrentlib_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -4145,17 +4145,17 @@ QPushButton:pressed{
                           <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/savenewlib_00001.png);
+    image: url(:/resources/savenewlib_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/savenewlib_00002.png);
+    image: url(:/resources/savenewlib_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/savenewlib_00003.png);
+    image: url(:/resources/savenewlib_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -4198,17 +4198,17 @@ QPushButton:pressed{
                           <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/refreshlibs_00001.png);
+    image: url(:/resources/refreshlibs_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/refreshlibs_00002.png);
+    image: url(:/resources/refreshlibs_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/refreshlibs_00003.png);
+    image: url(:/resources/refreshlibs_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -4239,17 +4239,17 @@ QPushButton:pressed{
                           <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/addlibrary_00001.png);
+    image: url(:/resources/addlibrary_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/addlibrary_00002.png);
+    image: url(:/resources/addlibrary_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/addlibrary_00003.png);
+    image: url(:/resources/addlibrary_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -4280,17 +4280,17 @@ QPushButton:pressed{
                           <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/removelib_00001.png);
+    image: url(:/resources/removelib_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/removelib_00002.png);
+    image: url(:/resources/removelib_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/removelib_00003.png);
+    image: url(:/resources/removelib_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -4377,17 +4377,17 @@ QPushButton:pressed{
                           <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/scenetolib_00001.png);
+    image: url(:/resources/scenetolib_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/scenetolib_00002.png);
+    image: url(:/resources/scenetolib_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/scenetolib_00003.png);
+    image: url(:/resources/scenetolib_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -4418,17 +4418,17 @@ QPushButton:pressed{
                           <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/libtoscene_00001.png);
+    image: url(:/resources/libtoscene_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/libtoscene_00002.png);
+    image: url(:/resources/libtoscene_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/libtoscene_00003.png);
+    image: url(:/resources/libtoscene_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -4459,17 +4459,17 @@ QPushButton:pressed{
                           <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/removestickfromlib_00001.png);
+    image: url(:/resources/removestickfromlib_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/removestickfromlib_00002.png);
+    image: url(:/resources/removestickfromlib_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/removestickfromlib_00003.png);
+    image: url(:/resources/removestickfromlib_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -4693,17 +4693,17 @@ border: 1px solid #5A5A5A;
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/dropperfill_00001.png);
+    image: url(:/resources/dropperfill_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/dropperfill_00002.png);
+    image: url(:/resources/dropperfill_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/dropperfill_00003.png);
+    image: url(:/resources/dropperfill_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -4814,17 +4814,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/fillstickfigurecolor_00001.png);
+    image: url(:/resources/fillstickfigurecolor_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/fillstickfigurecolor_00002.png);
+    image: url(:/resources/fillstickfigurecolor_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/fillstickfigurecolor_00003.png);
+    image: url(:/resources/fillstickfigurecolor_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -4858,17 +4858,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/fillstickcolor_00001.png);
+    image: url(:/resources/fillstickcolor_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/fillstickcolor_00002.png);
+    image: url(:/resources/fillstickcolor_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/fillstickcolor_00003.png);
+    image: url(:/resources/fillstickcolor_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -4999,17 +4999,17 @@ border: 1px solid #5A5A5A;
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/borderThickness_00001.png);
+    image: url(:/resources/borderThickness_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/borderThickness_00002.png);
+    image: url(:/resources/borderThickness_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/borderThickness_00003.png);
+    image: url(:/resources/borderThickness_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -5043,17 +5043,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/stickfigureborderthickness_00001.png);
+    image: url(:/resources/stickfigureborderthickness_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/stickfigureborderthickness_00002.png);
+    image: url(:/resources/stickfigureborderthickness_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/stickfigureborderthickness_00003.png);
+    image: url(:/resources/stickfigureborderthickness_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -5142,17 +5142,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/linedropper_00001.png);
+    image: url(:/resources/linedropper_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/linedropper_00002.png);
+    image: url(:/resources/linedropper_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/linedropper_00003.png);
+    image: url(:/resources/linedropper_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -5257,17 +5257,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/linestickfigurecolor_00001.png);
+    image: url(:/resources/linestickfigurecolor_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/linestickfigurecolor_00002.png);
+    image: url(:/resources/linestickfigurecolor_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/linestickfigurecolor_00003.png);
+    image: url(:/resources/linestickfigurecolor_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -5301,17 +5301,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/linestickcolor_00001.png);
+    image: url(:/resources/linestickcolor_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/linestickcolor_00002.png);
+    image: url(:/resources/linestickcolor_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/linestickcolor_00003.png);
+    image: url(:/resources/linestickcolor_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -5427,17 +5427,17 @@ border: 1px solid #5A5A5A;
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/stickfiguredepth_00001.png);
+    image: url(:/resources/stickfiguredepth_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/stickfiguredepth_00002.png);
+    image: url(:/resources/stickfiguredepth_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/stickfiguredepth_00003.png);
+    image: url(:/resources/stickfiguredepth_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -5465,17 +5465,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/stickdepth_00001.png);
+    image: url(:/resources/stickdepth_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/stickdepth_00002.png);
+    image: url(:/resources/stickdepth_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/stickdepth_00003.png);
+    image: url(:/resources/stickdepth_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -5521,17 +5521,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/singletopstick_00001.png);
+    image: url(:/resources/singletopstick_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/singletopstick_00002.png);
+    image: url(:/resources/singletopstick_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/singletopstick_00003.png);
+    image: url(:/resources/singletopstick_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -5553,17 +5553,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/singlebottomstick_00001.png);
+    image: url(:/resources/singlebottomstick_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/singlebottomstick_00002.png);
+    image: url(:/resources/singlebottomstick_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/singlebottomstick_00003.png);
+    image: url(:/resources/singlebottomstick_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -5615,17 +5615,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/sticktotop_00001.png);
+    image: url(:/resources/sticktotop_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/sticktotop_00002.png);
+    image: url(:/resources/sticktotop_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/sticktotop_00003.png);
+    image: url(:/resources/sticktotop_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -5653,17 +5653,17 @@ QPushButton:pressed{
                       <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/sticktobottom_00001.png);
+    image: url(:/resources/sticktobottom_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/sticktobottom_00002.png);
+    image: url(:/resources/sticktobottom_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/sticktobottom_00003.png);
+    image: url(:/resources/sticktobottom_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -5814,17 +5814,17 @@ QPushButton:pressed{
                    <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/addstickfigure_00001.png);
+    image: url(:/resources/addstickfigure_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/addstickfigure_00002.png);
+    image: url(:/resources/addstickfigure_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/addstickfigure_00003.png);
+    image: url(:/resources/addstickfigure_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -5852,17 +5852,17 @@ QPushButton:pressed{
                    <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/removestickfigure_00001.png);
+    image: url(:/resources/removestickfigure_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/removestickfigure_00002.png);
+    image: url(:/resources/removestickfigure_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/removestickfigure_00003.png);
+    image: url(:/resources/removestickfigure_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -5939,17 +5939,17 @@ QPushButton:pressed{
                    <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/copystickfigure_00001.png);
+    image: url(:/resources/copystickfigure_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/copystickfigure_00002.png);
+    image: url(:/resources/copystickfigure_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/copystickfigure_00003.png);
+    image: url(:/resources/copystickfigure_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -5980,17 +5980,17 @@ QPushButton:pressed{
                    <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/pastestickfigure_00001.png);
+    image: url(:/resources/pastestickfigure_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/pastestickfigure_00002.png);
+    image: url(:/resources/pastestickfigure_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/pastestickfigure_00003.png);
+    image: url(:/resources/pastestickfigure_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -6048,17 +6048,17 @@ QPushButton:pressed{
                    <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/bottombottom_00001.png);
+    image: url(:/resources/bottombottom_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/bottombottom_00002.png);
+    image: url(:/resources/bottombottom_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/bottombottom_00003.png);
+    image: url(:/resources/bottombottom_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -6073,7 +6073,7 @@ QPushButton:pressed{
                   <property name="minimumSize">
                    <size>
                     <width>50</width>
-                    <height>500</height>
+                    <height>50</height>
                    </size>
                   </property>
                   <property name="maximumSize">
@@ -6086,17 +6086,17 @@ QPushButton:pressed{
                    <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/toptop_00001.png);
+    image: url(:/resources/toptop_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/toptop_00002.png);
+    image: url(:/resources/toptop_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/toptop_00003.png);
+    image: url(:/resources/toptop_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -6160,17 +6160,17 @@ QPushButton:pressed{
                    <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/bottom_00001.png);
+    image: url(:/resources/bottom_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/bottom_00002.png);
+    image: url(:/resources/bottom_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/bottom_00003.png);
+    image: url(:/resources/bottom_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -6198,17 +6198,17 @@ QPushButton:pressed{
                    <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    background-image: url(:/resources/top_00001.png);
+    image: url(:/resources/top_00001.png);
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    background-image: url(:/resources/top_00002.png);
+    image: url(:/resources/top_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    background-image: url(:/resources/top_00003.png);
+    image: url(:/resources/top_00003.png);
     background-repeat: no-repeat;
 }
 </string>

@@ -1,7 +1,8 @@
 # Third-party notices
 
-SAM itself is distributed under the PolyForm Strict License 1.0.0 —
-see [LICENSE](LICENSE). It is a proprietary (source-available, noncommercial)
+SAM itself is distributed under the PolyForm Strict License 1.0.0, with
+additional permissions that allow any use, commercial included —
+see [LICENSE](LICENSE). It is a proprietary (source-available, freeware)
 application, which the LGPLv3 expressly permits for a work that merely links
 against LGPL libraries. The notices below cover the third-party components it
 is built with, and the third-party brushes and patterns installed with it.

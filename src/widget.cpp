@@ -63,47 +63,6 @@
 #define DEFAULTHANDLES 10
 //#include "QVideoEncoder.h"
 //#include "QVideoDecoder.h"
-// Deve restare allineata al file LICENSE (PolyForm Strict 1.0.0 + i permessi aggiuntivi):
-// se le due divergono, il programma dichiara a schermo condizioni diverse da quelle sotto
-// cui e' distribuito. Il punto 5 non e' una cortesia ma un requisito della sezione 4 LGPLv3.
-QString license = "SAM - Stickman Animation Maker - License terms\r\n\
-Copyright (C) 2026 Matteo Vittorio Ricciutelli. All rights reserved.\r\n\
-\r\n\
-SAM is distributed free of charge under the PolyForm Strict License\r\n\
-1.0.0. The complete terms are in the LICENSE file supplied with the program;\r\n\
-the summary below is provided for convenience and does not replace them.\r\n\
-By accepting, you agree to the following.\r\n\
-\r\n\
-1. Permitted use. You may install and use this program free of charge for any\r\n\
-   noncommercial purpose, including personal projects, hobby and amateur work,\r\n\
-   private study and entertainment, and use by educational, charitable,\r\n\
-   research, public safety and government institutions.\r\n\
-\r\n\
-2. Your work is yours. Animations, images and videos you create with this\r\n\
-   program belong to you, and you may publish, distribute or sell them,\r\n\
-   including commercially. These terms govern the program, not its output.\r\n\
-\r\n\
-3. Redistribution. You may not redistribute the program - by upload, p2p, ftp,\r\n\
-   email or any other means - without the author's written authorization.\r\n\
-   To request authorization to distribute, contact the author by email at\r\n\
-   matteoricciutelli(at)mail.com.\r\n\
-\r\n\
-4. Modification. You may not modify the program or create works based on it\r\n\
-   without the author's written authorization, requested as in point 3.\r\n\
-\r\n\
-5. Qt. This program is built with the Qt framework, copyright The Qt Company\r\n\
-   Ltd., used unmodified and dynamically linked under the GNU Lesser General\r\n\
-   Public License version 3 (see the LICENSES folder). Points 3 and 4 do not\r\n\
-   apply to the Qt libraries: you may modify, rebuild and replace them, relink\r\n\
-   this program against your own build, and reverse engineer this program as\r\n\
-   far as needed to debug such changes.\r\n\
-\r\n\
-6. No warranty. The program is provided \"as is\", without warranty or\r\n\
-   condition of any kind, as far as the law allows. The author accepts no\r\n\
-   liability for its use, for any works created with it, or for any loss of\r\n\
-   data.\r\n\
-";
-int terms_accepted = 0;
 QString image_name_buffer;
 QGraphicsScene *scene;
 Ui::Widget *my_ui;
@@ -200,10 +159,7 @@ QString FFMPEGPath = "";
 /**
  * @details Wires every global widget-pointer alias (uiItems.h) to its Designer-managed
  * `ui->` counterpart, builds the canvas (`scene`/`view`) and the four advanced-property
- * tabs, then loads (or creates, on first run) the default library and config.json. The
- * terms-and-conditions prompt only appears if `terms_accepted` is still 0 in the loaded
- * config; declining it exits the process outright rather than leaving a half-built
- * window on screen.
+ * tabs, then loads (or creates, on first run) the default library and config.json.
  */
 Widget::Widget(QWidget *parent)
     : QWidget(parent)
@@ -993,12 +949,7 @@ Widget::Widget(QWidget *parent)
     else{
         ReadJson(jsonConfigPath);
     }
-    if(terms_accepted == 0){
-        TermsAndConditions();
-    }
-    if(terms_accepted == 0){
-        exit(EXIT_FAILURE);
-    }
+    // la licenza si accetta nell'installer (SAM.iss, LicenseFile): niente secondo prompt qui
 
 
 
@@ -1051,8 +1002,7 @@ void Widget::ReadJson(QString path ){
         recordObject.value(QString("First time opened"))    == QJsonValue::Undefined||
         recordObject.value(QString("FFMPEG path"))          == QJsonValue::Undefined||
         recordObject.value(QString("Autosave operation interval"))  == QJsonValue::Undefined||
-        recordObject.value(QString("Handles size"))                 == QJsonValue::Undefined||
-            recordObject.value(QString("Terms Accepted"))                 == QJsonValue::Undefined
+        recordObject.value(QString("Handles size"))                 == QJsonValue::Undefined
        )
     {
         file.remove();
@@ -1066,33 +1016,8 @@ void Widget::ReadJson(QString path ){
     FFMPEGPath          = recordObject.value("FFMPEG path").toString();
     auto_save_interval    = recordObject.value(QString("Autosave operation interval")).toInt();
     handle_size          = recordObject.value(QString("Handles size")).toInt();
-    terms_accepted       = recordObject.value(QString("Terms Accepted")).toInt();
     file.close();
 
-}
-/**
- * @details Frameless, modal Yes/No box quoting the full license text. Accepting sets
- * `terms_accepted = 1`; declining sets it back to 0 — the constructor checks this flag
- * right after calling here and calls `exit(EXIT_FAILURE)` if it's still 0, so declining
- * closes the whole application, not just this dialog. Either way the result is written
- * back to config.json immediately (WriteJson()) so the prompt doesn't reappear on the
- * next launch once accepted.
- */
-void Widget::TermsAndConditions(){
-    QMessageBox* myBox =  new QMessageBox(QMessageBox::Question, "Terms And Conditions",
-license+" Click on the \"Yes\" button if you accept the above terms, click on the \"No\" button if you don't agree (the program will be closed). \r\n\
-                                  ",
-                                  QMessageBox::Yes|QMessageBox::No);
-
-    myBox->setWindowFlag(Qt::FramelessWindowHint);
-    if (myBox->exec() == QMessageBox::Yes) {
-       terms_accepted = 1;       //cicciottaEasterEgg!!!!
-       QMessageBox::information(this,"info"," you can review the terms accepted in the help menu",QMessageBox::Ok);
-    } else {
-        terms_accepted = 0;
-    }
-    delete myBox;
-    WriteJson();
 }
 /**
  * @details Always targets the standard config.json path under `program_folder` — unlike
@@ -1106,9 +1031,9 @@ void Widget::WriteJson( ){
 extern int op_count;
 /**
  * @details Snapshots every persisted setting (canvas size, fps, FFmpeg path, autosave
- * interval, handle size, terms-accepted flag) into a fresh QJsonObject and overwrites
- * the file at `path`. The sole writer of config.json; ReadJson() and TermsAndConditions()
- * both funnel through here rather than building JSON themselves.
+ * interval, handle size) into a fresh QJsonObject and overwrites the file at `path`. The
+ * sole writer of config.json; ReadJson() and WriteJson() both funnel through here rather
+ * than building JSON themselves.
  */
 void Widget::CreateJson(QString path ){
     QJsonObject recordObject;
@@ -1120,7 +1045,6 @@ void Widget::CreateJson(QString path ){
     recordObject.insert("FFMPEG path", QJsonValue::fromVariant(FFMPEGPath));
     recordObject.insert("Autosave operation interval", QJsonValue::fromVariant(auto_save_interval));
     recordObject.insert("Handles size", QJsonValue::fromVariant(handle_size));
-    recordObject.insert("Terms Accepted", QJsonValue::fromVariant((int)terms_accepted));
     QJsonDocument doc(recordObject);
     QFile file(path);
     if(!file.open(QIODevice::WriteOnly))

@@ -31,11 +31,8 @@ class Widget : public QWidget
 public:
     /**
      * @brief Builds the UI, wires the canvas into it, and loads/creates the config,
-     *        default library and terms-acceptance state.
+     *        default library.
      * @param parent parent widget (Qt ownership).
-     *
-     * Exits the process if the user declines the terms-and-conditions prompt on a
-     * first run (see TermsAndConditions()).
      */
     Widget(QWidget *parent = nullptr);
     ~Widget();
@@ -134,13 +131,6 @@ public:
      *        the current settings (CreateJson()).
      */
     void WriteJson();
-
-    /**
-     * @brief Shows the terms-and-conditions dialog; declining sets `terms_accepted = 0`
-     *        (the constructor then exits the process) rather than closing just this
-     *        dialog.
-     */
-    void TermsAndConditions();
 private slots:
     void on_drawBtn_clicked();
 

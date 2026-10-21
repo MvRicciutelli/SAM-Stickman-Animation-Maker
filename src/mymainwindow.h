@@ -137,10 +137,19 @@ private slots:
      */
     void on_actionThirdPartyNotices_triggered();
 
+    /**
+     * @brief Shows SAM's own license, read-only: it is accepted in the installer.
+     */
     void on_actionTerms_and_Conditions_triggered();
 
 private:
     Ui::MyMainWindow *ui;
+
+    /**
+     * @brief The notices dialog behind both Help entries.
+     * @param tab index of the tab to open on (0 = NOTICE.md, 1 = SAM's LICENSE).
+     */
+    void ShowNotices(int tab);
 
 
     // QWidget interface

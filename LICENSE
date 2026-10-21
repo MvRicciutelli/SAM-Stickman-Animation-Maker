@@ -6,10 +6,11 @@ License 1.0.0, reproduced verbatim below, together with the additional
 permissions granted at the end of this file.
 
 In short, and without replacing the terms below: you may use this program
-for personal, hobby, educational and other noncommercial purposes, free of
-charge. You may not redistribute it or modify it without the author's
-written authorization, which you may request at the contact address in the
-program's About dialog. The program comes with no warranty of any kind.
+free of charge for any purpose, personal or commercial, by yourself or
+within a company or other organization. You may not redistribute it or
+modify it without the author's written authorization, which you may request
+at the contact address in the program's About dialog. The program comes with
+no warranty of any kind.
 
 These terms cover SAM itself only. The third-party libraries distributed with
 it (Qt, the MinGW runtime) and the third-party brushes and patterns the
@@ -87,7 +88,14 @@ These permissions are granted by the copyright holder in addition to the
 PolyForm Strict License 1.0.0 above. Where they conflict with that license,
 these permissions prevail.
 
-## 1. Works you create with the program
+## 1. Any use of the program
+
+Any purpose is a permitted purpose, including commercial purposes and use by
+or on behalf of a company or any other organization. This permission widens
+what you may use the software for; it does not allow distributing the
+software or making changes or new works based on it.
+
+## 2. Works you create with the program
 
 Using SAM to create animations, images, videos or other works,
 and copying, publishing, distributing, selling or otherwise commercially
@@ -95,7 +103,7 @@ exploiting those works, is use for a permitted purpose. Works you create
 with the program are yours; the license above governs the program itself,
 not its output.
 
-## 2. Qt and other LGPL-licensed components
+## 3. Qt and other LGPL-licensed components
 
 "The software" in the license above means only the SAM source
 code and executable authored by the copyright holder. It does not cover the
