@@ -111,8 +111,9 @@ class TestCharacterization : public QObject
     // fix they flipped/reshaped). Builds master(LINE)->middle(vertex)->grandchild(LINE),
     // makes the grandchild master (SetDirectChainAsMaster -> reverses master+middle) and
     // checks the middle stick's scene vertices are unchanged. (Not a test slot: the
-    // ChangeMasterKeeps*Shape wrappers drive it.)
-    void ChangeMasterKeepsVertexShape(qint32 middle_type)
+    // ChangeMasterKeeps*Shape wrappers drive it.) @p transformed gives the middle stick a
+    // Stick Transform, so its drawn endpoints are no longer its spine's.
+    void ChangeMasterKeepsVertexShape(qint32 middle_type, bool transformed = false)
     {
         AddFrame();
         StickFigure *fig = CurrentStickFigure();
@@ -131,6 +132,14 @@ class TestCharacterization : public QObject
         mid->my_line = QLineF(100, 200, 200, 200);
         mid->parent = master;
         mid->stepchild = false;
+        if (transformed) {
+            mid->local_xf.offset = QPointF(15, -25);
+            mid->local_xf.angle = 35;
+            mid->local_xf.scale = QPointF(0.8, 1.4);
+            mid->local_xf.flip_v = true;
+            mid->global_xf.angle = -20;
+            mid->global_xf.flip_h = true;
+        }
         // choose scene vertices, then store them normalized to mid's current frame
         QList<QPointF> want;
         if (middle_type == StickData::MULTILINE)
@@ -165,9 +174,9 @@ class TestCharacterization : public QObject
         auto scene_verts = [&](StickData *s) {
             QList<QPointF> v;
             QTransform t = s->PolygonTransform();
-            if (s->stick_type == StickData::MULTILINE) v << s->my_line.p1();
+            if (s->stick_type == StickData::MULTILINE) v << s->DrawnLine().p1();
             for (const QPointF &p : s->polygon_points) v << t.map(p);
-            if (s->stick_type == StickData::MULTILINE) v << s->my_line.p2();
+            if (s->stick_type == StickData::MULTILINE) v << s->DrawnLine().p2();
             return v;
         };
         QList<QPointF> before = scene_verts(mid);
@@ -222,7 +231,6 @@ private slots:
         my_library_list_widget = new QListWidget;
         my_current_library_widget = new QListWidget;
         img_list_widget = new QListWidget;
-        img_buttons_row = new QWidget;  // nell'app è il frame dei bottoni immagine (widget.cpp)
         onion_skin_sb = new QSpinBox;   // value 0 -> UpdateOnionSkins() is a no-op
         fps_spin_box = new QSpinBox;
         img_rotation_slider = new QSlider;
@@ -265,6 +273,7 @@ private slots:
         view->my_animation->scene = scene;
 
         advanced_img_tab = new QWidget;
+        advanced_transform_tab = new QWidget;
         advanced_vertex_tab = new QWidget;
         vertex_width_row = new QWidget(advanced_vertex_tab);
         vertex_width_slider = new QSlider;
@@ -807,7 +816,9 @@ private slots:
         // --- LINE: dipinge in coordinate di scena, quindi "segue" richiede una correzione
         StickData line;
         line.stick_type = StickData::LINE;
-        line.my_line = QLineF(30, 40, 30, 140);
+        // inclinata davvero di 25°: il frame di una LINE si legge dalla linea, non da img_angle
+        // (che una LINE non tiene aggiornato: non è nemmeno nel suo record)
+        line.my_line = QLineF(QPointF(30, 40), QPointF(30, 40) + QTransform().rotate(25).map(QPointF(0, 100)));
         line.img_angle = 25;
         StickGraphicsItem line_view(&line);
 
@@ -3101,6 +3112,432 @@ private slots:
 
     void ChangeMasterKeepsPolygonShape()   { ChangeMasterKeepsVertexShape(StickData::POLYGON); }
     void ChangeMasterKeepsMultilineShape() { ChangeMasterKeepsVertexShape(StickData::MULTILINE); }
+    void ChangeMasterKeepsTransformedMultilineShape() { ChangeMasterKeepsVertexShape(StickData::MULTILINE, true); }
+
+    // The Stick Transform (local_xf.offset/_angle/_scale, record version 9) moves the shape of
+    // EVERY type on top of its own geometry, while the skeleton stays put. Rendered on a RECT
+    // (painted inside the stick's frame) and a LINE (painted in scene coordinates, and whose frame
+    // comes from the line: a LINE never keeps img_angle). Then the version-9 round trip, and an old
+    // record's placement — IMAGE, POLYGON and TEXT kept theirs in img_offset/img_angle_offset, an
+    // IMAGE its scale in img_*_scale — moved into the transform with the very same drawn frame
+    void StickTransformMovesEveryTypeAndMigratesOldPlacement()
+    {
+        auto render = [](StickData &d) {
+            QGraphicsScene render_scene;
+            render_scene.setSceneRect(0, 0, 400, 400);
+            StickGraphicsItem *item = new StickGraphicsItem(&d); // la scena possiede la view
+            render_scene.addItem(item);
+            item->Refresh(0);
+            QImage img(400, 400, QImage::Format_ARGB32_Premultiplied);
+            img.fill(Qt::transparent);
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 400, 400), QRectF(0, 0, 400, 400));
+            painter.end();
+            return img;
+        };
+        auto painted = [](const QImage &img, QPointF p) { return qAlpha(img.pixel(p.toPoint())) > 0; };
+
+        // RECT 20 wide on a vertical stick: its frame is the scene's, translated to P1
+        StickData rect;
+        rect.stick_type = StickData::RECT;
+        rect.my_line = QLineF(100, 100, 100, 200);
+        rect.img_w_scale = 20;
+        rect.brush = QBrush(Qt::black);
+        QVERIFY(painted(render(rect), QPointF(100, 150)));
+        rect.local_xf.offset = QPointF(60, 0);
+        QImage moved = render(rect);
+        QVERIFY2(painted(moved, QPointF(160, 150)) && !painted(moved, QPointF(100, 150)),
+                 "the offset did not move the rect");
+        rect.local_xf.scale = QPointF(2, 1);   // across the stick: 40 wide now
+        QVERIFY2(painted(render(rect), QPointF(177, 150)), "the width scale did not widen the rect");
+        {
+            StickGraphicsItem item(&rect);
+            item.Refresh(0);
+            QVERIFY2(item.boundingRect().contains(QPointF(177, 150)),
+                     "the bounding rect leaves the moved shape out");
+        }
+
+        // LINE: the offset runs ALONG the stick, read off the line and not off its stale img_angle
+        StickData line;
+        line.stick_type = StickData::LINE;
+        line.my_line = QLineF(100, 100, 100, 200);
+        line.img_angle = 123;
+        line.pen = QPen(Qt::black, 6);
+        line.local_xf.offset = QPointF(0, 50);
+        QImage slid = render(line);
+        QVERIFY2(painted(slid, QPointF(100, 230)) && !painted(slid, QPointF(100, 120)),
+                 "the offset did not slide the line along itself");
+        line.local_xf.offset = QPointF(0, 0);
+        line.local_xf.angle = 90;              // about P1: the stick's +y onto the scene's -x
+        QImage turned = render(line);
+        QVERIFY2(painted(turned, QPointF(50, 100)) && !painted(turned, QPointF(100, 150)),
+                 "the rotation did not turn the line about P1");
+
+        // version 9 round trip, and Clone()
+        StickData source;
+        source.local_xf.offset = QPointF(3, -4);
+        source.local_xf.angle = 12.5f;
+        source.local_xf.scale = QPointF(0.5, 2);
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << source;
+        }
+        StickData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+        QCOMPARE(loaded.local_xf.offset, source.local_xf.offset);
+        QCOMPARE(loaded.local_xf.angle, source.local_xf.angle);
+        QCOMPARE(loaded.local_xf.scale, source.local_xf.scale);
+        StickData *clone = source.Clone();
+        QCOMPARE(clone->local_xf.scale, source.local_xf.scale);
+        delete clone;
+
+        // a version-8 record: its placement becomes the transform, with the same drawn frame
+        auto load_as_v8 = [](StickData &old) {
+            old.version = 8;
+            QByteArray v8;
+            {
+                QDataStream out(&v8, QIODevice::WriteOnly);
+                out << old;
+            }
+            StickData *read = new StickData;
+            QDataStream in(&v8, QIODevice::ReadOnly);
+            in >> *read;
+            return read;
+        };
+        auto same = [](const QTransform &a, const QTransform &b) {
+            for (QPointF p : {QPointF(0, 0), QPointF(1, 0), QPointF(0, 1), QPointF(0.3, 0.7)})
+                if (QLineF(a.map(p), b.map(p)).length() > 1e-4)
+                    return false;
+            return true;
+        };
+        StickData poly;
+        poly.stick_type = StickData::POLYGON;
+        poly.my_line = QLineF(100, 100, 160, 180);
+        poly.img_angle = float(-qAtan2(60, 80) * 180.0 / M_PI);
+        poly.img_offset = QPointF(7, -3);
+        poly.img_angle_offset = 30;
+        poly.polygon_points << QPointF(0, 0) << QPointF(0.3, 0.5) << QPointF(0, 1);
+        const QTransform poly_before = poly.PolygonTransform();
+        StickData *poly_after = load_as_v8(poly);
+        QVERIFY2(same(poly_before, poly_after->PolygonTransform()), "a migrated polygon moved");
+        QCOMPARE(poly_after->img_offset, QPointF(0, 0));
+        QCOMPARE(poly_after->img_angle_offset, 0);
+        QCOMPARE(poly_after->local_xf.angle, 30.0f);
+        QCOMPARE(poly_after->version, StickData::CURRENT_VERSION);
+        delete poly_after;
+
+        // TEXT: its frame (stick.cpp's TextFrame()) is the shape frame turned by
+        // img_angle_offset + 90, then img_offset — rebuilt here for both records
+        auto text_frame = [](const StickData &d) {
+            QTransform t = d.ShapeFrame();
+            t.rotate(d.img_angle_offset + 90);
+            t.translate(d.img_offset.x(), d.img_offset.y());
+            return t;
+        };
+        StickData text;
+        text.stick_type = StickData::TEXT;
+        text.my_line = poly.my_line;
+        text.img_angle = poly.img_angle;
+        text.text = "x";
+        text.img_offset = QPointF(5, 2);
+        text.img_angle_offset = 20;
+        const QTransform text_before = text_frame(text);
+        StickData *text_after = load_as_v8(text);
+        QVERIFY2(same(text_before, text_frame(*text_after)), "a migrated text moved");
+        QCOMPARE(text_after->img_offset, QPointF(0, 0));
+        delete text_after;
+
+        // IMAGE, rendered: a 150x100 red picture, placed and turned by the old fields
+        StickData image;
+        image.stick_type = StickData::IMAGE;
+        image.my_line = QLineF(200, 200, 200, 300);   // length 100, frame = the scene's at P1
+        QImage picture(40, 20, QImage::Format_ARGB32);
+        picture.fill(Qt::red);
+        image.stick_img_list << new QImage(picture);
+        image.img_name_list << "red";
+        image.stick_img = image.stick_img_list[0];
+        image.img_offset = QPointF(10, 5);
+        image.img_angle_offset = 15;
+        image.img_w_scale = 1.5f;
+        image.img_h_scale = 2;
+        QTransform place;                             // the picture's centre and axes
+        place.translate(200, 200);
+        place.rotate(15);
+        place.translate(10, 5);
+        const QImage image_before = render(image);
+        StickData *image_after = load_as_v8(image);
+        QCOMPARE(image_after->local_xf.scale, QPointF(1.5, 2));
+        QCOMPARE(image_after->img_w_scale, 1.0f);
+        const QImage image_now = render(*image_after);
+        for (QPointF inside : {QPointF(0, 0), QPointF(65, 40), QPointF(-65, -40), QPointF(65, -40)})
+            QVERIFY2(painted(image_before, place.map(inside)) && painted(image_now, place.map(inside)),
+                     "a migrated image moved or shrank");
+        for (QPointF outside : {QPointF(0, 60), QPointF(85, 0), QPointF(-85, 0)})
+            QVERIFY2(!painted(image_before, place.map(outside)) && !painted(image_now, place.map(outside)),
+                     "a migrated image grew");
+        delete image_after;
+
+        // a FREEHAND's img_* are its canvas placement, never the user's: left alone
+        StickData canvas;
+        canvas.stick_type = StickData::FREEHAND;
+        canvas.img_offset = QPointF(40, 0);
+        StickData *canvas_after = load_as_v8(canvas);
+        QCOMPARE(canvas_after->img_offset, QPointF(40, 0));
+        QCOMPARE(canvas_after->local_xf.offset, QPointF(0, 0));
+        delete canvas_after;
+    }
+
+    // A MULTILINE under a Stick Transform is edited where it is DRAWN: SceneVertices() reports the
+    // transformed endpoints, and the edits that rebuild the spine from them (appending a vertex,
+    // dragging an endpoint) go back through StickData::SetDrawnLine(), so what was clicked is
+    // where the vertex lands and the rest of the line stays put
+    void MultilineEditsWhereItIsDrawnUnderATransform()
+    {
+        StickData arm;  // an ancestor whose global transform reaches the line too, flip included
+        arm.stick_type = StickData::LINE;
+        arm.my_line = QLineF(60, 40, 100, 100);
+        arm.global_xf.angle = -25;
+        arm.global_xf.offset = QPointF(-8, 12);
+        arm.global_xf.flip_h = true;
+        StickData m;
+        m.parent = &arm;
+        m.stick_type = StickData::MULTILINE;
+        m.my_line = QLineF(100, 100, 160, 180);
+        m.img_angle = float(-qAtan2(60, 80) * 180.0 / M_PI);
+        m.local_xf.offset = QPointF(20, -10);
+        m.local_xf.angle = 40;
+        m.local_xf.scale = QPointF(0.7, 1.6);
+        m.local_xf.flip_v = true;
+        m.global_xf.angle = 15;
+        m.global_xf.flip_h = true;
+        m.vertex_widths << 4 << 4 << 4;
+        m.vertex_curvatures << 0 << 0 << 0;
+        QGraphicsScene edit_scene;
+        StickGraphicsItem *item = new StickGraphicsItem(&m); // la scena possiede la view
+        edit_scene.addItem(item);
+        m.polygon_points << m.PolygonTransform().inverted().map(QPointF(150, 120));
+        // img_angle is a float: a spine rebuilt from drawn ends carries ~1e-5 px of its rounding
+        auto near = [](QPointF a, QPointF b) { return QLineF(a, b).length() < 1e-3; };
+        const QPolygonF drawn = item->SceneVertices();
+        QVERIFY(!near(drawn.first(), m.my_line.p1())); // the drawn ends are not the spine's
+        QVERIFY(near(drawn[1], QPointF(150, 120)));
+
+        QVERIFY(item->AppendMultilineVertex(QPointF(250, 260), StickData::CAP_ROUND));
+        const QPolygonF appended = item->SceneVertices();
+        QCOMPARE(appended.count(), 4);
+        QVERIFY2(near(appended.last(), QPointF(250, 260)), "the new end is not where it was clicked");
+        for (int i = 0; i < drawn.count(); i++)
+            QVERIFY2(near(appended[i], drawn[i]), "appending moved the rest of the line");
+
+        QVERIFY(item->EditPolygonPoint(0, QPointF(80, 300)));
+        const QPolygonF dragged = item->SceneVertices();
+        QVERIFY2(near(dragged.first(), QPointF(80, 300)), "P1 is not where it was dragged");
+        for (int i = 1; i < appended.count(); i++)
+            QVERIFY2(near(dragged[i], appended[i]), "dragging P1 moved the rest of the line");
+    }
+
+    // global_xf moves a stick's shape AND every descendant's, pivoting on its own joint (P1), while
+    // local_xf moves its own shape only. A descendant follows by the rotate tool's rule — a
+    // stepchild only follows a stepchild ancestor — and a render clone (icons, onion skins,
+    // export) keeps following, because CloneForRender() re-links the clones' parents
+
+    void GlobalTransformMovesTheBranchAndReachesRenderClones()
+    {
+        auto near = [](QLineF a, QLineF b) {
+            return QLineF(a.p1(), b.p1()).length() < 1e-6 && QLineF(a.p2(), b.p2()).length() < 1e-6;
+        };
+        StickData arm, hand;
+        arm.stick_type = hand.stick_type = StickData::LINE;
+        arm.my_line = QLineF(100, 100, 100, 200);     // its frame: the scene's, at P1
+        hand.my_line = QLineF(100, 200, 150, 280);
+        hand.parent = &arm;
+        arm.children << &hand;
+
+        arm.local_xf.offset = QPointF(0, 50);         // local: the arm alone
+        QVERIFY(near(arm.DrawnLine(), QLineF(100, 150, 100, 250)));
+        QVERIFY2(near(hand.DrawnLine(), hand.my_line), "a local transform reached a child");
+        arm.local_xf = StickXf();
+
+        arm.global_xf.offset = QPointF(0, 50);        // global: the arm and the hand
+        QVERIFY(near(arm.DrawnLine(), QLineF(100, 150, 100, 250)));
+        QVERIFY2(near(hand.DrawnLine(), QLineF(100, 250, 150, 330)), "a global offset missed the child");
+        arm.global_xf.offset = QPointF(0, 0);
+        arm.global_xf.angle = 90;                     // about the arm's P1: +y onto -x
+        QVERIFY2(near(hand.DrawnLine(), QLineF(0, 100, -80, 150)), "a global rotation missed the child");
+        arm.global_xf.angle = 0;
+        arm.global_xf.flip_h = true;                  // across the arm's axis, x = 100
+        QVERIFY2(near(hand.DrawnLine(), QLineF(100, 200, 50, 280)), "a global flip missed the child");
+
+        hand.stepchild = true;                        // the rotate tool's rule: not from a plain stick
+        QVERIFY(near(hand.DrawnLine(), hand.my_line));
+        arm.stepchild = true;
+        QVERIFY(near(hand.DrawnLine(), QLineF(100, 200, 50, 280)));
+        arm.stepchild = hand.stepchild = false;
+
+        QList<StickData*> clones = CloneForRender({&arm, &hand});
+        QCOMPARE(clones[1]->parent, clones[0]);
+        QVERIFY2(near(clones[1]->DrawnLine(), hand.DrawnLine()), "a render clone lost the global transform");
+        QVERIFY(clones[0]->parent == nullptr);
+        qDeleteAll(clones);
+    }
+
+    // The flips mirror the shape IN PLACE: a local flip about the stick's midpoint (about the image's
+    // centre for an image type), so a vertical flip swaps a trapezoid's ends without moving it.
+    // Then the record formats: version 10 carries the flips and global_xf, a version-9 record (local
+    // offset/angle/scale only) still reads
+    void StickTransformFlipsAndVersion10()
+    {
+        auto render = [](StickData &d) {
+            QGraphicsScene render_scene;
+            render_scene.setSceneRect(0, 0, 400, 400);
+            StickGraphicsItem *item = new StickGraphicsItem(&d); // la scena possiede la view
+            render_scene.addItem(item);
+            item->Refresh(0);
+            QImage img(400, 400, QImage::Format_ARGB32_Premultiplied);
+            img.fill(Qt::transparent);
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 400, 400), QRectF(0, 0, 400, 400));
+            painter.end();
+            return img;
+        };
+        auto painted = [](const QImage &img, int x, int y) { return qAlpha(img.pixel(x, y)) > 0; };
+        StickData trapezoid;                          // 40 wide at P1, 10 at P2
+        trapezoid.stick_type = StickData::TRAPEZOID;
+        trapezoid.my_line = QLineF(100, 100, 100, 200);
+        trapezoid.img_w_scale = 40;
+        trapezoid.img_h_scale = 10;
+        trapezoid.brush = QBrush(Qt::black);
+        QImage plain = render(trapezoid);
+        QVERIFY(painted(plain, 116, 110) && !painted(plain, 116, 190));
+        trapezoid.local_xf.flip_v = true;
+        QImage flipped = render(trapezoid);
+        QVERIFY2(!painted(flipped, 116, 110) && painted(flipped, 116, 190),
+                 "a vertical flip did not swap the ends in place");
+
+        StickData poly;                               // a vertex right of the axis goes left
+        poly.stick_type = StickData::POLYGON;
+        poly.my_line = QLineF(100, 100, 100, 200);
+        poly.local_xf.flip_h = true;
+        QVERIFY(QLineF(poly.PolygonTransform().map(QPointF(0.3, 0.5)), QPointF(70, 150)).length() < 1e-6);
+
+        StickData image;                              // an image flips about its own centre
+        image.stick_type = StickData::IMAGE;
+        image.img_offset = QPointF(10, -4);
+        image.local_xf.flip_h = image.local_xf.flip_v = true;
+        QVERIFY(QLineF(image.LocalTransform(100).map(image.img_offset), image.img_offset).length() < 1e-9);
+
+        StickData source;
+        source.local_xf.offset = QPointF(3, -4);
+        source.local_xf.flip_v = true;
+        source.global_xf.angle = 33;
+        source.global_xf.scale = QPointF(1.5, 0.5);
+        source.global_xf.flip_h = true;
+        auto round_trip = [](StickData &written) {
+            QByteArray bytes;
+            {
+                QDataStream out(&bytes, QIODevice::WriteOnly);
+                out << written;
+            }
+            StickData *read = new StickData;
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> *read;
+            return read;
+        };
+        StickData *loaded = round_trip(source);
+        QCOMPARE(loaded->local_xf.offset, source.local_xf.offset);
+        QCOMPARE(loaded->local_xf.flip_v, true);
+        QCOMPARE(loaded->global_xf.angle, 33.0f);
+        QCOMPARE(loaded->global_xf.scale, QPointF(1.5, 0.5));
+        QCOMPARE(loaded->global_xf.flip_h, true);
+        delete loaded;
+        StickData *clone = source.Clone();
+        QCOMPARE(clone->global_xf.flip_h, true);
+        delete clone;
+
+        source.version = 9;                           // a version-9 record: local offset/angle/scale
+        StickData *v9 = round_trip(source);
+        QCOMPARE(v9->local_xf.offset, source.local_xf.offset);
+        QCOMPARE(v9->local_xf.flip_v, false);
+        QVERIFY(v9->global_xf.IsIdentity());
+        QCOMPARE(v9->version, StickData::CURRENT_VERSION);
+        delete v9;
+    }
+
+    // Draw mode on a stick an ANCESTOR transforms globally: that transform can't be baked into
+    // the pixels (it is the ancestor's), so the canvas is painted through it — draw_disp must be
+    // exactly what paint() applies, or strokes land away from the cursor — and must still cover
+    // the viewport. Exiting re-anchors the canvas where it was painted
+    void DrawModeUnderAnInheritedGlobalTransform()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        StickData ancestor;
+        ancestor.stick_type = StickData::LINE;
+        ancestor.my_line = QLineF(300, 50, 300, 150);
+        ancestor.global_xf.angle = 30;
+        ancestor.global_xf.scale = QPointF(0.5, 0.8);
+        ancestor.global_xf.flip_h = true;
+        StickData *stick = DrawStick(QPointF(200, 200), QPointF(260, 300));
+        struct Restore { StickData *s, *was; ~Restore() { s->parent = was; } } restore{stick, stick->parent};
+        stick->parent = &ancestor;
+        stick->stick_type = StickData::FREEHAND;
+        stick->local_xf.angle = 20;                   // the local one IS baked, and reset
+        view->EnterDrawMode(stick, false);
+        QVERIFY(stick->local_xf.IsIdentity());
+        view->draw_brush_size = 6;
+        view->draw_brush_hardness = 100;
+        // what paint() does with a canvas pixel, centred: ShapeFrame, internal rotation and offset,
+        // and the image's own size (len * img_w_scale stick units for the whole square canvas)
+        QImage &canvas = *view->draw_canvas;
+        QTransform shown = stick->ShapeFrame();
+        shown.rotate(stick->img_angle_offset);
+        shown.translate(stick->img_offset.x(), stick->img_offset.y());
+        const qreal unit_per_px = stick->my_line.length() * stick->img_w_scale / canvas.width();
+        shown.scale(unit_per_px, unit_per_px);
+        // the ancestor scales by 0.5/0.8: the canvas stays viewport-sized in pixels
+        QVERIFY2(canvas.width() < 1.01 * QLineF(QPointF(0, 0), QPointF(view->viewport()->rect().bottomRight())).length() / view->transform().m11() + 2,
+                 "a global scale-down multiplied the canvas pixels");
+        const QPointF half(canvas.width() / 2.0, canvas.height() / 2.0);
+        // one click = one dab; where its pixels are SHOWN must be where it was clicked
+        auto dab_lands_at = [&](QPointF scene_point, QPointF *shown_at) {
+            canvas.fill(Qt::transparent);
+            QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                              view->mapFromScene(scene_point));
+            QPointF sum;
+            int count = 0;
+            for (int y = 0; y < canvas.height(); y++)
+                for (int x = 0; x < canvas.width(); x++)
+                    if (qAlpha(canvas.pixel(x, y)) != 0) {
+                        sum += QPointF(x + 0.5, y + 0.5);
+                        count++;
+                    }
+            if (count == 0)
+                return false;
+            *shown_at = shown.map(sum / count - half);
+            return true;
+        };
+        const QRect viewport = view->viewport()->rect();
+        for (QPoint at : {viewport.center(), viewport.topLeft() + QPoint(15, 15),
+                          viewport.bottomRight() - QPoint(15, 15)}) {
+            const QPointF clicked = view->mapToScene(at);
+            QPointF landed;
+            QVERIFY2(dab_lands_at(clicked, &landed), "the canvas does not cover the viewport there");
+            QVERIFY2(QLineF(landed, clicked).length() < 2.0, "the stroke is shown away from the cursor");
+        }
+        canvas.fill(Qt::transparent);
+        const QPointF centre = shown.map(QPointF(0, 0));
+        view->ExitDrawMode();                         // nothing painted: a 1x1 at the centre
+        QTransform after = stick->ShapeFrame();
+        after.rotate(stick->img_angle_offset);
+        after.translate(stick->img_offset.x(), stick->img_offset.y());
+        QVERIFY2(QLineF(after.map(QPointF(0, 0)), centre).length() < 1.0,
+                 "exiting moved the drawing away from where it was painted");
+        view->SetTool(NOTOOL);
+    }
 
     // Group D bug 3: the scale tool must scale a MULTILINE's per-vertex thickness
     // (vertex_widths) along with its shape, and a POLYGON's outline pen. Replicates the

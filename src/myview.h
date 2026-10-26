@@ -1261,6 +1261,8 @@ private:
     QLineF draw_orig_line;        ///< the stick's skeleton (the 2-click line) stashed on entry, restored on exit so the freehand keeps a normal-stick origin/rotation
     QTransform draw_disp;         ///< canvas display transform, mirrors paint(): scene = draw_disp.map(pixel - canvasCenter). The canvas is painted in the stick's ROTATED frame, so the drawing is born at the stick's position/rotation and needs no re-rotation on exit
     QTransform draw_disp_inv;     ///< inverse of draw_disp, for scene -> canvas-pixel mouse mapping
+    QTransform draw_branch;       ///< the global Stick Transforms acting on the canvas (the stick's own and its ancestors'), scene -> scene; draw_disp ends with it
+    double draw_px_scale = 1;     ///< stick units per canvas pixel: 1 unless a global transform scales the canvas, which keeps its pixel count at the viewport's
     double draw_theta = 0;        ///< the stick's rotation (its img_angle) during the session
 
     /** @brief Pressure multiplier centred on 1.0 at a "normal" (half-way) pen press: the

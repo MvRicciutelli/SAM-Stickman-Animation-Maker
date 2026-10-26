@@ -3072,7 +3072,7 @@ QPushButton:pressed{
                   </widget>
                   <widget class="QWidget" name="advancedTab">
                    <property name="toolTip">
-                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Move, Scale and Rotate images embedded in your stickfigures&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                    <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;The images an image stick can switch between&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
                    </property>
                    <attribute name="title">
                     <string>Edit</string>
@@ -3126,7 +3126,7 @@ QPushButton:pressed{
                            </size>
                           </property>
                           <property name="title">
-                           <string>Image editing</string>
+                           <string>Stick transform</string>
                           </property>
                           <layout class="QVBoxLayout" name="verticalLayout_18">
                            <property name="spacing">
@@ -3221,7 +3221,7 @@ QPushButton:pressed{
                                    <item>
                                     <widget class="QLabel" name="label_13">
                                      <property name="text">
-                                      <string>image horizontal offset</string>
+                                      <string>horizontal offset</string>
                                      </property>
                                     </widget>
                                    </item>
@@ -3359,7 +3359,7 @@ QPushButton:pressed{
                                    <item>
                                     <widget class="QLabel" name="label_14">
                                      <property name="text">
-                                      <string>image vertical offset</string>
+                                      <string>vertical offset</string>
                                      </property>
                                     </widget>
                                    </item>
@@ -3503,7 +3503,7 @@ QPushButton:pressed{
                                    <item>
                                     <widget class="QLabel" name="label_15">
                                      <property name="text">
-                                      <string>image width</string>
+                                      <string>width scale</string>
                                      </property>
                                     </widget>
                                    </item>
@@ -3641,7 +3641,7 @@ QPushButton:pressed{
                                    <item>
                                     <widget class="QLabel" name="label_16">
                                      <property name="text">
-                                      <string>image height</string>
+                                      <string>height scale</string>
                                      </property>
                                     </widget>
                                    </item>
@@ -3788,7 +3788,7 @@ QPushButton:pressed{
                                    <item>
                                     <widget class="QLabel" name="label_17">
                                      <property name="text">
-                                      <string>image rotation</string>
+                                      <string>rotation</string>
                                      </property>
                                     </widget>
                                    </item>

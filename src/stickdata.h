@@ -17,6 +17,28 @@
 class StickGraphicsItem; // defined in stick.h; forward-declared to avoid a header cycle
 
 /**
+ * @brief One set of "Stick Transform" parameters, in a stick's own frame (origin P1, +y along
+ *        the stick, so x is the "horizontal"/"width" axis). A stick carries two: StickData's
+ *        local_xf (its own shape) and global_xf (its shape and its descendants').
+ */
+struct StickXf
+{
+    QPointF offset = QPointF(0, 0);
+    float angle = 0;                ///< degrees
+    QPointF scale = QPointF(1, 1);  ///< x across the stick, y along it; always > 0 (the flips are separate)
+    bool flip_h = false;            ///< mirror across the stick's axis (x -> -x)
+    bool flip_v = false;            ///< mirror along the stick (y -> -y)
+
+    /// @brief True for the default set: then Matrix() is the identity, and callers can skip it.
+    bool IsIdentity() const;
+    /**
+     * @brief The set as a matrix: flip about @p flip_pivot, then scale, then offset, then
+     *        rotation (the order an IMAGE's placement always had).
+     */
+    QTransform Matrix(const QPointF &flip_pivot = QPointF(0, 0)) const;
+};
+
+/**
  * @brief Pure-data half of a stick: every field that is saved to disk or duplicated by
  *        undo snapshots, copy/paste and the library, with no scene or widget dependency.
  *
@@ -172,12 +194,13 @@ public:
     /// The newest record format this build reads AND writes; operator>> refuses anything above
     /// it (RejectNewerVersion()), because a newer record's extra fields would be read as the
     /// start of the next record and desync the whole stream.
-    static constexpr qint32 CURRENT_VERSION = 8;
+    static constexpr qint32 CURRENT_VERSION = 10;
     qint32 version = CURRENT_VERSION; ///< serialization format version of this record; 2 adds the
                                      ///< IK fields below, 3 adds TEXT's text_v_stretch, 4 adds
                                      ///< brush_follows_stick, 5 adds texture_tiled, 6 adds
                                      ///< stroke_brush, 7 adds MULTILINE's vertex_parents, 8 its
-                                     ///< vertex_caps — all gated in operator<</operator>> so files saved before
+                                     ///< vertex_caps, 9 local_xf's offset/angle/scale, 10 its flips and
+                                     ///< global_xf — all gated in operator<</operator>> so files saved before
                                      ///< those fields existed still load (and operator>> then
                                      ///< raises the record to CURRENT_VERSION)
     qint32 stick_type = StickType::LINE;///< StickType value; drives painting and serialization
@@ -249,10 +272,27 @@ public:
     BrushStroke stroke_brush;
     qint32 order = 0;                ///< position inside Frame::total_sticks (frame-wide draw order)
     float img_angle = 0;             ///< orientation of the image/shape, follows the line direction
-    float img_w_scale = 1;            ///< horizontal scale of the image, or shape width
-    float img_h_scale = 1;            ///< vertical scale of the image, or second shape width
-    qint32 img_angle_offset = 0;      ///< extra user rotation on top of img_angle (IMAGE only)
-    QPointF img_offset = QPointF(0, 0); ///< user translation of the image relative to the stick (IMAGE only)
+    float img_w_scale = 1;            ///< image scale (internal placement, see local_xf), or shape width
+    float img_h_scale = 1;            ///< image scale (internal placement, see local_xf), or second shape width
+    qint32 img_angle_offset = 0;      ///< internal rotation of an image/polygon/text inside the stick; the user's is local_xf
+    QPointF img_offset = QPointF(0, 0); ///< internal placement of an image/polygon/text (a FREEHAND canvas); the user's is local_xf
+    /**
+     * @brief The "Stick Transform" tab, Local: moves this stick's shape only, on top of its own
+     *        geometry. Rotation and scale pivot on P1; the flips mirror the shape in place
+     *        (LocalTransform()).
+     *
+     * Before record version 9 IMAGE, POLYGON and TEXT kept their offset/rotation (and IMAGE its
+     * scale) in the img_* fields above; operator>> moves them here, and the img_* fields are left
+     * as each type's internal placement. The flips exist from version 10.
+     */
+    StickXf local_xf;
+    /**
+     * @brief The "Stick Transform" tab, Global: moves this stick's shape AND every descendant's,
+     *        all of it pivoting on this stick's P1 (flips included). A descendant follows by the
+     *        same rule the rotate tool uses (a stepchild only follows a stepchild ancestor).
+     *        Record version 10.
+     */
+    StickXf global_xf;
     bool hard_top = false;           ///< TAPER: draw the far end flat instead of rounded
     bool hard_bottom = false;        ///< TAPER: draw the near end flat instead of rounded
     QImage *stick_img = nullptr;     ///< currently displayed image; points into stick_img_list, not separately owned
@@ -262,8 +302,9 @@ public:
      * @brief Extra vertices of a POLYGON or MULTILINE stick, in normalized
      *        stick-local coordinates.
      *
-     * Local frame: origin at my_line.p1(), rotated by img_angle+img_angle_offset,
-     * translated by img_offset, and scaled by my_line.length() — the exact transform
+     * Local frame: ShapeFrame() (origin at my_line.p1(), rotated by img_angle, plus the
+     * Stick Transform), rotated by img_angle_offset, translated by img_offset, and scaled
+     * by my_line.length() — the exact transform
      * PolygonTransform() returns. Storing normalized coordinates makes the shape
      * follow the stick's move/rotate for free (like an IMAGE) and scale with the
      * figure when the stick's length changes.
@@ -379,10 +420,43 @@ public:
      * @return the local→scene transform; invert it to map a click back to a vertex.
      *
      * Mirrors the painter transform the IMAGE branch of paint() applies
-     * (translate p1 → rotate img_angle+img_angle_offset → translate img_offset),
+     * (ShapeFrame() → rotate img_angle_offset → translate img_offset),
      * plus the length scaling that normalizes the stored points.
      */
     QTransform PolygonTransform() const;
+
+    /**
+     * @brief local_xf as a matrix in the stick's own frame, for a spine @p len long: its flips
+     *        mirror the shape in place — about the image's centre for an image type, about the
+     *        stick's midpoint (0, len/2) otherwise.
+     */
+    QTransform LocalTransform(qreal len) const;
+    /**
+     * @brief What the ancestors' global_xf do to this stick, scene → scene (the identity when
+     *        none has one). Walks the parent chain, so it needs the tree: a render clone gets it
+     *        from CloneForRender().
+     */
+    QTransform InheritedTransform() const;
+    /// @brief This stick's own global_xf as seen from the scene (scene → scene).
+    QTransform GlobalInScene() const;
+    /**
+     * @brief The frame every type draws its shape in: origin P1, +y along the stick, with the
+     *        local, own global and inherited transforms applied. Local → scene.
+     */
+    QTransform ShapeFrame() const;
+    /**
+     * @brief All the Stick Transforms acting on this stick as seen from the scene (scene →
+     *        scene), for the types that draw straight in scene coordinates (LINE, MULTILINE).
+     *        Exactly the identity when none acts.
+     */
+    QTransform SceneStickTransform() const;
+    /// @brief my_line as drawn, i.e. through SceneStickTransform(). A MULTILINE's endpoints.
+    QLineF DrawnLine() const;
+    /**
+     * @brief The inverse of DrawnLine(): sets my_line and img_angle so that the stick is drawn
+     *        along @p drawn. The one place a MULTILINE's spine is rebuilt from drawn endpoints.
+     */
+    void SetDrawnLine(const QLineF &drawn);
 
     /**
      * @brief Role of a stick inside an inverse-kinematics chain (the DRAW_IK tool,
@@ -542,12 +616,21 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data);
  * Written for MyView::GenerateInbetweens() (myview.cpp), which fills the frames it
  * creates between two keyframes stick by stick. Blended fields: my_line (hence
  * img_angle, recomputed from it), z, pen width/colour, brush colour, img_offset,
- * img_w_scale/img_h_scale, img_angle_offset and — only when the two poses agree on the
+ * img_w_scale/img_h_scale, img_angle_offset, local_xf/global_xf (their flips switch at the
+ * midpoint, since a mirror cannot be blended) and — only when the two poses agree on the
  * vertex count — polygon_points/vertex_widths/vertex_curvatures. A raster image cannot
  * be blended, so an IMAGE/FREEHAND stick keeps the target's picture and only its
  * placement moves.
  */
 void InterpolateStickData(StickData &target, const StickData &start, const StickData &end, float t);
+
+/**
+ * @brief Clones @p sticks for a throwaway render (icons, onion skins, export) with each clone's
+ *        parent re-linked to the clone of its parent, which is what lets an ancestor's global
+ *        Stick Transform reach a descendant there. A parent outside the list stays null, and
+ *        `children` stays empty: nothing a render reads. The clones are the caller's.
+ */
+QList<StickData*> CloneForRender(const QList<StickData*> &sticks);
 
 /**
  * @brief The placement of a texture or gradient inside a QBrush, as three editable numbers.

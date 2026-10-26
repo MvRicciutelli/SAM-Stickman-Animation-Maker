@@ -40,6 +40,7 @@
 #include <QTextEdit>
 #include <QSplitter>
 #include <QScrollArea>
+#include <QTabBar>
 #include <QStyle>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -110,7 +111,6 @@ QListWidget * my_frame_widget_list;
 QListWidget * my_library_list_widget ;
 QListWidget * my_current_library_widget;
 QListWidget * img_list_widget;
-QWidget * img_buttons_row;
 QLabel * dbg_lbl;
 QSlider* img_h_offset_slider;
 QSlider* img_v_offset_slider;
@@ -125,9 +125,11 @@ QCheckBox* hard_bottom_check;
 AdvancedTab* advanced_rect_tab;
 QTabWidget* my_tab_widget;
 QWidget * advanced_img_tab;
+QWidget * advanced_transform_tab;
 QWidget * advanced_vertex_tab;
 QWidget * advanced_text_tab; ///< pannello dei TEXT stick; costruito nel ctor di Widget
 std::function<void(StickData *)> refresh_text_panel; ///< vedi uiItems.h
+std::function<void(StickData *)> refresh_transform_panel; ///< vedi uiItems.h
 QWidget * advanced_draw_tab; ///< freehand draw-mode panel (brush/eraser/size/opacity/color); built in Widget's ctor
 QWidget * advanced_ik_tab;
 QCheckBox * ik_active_check;
@@ -207,8 +209,68 @@ Widget::Widget(QWidget *parent)
     depth_spinbox = ui->depthSpinbox;
     depth_slider = ui->depthSlider;
     img_list_widget = ui->imgListWidget;
-    img_buttons_row = ui->frame_44; // scambia/aggiungi/rimuovi immagine: si abilitano insieme
     advanced_rect_tab = new AdvancedTab();
+
+    // ---- pannello "Stick Transform" (ogni tipo di stick): offset, scala e rotazione erano il ----
+    // ---- gruppo in cima al pannello immagine, e sono proprio quei widget — riparentati, non ----
+    // ---- ricostruiti, così gli slot on_img*_valueChanged() che il .ui auto-connette restano --
+    // Ha il suo QScrollArea per la stessa ragione del pannello immagine: un QTabWidget è alto
+    // quanto la sua pagina più alta, e il gruppo è alto 400 px fissi.
+    advanced_transform_tab = new QWidget();
+    {
+        QVBoxLayout *col = new QVBoxLayout(advanced_transform_tab);
+        col->setContentsMargins(0, 0, 0, 0);
+        // Local e Global: gli stessi controlli su uno dei due insiemi di parametri dello stick
+        // (StickData::local_xf / global_xf). Una barra senza pagine invece di due pagine di
+        // controlli duplicati, così gli slot auto-connessi dal .ui restano uno per controllo
+        transform_mode_bar = new QTabBar(advanced_transform_tab);
+        transform_mode_bar->addTab(tr("Local"));
+        transform_mode_bar->addTab(tr("Global"));
+        transform_mode_bar->setTabToolTip(0, tr("Moves this stick's shape only"));
+        transform_mode_bar->setTabToolTip(1, tr("Moves this stick's shape and all of its "
+                                                "children's, about this stick's joint"));
+        col->addWidget(transform_mode_bar);
+        QScrollArea *scroll = new QScrollArea(advanced_transform_tab);
+        scroll->setWidgetResizable(true);
+        scroll->setWidget(ui->groupBox_5); // riparenta, e questo lo toglie dal pannello immagine
+        col->addWidget(scroll, 1);
+        QHBoxLayout *flips = new QHBoxLayout();
+        flip_h_check = new QCheckBox(tr("Flip horizontal"), advanced_transform_tab);
+        flip_v_check = new QCheckBox(tr("Flip vertical"), advanced_transform_tab);
+        flip_h_check->setToolTip(tr("Mirror across the stick"));
+        flip_v_check->setToolTip(tr("Mirror along the stick"));
+        flips->addWidget(flip_h_check);
+        flips->addWidget(flip_v_check);
+        col->addLayout(flips);
+
+        refresh_transform_panel = [this](StickData *cs){
+            const StickXf &xf = EditedXf(cs);
+            // eco a segnali zittiti: riallineare i controlli allo stick selezionato passerebbe
+            // altrimenti per una modifica dell'utente e spingerebbe un undo a vuoto
+            auto echo = [](QSlider *slider, QSpinBox *box, int value){
+                QSignalBlocker mute_slider(slider), mute_box(box);
+                slider->setValue(value);
+                box->setValue(value);
+            };
+            // l'inversa di SliderScale()
+            auto scale_to_slider = [](qreal s){ return qRound(s >= 1 ? 10*(s-1) : -10*(1/s-1)); };
+            echo(img_h_offset_slider, img_h_offset_spinbox, qRound(xf.offset.x()));
+            echo(img_v_offset_slider, img_v_offset_spinbox, qRound(xf.offset.y()));
+            echo(img_width_slider, img_width_spinbox, scale_to_slider(xf.scale.x()));
+            echo(img_height_slider, img_height_spinbox, scale_to_slider(xf.scale.y()));
+            echo(img_rotation_slider, img_rotation_spinbox, qRound(xf.angle));
+            QSignalBlocker mute_h(flip_h_check), mute_v(flip_v_check);
+            flip_h_check->setChecked(xf.flip_h);
+            flip_v_check->setChecked(xf.flip_v);
+        };
+        connect(transform_mode_bar, &QTabBar::currentChanged, this, [this]{
+            StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
+            if(cs != nullptr)
+                refresh_transform_panel(cs);
+        });
+        connect(flip_h_check, &QCheckBox::toggled, this, [this](bool on){ SetTransformFlip(true, on); });
+        connect(flip_v_check, &QCheckBox::toggled, this, [this](bool on){ SetTransformFlip(false, on); });
+    }
 
     // ---- pannello "vertici" per POLYGON/MULTILINE (costruito in codice: due sole ----
     // ---- righe slider, un .ui dedicato sarebbe stato più ingombrante del codice) ----
@@ -423,9 +485,8 @@ Widget::Widget(QWidget *parent)
     }
 
     // ---- pannello "testo" per i TEXT stick (costruito in codice come i pannelli --------
-    // ---- vertici/IK/draw). Offset e rotazione NON sono qui: sono gli stessi campi ------
-    // ---- img_offset/img_angle_offset dell'immagine, quindi Animation::UpdateTab() ------
-    // ---- affianca a questo il pannello immagine ("Text Placement"), come per i POLYGON -
+    // ---- vertici/IK/draw). Offset e rotazione NON sono qui: sono la Stick Transform, ---
+    // ---- il pannello che Animation::UpdateTab() aggiunge per ogni tipo -----------------
     advanced_text_tab = new QWidget();
     {
         QVBoxLayout *col = new QVBoxLayout(advanced_text_tab);
@@ -904,6 +965,9 @@ Widget::Widget(QWidget *parent)
         connect(view, &MyView::DrawModeChanged, this, [enter_btn](bool active){
             enter_btn->setText(active ? tr("Exit draw mode") : tr("Edit drawing"));
         });
+        // il canvas si dipinge attraverso la trasformazione con cui è entrato (EnterDrawMode()
+        // la cuoce nei pixel e la azzera): cambiarla a metà sessione sposterebbe i tratti
+        connect(view, &MyView::DrawModeChanged, advanced_transform_tab, &QWidget::setDisabled);
         connect(undo_btn, &QPushButton::clicked, this, [this]{ view->DrawStrokeUndo(); });
         connect(redo_btn, &QPushButton::clicked, this, [this]{ view->DrawStrokeRedo(); });
         // niente addStretch finale: lo splitter con la griglia riempie lo spazio verticale
@@ -1153,6 +1217,8 @@ Widget::~Widget()
     delete advanced_ik_tab;
     advanced_draw_tab->setParent(nullptr);
     delete advanced_draw_tab;
+    advanced_transform_tab->setParent(nullptr);
+    delete advanced_transform_tab;
     qDeleteAll(frame_copy_buffer); // il buffer copia-frame è nostro (era un globale mai liberato)
     delete ui;
 }
@@ -1796,32 +1862,25 @@ void Widget::on_saveCurrentLibraryBtn_clicked()
 }
 
 /**
- * @details `sliderFlags.sliderHOffset` coalesces an entire drag into one undo snapshot:
- * the first valueChanged() of a drag takes it (and raises the flag), every subsequent
- * one during the same drag does not — sliderReleased() lowers the flag again so the
- * next drag starts its own snapshot. Same pattern repeats for every image-property
- * slider below.
+ * @details The five sliders of the "Stick Transform" tab, which act on every stick type (they
+ * used to be the image panel's, and only IMAGE/POLYGON/TEXT listened). `sliderFlags.sliderHOffset`
+ * coalesces an entire drag into one undo snapshot: the first valueChanged() of a drag takes it
+ * (and raises the flag), every subsequent one during the same drag does not — sliderReleased()
+ * lowers the flag again so the next drag starts its own snapshot. Same pattern repeats for every
+ * transform slider below.
  */
 void Widget::on_imgHOffsetSlider_valueChanged(int value)
 {
     StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
     if(cs == nullptr)
         return;
-    else{
-        // il POLYGON riusa l'offset dell'immagine per traslare in blocco i suoi vertici,
-        // il TEXT per spostare il blocco di testo rispetto alla spina
-        if(cs->stick_type == StickData::IMAGE || cs->stick_type == StickData::POLYGON || cs->stick_type == StickData::TEXT){
-            if(!sliderFlags.sliderHOffset){
-                view->StoreUndo(CMD_SIMPLE);
-                sliderFlags.sliderHOffset = true;
-            }
-            float val = 0;
-            val = (float)img_h_offset_slider->value();
-            img_h_offset_spinbox->setValue(img_h_offset_slider->value());
-            cs->img_offset.setX(val);
-             view->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
-        }
+    if(!sliderFlags.sliderHOffset){
+        view->StoreUndo(CMD_SIMPLE);
+        sliderFlags.sliderHOffset = true;
     }
+    img_h_offset_spinbox->setValue(value);
+    EditedXf(cs).offset.setX(value);
+    RefreshTransformed(cs);
 }
 
 
@@ -1831,85 +1890,103 @@ void Widget::on_imgVOfsetSlider_valueChanged(int value)
     StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
     if(cs == nullptr)
         return;
-    else{
-        // vedi on_imgHOffsetSlider_valueChanged(): vale anche per POLYGON e TEXT
-        if(cs->stick_type == StickData::IMAGE || cs->stick_type == StickData::POLYGON || cs->stick_type == StickData::TEXT){
-            float val = 0;
-            if(!sliderFlags.sliderVOffset){
-                view->StoreUndo(CMD_SIMPLE);
-                sliderFlags.sliderVOffset = true;
-            }
-            img_v_offset_spinbox->setValue(img_v_offset_slider->value());
-            val = (float)img_v_offset_slider->value();
-            cs->img_offset.setY(val);
-             view->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
-        }
+    if(!sliderFlags.sliderVOffset){
+        view->StoreUndo(CMD_SIMPLE);
+        sliderFlags.sliderVOffset = true;
     }
+    img_v_offset_spinbox->setValue(value);
+    EditedXf(cs).offset.setY(value);
+    RefreshTransformed(cs);
 }
 
-/// @details Width-scale counterpart of on_imgHOffsetSlider_valueChanged(); the ternary maps the slider's signed range onto a >0 scale factor (shrinking below 1 on the negative side instead of going negative).
+/// @details Maps a scale slider's signed range onto a >0 scale factor: shrinking below 1 on the
+/// negative side instead of going negative. Animation::UpdateSliders() echoes back its inverse.
+static float SliderScale(int value)
+{
+    return value > 0 ? (float)value/10+1 : 1/((float)(-value)/10+1);
+}
+
+/// @details Width-scale counterpart of on_imgHOffsetSlider_valueChanged() — across the stick.
 void Widget::on_imgWSlider_valueChanged(int value)
 {
     StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
     if(cs == nullptr)
         return;
-    else{
-        if(cs->stick_type == StickData::IMAGE){
-            float scale = 0;
-            if(!sliderFlags.sliderWScale){
-                view->StoreUndo(CMD_SIMPLE);
-                sliderFlags.sliderWScale = true;
-            }
-            img_width_slider->value()>0?scale = (float)img_width_slider->value()/10+1:scale = 1/((float)(-img_width_slider->value())/10+1);
-            img_width_spinbox->setValue(img_width_slider->value());
-            cs->img_w_scale = scale;
-            view->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
-        }
+    if(!sliderFlags.sliderWScale){
+        view->StoreUndo(CMD_SIMPLE);
+        sliderFlags.sliderWScale = true;
     }
+    img_width_spinbox->setValue(value);
+    EditedXf(cs).scale.setX(SliderScale(value));
+    RefreshTransformed(cs);
 }
 
-/// @details Height-scale counterpart of on_imgWSlider_valueChanged() — same scale-factor mapping.
+/// @details Height-scale counterpart of on_imgWSlider_valueChanged() — along the stick.
 void Widget::on_imgHSlider_valueChanged(int value)
 {
     StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
     if(cs == nullptr)
         return;
-    else{
-        if(cs->stick_type == StickData::IMAGE){
-            float scale = 0;
-            if(!sliderFlags.sliderHScale){
-                view->StoreUndo(CMD_SIMPLE);
-                sliderFlags.sliderHScale = true;
-            }
-            img_height_slider->value()>0?scale = (float)img_height_slider->value()/10+1 : scale = 1/((float)(-img_height_slider->value())/10+1);
-            img_height_spinbox->setValue(img_height_slider->value());
-            cs->img_h_scale = scale;
-             view->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
-        }
+    if(!sliderFlags.sliderHScale){
+        view->StoreUndo(CMD_SIMPLE);
+        sliderFlags.sliderHScale = true;
     }
+    img_height_spinbox->setValue(value);
+    EditedXf(cs).scale.setY(SliderScale(value));
+    RefreshTransformed(cs);
 }
 
-/// @details Rotation-offset counterpart of on_imgHOffsetSlider_valueChanged() — see its doc for the undo-coalescing pattern.
+/// @details Rotation counterpart of on_imgHOffsetSlider_valueChanged(): turns the shape about the stick's origin.
 void Widget::on_imgRotationSlider_valueChanged(int value)
 {
     StickData*cs =  view->my_animation->CurrentFrame()->CurrentStick();
     if(cs == nullptr)
         return;
-    else{
-        // vedi on_imgHOffsetSlider_valueChanged(): il POLYGON ruota i vertici attorno a P1,
-        // il TEXT ruota il blocco di testo attorno allo stesso punto
-        if(cs->stick_type == StickData::IMAGE || cs->stick_type == StickData::POLYGON || cs->stick_type == StickData::TEXT){
-            if(!sliderFlags.sliderRot){
-                view->StoreUndo(CMD_SIMPLE);
-                sliderFlags.sliderRot = true;
-            }
-            float val = 0;
-            val =img_rotation_slider->value();
-            img_rotation_spinbox->setValue(val);
-            cs->img_angle_offset = val;
-             view->my_animation->CurrentFrame()->CurrentStickFigure()->Refresh();
-        }
+    if(!sliderFlags.sliderRot){
+        view->StoreUndo(CMD_SIMPLE);
+        sliderFlags.sliderRot = true;
     }
+    img_rotation_spinbox->setValue(value);
+    EditedXf(cs).angle = value;
+    RefreshTransformed(cs);
+}
+
+/// @details The set the "Stick Transform" tab is showing: Local or Global.
+StickXf &Widget::EditedXf(StickData *cs) const
+{
+    return transform_mode_bar->currentIndex() == 1 ? cs->global_xf : cs->local_xf;
+}
+
+/**
+ * @details Repaints exactly what a Stick Transform edit moved: the stick alone for a local one, the
+ * stick and its descendants (`children` is already the flattened list) for a global one. The
+ * sliders used to refresh the whole figure — a bounding rect, and for a text stick a whole text
+ * layout, per stick per slider tick — to move one shape.
+ */
+void Widget::RefreshTransformed(StickData *cs)
+{
+    if(cs->view)
+        cs->view->Refresh(1);
+    if(transform_mode_bar->currentIndex() == 1)
+        for(StickData *s : cs->children)
+            if(s->view)
+                s->view->Refresh(1);
+}
+
+/// @details One undo step per toggle, like every other per-stick control of the panel.
+void Widget::SetTransformFlip(bool horizontal, bool on)
+{
+    StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
+    if(cs == nullptr)
+        return;
+    StickXf &xf = EditedXf(cs);
+    bool &flip = horizontal ? xf.flip_h : xf.flip_v;
+    if(flip == on)
+        return;
+    view->StoreUndo(CMD_SIMPLE);
+    flip = on;
+    RefreshTransformed(cs);
+    view->my_animation->current_frame->UpdateIcon();
 }
 
 /**

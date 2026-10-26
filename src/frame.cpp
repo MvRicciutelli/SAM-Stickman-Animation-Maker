@@ -327,15 +327,12 @@ void Frame::UpdateIcon()
     icon_img->fill(Qt::white);
     icoScene.setBackgroundBrush(QBrush(QColor(Qt::white)));
     icoScene.setSceneRect(scene->sceneRect());
+    // con il genitore ricollegato: è da lì che la trasformazione globale di un antenato arriva
     QList<StickData*> renderClones;
     for(StickFigure *S:stick_figures)
-    {
-        for(StickData* s: S->stick_list){
-            StickData* clone = s->Clone();
-            renderClones.append(clone);
-            icoScene.addItem(new StickGraphicsItem(clone));
-        }
-    }
+        renderClones += CloneForRender(S->stick_list);
+    for(StickData* clone: renderClones)
+        icoScene.addItem(new StickGraphicsItem(clone));
     // crea un painter che disegni sull'immagine
     QPainter painter(icon_img);
     // renderizza dalla scena sull'immagine mediante il painter

@@ -117,17 +117,17 @@ static QPainterPath CurvedPath(const QPolygonF &verts, const QList<float> &curva
     return path;
 }
 
-/// @details Local frame of a TEXT stick: origin on p1, x axis ALONG the stick (hence the
-/// +90: img_angle == 0 means the stick points down the scene's +y, see StickFigure.cpp's
-/// -atan2(dx,dy) convention), then the user's h/v offset, then the vertical stretch (the
-/// one text property QFont has no equivalent for — the horizontal one is
-/// QFont::setStretch()). Scaling last keeps the offset itself unstretched. Shared by
-/// paint() and ConstructBr() so the drawn text and its bounding rect can't drift apart.
+/// @details Local frame of a TEXT stick: the stick's ShapeFrame() (origin on p1, Stick Transform
+/// included), with the x axis turned ALONG the stick (hence the +90: img_angle == 0 means the
+/// stick points down the scene's +y, see StickFigure.cpp's -atan2(dx,dy) convention), then the
+/// internal h/v offset, then the vertical stretch (the one text property QFont has no
+/// equivalent for — the horizontal one is QFont::setStretch()). Scaling last keeps the offset
+/// itself unstretched. Shared by paint() and ConstructBr() so the drawn text and its bounding
+/// rect can't drift apart.
 static QTransform TextFrame(const StickData *d)
 {
-    QTransform t;
-    t.translate(d->my_line.p1().x(), d->my_line.p1().y());
-    t.rotate(d->img_angle + d->img_angle_offset + 90);
+    QTransform t = d->ShapeFrame();
+    t.rotate(d->img_angle_offset + 90);
     t.translate(d->img_offset.x(), d->img_offset.y());
     t.scale(1.0, qMax(1, d->text_v_stretch) / 100.0);
     return t;
@@ -178,31 +178,31 @@ static bool PainterIsLocalFor(const StickData *d)
 }
 
 /// @details The stick's own frame, exactly as the type branches of paint() install it on the
-/// painter (`translate(p1)` then `rotate(img_angle)`, or TextFrame() for a text stick), so the
-/// two matrices are the same by construction rather than by a coincidence a later edit could
-/// break. This is the frame anything living in LOGICAL coordinates needs — a texture, and a
-/// LogicalMode gradient.
+/// painter (StickData::ShapeFrame(), or TextFrame() for a text stick), so the two matrices are
+/// the same by construction rather than by a coincidence a later edit could break. This is the
+/// frame anything living in LOGICAL coordinates needs — a texture, and a LogicalMode gradient.
+/// It includes the Stick Transform, so a paint that follows the stick follows that too.
 static QTransform StickLocalFrame(const StickData *d)
 {
     if(d->stick_type == StickData::TEXT)
         return TextFrame(d);
-    QTransform local;
-    local.translate(d->my_line.p1().x(), d->my_line.p1().y());
-    local.rotate(d->img_angle);
-    return local;
+    return d->ShapeFrame();
 }
 
 /// @details The rotation of the frame above, on its own — the one number both ObjectGradientTurn()
 /// and StickGraphicsItem::BrushFrameAngle() need, kept here so the TEXT case (whose frame is
 /// TextFrame()'s, not a plain img_angle) cannot drift between them.
 ///
-/// ponytail: TextFrame() also SCALES for text_v_stretch, which this cannot express. Only the arrow
-/// handle reads it, and a text stick has no fill to aim; if a stretched TEXT ever needs an exact
-/// textured stroke handle, the route is to decompose TextFrame() instead of rebuilding its angle.
+/// ponytail: the frame may also SCALE or MIRROR (text_v_stretch, the Stick Transforms' scale and
+/// flips), which one angle cannot express. Only the arrow handle reads it, so on such a stick the
+/// texture arrow is measured against the plain turned stick; the route, if it matters, is to
+/// decompose StickLocalFrame() instead of rebuilding its angle.
 static qreal StickFrameAngle(const StickData *d)
 {
-    return (d->stick_type == StickData::TEXT)
-         ? d->img_angle + d->img_angle_offset + 90 : d->img_angle;
+    // read off the frame itself — the local, global and inherited rotations are all in it, and a
+    // LINE's angle doesn't come from img_angle: its first row is where the frame sends local +x
+    const QTransform frame = StickLocalFrame(d);
+    return qAtan2(frame.m12(), frame.m11()) * 180.0 / M_PI;
 }
 
 /// @details The rotation an ObjectMode gradient needs to TURN WITH the stick, and nothing more.
@@ -407,7 +407,6 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
 {
     Q_UNUSED(option);
     Q_UNUSED(widget);
-    QPointF p(data->my_line.p1().x(),data->my_line.p1().y());
     this->setZValue(data->z);
     if(!onion_render){
         QPen aligned_pen(data->pen);
@@ -431,21 +430,18 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         // e poi una conversione in QPixmap, entrambi grandi quanto l'immagine dipinta
         const QSizeF size = CalcImgSize();
         if(!size.isEmpty()){
-            p = QPointF(data->my_line.p1().x(),data->my_line.p1().y());
             QRectF target(QPointF(-size.width()/2,-size.height()/2), size);
-            painter->translate(p);
-            painter->rotate(data->img_angle+data->img_angle_offset);
-            QPointF p3 = QPointF(data->img_offset);
-            painter->translate(p3);
+            painter->save();
+            painter->setTransform(StickLocalFrame(data), true); // spina + Stick Transform
+            painter->rotate(data->img_angle_offset);            // + il posizionamento interno
+            painter->translate(data->img_offset);
             // in caso di onion rendering converti l'immagine in grayscale: DOPO averla scalata,
             // così la conversione costa quanto l'immagine dipinta e non quanto la sorgente
             if(onion_render)
                 painter->drawImage(target, CalcImg().convertToFormat(QImage::Format_Grayscale8));
             else
                 painter->drawImage(target, *data->stick_img);
-            painter->translate(-p3.x(),-p3.y());
-            painter->rotate(-data->img_angle-data->img_angle_offset);
-            painter->translate(-p.x(),-p.y());
+            painter->restore();
         }
 
     }
@@ -758,11 +754,13 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         }
     }
     else if(data->stick_type == StickData::LINE){
+        // disegnata in coordinate di scena, quindi la Stick Transform si applica alla geometria
+        const QLineF drawn = data->DrawnLine();
         QPainterPath segment;
-        segment.moveTo(data->my_line.p1());
-        segment.lineTo(data->my_line.p2());
+        segment.moveTo(drawn.p1());
+        segment.lineTo(drawn.p2());
         if(!StrokeWithBrush(painter, segment))
-            painter->drawLine(data->my_line.x1(),data->my_line.y1(),data->my_line.x2(),data->my_line.y2());
+            painter->drawLine(drawn);
     }
 
     // il marcatore della catena IK (linea tratteggiata + croce sul target) non è più
@@ -878,6 +876,17 @@ QRectF StickGraphicsItem::ConstructBr()
             m = qMax(m, 2*w + handle_size); // lo spigolo vivo arriva fino a 2 larghezze (tetto del miter in paint())
         return r.adjusted(-m, -m, m, m);
     }
+    // gli altri tipi: l'ingombro della forma senza Stick Transform, unito alla sua immagine
+    // attraverso la trasformazione (la spina, con maniglie ed evidenziazione, resta dov'è).
+    // TEXT, POLYGON e MULTILINE sopra la includono già, perché passano da ShapeFrame()
+    QRectF r = UntransformedBr();
+    return r | data->SceneStickTransform().mapRect(r);
+}
+
+/// @details The bounding rect of the radius-based types (images, shapes, LINE) before the Stick
+/// Transform moves them: what ConstructBr() always returned for them.
+QRectF StickGraphicsItem::UntransformedBr()
+{
     if((data->IsImageType() || data->stick_type == StickData::CIRCLE||data->stick_type ==StickData::RECT || data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::TAPER ) && data->my_line.length()>0)
     {
         float d = 0;
@@ -1134,12 +1143,14 @@ QPolygonF StickGraphicsItem::SceneVertices() const
     QPolygonF verts;
     if(!HasEditableVertices(data)) return verts;
     QTransform t = data->PolygonTransform();
+    // gli estremi DISEGNATI: con una Stick Transform non coincidono più con quelli della spina
+    QLineF spine = data->DrawnLine();
     if(data->stick_type == StickData::MULTILINE)
-        verts << data->my_line.p1();
+        verts << spine.p1();
     for(const QPointF &pt : data->polygon_points)
         verts << t.map(pt);
     if(data->stick_type == StickData::MULTILINE)
-        verts << data->my_line.p2();
+        verts << spine.p2();
     return verts;
 }
 
@@ -1156,11 +1167,11 @@ void StickGraphicsItem::RebuildMultilineFrame(const QPointF &new_p1, const QPoin
 }
 
 /// @details The one place a MULTILINE's frame is rebuilt from scene positions: my_line and
-/// img_angle first, then the interior normalized through the NEW transform.
+/// img_angle first (from the DRAWN endpoints, so through the Stick Transform's inverse), then
+/// the interior normalized through the NEW transform.
 void StickGraphicsItem::SetMultilineVertices(const QPolygonF &scene_verts)
 {
-    data->my_line = QLineF(scene_verts.first(), scene_verts.last());
-    data->img_angle = float(-atan2(data->my_line.dx(), data->my_line.dy())*180/M_PI);
+    data->SetDrawnLine(QLineF(scene_verts.first(), scene_verts.last()));
     QTransform inverse = data->PolygonTransform().inverted();
     data->polygon_points.clear();
     for(int i = 1; i < scene_verts.size() - 1; i++)
@@ -1296,10 +1307,11 @@ bool StickGraphicsItem::EditPolygonPoint(int index, const QPointF &scene_pos)
     if(data->stick_type == StickData::MULTILINE){
         int last = data->polygon_points.length() + 1;
         if(index < 0 || index > last) return false;
+        // l'altro estremo resta dov'è DISEGNATO (con una Stick Transform non è quello della spina)
         if(index == 0)
-            RebuildMultilineFrame(scene_pos, data->my_line.p2());
+            RebuildMultilineFrame(scene_pos, data->DrawnLine().p2());
         else if(index == last)
-            RebuildMultilineFrame(data->my_line.p1(), scene_pos);
+            RebuildMultilineFrame(data->DrawnLine().p1(), scene_pos);
         else
             data->polygon_points[index - 1] = data->PolygonTransform().inverted().map(scene_pos);
     }

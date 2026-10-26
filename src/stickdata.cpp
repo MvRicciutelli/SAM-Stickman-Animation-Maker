@@ -314,6 +314,8 @@ void StickData::CopyFrom(const StickData &source)
     img_h_scale = source.img_h_scale;
     img_angle_offset = source.img_angle_offset;
     img_offset = source.img_offset;
+    local_xf = source.local_xf;
+    global_xf = source.global_xf;
     hard_top = source.hard_top;
     hard_bottom = source.hard_bottom;
     polygon_points = source.polygon_points;
@@ -376,12 +378,147 @@ QTransform StickData::PolygonTransform() const
     qreal len = my_line.length();
     if (len < 1e-6)
         len = 1e-6; // linea degenere: mantieni la trasformazione invertibile
-    QTransform t;
-    t.translate(my_line.p1().x(), my_line.p1().y());
-    t.rotate(img_angle + img_angle_offset);
+    QTransform t = ShapeFrame();
+    t.rotate(img_angle_offset);
     t.translate(img_offset.x(), img_offset.y());
     t.scale(len, len);
     return t;
+}
+
+/// @details The stick's frame WITHOUT the Stick Transform: origin P1, +y along the stick. A LINE
+/// never keeps img_angle up to date (nothing used to read it, and its record doesn't even stream
+/// it), so its frame is read off the line itself.
+static QTransform SpineFrame(const StickData &d)
+{
+    QTransform t;
+    t.translate(d.my_line.p1().x(), d.my_line.p1().y());
+    t.rotate(d.stick_type == StickData::LINE
+             ? -qAtan2(d.my_line.dx(), d.my_line.dy()) * 180.0 / M_PI : d.img_angle);
+    return t;
+}
+
+bool StickXf::IsIdentity() const
+{
+    return offset.isNull() && angle == 0 && scale == QPointF(1, 1) && !flip_h && !flip_v;
+}
+
+/// @details Qt's rotate/translate/scale return early on 0/(0,0)/(1,1), so a default set yields a
+/// matrix whose type is TxNone: multiplying by it is free, and leaves a product bit for bit intact.
+QTransform StickXf::Matrix(const QPointF &flip_pivot) const
+{
+    QTransform t;
+    t.rotate(angle);
+    t.translate(offset.x(), offset.y());
+    t.scale(scale.x(), scale.y());
+    if (flip_h || flip_v) {
+        t.translate(flip_pivot.x(), flip_pivot.y());
+        t.scale(flip_h ? -1 : 1, flip_v ? -1 : 1);
+        t.translate(-flip_pivot.x(), -flip_pivot.y());
+    }
+    return t;
+}
+
+/// @details The pivot depends only on the spine and the internal placement — never on vertices —
+/// so editing a polygon or multiline vertex cannot move the pivot under the other vertices.
+QTransform StickData::LocalTransform(qreal len) const
+{
+    if (!local_xf.flip_h && !local_xf.flip_v)
+        return local_xf.Matrix();
+    QPointF pivot(0, len / 2);
+    if (IsImageType()) {
+        QTransform placement;   // dove paint() mette il centro dell'immagine nel frame dello stick
+        placement.rotate(img_angle_offset);
+        pivot = placement.map(img_offset);
+    }
+    return local_xf.Matrix(pivot);
+}
+
+QTransform StickData::GlobalInScene() const
+{
+    if (global_xf.IsIdentity())
+        return QTransform();
+    const QTransform spine = SpineFrame(*this);
+    return spine.inverted() * global_xf.Matrix() * spine;
+}
+
+/**
+ * @details Innermost first: the parent's global moves what this stick's own global already moved,
+ * the grandparent's moves that, and so on — nested groups. An ancestor counts by the rule the
+ * rotate tool uses for what follows a stick (StickGraphicsItem::Rotate()): a stepchild follows only
+ * a stepchild ancestor. Ancestors without a global transform are skipped, so the common case costs
+ * one IsIdentity() per ancestor and builds no matrix at all.
+ */
+QTransform StickData::InheritedTransform() const
+{
+    QTransform t;
+    for (const StickData *a = parent; a != nullptr; a = a->parent)
+        if ((!stepchild || a->stepchild) && !a->global_xf.IsIdentity())
+            t = t * a->GlobalInScene();
+    return t;
+}
+
+QTransform StickData::ShapeFrame() const
+{
+    // spine · (spine⁻¹ · global · spine) collassa in global · spine
+    return LocalTransform(my_line.length()) * global_xf.Matrix() * SpineFrame(*this)
+         * InheritedTransform();
+}
+
+QTransform StickData::SceneStickTransform() const
+{
+    const QTransform inherited = InheritedTransform();
+    if (local_xf.IsIdentity() && global_xf.IsIdentity())
+        return inherited; // nulla di suo: esattamente l'identità quando nemmeno gli antenati hanno nulla
+    const QTransform spine = SpineFrame(*this);
+    return spine.inverted() * LocalTransform(my_line.length()) * global_xf.Matrix() * spine
+         * inherited;
+}
+
+QLineF StickData::DrawnLine() const
+{
+    return SceneStickTransform().map(my_line);
+}
+
+/**
+ * @details Three steps. (1) The ancestors' part doesn't depend on this stick's spine, so it is
+ * undone first. (2) What is left — local then own global, in the stick's frame — has a linear part
+ * that doesn't depend on the spine's length either: it sends the stick's own +y to its second row
+ * r2, so the drawn spine is the real one turned by r2's angle and stretched by |r2| (flips
+ * included: r2 is just a vector), and undoing that gives the real direction and length. (3) With the
+ * length known, the full transform (whose flip pivot does depend on it) gives the ends, written as
+ * CORRECTIONS to the drawn ones — which no transform at all hands back bit for bit, so a MULTILINE
+ * without one rebuilds its spine exactly as it always did.
+ */
+void StickData::SetDrawnLine(const QLineF &drawn_in)
+{
+    const QLineF drawn = InheritedTransform().inverted().map(drawn_in);
+    const QTransform own = local_xf.Matrix() * global_xf.Matrix(); // la parte lineare basta
+    const QPointF r2(own.m21(), own.m22());
+    QTransform unturn;
+    unturn.rotate(qAtan2(r2.x(), r2.y()) * 180.0 / M_PI);
+    const QPointF spine = unturn.map(QPointF(drawn.dx(), drawn.dy()))
+                        / QLineF(QPointF(0, 0), r2).length();
+    img_angle = float(-qAtan2(spine.x(), spine.y()) * 180.0 / M_PI);
+    const qreal len = QLineF(QPointF(0, 0), spine).length();
+    const QTransform x = LocalTransform(len) * global_xf.Matrix();
+    QTransform turn;
+    turn.rotate(img_angle);
+    my_line = QLineF(drawn.p1() - turn.map(x.map(QPointF(0, 0))),
+                     drawn.p2() - turn.map(x.map(QPointF(0, len)) - QPointF(0, len)));
+}
+
+QList<StickData*> CloneForRender(const QList<StickData*> &sticks)
+{
+    QHash<const StickData*, StickData*> clone_of;
+    QList<StickData*> clones;
+    for (StickData *s : sticks) {
+        StickData *clone = s->Clone();
+        clone_of.insert(s, clone);
+        clones.append(clone);
+    }
+    for (int i = 0; i < sticks.count(); i++)
+        clones[i]->parent = clone_of.value(sticks[i]->parent, nullptr);
+    return clones;
 }
 
 /**
@@ -666,6 +803,16 @@ void WritePaintOpacity(QBrush *brush, qreal opacity)
     brush->setTransform(keep_transform);
 }
 
+/// @details A mirror can't be blended: the flips switch from one pose's to the other's halfway.
+static StickXf MixXf(const StickXf &start, const StickXf &end, float t)
+{
+    StickXf mixed = t < 0.5f ? start : end;
+    mixed.offset = MixPoint(start.offset, end.offset, t);
+    mixed.angle = float(Mix(start.angle, end.angle, t));
+    mixed.scale = MixPoint(start.scale, end.scale, t);
+    return mixed;
+}
+
 void InterpolateStickData(StickData &target, const StickData &start, const StickData &end, float t)
 {
     target.my_line = QLineF(MixPoint(start.my_line.p1(), end.my_line.p1(), t),
@@ -676,6 +823,8 @@ void InterpolateStickData(StickData &target, const StickData &start, const Stick
     target.img_w_scale = float(Mix(start.img_w_scale, end.img_w_scale, t));
     target.img_h_scale = float(Mix(start.img_h_scale, end.img_h_scale, t));
     target.img_angle_offset = qRound(Mix(start.img_angle_offset, end.img_angle_offset, t));
+    target.local_xf = MixXf(start.local_xf, end.local_xf, t);
+    target.global_xf = MixXf(start.global_xf, end.global_xf, t);
     target.pen.setWidthF(Mix(start.pen.widthF(), end.pen.widthF(), t));
     // la larghezza si interpola sempre, il COLORE solo fra due tinte piatte: vedi IsSolidFill()
     if (IsSolidFill(start.pen.brush()) && IsSolidFill(end.pen.brush()))
@@ -700,6 +849,30 @@ void InterpolateStickData(StickData &target, const StickData &start, const Stick
  * Image-family types append their extra block; IMAGE additionally streams every image
  * variant plus the index of the displayed one.
  */
+/// @details The v9 half of a StickXf (offset, angle as an explicit double, scale)...
+static void WriteXfBody(QDataStream &stream, const StickXf &xf)
+{
+    stream << xf.offset << (double)xf.angle << xf.scale;
+}
+/// @details ...and the v10 half.
+static void WriteXfFlips(QDataStream &stream, const StickXf &xf)
+{
+    stream << xf.flip_h << xf.flip_v;
+}
+static void ReadXfBody(QDataStream &stream, StickXf &xf)
+{
+    double angle = 0;
+    stream >> xf.offset >> angle >> xf.scale;
+    xf.angle = float(angle);
+    // una scala nulla o negativa (file corrotto) renderebbe la trasformazione non invertibile
+    if (xf.scale.x() <= 0 || xf.scale.y() <= 0)
+        xf.scale = QPointF(1, 1);
+}
+static void ReadXfFlips(QDataStream &stream, StickXf &xf)
+{
+    stream >> xf.flip_h >> xf.flip_v;
+}
+
 QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
 {
     stream << (double)stick_data.z; // explicit double: qreal itself is float on some Qt builds
@@ -743,6 +916,16 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
         stream << stick_data.ik_role;
         stream << stick_data.ik_start_idx;
         stream << stick_data.ik_target_idx;
+    }
+    if (stick_data.version >= 9) {
+        // la Stick Transform: vale per ogni tipo, quindi fuori dal blocco type-gated. La v9 aveva
+        // solo offset/angolo/scala locali, la v10 aggiunge i ribaltamenti e l'insieme globale
+        WriteXfBody(stream, stick_data.local_xf);
+    }
+    if (stick_data.version >= 10) {
+        WriteXfFlips(stream, stick_data.local_xf);
+        WriteXfBody(stream, stick_data.global_xf);
+        WriteXfFlips(stream, stick_data.global_xf);
     }
     if ((stick_data.stick_type == StickData::CIRCLE) || stick_data.IsImageType() || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE) || (stick_data.stick_type == StickData::TEXT)) {
         if (stick_data.IsImageType()) {
@@ -865,6 +1048,14 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
         // ik_start/ik_target vengono risolti dagli indici più tardi, a livello di
         // StickFigureData::operator>> (stessa fase in cui parent_idx diventa parent)
     }
+    if (stick_data.version >= 9) {
+        ReadXfBody(stream, stick_data.local_xf);
+    }
+    if (stick_data.version >= 10) {
+        ReadXfFlips(stream, stick_data.local_xf);
+        ReadXfBody(stream, stick_data.global_xf);
+        ReadXfFlips(stream, stick_data.global_xf);
+    }
     if (stick_data.IsImageType() || (stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE) || (stick_data.stick_type == StickData::TEXT)) {
         QSize mysize;
         if (stick_data.IsImageType()) {
@@ -983,6 +1174,28 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
                     missing_text_fonts.append(family);
                 stick_data.text_font.setFamily("Arial");
             }
+        }
+    }
+    // prima della v9 offset e rotazione di IMAGE/POLYGON/TEXT (e la scala di un IMAGE) erano i
+    // campi img_*, che il pannello immagine modificava: ora quel pannello è la Stick Transform,
+    // quindi passano in local_xf. Stessa geometria disegnata: local_xf si inserisce esattamente
+    // dove img_offset/img_angle_offset agivano (vedi PolygonTransform(), TextFrame(), paint()).
+    // Il FREEHAND no: i suoi img_* sono il posizionamento del canvas, mai stati dell'utente
+    if (stick_data.version < 9 && (stick_data.stick_type == StickData::IMAGE
+                                   || stick_data.stick_type == StickData::POLYGON
+                                   || stick_data.stick_type == StickData::TEXT)) {
+        QPointF offset = stick_data.img_offset;
+        if (stick_data.stick_type == StickData::TEXT)
+            offset = QPointF(-offset.y(), offset.x()); // il frame del testo è girato di 90°: x lungo lo stick
+        stick_data.local_xf.offset = offset;
+        stick_data.local_xf.angle = stick_data.img_angle_offset;
+        stick_data.img_offset = QPointF(0, 0);
+        stick_data.img_angle_offset = 0;
+        if (stick_data.stick_type == StickData::IMAGE
+                && stick_data.img_w_scale > 0 && stick_data.img_h_scale > 0) { // > 0: vedi sopra
+            stick_data.local_xf.scale = QPointF(stick_data.img_w_scale, stick_data.img_h_scale);
+            stick_data.img_w_scale = 1;
+            stick_data.img_h_scale = 1;
         }
     }
     // i campi più nuovi della versione letta valgono ora il loro default: il record è

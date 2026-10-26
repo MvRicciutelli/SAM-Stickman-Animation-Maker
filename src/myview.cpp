@@ -1581,14 +1581,6 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
     if(draw_orig_line.length() < 1.0) // the 2 clicks coincided: give it a fake length/rotation
         draw_orig_line = QLineF(draw_orig_line.p1(), draw_orig_line.p1() + QPointF(0, 100));
 
-    draw_region = mapToScene(viewport()->rect()).boundingRect();
-    QPointF vc = draw_region.center(); // viewport centre, in scene coordinates
-    // Make the canvas a SQUARE whose side is the viewport's diagonal: at that size, no matter
-    // what angle it's rotated to (see theta below), it still covers the entire visible viewport.
-    int D = int(ceil(sqrt(draw_region.width()*draw_region.width()
-                          + draw_region.height()*draw_region.height())));
-    if(D < 1) D = 1;
-
     // Display rotation = the stick's own line angle (same convention IMAGE sticks use: img_angle
     // follows the stick's direction). The canvas lives and paints in this already-rotated frame,
     // so the drawing is born at the stick's position+rotation directly — no re-rotation is needed
@@ -1598,8 +1590,43 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
     QPointF p1 = draw_orig_line.p1();
     draw_theta = theta;
 
+    // The stick's CURRENT on-screen appearance (needed to re-open an existing drawing for
+    // editing) is captured here, before anything below overwrites the stick's own transform.
+    QImage old_scaled;
+    QTransform old_disp; // old appearance's centred local pixel -> scene transform
+    if(stick->view && stick->stick_img && !stick->stick_img->isNull()){
+        old_scaled = stick->view->CalcImg();
+        old_disp = stick->ShapeFrame(); // spina + Stick Transform, come in paint()
+        old_disp.rotate(stick->img_angle_offset);
+        old_disp.translate(stick->img_offset.x(), stick->img_offset.y());
+    }
+
+    // The spine the session paints on, set now because the global transforms are measured on it.
+    // Those (the stick's own global and its ancestors') cannot be baked into the pixels like the
+    // local one below: they move the children too, and the ancestors' belong to the ancestors.
+    // So the canvas is painted THROUGH them, and draw_disp includes them.
+    stick->my_line = draw_orig_line;
+    stick->img_angle = theta;
+    draw_branch = stick->GlobalInScene() * stick->InheritedTransform();
+
+    draw_region = mapToScene(viewport()->rect()).boundingRect();
+    // the visible viewport as seen from before the global transforms: what the canvas must cover
+    const QRectF covered = draw_branch.inverted().mapRect(draw_region);
+    QPointF vc = covered.center(); // viewport centre, in pre-global scene coordinates
+    // Make the canvas a SQUARE whose side is the viewport's diagonal: at that size, no matter
+    // what angle it's rotated to (see theta above), it still covers the entire visible viewport.
+    // Its PIXELS are counted on the viewport as it is, and draw_px_scale stick units per pixel
+    // stretch it over the covered region instead: sized in stick units, a global scale-down
+    // multiplied the pixel count (16x at 0.25, i.e. 38 MB instead of 2 per canvas, and draw
+    // mode keeps up to MAXDRAWUNDO of them). Exactly 1 without global transforms.
+    const qreal viewport_diagonal = hypot(draw_region.width(), draw_region.height());
+    int D = int(ceil(viewport_diagonal));
+    if(D < 1) D = 1;
+    draw_px_scale = viewport_diagonal > 0
+                  ? hypot(covered.width(), covered.height()) / viewport_diagonal : 1.0;
+
     // Solve for the img_offset that puts the canvas's CENTRE on the viewport's centre. paint()
-    // computes scene = p1 + R(theta)*(img_offset + (pixel - D/2)); at the canvas centre pixel
+    // computes scene = p1 + R(theta)*(img_offset + k*(pixel - D/2)), k = draw_px_scale; at the canvas centre pixel
     // (D/2), that reduces to vc = p1 + R(theta)*img_offset, so img_offset = R(-theta)*(vc - p1) —
     // R(-theta), the inverse rotation, is what QTransform::inverted() below builds and applies.
     QTransform rot; rot.rotate(theta);
@@ -1611,19 +1638,9 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
     disp.translate(p1.x(), p1.y());
     disp.rotate(theta);
     disp.translate(img_offset.x(), img_offset.y());
-    draw_disp = disp;
-    draw_disp_inv = disp.inverted();
-
-    // The stick's CURRENT on-screen appearance (needed to re-open an existing drawing for
-    // editing) is captured here, before anything below overwrites the stick's own transform.
-    QImage old_scaled;
-    QTransform old_disp; // old appearance's centred local pixel -> scene transform
-    if(stick->view && stick->stick_img && !stick->stick_img->isNull()){
-        old_scaled = stick->view->CalcImg();
-        old_disp.translate(stick->my_line.p1().x(), stick->my_line.p1().y());
-        old_disp.rotate(stick->img_angle + stick->img_angle_offset);
-        old_disp.translate(stick->img_offset.x(), stick->img_offset.y());
-    }
+    disp.scale(draw_px_scale, draw_px_scale);
+    draw_disp = disp * draw_branch;
+    draw_disp_inv = draw_disp.inverted();
 
     QImage *canvas = new QImage(D, D, QImage::Format_ARGB32_Premultiplied);
     canvas->fill(Qt::transparent);
@@ -1656,12 +1673,12 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
 
     // lo stick resta nel suo frame reale (scheletro dei 2 click); il canvas DxD copre il
     // viewport ruotato di theta e centrato su vc
-    stick->my_line = draw_orig_line;
-    stick->img_angle = theta;
     stick->img_angle_offset = 0;
     stick->img_offset = img_offset;
-    stick->img_w_scale = float(D / len); // CalcImg riporta il canvas DxD a dimensione naturale
-    stick->img_h_scale = float(D / len);
+    stick->img_w_scale = float(D * draw_px_scale / len); // CalcImg: il canvas DxD a draw_px_scale unità per pixel
+    stick->img_h_scale = float(D * draw_px_scale / len);
+    // la trasformazione locale è appena stata cotta nei pixel (old_disp); le globali no (sopra)
+    stick->local_xf = StickXf();
 
     if(stick->view){
         stick->view->stick_handle[0]->hide();
@@ -1742,6 +1759,8 @@ void MyView::ExitDrawMode()
     // draw_disp — the same centred-pixel-to-scene transform EnterDrawMode() built — to land in
     // scene coordinates.
     QPointF crop_center_scene = draw_disp.map(center_px - QPointF(canvas_half_w, canvas_half_h));
+    // ...then back from under the global transforms, which paint() keeps applying on top
+    crop_center_scene = draw_branch.inverted().map(crop_center_scene);
     double len = draw_orig_line.length();
     QPointF p1 = draw_orig_line.p1();
     QTransform rot; rot.rotate(draw_theta);
@@ -1754,8 +1773,8 @@ void MyView::ExitDrawMode()
     // rot.inverted() (Qt QTransform), mapped over (crop_center_scene - p1).
     stick->img_offset = rot.inverted().map(crop_center_scene - p1);
     double max_dim = qMax(bw, bh);
-    stick->img_w_scale = float(max_dim / len);                    // CalcImg() -> natural (1:1) size
-    stick->img_h_scale = float(max_dim / len);
+    stick->img_w_scale = float(max_dim * draw_px_scale / len);    // CalcImg() -> the size it was painted at
+    stick->img_h_scale = float(max_dim * draw_px_scale / len);
 
     if(stick->view){
         stick->view->stick_handle[0]->show();
@@ -4526,13 +4545,10 @@ void MyView::UpdateOnionSkins(){
         // questi stick sono VIVI (hanno già una view sul frame i): clonarne i dati prima di
         // wrapparli evita che il costruttore di stick rubi il back-pointer data->view alla
         // view reale (vedi StickFigure::UpdateIcon per lo stesso pattern)
-        QList<StickData*> render_clones;
-        for(StickData *s:my_animation->frame_list[i]->total_sticks)
-        {
-            StickData* clone = s->Clone();
-            render_clones.append(clone);
+        // ...e con il genitore ricollegato, da cui arriva la trasformazione globale di un antenato
+        QList<StickData*> render_clones = CloneForRender(my_animation->frame_list[i]->total_sticks);
+        for(StickData *clone : render_clones)
             render_scene.addItem(new StickGraphicsItem(clone));
-        }
         // più è vecchio l'onion skin più è trasparente, più è vicino al frame corrente più è opaco
         opacity_val += 0.5/skin_num;
         // solo l'ingombro delle figure, non tutta la scena: un fantasma costava 1.44x la tela

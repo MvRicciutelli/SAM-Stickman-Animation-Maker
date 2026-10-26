@@ -50,7 +50,6 @@ QListWidget *my_frame_widget_list = nullptr;
 QListWidget *my_library_list_widget = nullptr;
 QListWidget *my_current_library_widget = nullptr;
 QListWidget *img_list_widget = nullptr;
-QWidget *img_buttons_row = nullptr;      // istanziato dalla fixture: UpdateSliders() lo abilita/disabilita
 QLabel *dbg_lbl = nullptr;
 QSlider *img_h_offset_slider = nullptr;
 QSlider *img_v_offset_slider = nullptr;
@@ -65,6 +64,8 @@ QCheckBox *hard_bottom_check = nullptr;
 AdvancedTab *advanced_rect_tab = nullptr;
 QTabWidget *my_tab_widget = nullptr;
 QWidget *advanced_img_tab = nullptr;
+QWidget *advanced_transform_tab = nullptr;
+std::function<void(StickData *)> refresh_transform_panel;   // vuota: nessun pannello nei test
 QWidget *advanced_draw_tab = nullptr;    // il tab draw mode non è esercitato dai test (UpdateTab non è chiamata con FREEHAND)
 QWidget *advanced_vertex_tab = nullptr;
 QWidget *advanced_text_tab = nullptr;     // il pannello testo non è esercitato dai test

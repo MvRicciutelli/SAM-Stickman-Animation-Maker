@@ -102,28 +102,19 @@ field is a QFont and not a family+size pair. The VERTICAL stretch is the
 one QFont has no equivalent for: it's a percent field applied as the
 y-scale of `TextFrame()` (so it stretches the line pitch with the glyphs)
 and is gated on record `version >= 3`, the same way version 2 gates the IK
-fields. **Placement reuses the IMAGE fields**, `img_offset` for
-the h/v offset and `img_angle_offset` for the extra rotation, so the
-offset panel, `InterpolateStickData()` and the undo/clone paths needed no
-new plumbing (same trick POLYGON already uses). The skeleton is painted
+fields. **Placement is the Stick Transform** (see below), like every
+other type's; `TextFrame()` turns it by +90° so the text runs along the
+stick. The skeleton is painted
 only while `text` is empty, which is exactly what makes the 2-click
 preview visible; the text colour IS the stick's pen colour, and the wrap
 width IS `my_line.length()` (the font size does not scale with the
 figure). `stick.cpp`'s `TextFrame()`/`LayoutText()` are the single source
-of truth shared by `paint()` and `ConstructBr()`. Selecting one shows two
-tabs (`Animation::UpdateTab()`): the code-built `advanced_text_tab`
-(content, font, size, bold/italic/underline/strikeout, justification, V/H
-spacing, H/V stretch, wrap — wired in `Widget`'s
+of truth shared by `paint()` and `ConstructBr()`. Selecting one shows the
+code-built `advanced_text_tab` (content, font, size, bold/italic/underline/
+strikeout, justification, V/H spacing, H/V stretch, wrap — wired in `Widget`'s
 ctor, echoed back by `refresh_text_panel` — one `std::function` global in
-`uiItems.h` instead of an extern per control) plus `advanced_img_tab` as
-"Text Placement", of which `Animation::UpdateSliders()` disables the parts
-a text stick has nothing to act on — the width/height SCALE controls (they
-write `img_w_scale`/`img_h_scale`, which nothing reads for text) and the
-image-variant list plus its swap/add/remove buttons (`img_list_widget` /
-`img_buttons_row`, the latter being `ui->frame_44`, the one frame holding
-all three) — re-enabling them for every other type. That lives in
-UpdateSliders(), not UpdateTab(), because only the former runs on every
-selection change rather than only on a type change. A font missing on load is replaced with Arial by
+`uiItems.h` instead of an extern per control) plus the Stick Transform tab.
+A font missing on load is replaced with Arial by
 `StickData::operator>>`, which records the family in the
 `missing_text_fonts` list that `MyView::ReportMissingTextFonts()` (called
 by every load path) turns into one prompt. The foreign `.stk`/`.nodes`
@@ -222,19 +213,121 @@ geometry, rendered semi-transparent: no spike, no hole, no double alpha at the f
 `ChangeMasterKeepsMultilineShape` and the branched half of `StkAndNodesExportMultilineChain`
 pin it. Each was checked to fail with its piece neutralized.
 
+### The Stick Transform
+
+Every stick type has a "Stick Transform" tab with offset, width/height scale, rotation, and
+flip horizontal/vertical, each in two sets selected by a Local | Global bar:
+- **Local** (`StickData::local_xf`) moves this stick's shape only.
+- **Global** (`global_xf`) moves the shapes of this stick and every descendant.
+
+Both sets are a `StickXf` and live in the stick's own frame (origin P1, +y along the stick).
+`StickXf::Matrix()` composes a set as flip, then scale, then offset, then rotation.
+- Rotation and scale pivot on P1, in both sets.
+- A local flip mirrors the shape in place: about the image's centre for an image type, and
+  about the stick's midpoint `(0, len/2)` otherwise (`LocalTransform(len)`). The pivot depends
+  only on the spine and the internal placement, never on vertices, so a vertex edit cannot move
+  it under the others.
+- A global flip pivots on P1 like the rest of the global set. It mirrors the whole branch at the
+  joint.
+
+Record versions: v9 had the local offset/angle/scale; v10 adds the local flips and `global_xf`.
+
+**How a stick is drawn:** `ShapeFrame() = LocalTransform(len) · global_xf · spine ·
+InheritedTransform()`. `InheritedTransform()` multiplies the ancestors' `GlobalInScene()`
+(spine⁻¹ · global · spine), innermost first, so nested globals behave like nested groups. An
+ancestor counts by the rule the rotate tool uses for what follows a stick: a stepchild follows
+only a stepchild ancestor. Every type draws through `ShapeFrame()`:
+- RECT/CIRCLE/TAPER/TRAPEZOID, through `StickLocalFrame()`, which is `ShapeFrame()`. So the
+  brush anchoring, `TextureToScene()` and a brush border follow the transforms too.
+- IMAGE/FREEHAND, by `ShapeFrame()` plus their internal `img_angle_offset`/`img_offset`.
+- TEXT, through `TextFrame()`.
+- POLYGON and MULTILINE interiors, through `PolygonTransform()`, which is built on `ShapeFrame()`.
+- LINE and the MULTILINE endpoints, which are drawn in scene coordinates, through
+  `SceneStickTransform()` (scene → scene) and `DrawnLine()`.
+
+`StickFrameAngle()` reads the angle off the frame matrix, so it picks up every rotation.
+
+**A LINE's frame is read off its line, not off `img_angle`.** Nothing keeps a LINE's
+`img_angle` up to date: `PreviewDrawing()` skips LINE, and a LINE record doesn't even stream it.
+
+**Render clones must keep the tree.** Icons (`StickFigure::UpdateIcon()`, `Frame::UpdateIcon()`),
+onion skins and `ImageExport` used to clone sticks one by one, which drops `parent`, and an
+ancestor's global transform then vanished from every thumbnail and export. They all go through
+`CloneForRender()`, which re-links each clone's parent to the clone of its parent.
+
+**The tab** reuses the image panel's five slider rows (`ui->groupBox_5`), re-parented into
+`advanced_transform_tab` in `Widget`'s ctor. The rows sit under a `QTabBar` with no pages
+(`transform_mode_bar`), so the `.ui` auto-connected `on_img*_valueChanged()` slots stay one per
+control; `Widget::EditedXf()` picks the set they write. The flips are two check boxes, each toggle
+one undo step (`SetTransformFlip()`). `refresh_transform_panel` (a `std::function` hook in
+`uiItems.h`, like `refresh_text_panel`) echoes the shown set under `QSignalBlocker` from
+`UpdateSliders()`. It also runs on a Local/Global switch. `Animation::UpdateTab()` inserts the tab
+after the type's own tabs. The image panel keeps only the image variants list and its
+swap/add/remove buttons. POLYGON has no "Polygon Editing" tab and TEXT no "Text Placement": every
+control in them was the transform.
+
+**The `img_*` fields are internal placement, not the user's.** Before v9, IMAGE, POLYGON and
+TEXT kept their user offset/rotation in `img_offset`/`img_angle_offset`, and IMAGE its scale in
+`img_*_scale`. `operator>>` moves them into `local_xf` for a record older than v9, which gives the
+same drawn frame. TEXT's offset is turned by 90°, because its frame is. FREEHAND is not migrated:
+its `img_*` fields are draw mode's canvas placement.
+
+**Draw mode:**
+- `EnterDrawMode()` bakes the local transform into the canvas and resets it.
+- It cannot bake the global ones: they move the children too, and the ancestors' belong to the
+  ancestors. So the canvas is painted through them. `draw_branch` (own global · inherited) is part
+  of `draw_disp`, which every scene↔canvas mapping already uses. The viewport is pulled back
+  through it to size and centre the canvas. `ExitDrawMode()` takes it back out before placing the
+  crop.
+- The canvas's pixel count is the viewport's, and `draw_px_scale` stick units per pixel stretch it
+  over the covered region. Sized in stick units, an ancestor's 0.25 scale made it 16x the pixels
+  (measured: 38 MB instead of 2 per canvas, times up to `MAXDRAWUNDO` undo entries).
+- The tab is disabled during a session.
+
+**A MULTILINE is edited where it is drawn.** `SceneVertices()` returns the drawn endpoints.
+`StickData::SetDrawnLine()` is the exact inverse of `DrawnLine()`. It undoes the inherited part
+first (it doesn't depend on this spine), then this stick's own local·global, whose linear part
+doesn't depend on the length: that gives the direction and length, and then the ends, flips
+included. `SetMultilineVertices()`, endpoint drags (`EditPolygonPoint()` passes the other end as
+drawn) and the change-master re-anchoring (`Capture`/`ReanchorVertexScenePositions()` carry the
+drawn ends) all go through it. It is exact bit for bit with no transform; under one it is exact to
+about 1e-5 px, since `img_angle` is a `float`.
+
+**Performance, measured** with a throwaway benchmark:
+- No transforms cost nothing: each matrix of a default `StickXf` is `TxNone`, and the ancestor
+  walk is one `IsIdentity()` per ancestor.
+- With a global on every stick of a 20-deep chain: 50 renders 6 → 8 ms. At a pathological depth
+  of 100 (the walk is O(depth) per call): 0.9 ms per render, 0.5 ms per full refresh. No cache was
+  added for that.
+- A brush border scaled up 9x by nested globals: 2 → 4 ms per 20 renders. Off-screen dabs are
+  cheap, so there is no culling.
+- The draw-mode canvas (above) was the one real problem.
+- The sliders refresh only what moved: the stick for a local edit, the stick and its descendants
+  for a global one (`RefreshTransformed()`). They used to refresh the whole figure, a bounding rect
+  and a text layout per stick, per tick.
+
+`StickTransformMovesEveryTypeAndMigratesOldPlacement`,
+`GlobalTransformMovesTheBranchAndReachesRenderClones`, `StickTransformFlipsAndVersion10`,
+`MultilineEditsWhereItIsDrawnUnderATransform` (with an ancestor's global and flips),
+`ChangeMasterKeepsTransformedMultilineShape` and `DrawModeUnderAnInheritedGlobalTransform` (real
+clicks land under the cursor, canvas pixels capped) pin it. The re-anchoring and `draw_branch`
+were each checked to fail when reverted.
+
 ### Converting a stick's type
 
 `MyView::ConvertStick()` turns any stick type into any other, in place, as one
 `StoreUndo()`. It keeps `my_line`, the IK role/chain, the tree links, `pen` (colour,
 thickness, border brush) and `brush`, and is **destructive by spec**: it first drops
 everything only the old type reads (POLYGON/MULTILINE vertices, IMAGE/FREEHAND images —
-IMAGE's `img_list_widget` rows too — TEXT's `text`, and the shared `img_offset`/
+IMAGE's `img_list_widget` rows too — TEXT's `text`, and the internal `img_offset`/
 `img_angle_offset`/`img_*_scale` placement), then seeds the new type the way `DrawCmd()`
 seeds a fresh one (RECT/TAPER/TRAPEZOID widths from their sliders, MULTILINE's two endpoint
 widths from the pen). Two seeds are this function's own: a POLYGON starts as a **diamond
 through both ends** (an empty one is invisible), and a FREEHAND enters draw mode on a blank
 canvas. IMAGE and TEXT need user input, which the caller (the Widget lambda) asks for
 BEFORE calling, so cancelling leaves neither a half-converted stick nor an empty undo step.
+The Stick Transform survives a conversion, since every type reads it (a FREEHAND's draw-mode
+entry then bakes it into the canvas).
 
 The UI is a single "Convert to" row (combo + button; `convert_type_combo` in `uiItems.h`,
 its parent is the row). A widget has one parent, so `Animation::UpdateTab()` moves that row
@@ -1265,10 +1358,10 @@ one rather than an old header with new content.
 
 Three versions are on the wire and each is checked: the `.sam` header
 (`Animation::CURRENT_VERSION`, 3), `StickFigureData::version` (1) and `StickData::version`
-(`StickData::CURRENT_VERSION`, 8). `FrameData` has none. **Raising a format means raising its
+(`StickData::CURRENT_VERSION`, 10). `FrameData` has none. **Raising a format means raising its
 `CURRENT_VERSION` constant** — the in-class default of `version` is that constant, so a writer
 and the reader's limit cannot drift apart. The stick record is the one that matters most: it
-went 2→8 while the file header stayed at 3, so a newer build's `.sam` can hold a too-new
+went 2→10 while the file header stayed at 3, so a newer build's `.sam` can hold a too-new
 stick under a perfectly supported header, discoverable only mid-stream.
 
 **A stick record read from an older version is raised to `CURRENT_VERSION` at the end of
@@ -1479,8 +1572,8 @@ before it is displayed must therefore null-check `linked_item` —
 ## Tests
 
 `tests/tests.pro` is a standalone qmake QtTest project (characterization
-suite, docs/REFACTOR_PLAN.md Phase 0, 129 tests as of the Krita bundle import —
-128 passing plus the one font-dependent skip). Note the slots share
+suite, docs/REFACTOR_PLAN.md Phase 0, 135 tests as of the Stick Transform's local/global sets —
+134 passing plus the one font-dependent skip). Note the slots share
 ONE animation and run in declaration order: a test that leaves the current
 frame somewhere other than the last one breaks every later test that
 assumes `AddFrame()` appends (see the closing `MoveToFrame()` in
@@ -1567,6 +1660,20 @@ empty `QFontDatabase::families()` — anything font-dependent must skip
 - `StickFigure::SetStepChildAsMaster()` has an unused local (`oldParent`,
   harmless compiler warning) left over from the safety-sweep pass —
   cosmetic, not fixed since it wasn't part of that pass's actual findings.
+- **A master change reverses sticks and inverts the tree, and the Stick Transforms are not
+  conjugated.** MULTILINE is the exception, since its drawn ends are carried across. The numbers
+  are kept, but they are relative to the reversed spine, and a global now reaches a different set
+  of descendants. So transformed sticks on that chain jump. This is the same class as an IMAGE's
+  internal offset, which never followed a reversal either.
+- The transforms' **scale and flips** are not in the texture arrow's unit or angle
+  (`StickFrameAngle()`'s `ponytail:`). They don't scale a LINE's pen or a MULTILINE's vertex widths
+  either, since those are drawn in scene coordinates; a RECT's outline, drawn in the scaled frame,
+  does scale.
+- The stick handles stay on the skeleton under any transform, local or global. The transforms
+  move the drawn shapes, not the joints.
+- The foreign `.stk`/`.nodes` exporters ignore the transform, except where it is already in
+  the geometry they read: polygon vertices (`PolygonTransform()`) and the multiline ends
+  (`DrawnLine()`).
 - An `ObjectMode` gradient's bounding box stays **axis-aligned**, so a gradient
   that FOLLOWS the stick stretches slightly as well as turning when the stick
   rotates. Marked with a `ponytail:` comment in `ObjectGradientTurn()`; the

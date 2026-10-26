@@ -26,9 +26,15 @@ static QList<QPointF> CaptureVertexScenePositions(StickData *s)
     QList<QPointF> pts;
     if(s->stick_type != StickData::POLYGON && s->stick_type != StickData::MULTILINE)
         return pts;
+    // MULTILINE: anche gli estremi DISEGNATI, in testa e in coda — con una Stick Transform non
+    // sono quelli della spina, e la trasformazione riletta sulla spina invertita li sposterebbe
+    if(s->stick_type == StickData::MULTILINE)
+        pts.append(s->DrawnLine().p1());
     QTransform t = s->PolygonTransform();
     for(const QPointF &p : s->polygon_points)
         pts.append(t.map(p));
+    if(s->stick_type == StickData::MULTILINE)
+        pts.append(s->DrawnLine().p2());
     return pts;
 }
 static void ReanchorVertexScenePositions(StickData *s, QList<QPointF> scene_pts)
@@ -51,6 +57,10 @@ static void ReanchorVertexScenePositions(StickData *s, QList<QPointF> scene_pts)
         for(int i = 0; i < n; i++)
             reversed[n-1-i] = parents[i] < 0 ? -1 : n-1-parents[i];
         s->vertex_parents = StickData::ReRootTree(reversed, 0);
+        // gli estremi disegnati, ora invertiti, riposizionano la spina (identica a quella già
+        // scambiata dal chiamante quando non c'è trasformazione); restano gli interni
+        s->SetDrawnLine(QLineF(scene_pts.first(), scene_pts.last()));
+        scene_pts = scene_pts.mid(1, scene_pts.length() - 2);
     }
     // img_angle deve tornare a tracciare la direzione della (nuova) spina, come dopo un
     // disegno/Manipulate (stessa formula). Se lo lasciassimo sfasato di 180° dallo scambio
@@ -104,12 +114,10 @@ void StickFigure::UpdateIcon()
     // ora clona tutti gli stick nello stickfigure e aggiungili alla scena fittizia
     // (addItem rende la scena proprietaria dei cloni: non vanno cancellati a mano,
     // altrimenti verrebbero distrutti due volte quando icoScene esce di scope)
-    QList<StickData*> renderClones;
-    for(StickData* S: stick_list){
-        StickData* clone = S->Clone();
-        renderClones.append(clone);
+    // con il genitore ricollegato: è da lì che la trasformazione globale di un antenato arriva
+    QList<StickData*> renderClones = CloneForRender(stick_list);
+    for(StickData* clone: renderClones)
         icoScene.addItem(new StickGraphicsItem(clone));
-    }
     // crea un painter che disegni sull'immagine
     QPainter painter(icon_img);
     // renderizza dalla scena sull'immagine mediante il painter

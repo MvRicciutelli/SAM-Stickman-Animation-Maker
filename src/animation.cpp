@@ -178,11 +178,9 @@ void Animation::UpdateTab(int t){
         hard_bottom_check->hide();
     }
     else if(t == StickData::POLYGON){
-        // pannello immagine per offset/rotazione (gli slider di scala e la lista
-        // immagini restano inerti, guardati su IMAGE) + pannello vertici per la
-        // curvatura degli spigoli (la riga larghezza è solo per le MULTILINE)
-        my_tab_widget->insertTab(1,advanced_img_tab,"Polygon Editing");
-        my_tab_widget->insertTab(2,advanced_vertex_tab,"Polygon Vertices");
+        // pannello vertici per la curvatura degli spigoli (la riga larghezza è solo per le
+        // MULTILINE); offset e rotazione stanno nella Stick Transform qui sotto
+        my_tab_widget->insertTab(1,advanced_vertex_tab,"Polygon Vertices");
         vertex_width_row->hide();
     }
     else if(t == StickData::MULTILINE){
@@ -190,12 +188,13 @@ void Animation::UpdateTab(int t){
         vertex_width_row->show();
     }
     else if(t == StickData::TEXT){
-        // pannello testo (contenuto/font/giustificazione/interlinea/word wrap) + pannello
-        // immagine per offset e rotazione, come fa il POLYGON: sono le stesse tre
-        // proprietà (img_offset/img_angle_offset), riusate invece di duplicarle
+        // pannello testo (contenuto/font/giustificazione/interlinea/word wrap); il
+        // posizionamento è la Stick Transform qui sotto
         my_tab_widget->insertTab(1,advanced_text_tab,"Text Editing");
-        my_tab_widget->insertTab(2,advanced_img_tab,"Text Placement");
     }
+    // la Stick Transform vale per ogni tipo: dopo il pannello del tipo, prima delle Libraries
+    // (indexOf() di un library_tab nullo, nei test, è -1, e insertTab(-1) accoda)
+    my_tab_widget->insertTab(my_tab_widget->indexOf(library_tab), advanced_transform_tab, "Stick Transform");
     // la riga "Convert to" (Widget) è UN solo widget e un widget ha un solo genitore: va
     // spostata in cima al primo pannello del tipo mostrato a ogni cambio di tipo
     QWidget *panel = my_tab_widget->count() > 1 ? my_tab_widget->widget(1) : nullptr;
@@ -350,24 +349,10 @@ void Animation::UpdateSliders(){
     StickData *cs = current_frame->CurrentStick();
     if(current_frame->CurrentStick() == nullptr)
         return;
-    // Il pannello immagine è condiviso (IMAGE, POLYGON, TEXT), ma per un TEXT una parte dei
-    // suoi controlli non ha nulla su cui agire: gli slider di scala scrivono img_w_scale/
-    // img_h_scale, che nessuno legge per il testo (né il corpo del font né la larghezza di
-    // ritorno a capo dipendono da loro), e la lista immagini con i suoi bottoni (scambia/
-    // aggiungi/rimuovi) riguarda le varianti immagine, che un TEXT non ha — la lista
-    // mostrerebbe anzi le righe rimaste dall'ultimo IMAGE selezionato, dato che
-    // PopulateImageListWidget() la ripopola solo per gli IMAGE. Disabilitati invece di
-    // lasciarli sembrare guasti, e riabilitati per ogni altro tipo. Sta qui e non in
-    // UpdateTab() perché questa gira a OGNI cambio di selezione, non solo di tipo.
-    {
-        bool image_controls = (cs->stick_type != StickData::TEXT);
-        img_width_slider->setEnabled(image_controls);
-        img_width_spinbox->setEnabled(image_controls);
-        img_height_slider->setEnabled(image_controls);
-        img_height_spinbox->setEnabled(image_controls);
-        img_list_widget->setEnabled(image_controls);
-        img_buttons_row->setEnabled(image_controls);
-    }
+    // la Stick Transform, per ogni tipo: il pannello (e quale dei due insiemi, locale o globale,
+    // sta mostrando) è di Widget, quindi l'eco passa da lì. Nullo nei test
+    if(refresh_transform_panel)
+        refresh_transform_panel(cs);
     // Stesso criterio per i due selettori di tipo riempimento/contorno della colonna Style:
     // un IMAGE/FREEHAND non ha né l'uno né l'altro (il suo aspetto È il raster, che paint()
     // disegna senza guardare pen e brush), mentre LINE, MULTILINE e TEXT hanno solo il
@@ -384,26 +369,7 @@ void Animation::UpdateSliders(){
             entries->item(brush_row)->setEnabled(cs->StrokesAPath());
     }
     UpdateStyleControls();
-    if(cs->stick_type == StickData::IMAGE){
-        //aggiorna gli slider di modifica alla scala e all'offset
-        if(cs->img_w_scale>=1){
-            img_width_slider->setValue(10*(cs->img_w_scale-1));
-        }
-        else{
-            img_width_slider->setValue(-10*(1/(cs->img_w_scale)-1));
-        }
-        if(cs->img_h_scale>=1){
-            img_height_slider->setValue(10*(cs->img_h_scale-1));
-        }
-        else{
-            img_height_slider->setValue(-10*(1/(cs->img_h_scale)-1));
-
-        }
-        img_v_offset_slider->setValue(cs->img_offset.y());
-        img_h_offset_slider->setValue(cs->img_offset.x());
-        img_rotation_slider->setValue(cs->img_angle_offset);
-    }
-    else if(cs->stick_type == StickData::RECT){
+    if(cs->stick_type == StickData::RECT){
         advanced_rect_slider->setValue(cs->img_w_scale);
     }
     else if(cs->stick_type == StickData::CIRCLE){
@@ -421,15 +387,7 @@ void Animation::UpdateSliders(){
         hard_bottom_check->setChecked(cs->hard_bottom);
 
     }
-    else if(cs->stick_type == StickData::POLYGON){
-        img_v_offset_slider->setValue(cs->img_offset.y());
-        img_h_offset_slider->setValue(cs->img_offset.x());
-        img_rotation_slider->setValue(cs->img_angle_offset);
-    }
     else if(cs->stick_type == StickData::TEXT){
-        img_v_offset_slider->setValue(cs->img_offset.y());
-        img_h_offset_slider->setValue(cs->img_offset.x());
-        img_rotation_slider->setValue(cs->img_angle_offset);
         // il pannello testo vive in widget.cpp: l'eco dei suoi controlli passa da qui
         // (nullo nei test, dove il pannello non esiste)
         if(refresh_text_panel)

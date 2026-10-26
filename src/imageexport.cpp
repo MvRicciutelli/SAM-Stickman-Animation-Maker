@@ -42,10 +42,8 @@ ImageExport::ImageExport(QObject *parent, QString path, int option,
         image_size = QSize(qMax(1, qRound(W * preview_scale)), qMax(1, qRound(H * preview_scale)));
     }
     for(Frame* f : V->my_animation->frame_list){
-        QList<StickData*> clones;
-        for(StickData* s : f->total_sticks)
-            clones.append(s->Clone());
-        frames.append(clones);
+        // con il genitore ricollegato: è da lì che la trasformazione globale di un antenato arriva
+        frames.append(CloneForRender(f->total_sticks));
         frame_numbers.append(f->frame_number);
     }
 }

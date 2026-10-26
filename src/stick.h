@@ -488,6 +488,8 @@ private:
      * @return rect before pen/handle padding is applied.
      */
     QRectF ConstructBr();
+    /// @brief ConstructBr() of an image, shape or LINE before the Stick Transform moves it.
+    QRectF UntransformedBr();
 };
 
 /**

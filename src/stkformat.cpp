@@ -668,11 +668,11 @@ bool ResolveExportSegments(const StickFigureData &figure, QList<ExportSegment> *
         if (stick->stick_type == StickData::MULTILINE) {
             multilines++;
             QList<QPointF> verts;
-            verts << stick->my_line.p1();
+            verts << stick->DrawnLine().p1(); // gli estremi come disegnati, Stick Transform inclusa
             QTransform t = stick->PolygonTransform();
             for (const QPointF &pt : stick->polygon_points)
                 verts << t.map(pt);
-            verts << stick->my_line.p2();
+            verts << stick->DrawnLine().p2();
             for (float c : stick->vertex_curvatures) {
                 if (c > 0.001f && !curvature_warned) {
                     warnings->append(QObject::tr("Curved multi-line corners were exported as sharp angles."));
@@ -1639,11 +1639,11 @@ bool StkFormat::ExportNodes(const QString &path, const StickFigureData &figure,
         if (stick->stick_type == StickData::MULTILINE && !stick->polygon_points.isEmpty()) {
             multilines++;
             QList<QPointF> verts;
-            verts << stick->my_line.p1();
+            verts << stick->DrawnLine().p1(); // gli estremi come disegnati, Stick Transform inclusa
             QTransform t = stick->PolygonTransform();
             for (const QPointF &pt : stick->polygon_points)
                 verts << t.map(pt);
-            verts << stick->my_line.p2();
+            verts << stick->DrawnLine().p2();
             for (float c : stick->vertex_curvatures) {
                 if (c > 0.001f && !curvature_warned) {
                     warnings->append(QObject::tr("Curved multi-line corners were exported as sharp angles."));

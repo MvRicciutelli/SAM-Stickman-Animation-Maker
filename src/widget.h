@@ -8,6 +8,8 @@ QT_BEGIN_NAMESPACE
 namespace Ui { class Widget; }
 QT_END_NAMESPACE
 
+class QCheckBox;
+class QTabBar;
 class GradientDialog; // gradientdialog.h — opened by ChooseStyle() for the two gradient kinds
 class PatternLibrary; // patternlibrary.h — the floating .pat picker, likewise
 class TextureOptionsDialog; // textureoptionsdialog.h — the image fill's numeric options, likewise
@@ -405,6 +407,16 @@ private:
      * Must run after BuildStyleCombos(), which creates the four check boxes it groups.
      */
     void BuildStyleTabs();
+
+    /// @brief The parameter set the "Stick Transform" tab edits on @p cs: local_xf or global_xf.
+    StickXf &EditedXf(StickData *cs) const;
+    /// @brief Refreshes what a Stick Transform edit on @p cs moved: @p cs, plus its descendants for a global one.
+    void RefreshTransformed(StickData *cs);
+    /// @brief The two flip check boxes: sets the edited set's flip as one undo step.
+    void SetTransformFlip(bool horizontal, bool on);
+    QTabBar *transform_mode_bar = nullptr;  ///< "Local" | "Global" above the Stick Transform sliders
+    QCheckBox *flip_h_check = nullptr;      ///< Stick Transform: mirror across the stick
+    QCheckBox *flip_v_check = nullptr;      ///< Stick Transform: mirror along the stick
 
     /**
      * @brief Puts the tools column, the canvas, the Style column and the layers column into

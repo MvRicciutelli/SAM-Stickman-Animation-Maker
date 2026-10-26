@@ -36,7 +36,6 @@ extern QListWidget * my_frame_widget_list;
 extern QListWidget * my_library_list_widget ;
 extern QListWidget * my_current_library_widget;
 extern QListWidget * img_list_widget;
-extern QWidget * img_buttons_row;       ///< the frame holding the image swap/add/remove buttons (ui->frame_44); disabled together with img_list_widget for the types that have no image variants
 extern QLabel * dbg_lbl;
 extern QSlider* img_h_offset_slider;
 extern QSlider* img_v_offset_slider;
@@ -50,7 +49,8 @@ extern QCheckBox* hard_top_check;
 extern QCheckBox* hard_bottom_check;
 extern AdvancedTab* advanced_rect_tab;
 extern QTabWidget* my_tab_widget;
-extern QWidget * advanced_img_tab;
+extern QWidget * advanced_img_tab;      ///< IMAGE panel: the image variants list and its swap/add/remove buttons
+extern QWidget * advanced_transform_tab; ///< "Stick Transform" panel (every type): offset, scale and rotation sliders, built in Widget's ctor
 extern QWidget * advanced_draw_tab;     ///< freehand draw-mode panel (brush/eraser/size/opacity/color), built in Widget's ctor
 extern QWidget * advanced_vertex_tab;   ///< POLYGON/MULTILINE vertex panel (built in Widget's ctor)
 extern QWidget * advanced_text_tab;     ///< TEXT panel: content, font, justification, size, line spacing, word wrap (built in Widget's ctor)
@@ -62,6 +62,12 @@ extern QWidget * advanced_text_tab;     ///< TEXT panel: content, font, justific
  * per control. Null when no panel exists (the test binary doesn't link widget.cpp).
  */
 extern std::function<void(StickData *)> refresh_text_panel;
+/**
+ * @brief Echoes a stick's Stick Transform (whichever set, local or global, the tab is showing)
+ *        into advanced_transform_tab's controls. Same hook pattern as refresh_text_panel; null
+ *        in the test binary.
+ */
+extern std::function<void(StickData *)> refresh_transform_panel;
 extern QWidget * advanced_ik_tab;       ///< "IK properties" panel, shown only when the selected stick has an IK role (built in Widget's ctor)
 extern QCheckBox * ik_active_check;     ///< the "Chain active" toggle inside advanced_ik_tab (IK_TARGET_ON <-> IK_TARGET_OFF)
 extern QWidget * library_tab;           ///< the "Libraries" tab page in my_tab_widget; UpdateTab() must never strip it while rebuilding the per-stick-type advanced tabs
