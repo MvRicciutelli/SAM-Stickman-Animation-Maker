@@ -13,6 +13,37 @@ the license files stay at the root, so the root listing stays short and the READ
 near the top of the GitHub page. Generated files (moc/uic output, `SAM.pro.user*`) are not
 tracked.
 
+---
+## Model Routing & Delegation
+
+To optimize token usage, delegate tasks to specialized subagents whenever a suitable agent exists. Always prefer a subagent over handling the task in the main Opus thread.
+
+| Signal / Trigger | Delegate to | Model |
+|---|---|---|
+| find, search, locate, where is X defined, usages, explore codebase, grep | `researcher` | haiku |
+| run tests, test suite, failing test, interpret test output | `test-runner` | haiku |
+| git, commit, stage, branch, merge, rebase, diff, stash, push, pull, checkout, log | `git-ops` | haiku |
+| web search, look up online, external docs, compare library, current best practice, research the web | `web-researcher` | haiku |
+| boilerplate, simple function, well-specified single-file edit, scaffold | `code-writer` | sonnet |
+| add comments, docstring, explain code in comments, PR comment, issue reply, inline documentation | `comment-writer` | sonnet |
+| README, docs/, guide, tutorial, changelog, architecture note, standalone documentation page | `doc-writer` | sonnet |
+
+### Delegation rules
+
+- When a request matches a row above, use the `Agent` tool with the matching subagent name.
+- Keep complex reasoning, architectural decisions, multi-file refactoring, and cross-cutting changes in the main Opus thread.
+- Do not delegate just because a trigger word appears; the table describes the *primary nature* of the task. "Refactor this function and commit it" is a main-thread task with a `git-ops` step at the end.
+- When a request spans multiple domains, break it into steps and delegate each sub-task to the matching specialist, then handle the rest in the main thread.
+
+### Overlap & precedence
+
+- **`researcher` vs `web-researcher`**: `researcher` searches the **local codebase**; `web-researcher` searches the **external web**. Never send codebase content to `web-researcher`.
+- **`code-writer` vs `comment-writer` vs `doc-writer`**: `code-writer` writes executable code; `comment-writer` writes inline comments and docstrings only; `doc-writer` writes standalone documentation files only. If a request covers several, split it.
+- **`test-runner` → `code-writer`**: let `test-runner` diagnose a failure on Haiku; only escalate to `code-writer` (or the main thread, if the fix is non-trivial) once the cause is known.
+- **`git-ops` is last**: run it *after* the content work is done, not before, so it only handles staging/committing/branching.
+---
+
+
 ## Data model
 
 `Animation` owns `QList<Frame*> frame_list`.
@@ -224,7 +255,7 @@ Both sets are a `StickXf` and live in the stick's own frame (origin P1, +y along
 `StickXf::Matrix()` composes a set as flip, then scale, then offset, then rotation.
 - Rotation and scale pivot on P1, in both sets.
 - A local flip mirrors the shape in place: about the image's centre for an image type, and
-  about the stick's midpoint `(0, len/2)` otherwise (`LocalTransform(len)`). The pivot depends
+  about the stick's midpoint `(0, len/2)` otherwise (`ShapeCentre(len)`). The pivot depends
   only on the spine and the internal placement, never on vertices, so a vertex edit cannot move
   it under the others.
 - A global flip pivots on P1 like the rest of the global set. It mirrors the whole branch at the
@@ -306,6 +337,30 @@ about 1e-5 px, since `img_angle` is a `float`.
   for a global one (`RefreshTransformed()`). They used to refresh the whole figure, a bounding rect
   and a text layout per stick, per tick.
 
+**The DISPLACE tool** (`#define DISPLACE 29`, the button next to Weld) edits the same numbers on
+the canvas. It selects like the arrow tool: it shares `NOTOOL`'s branch of `mousePressEvent()` and
+`mouseMoveEvent()`, with click, Shift/Alt, rubber band and Ctrl vertices. It shows no transformation
+box and never runs the skeleton-rotating drag. Instead it draws two handles on the current stick
+(`DisplaceHandles()`): a square on the drawn centre (`DrawnCentre()`, which moves the shape) and a knob
+on a stem along the drawn stick (which turns the shape about that centre). A press on a stick selects
+it and then drags its shape, so one gesture picks and moves. What the tool does:
+- **It edits the set the tab shows.** `MyView::displace_global` follows the Local | Global bar,
+  so the tab always shows what the tool edits, and Global moves the descendants too.
+- **The math is in `StickData`.** `MoveDrawnShape()` pulls the scene drag back through what comes
+  after the set (`AfterSet()`). `TurnDrawnShape()` solves for the offset that keeps the centre still.
+  Both are exact under any surrounding flips, scales and inherited globals. A mirrored frame turns
+  the set the other way, so the shape turns the way the cursor did on screen.
+- **No drift.** `DragDisplace()` restores the set latched at press and re-applies the whole drag
+  each move, rather than the step since the last event.
+- **No empty undo steps.** The `StoreUndo()` waits for the first move past Qt's drag distance, so a
+  click that only selects pushes nothing.
+
+**"Reset transform"** in the tab (`Widget::ResetTransform()`) puts the shown set back to rest as one
+undo step, or does nothing when it already is.
+
+`DisplaceMovesAndTurnsTheDrawnShapeExactly` (checked to fail without the mirror sign) and
+`DisplaceToolMovesAndTurnsViaRealMouseEvents` pin the tool.
+
 `StickTransformMovesEveryTypeAndMigratesOldPlacement`,
 `GlobalTransformMovesTheBranchAndReachesRenderClones`, `StickTransformFlipsAndVersion10`,
 `MultilineEditsWhereItIsDrawnUnderATransform` (with an ancestor's global and flips),
@@ -333,6 +388,37 @@ The UI is a single "Convert to" row (combo + button; `convert_type_combo` in `ui
 its parent is the row). A widget has one parent, so `Animation::UpdateTab()` moves that row
 to the top of the first advanced panel of whatever type it is showing, and preselects that
 type.
+
+### Copying and pasting a stick branch
+
+The Transform tab's "Copy sticks"/"Paste sticks"/"Paste sticks at origin" buttons
+(`copyStickBtn`/`pasteStickBtn`/`pasteStickAtOriginBtn`) act on
+the ONE selected stick (`MyView::SingleSelectedStick()`: the current stick, but not during a
+multi-selection or a 2-click draw). There is no multi-stick selection, so a copy is that stick plus
+everything in its `children` list, which already holds every descendant. **A master copies its own
+chain only**: the stepchildren hanging from its P1 and their chains stay behind (a chain is on the
+side of its stick hanging from the master, the test `Weld()` uses). Both methods return a
+refusal string, and Widget shows it as a warning, the `GenerateInbetweens()` shape.
+- **Copy** (`MyView::CopyStickBranch()`) pushes no undo step. It replaces `stick_copy_buffer`, a
+  `StickFigureData` built by `ExtractStickBranch()` whose `master_stick` is the copied stick. The
+  buffer is freed by the next copy and by `~MyView()`, and undo never touches it.
+- **Paste** (`MyView::PasteStickBranch(at_origin)`) is one `StoreUndo()`. `GraftStickBranch()`
+  clones the buffer (so it can be pasted again), gives every pasted stick the `stepchild` flag of
+  the side it lands on, rebuilds the flattened `children`, remaps the IK links and sanitizes the
+  chains the copy cut. Where it lands:
+  - "Paste sticks": the root's P1 on the selected stick's P2, hanging from that stick, on its side.
+  - "Paste sticks at origin": the root's P1 on the selected stick's P1, hanging from that stick's
+    parent, beside it and on its side. So at a stepchild hanging from the master it starts from
+    the master's origin too. A master has no parent: the paste hangs from the master itself, at
+    its origin, as a stepchild chain.
+  - With no stick selected and an EMPTY current layer, both buttons paste the branch where it was
+    copied, and its root becomes the layer's master, so no pasted stick is a stepchild. That is
+    `GraftStickBranch(figure, nullptr, ...)`. It is refused mid-draw: a figure's first stick is
+    already its master while being drawn, though `stick_list` is still empty.
+
+`CopyPasteStickBranch` (checked to fail with the master's stepchild exclusion removed),
+`PasteStickBranchAtOrigin` (checked to fail with the master's stepchild rule removed) and
+`PasteStickBranchIntoEmptyLayer` (checked to fail without the new master) pin it.
 
 ### View navigation: zoom view, rotate view, pan view, reset
 
@@ -417,6 +503,18 @@ opposite: every change of width went to the canvas until its minimum, so the can
 crushed while the tools column kept a hundred unneeded pixels. No stretch factor can express
 the rule either, because a stretch factor applies to growing as well. Measured by dragging
 the window edge in 10 px steps, 1920 -> 1500 -> 1920: no drift.
+
+**The tools column widens until all its tabs show, while the canvas can spare it**
+(`BottomRowSplitter::FitToolTabs()`). The width comes from the canvas, but only if the canvas
+viewport still fits 130% of the frame's on-screen width afterwards. Height is not checked, since
+the column takes only width. The column never gets wider than the tab bar's `sizeHint()`. The fit
+runs on a resize and on a `LayoutRequest` to `toolsTabWidget`, which a tab insert or remove posts,
+so selecting another stick type triggers it. While a mouse button is held it waits, because the
+press that selects a stick is the one that changes the tabs, and widening then would slide the
+canvas under the drag it starts. It only grows: a shorter tab set doesn't shrink the column back,
+or the canvas would shift on every selection. Once the user drags that column's handle, it stops
+for good. Measured at 1900 px: the trapezoid tab set took the column from 201 to 370 px. At
+1350 px the canvas is under 130% and the column returns to scroll arrows.
 
 The .ui's icon buttons paint their 50 px PNGs through the stylesheet **`image:`** property,
 never `background-image:`. A background image is never scaled, so a button the layout
@@ -1541,9 +1639,7 @@ before it is displayed must therefore null-check `linked_item` —
 
 ## Conventions
 
-- Comments are a mix of Italian and English; match whichever the
-  surrounding function uses. Comments explain *why* (a guard's reason, a
-  workaround), never *what*.
+- Comments should always be in english, if you find italian comments, translate them.
 - Refactored/new code (from refactor Phase 1 on): plain, navigable C++ (no
   clever tricks), English Doxygen on every touched symbol — `@brief`/
   `@param`/`@return` in headers, `@details` (the symbol's relevance) in
@@ -1572,8 +1668,8 @@ before it is displayed must therefore null-check `linked_item` —
 ## Tests
 
 `tests/tests.pro` is a standalone qmake QtTest project (characterization
-suite, docs/REFACTOR_PLAN.md Phase 0, 135 tests as of the Stick Transform's local/global sets —
-134 passing plus the one font-dependent skip). Note the slots share
+suite, docs/REFACTOR_PLAN.md Phase 0, 140 tests as of stick copy/paste —
+139 passing plus the one font-dependent skip). Note the slots share
 ONE animation and run in declaration order: a test that leaves the current
 frame somewhere other than the last one breaks every later test that
 assumes `AddFrame()` appends (see the closing `MoveToFrame()` in

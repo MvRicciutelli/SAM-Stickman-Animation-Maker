@@ -78,7 +78,7 @@ public:
         TEXT = 25       ///< paragraph of text laid out along the stick; the skeleton is
                         ///< invisible (drawn only while `text` is empty, i.e. during the
                         ///< 2-click drawing preview). Content/font/layout live in the
-                        ///< text_* fields below, placement in img_offset/img_angle_offset
+                        ///< text_* fields below, placement in the Stick Transform (local_xf)
     };
 
     /**
@@ -457,6 +457,25 @@ public:
      *        along @p drawn. The one place a MULTILINE's spine is rebuilt from drawn endpoints.
      */
     void SetDrawnLine(const QLineF &drawn);
+    /**
+     * @brief The middle of the shape before any Stick Transform, in the stick's own frame: the
+     *        image's centre for an image type, the stick's midpoint (0, len/2) otherwise. The
+     *        local flips mirror about it, and the displace tool turns the shape about it.
+     */
+    QPointF ShapeCentre(qreal len) const;
+    /// @brief ShapeCentre() as drawn, i.e. through every Stick Transform, in scene coordinates.
+    QPointF DrawnCentre() const;
+    /**
+     * @brief Moves the drawn shape by @p scene_delta by editing local_xf, or global_xf when
+     *        @p global (which moves the descendants too). Exact whatever transforms surround
+     *        the edited set.
+     */
+    void MoveDrawnShape(const QPointF &scene_delta, bool global);
+    /**
+     * @brief Turns the drawn shape by @p degrees on screen (clockwise, Qt's convention) about
+     *        DrawnCentre(), by editing local_xf, or global_xf when @p global.
+     */
+    void TurnDrawnShape(qreal degrees, bool global);
 
     /**
      * @brief Role of a stick inside an inverse-kinematics chain (the DRAW_IK tool,

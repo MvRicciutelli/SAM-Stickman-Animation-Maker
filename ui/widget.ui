@@ -2454,6 +2454,49 @@ QPushButton:pressed{
                               </widget>
                              </item>
                              <item>
+                              <widget class="QPushButton" name="displaceToolBtn">
+                               <property name="minimumSize">
+                                <size>
+                                 <width>25</width>
+                                 <height>25</height>
+                                </size>
+                               </property>
+                               <property name="maximumSize">
+                                <size>
+                                 <width>50</width>
+                                 <height>50</height>
+                                </size>
+                               </property>
+                               <property name="toolTip">
+                                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Displace:&lt;/p&gt;&lt;p&gt;select a stick, then drag it or its centre square to move its shape, and drag the round knob to turn it about its centre. The skeleton stays put: this edits the stick's Stick Transform.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                               </property>
+                               <property name="styleSheet">
+                                <string notr="true">QPushButton {
+    qproperty-icon: url(&quot; &quot;); /* empty image */
+    qproperty-iconSize: 16px 16px; /* space for the background image */
+    image: url(:/resources/displace_00001.png);
+    width: 50px;
+    height: 50px;
+    background-repeat: no-repeat;
+	border: 0px solid #5A5A5A;
+}
+QPushButton:hover{
+    image: url(:/resources/displace_00002.png);
+    background-repeat: no-repeat;
+	background-color: rgb(25, 25, 25)
+}
+QPushButton:pressed{
+    image: url(:/resources/displace_00003.png);
+    background-repeat: no-repeat;
+}
+</string>
+                               </property>
+                               <property name="text">
+                                <string/>
+                               </property>
+                              </widget>
+                             </item>
+                             <item>
                               <widget class="QPushButton" name="splitStick">
                                <property name="minimumSize">
                                 <size>
@@ -2487,6 +2530,162 @@ QPushButton:hover{
 }
 QPushButton:pressed{
     image: url(:/resources/chopchop_00003.png);
+    background-repeat: no-repeat;
+}
+</string>
+                               </property>
+                               <property name="text">
+                                <string/>
+                               </property>
+                              </widget>
+                             </item>
+                            </layout>
+                           </widget>
+                          </item>
+                          <item>
+                           <widget class="QGroupBox" name="copyPasteStickBox">
+                            <property name="maximumSize">
+                             <size>
+                              <width>16777215</width>
+                              <height>55</height>
+                             </size>
+                            </property>
+                            <property name="title">
+                             <string/>
+                            </property>
+                            <layout class="QHBoxLayout" name="copyPasteStickLayout">
+                             <property name="leftMargin">
+                              <number>0</number>
+                             </property>
+                             <property name="topMargin">
+                              <number>0</number>
+                             </property>
+                             <property name="rightMargin">
+                              <number>0</number>
+                             </property>
+                             <property name="bottomMargin">
+                              <number>0</number>
+                             </property>
+                             <item>
+                              <widget class="QPushButton" name="copyStickBtn">
+                               <property name="minimumSize">
+                                <size>
+                                 <width>25</width>
+                                 <height>25</height>
+                                </size>
+                               </property>
+                               <property name="maximumSize">
+                                <size>
+                                 <width>50</width>
+                                 <height>50</height>
+                                </size>
+                               </property>
+                               <property name="toolTip">
+                                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Copy Sticks:&lt;/p&gt;&lt;p&gt;copy the selected stick together with every stick hanging from it&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                               </property>
+                               <property name="styleSheet">
+                                <string notr="true">QPushButton {
+    qproperty-icon: url(&quot; &quot;); /* empty image */
+    qproperty-iconSize: 16px 16px; /* space for the background image */
+    image: url(:/resources/copystickfigure_00001.png);
+    width: 50px;
+    height: 50px;
+    background-repeat: no-repeat;
+	border: 0px solid #5A5A5A;
+}
+QPushButton:hover{
+    image: url(:/resources/copystickfigure_00002.png);
+    background-repeat: no-repeat;
+	background-color: rgb(25, 25, 25)
+}
+QPushButton:pressed{
+    image: url(:/resources/copystickfigure_00003.png);
+    background-repeat: no-repeat;
+}
+</string>
+                               </property>
+                               <property name="text">
+                                <string/>
+                               </property>
+                              </widget>
+                             </item>
+                             <item>
+                              <widget class="QPushButton" name="pasteStickBtn">
+                               <property name="minimumSize">
+                                <size>
+                                 <width>25</width>
+                                 <height>25</height>
+                                </size>
+                               </property>
+                               <property name="maximumSize">
+                                <size>
+                                 <width>50</width>
+                                 <height>50</height>
+                                </size>
+                               </property>
+                               <property name="toolTip">
+                                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Paste Sticks:&lt;/p&gt;&lt;p&gt;paste the copied sticks as children of the selected stick, starting from its free end&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                               </property>
+                               <property name="styleSheet">
+                                <string notr="true">QPushButton {
+    qproperty-icon: url(&quot; &quot;); /* empty image */
+    qproperty-iconSize: 16px 16px; /* space for the background image */
+    image: url(:/resources/pastestickfigure_00001.png);
+    width: 50px;
+    height: 50px;
+    background-repeat: no-repeat;
+	border: 0px solid #5A5A5A;
+}
+QPushButton:hover{
+    image: url(:/resources/pastestickfigure_00002.png);
+    background-repeat: no-repeat;
+	background-color: rgb(25, 25, 25)
+}
+QPushButton:pressed{
+    image: url(:/resources/pastestickfigure_00003.png);
+    background-repeat: no-repeat;
+}
+</string>
+                               </property>
+                               <property name="text">
+                                <string/>
+                               </property>
+                              </widget>
+                             </item>
+                             <item>
+                              <widget class="QPushButton" name="pasteStickAtOriginBtn">
+                               <property name="minimumSize">
+                                <size>
+                                 <width>25</width>
+                                 <height>25</height>
+                                </size>
+                               </property>
+                               <property name="maximumSize">
+                                <size>
+                                 <width>50</width>
+                                 <height>50</height>
+                                </size>
+                               </property>
+                               <property name="toolTip">
+                                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Paste Sticks at Origin:&lt;/p&gt;&lt;p&gt;paste the copied sticks at the origin of the selected stick, beside it, hanging from its parent. On the master stick they start from its origin as a stepchild chain&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                               </property>
+                               <property name="styleSheet">
+                                <string notr="true">QPushButton {
+    qproperty-icon: url(&quot; &quot;); /* empty image */
+    qproperty-iconSize: 16px 16px; /* space for the background image */
+    image: url(:/resources/pasteFrame_00001.png);
+    width: 50px;
+    height: 50px;
+    background-repeat: no-repeat;
+	border: 0px solid #5A5A5A;
+}
+QPushButton:hover{
+    image: url(:/resources/pasteFrame_00002.png);
+    background-repeat: no-repeat;
+	background-color: rgb(25, 25, 25)
+}
+QPushButton:pressed{
+    image: url(:/resources/pasteFrame_00003.png);
     background-repeat: no-repeat;
 }
 </string>

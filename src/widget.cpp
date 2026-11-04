@@ -211,18 +211,18 @@ Widget::Widget(QWidget *parent)
     img_list_widget = ui->imgListWidget;
     advanced_rect_tab = new AdvancedTab();
 
-    // ---- pannello "Stick Transform" (ogni tipo di stick): offset, scala e rotazione erano il ----
-    // ---- gruppo in cima al pannello immagine, e sono proprio quei widget — riparentati, non ----
-    // ---- ricostruiti, così gli slot on_img*_valueChanged() che il .ui auto-connette restano --
-    // Ha il suo QScrollArea per la stessa ragione del pannello immagine: un QTabWidget è alto
-    // quanto la sua pagina più alta, e il gruppo è alto 400 px fissi.
+    // ---- "Stick Transform" panel (every stick type): offset, scale and rotation used to be the --
+    // ---- group at the top of the image panel, and these are those very widgets, re-parented ---
+    // ---- rather than rebuilt, so the on_img*_valueChanged() slots the .ui auto-connects stay ---
+    // It has its own QScrollArea for the image panel's reason: a QTabWidget is as tall as its
+    // tallest page, and the group is a fixed 400 px.
     advanced_transform_tab = new QWidget();
     {
         QVBoxLayout *col = new QVBoxLayout(advanced_transform_tab);
         col->setContentsMargins(0, 0, 0, 0);
-        // Local e Global: gli stessi controlli su uno dei due insiemi di parametri dello stick
-        // (StickData::local_xf / global_xf). Una barra senza pagine invece di due pagine di
-        // controlli duplicati, così gli slot auto-connessi dal .ui restano uno per controllo
+        // Local and Global: the same controls on either of the stick's two parameter sets
+        // (StickData::local_xf / global_xf). A bar with no pages instead of two pages of
+        // duplicated controls, so the slots the .ui auto-connects stay one per control
         transform_mode_bar = new QTabBar(advanced_transform_tab);
         transform_mode_bar->addTab(tr("Local"));
         transform_mode_bar->addTab(tr("Global"));
@@ -232,7 +232,7 @@ Widget::Widget(QWidget *parent)
         col->addWidget(transform_mode_bar);
         QScrollArea *scroll = new QScrollArea(advanced_transform_tab);
         scroll->setWidgetResizable(true);
-        scroll->setWidget(ui->groupBox_5); // riparenta, e questo lo toglie dal pannello immagine
+        scroll->setWidget(ui->groupBox_5); // re-parents, which takes it out of the image panel
         col->addWidget(scroll, 1);
         QHBoxLayout *flips = new QHBoxLayout();
         flip_h_check = new QCheckBox(tr("Flip horizontal"), advanced_transform_tab);
@@ -242,17 +242,22 @@ Widget::Widget(QWidget *parent)
         flips->addWidget(flip_h_check);
         flips->addWidget(flip_v_check);
         col->addLayout(flips);
+        QPushButton *reset_btn = new QPushButton(tr("Reset transform"), advanced_transform_tab);
+        reset_btn->setToolTip(tr("Puts back this stick's Local (or Global, whichever is shown) "
+                                 "transform: no offset, rotation, scale or flip"));
+        col->addWidget(reset_btn);
+        connect(reset_btn, &QPushButton::clicked, this, [this]{ ResetTransform(); });
 
         refresh_transform_panel = [this](StickData *cs){
             const StickXf &xf = EditedXf(cs);
-            // eco a segnali zittiti: riallineare i controlli allo stick selezionato passerebbe
-            // altrimenti per una modifica dell'utente e spingerebbe un undo a vuoto
+            // echoed with signals muted: re-aligning the controls to the selected stick would
+            // otherwise pass for a user edit and push an empty undo step
             auto echo = [](QSlider *slider, QSpinBox *box, int value){
                 QSignalBlocker mute_slider(slider), mute_box(box);
                 slider->setValue(value);
                 box->setValue(value);
             };
-            // l'inversa di SliderScale()
+            // the inverse of SliderScale()
             auto scale_to_slider = [](qreal s){ return qRound(s >= 1 ? 10*(s-1) : -10*(1/s-1)); };
             echo(img_h_offset_slider, img_h_offset_spinbox, qRound(xf.offset.x()));
             echo(img_v_offset_slider, img_v_offset_spinbox, qRound(xf.offset.y()));
@@ -263,7 +268,8 @@ Widget::Widget(QWidget *parent)
             flip_h_check->setChecked(xf.flip_h);
             flip_v_check->setChecked(xf.flip_v);
         };
-        connect(transform_mode_bar, &QTabBar::currentChanged, this, [this]{
+        connect(transform_mode_bar, &QTabBar::currentChanged, this, [this](int index){
+            view->displace_global = (index == 1); // the displace tool edits the set the tab shows
             StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
             if(cs != nullptr)
                 refresh_transform_panel(cs);
@@ -1973,6 +1979,24 @@ void Widget::RefreshTransformed(StickData *cs)
                 s->view->Refresh(1);
 }
 
+/// @details One undo step, and none when the set is already at rest, like a flip toggle.
+void Widget::ResetTransform()
+{
+    StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
+    if(cs == nullptr)
+        return;
+    StickXf &xf = EditedXf(cs);
+    if(xf.IsIdentity())
+        return;
+    view->StoreUndo(CMD_SIMPLE);
+    xf = StickXf();
+    RefreshTransformed(cs);
+    refresh_transform_panel(cs);
+    view->my_animation->current_frame->UpdateIcon();
+    if(view->viewport())
+        view->viewport()->update(); // the displace tool's handles follow the shape
+}
+
 /// @details One undo step per toggle, like every other per-stick control of the panel.
 void Widget::SetTransformFlip(bool horizontal, bool on)
 {
@@ -2242,26 +2266,57 @@ namespace {
  * it has beyond what its content needs. It grows back up to `preferred`: its starting width, or
  * the width the user last dragged it to. Below the columns' needs QSplitter's own rule applies
  * again: the canvas shrinks to its minimum, then the columns scroll.
+ *
+ * The tools column also widens, from the canvas, until every tab of `tools_tabs` shows instead
+ * of the scroll arrows, but only while the canvas still fits 130% of the frame's on-screen
+ * width, and never past what the tabs need. That runs on a resize and whenever the tabs change
+ * (selecting another stick type), and stops for good once the user drags that column's handle.
  */
 class BottomRowSplitter : public QSplitter
 {
 public:
     explicit BottomRowSplitter(QWidget *parent) : QSplitter(Qt::Horizontal, parent)
     {
-        connect(this, &QSplitter::splitterMoved, this, [this]{ preferred = sizes(); });
+        connect(this, &QSplitter::splitterMoved, this, [this](int, int index){
+            preferred = sizes();
+            tools_dragged |= index == 1; // handle 1 is the tools column's right edge
+        });
+        fit_timer.setSingleShot(true);
+        connect(&fit_timer, &QTimer::timeout, this, [this]{
+            // the press that selects a stick changes the tabs: widening now would slide the
+            // canvas under the drag that press starts
+            if(QGuiApplication::mouseButtons() != Qt::NoButton){
+                fit_timer.start(100);
+                return;
+            }
+            QList<int> s = sizes();
+            if(FitToolTabs(s))
+                setSizes(s);
+        });
     }
     QList<int> preferred; ///< per widget, as sizes(); the canvas's entry is not used
     static constexpr int CANVAS = 1;
+    QTabWidget *tools_tabs = nullptr; ///< the tools column's tabs, watched by eventFilter()
+    QGraphicsView *canvas = nullptr;  ///< the view showing my_rect
+    QTimer fit_timer;                 ///< runs FitToolTabs() once events settle
+
+    /// A tab inserted into or removed from `tools_tabs` posts it a LayoutRequest.
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if(event->type() == QEvent::LayoutRequest)
+            fit_timer.start(0);
+        return QSplitter::eventFilter(watched, event);
+    }
 
 protected:
     void resizeEvent(QResizeEvent *event) override
     {
-        QList<int> s = sizes(); // ancora quelle di prima del ridimensionamento
+        QList<int> s = sizes(); // still the ones from before the resize
         QSplitter::resizeEvent(event);
         const int delta = event->size().width() - event->oldSize().width();
         if(event->oldSize().width() < 0 || delta == 0 || preferred.size() != s.size())
             return;
-        // stringendo si prende il margine di ogni colonna, allargando si restituisce il perso
+        // narrowing takes each column's spare width, widening gives back what was taken
         QList<int> room(s.size(), 0);
         int total = 0;
         for(int i = 0; i < s.size(); i++){
@@ -2277,17 +2332,49 @@ protected:
         const int sign = delta < 0 ? -1 : 1;
         int left = moved;
         for(int i = 0; i < s.size() && total > 0; i++){
-            const int share = int(qint64(moved) * room[i] / total); // in proporzione al margine
+            const int share = int(qint64(moved) * room[i] / total); // in proportion to the spare width
             s[i] += sign * share;
             left -= share;
         }
-        for(int i = 0; i < s.size() && left > 0; i++) // gli avanzi dell'arrotondamento
+        for(int i = 0; i < s.size() && left > 0; i++) // the rounding leftovers
             if(room[i] > 0){
                 s[i] += sign;
                 left--;
             }
         s[CANVAS] += delta - sign * moved;
+        FitToolTabs(s);
         setSizes(s);
+    }
+
+private:
+    bool tools_dragged = false;
+
+    /**
+     * @brief Widens the tools column in `s`, taking the width from the canvas, until every tab
+     *        shows, if the canvas then still fits 130% of the frame's on-screen width.
+     * @param s target sizes; the widgets themselves still have their current ones.
+     * @return whether `s` changed.
+     */
+    bool FitToolTabs(QList<int> &s) const
+    {
+        // my_rect: a message box from the constructor's library load runs the timer before it exists
+        if(tools_dragged || tools_tabs == nullptr || canvas == nullptr || my_rect == nullptr
+           || s.size() <= CANVAS)
+            return false;
+        // the tab bar gets the tab widget's width from its own x on, so this is what the
+        // column is short of (negative: what it has to spare)
+        const QTabBar *bar = tools_tabs->tabBar();
+        const int short_of = bar->sizeHint().width() - (tools_tabs->width() - bar->x());
+        const int grow = widget(0)->width() + short_of - s[0];
+        if(grow <= 0)
+            return false;
+        const int viewport = canvas->viewport()->width() + s[CANVAS] - widget(CANVAS)->width() - grow;
+        // ponytail: width only, since that's all the column takes; a short canvas doesn't block it
+        if(viewport < 1.3 * canvas->mapFromScene(my_rect->sceneBoundingRect()).boundingRect().width())
+            return false;
+        s[0] += grow;
+        s[CANVAS] -= grow;
+        return true;
     }
 };
 
@@ -2303,8 +2390,8 @@ void Widget::BuildResizableSidebars()
     BottomRowSplitter *split = new BottomRowSplitter(ui->bottomframe);
     QList<int> sizes;
     auto add_column = [&](QWidget *column){
-        // i limiti fissi del .ui impedirebbero sia di allargare la colonna sia di farla
-        // scorrere: senza minimo esplicito l'area di scorrimento usa quello del contenuto
+        // the .ui's fixed limits would stop the column both from widening and from scrolling:
+        // with no explicit minimum the scroll area uses its content's
         column->setMinimumSize(0, 0);
         column->setMaximumWidth(QWIDGETSIZE_MAX);
         QScrollArea *area = new QScrollArea;
@@ -2313,24 +2400,28 @@ void Widget::BuildResizableSidebars()
         area->setFrameShape(QFrame::NoFrame);
         split->addWidget(area);
         split->setCollapsible(split->count() - 1, false);
-        // posto per la barra verticale fin dall'inizio, o la sua comparsa farebbe comparire
-        // anche quella orizzontale
+        // room for the vertical bar from the start, or its appearing would bring the
+        // horizontal one along too
         sizes << column->sizeHint().width() + scroll_bar;
     };
     add_column(ui->toolsFrame);
-    ui->viewBox->setMinimumSize(0, 0); // era 800x500: la vista scorre già da sé
+    ui->viewBox->setMinimumSize(0, 0); // was 800x500: the view already scrolls by itself
     split->addWidget(ui->viewFrame);
     split->setCollapsible(1, false);
-    // lo spazio in più va alla tela, non alle colonne (che però cedono il loro margine per
-    // prime: vedi BottomRowSplitter)
+    // extra space goes to the canvas, not to the columns (which do give up their spare width
+    // first: see BottomRowSplitter)
     split->setStretchFactor(1, 1);
     sizes << ui->viewFrame->sizeHint().width();
     add_column(ui->groupBox_3);
     add_column(ui->layersFrame);
     split->setSizes(sizes);
     split->preferred = sizes;
-    // le maniglie di default sono invisibili: una riga fissa che si accende al passaggio
-    // del mouse mostra dove trascinare
+    split->tools_tabs = ui->toolsTabWidget;
+    split->canvas = view;
+    ui->toolsTabWidget->installEventFilter(split);
+    split->fit_timer.start(0); // once the window is shown and laid out
+    // the default handles are invisible: a fixed line that lights up on hover shows where
+    // to drag
     split->setObjectName("sidebarSplitter");
     split->setHandleWidth(7);
     split->setStyleSheet("#sidebarSplitter::handle { background: palette(mid); margin: 0 2px; }"
@@ -3468,6 +3559,34 @@ void Widget::on_lineThicknessSlider_sliderMoved(int position)
 void Widget::on_clampToolBtn_clicked()
 {
     view->SetTool(CLAMP);
+}
+
+/// @details Switches to the displace tool (MyView's DISPLACE): select a stick, then move/turn its
+/// drawn shape through its Stick Transform.
+void Widget::on_displaceToolBtn_clicked()
+{
+    view->SetTool(DISPLACE);
+}
+/// @details "Copy sticks": MyView::CopyStickBranch(), whose refusal is shown as a warning.
+void Widget::on_copyStickBtn_clicked()
+{
+    QString refusal = view->CopyStickBranch();
+    if(!refusal.isEmpty())
+        QMessageBox::warning(this, tr("Copy sticks"), refusal);
+}
+/// @details "Paste sticks": MyView::PasteStickBranch(), whose refusal is shown as a warning.
+void Widget::on_pasteStickBtn_clicked()
+{
+    QString refusal = view->PasteStickBranch(false);
+    if(!refusal.isEmpty())
+        QMessageBox::warning(this, tr("Paste sticks"), refusal);
+}
+/// @details "Paste sticks at origin": MyView::PasteStickBranch(true), whose refusal is shown as a warning.
+void Widget::on_pasteStickAtOriginBtn_clicked()
+{
+    QString refusal = view->PasteStickBranch(true);
+    if(!refusal.isEmpty())
+        QMessageBox::warning(this, tr("Paste sticks at origin"), refusal);
 }
 ///@brief switches to the polygon drawing tool
 void Widget::on_addPolyBtn_clicked()

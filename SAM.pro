@@ -9,7 +9,7 @@ QT += core-private
 
 CONFIG += c++11
 
-VERSION = 0.9.0
+VERSION = 0.10.0
 # one source of truth for the version: the About box and the update check read APP_VERSION
 DEFINES += APP_VERSION=\\\"$$VERSION\\\"
 QMAKE_TARGET_COMPANY = "Matteo Vittorio Ricciutelli"

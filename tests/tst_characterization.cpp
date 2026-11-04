@@ -2169,6 +2169,185 @@ private slots:
         QCOMPARE(drawn->my_line.p2(), QPointF(100, 200));
     }
 
+    // "Copy sticks"/"Paste sticks" (MyView::CopyStickBranch()/PasteStickBranch()): the copy
+    // takes the selected stick and its descendants and pushes no undo step; the paste hangs a
+    // copy from the selected stick (root P1 on its P2) as ONE undo step and can be repeated. A
+    // copied master leaves out its stepchildren (hung from its P1) and their chains.
+    void CopyPasteStickBranch()
+    {
+        AddFrame();
+        StickFigure *figure = CurrentStickFigure();
+        StickData *master = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        StickData *arm = DrawStick(QPointF(100, 200), QPointF(150, 250));
+        StickData *hand = DrawStick(QPointF(150, 250), QPointF(180, 260));
+        StickData *step = DrawStick(QPointF(100, 100), QPointF(60, 60)); // from the master's P1
+        StickData *step_child = DrawStick(QPointF(60, 60), QPointF(40, 40));
+        QCOMPARE(hand->parent, arm);
+        QVERIFY(step->stepchild);
+        QCOMPARE(step_child->parent, step);
+        delete view->stick_copy_buffer;
+        view->stick_copy_buffer = nullptr;
+        view->ClearUndo();
+
+        // refusals change nothing
+        QVERIFY(!view->PasteStickBranch().isEmpty()); // nothing copied yet
+        CurrentFrame()->CurrentStickFigure() = nullptr;
+        QVERIFY(!view->CopyStickBranch().isEmpty()); // no stick selected
+        QVERIFY(view->stick_copy_buffer == nullptr);
+        QCOMPARE(view->undo_stack.count(), 0);
+
+        // copy the arm: arm + hand, no undo step
+        view->my_animation->UpdateSelection(arm);
+        QVERIFY(view->CopyStickBranch().isEmpty());
+        QCOMPARE(view->undo_stack.count(), 0);
+        QCOMPARE(view->stick_copy_buffer->stick_list.count(), 2);
+        QVERIFY(view->stick_copy_buffer->master_stick->parent == nullptr);
+
+        // paste under the hand: shifted by hand.P2 - arm.P1 = (80, 60)
+        view->my_animation->UpdateSelection(hand);
+        QVERIFY(view->PasteStickBranch().isEmpty());
+        QCOMPARE(view->undo_stack.count(), 1);
+        QCOMPARE(figure->stick_list.count(), 7);
+        StickData *arm2 = figure->stick_list[5];
+        StickData *hand2 = figure->stick_list[6];
+        QCOMPARE(arm2->my_line, QLineF(180, 260, 230, 310));
+        QCOMPARE(hand2->my_line, QLineF(230, 310, 260, 320));
+        QCOMPARE(arm2->parent, hand);
+        QCOMPARE(hand2->parent, arm2);
+        QVERIFY(arm2->view != nullptr && hand2->view != nullptr);
+        for (StickData *ancestor : {hand, arm, master})
+            QVERIFY(ancestor->children.contains(arm2) && ancestor->children.contains(hand2));
+        QVERIFY(CurrentFrame()->total_sticks.contains(arm2) && CurrentFrame()->total_sticks.contains(hand2));
+        QCOMPARE(figure->current_stick, arm2); // the paste selects the pasted root
+
+        // paste again, under the pasted root itself
+        QVERIFY(view->PasteStickBranch().isEmpty());
+        QCOMPARE(figure->stick_list.count(), 9);
+        QCOMPARE(figure->stick_list[7]->parent, arm2);
+
+        // copying the master takes its own chain (master, arm, hand and the 4 pasted sticks),
+        // not the stepchild nor the stick hanging from it
+        view->my_animation->UpdateSelection(master);
+        QVERIFY(view->CopyStickBranch().isEmpty());
+        QCOMPARE(view->stick_copy_buffer->stick_list.count(), 7);
+        for (StickData *s : view->stick_copy_buffer->stick_list)
+            QVERIFY(!s->stepchild);
+        view->my_animation->UpdateSelection(hand);
+        QVERIFY(view->PasteStickBranch().isEmpty());
+        QCOMPARE(figure->stick_list.count(), 16);
+        StickData *master2 = figure->stick_list[9];
+        QCOMPARE(master2->parent, hand);
+        QCOMPARE(master2->my_line.p1(), hand->my_line.p2());
+        QCOMPARE(master2->children.count(), 6);
+        QCOMPARE(view->undo_stack.count(), 3);
+
+        // each paste undoes on its own (the frame is rebuilt, so read it afresh)
+        view->undo_stack.undo();
+        QCOMPARE(CurrentFrame()->stick_figures.first()->stick_list.count(), 9);
+        view->undo_stack.undo();
+        view->undo_stack.undo();
+        QCOMPARE(CurrentFrame()->stick_figures.first()->stick_list.count(), 5);
+        QVERIFY(view->stick_copy_buffer != nullptr); // undo leaves the buffer alone
+    }
+
+    // "Paste sticks at origin" (MyView::PasteStickBranch(true)): the copy starts at the selected
+    // stick's origin and hangs from its parent, beside it and on its side; on the master it
+    // starts from the master's origin as a stepchild chain
+    void PasteStickBranchAtOrigin()
+    {
+        AddFrame();
+        StickFigure *figure = CurrentStickFigure();
+        StickData *master = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        StickData *arm = DrawStick(QPointF(100, 200), QPointF(150, 250));
+        StickData *hand = DrawStick(QPointF(150, 250), QPointF(180, 260));
+        view->ClearUndo();
+        view->my_animation->UpdateSelection(arm);
+        QVERIFY(view->CopyStickBranch().isEmpty()); // arm + hand
+
+        // at the hand's origin: beside the hand, hanging from the arm
+        view->my_animation->UpdateSelection(hand);
+        QVERIFY(view->PasteStickBranch(true).isEmpty());
+        QCOMPARE(figure->stick_list.count(), 5);
+        StickData *arm2 = figure->stick_list[3];
+        StickData *hand2 = figure->stick_list[4];
+        QCOMPARE(arm2->parent, arm);
+        QCOMPARE(arm2->my_line, QLineF(150, 250, 200, 300));
+        QCOMPARE(hand2->parent, arm2);
+        QVERIFY(!arm2->stepchild && !hand2->stepchild);
+        QVERIFY(!hand->children.contains(arm2));
+        for (StickData *ancestor : {arm, master})
+            QVERIFY(ancestor->children.contains(arm2) && ancestor->children.contains(hand2));
+
+        // at the master's origin: hanging from the master, as a stepchild chain
+        view->my_animation->UpdateSelection(master);
+        QVERIFY(view->PasteStickBranch(true).isEmpty());
+        QCOMPARE(figure->stick_list.count(), 7);
+        StickData *arm3 = figure->stick_list[5];
+        StickData *hand3 = figure->stick_list[6];
+        QCOMPARE(arm3->parent, master);
+        QCOMPARE(arm3->my_line.p1(), master->my_line.p1());
+        QCOMPARE(hand3->parent, arm3);
+        QVERIFY(arm3->stepchild && hand3->stepchild);
+
+        // at the origin of a stepchild hanging from the master: the master's origin again
+        view->my_animation->UpdateSelection(arm3);
+        QVERIFY(view->PasteStickBranch(true).isEmpty());
+        StickData *arm4 = figure->stick_list[7];
+        QCOMPARE(arm4->parent, master);
+        QCOMPARE(arm4->my_line.p1(), master->my_line.p1());
+        QVERIFY(arm4->stepchild && figure->stick_list[8]->stepchild);
+
+        QCOMPARE(view->undo_stack.count(), 3);
+        view->undo_stack.undo();
+        QCOMPARE(CurrentFrame()->stick_figures.first()->stick_list.count(), 7);
+    }
+
+    // Pasting with no stick selected into an EMPTY current layer: either button pastes the branch
+    // where it was copied, its root becoming the layer's master (a stepchild chain stops being
+    // one). With no stick selected in a layer that is not empty, the paste is still refused.
+    void PasteStickBranchIntoEmptyLayer()
+    {
+        AddFrame();
+        DrawStick(QPointF(100, 100), QPointF(100, 200));
+        StickData *step = DrawStick(QPointF(100, 100), QPointF(60, 60)); // from the master's P1
+        StickData *step_child = DrawStick(QPointF(60, 60), QPointF(40, 40));
+        QVERIFY(step->stepchild && step_child->stepchild);
+        const QLineF step_line = step->my_line, step_child_line = step_child->my_line;
+        view->my_animation->UpdateSelection(step);
+        QVERIFY(view->CopyStickBranch().isEmpty()); // step + step_child
+
+        for (bool at_origin : {false, true}) {
+            StickFigure *empty = AddStick("empty");
+            QVERIFY(empty->stick_list.isEmpty() && CurrentFrame()->CurrentStick() == nullptr);
+            view->ClearUndo();
+            QVERIFY(view->PasteStickBranch(at_origin).isEmpty());
+            QCOMPARE(view->undo_stack.count(), 1);
+            QCOMPARE(empty->stick_list.count(), 2);
+            StickData *root = empty->stick_list[0];
+            StickData *child = empty->stick_list[1];
+            QCOMPARE(empty->master_stick, root);
+            QVERIFY(root->parent == nullptr);
+            QCOMPARE(child->parent, root);
+            QVERIFY(root->children.contains(child));
+            QVERIFY(!root->stepchild && !child->stepchild);
+            QCOMPARE(root->my_line, step_line); // where it was copied
+            QCOMPARE(child->my_line, step_child_line);
+            QVERIFY(root->view != nullptr && CurrentFrame()->total_sticks.contains(child));
+            QCOMPARE(CurrentFrame()->CurrentStickFigure(), empty);
+            QCOMPARE(CurrentFrame()->CurrentStick(), root);
+            view->undo_stack.undo();
+            QVERIFY(CurrentFrame()->stick_figures.last()->stick_list.isEmpty());
+        }
+
+        // no stick selected, layer not empty: refused, nothing changes
+        CurrentFrame()->CurrentStickFigure() = CurrentFrame()->stick_figures.first();
+        CurrentFrame()->CurrentStick() = nullptr;
+        view->ClearUndo();
+        QVERIFY(!view->PasteStickBranch().isEmpty());
+        QCOMPARE(view->undo_stack.count(), 0);
+        QCOMPARE(CurrentFrame()->stick_figures.first()->stick_list.count(), 3);
+    }
+
     void MergeTwoStickFigures()
     {
         AddFrame();
@@ -3537,6 +3716,96 @@ private slots:
         QVERIFY2(QLineF(after.map(QPointF(0, 0)), centre).length() < 1.0,
                  "exiting moved the drawing away from where it was painted");
         view->SetTool(NOTOOL);
+    }
+
+    // StickData::MoveDrawnShape()/TurnDrawnShape(), the DISPLACE tool's math: whichever set is
+    // edited and whatever surrounds it (here an ancestor's mirrored, scaled, turned global, the
+    // stick's own flipped and stretched local, its own global), a move takes the drawn centre exactly
+    // along the drag, and a turn spins the drawn shape about that centre by the asked angle ON
+    // SCREEN — the mirror is what flips the sign the set itself has to turn by
+    void DisplaceMovesAndTurnsTheDrawnShapeExactly()
+    {
+        StickData arm;
+        arm.stick_type = StickData::LINE;
+        arm.my_line = QLineF(60, 40, 100, 100);
+        arm.global_xf.angle = -25;
+        arm.global_xf.scale = QPointF(1.5, 1.5);
+        arm.global_xf.flip_h = true;
+        StickData stick;
+        stick.stick_type = StickData::RECT;
+        stick.my_line = QLineF(100, 100, 160, 180);
+        stick.img_angle = float(-qAtan2(60, 80) * 180.0 / M_PI);
+        stick.parent = &arm;
+        stick.local_xf.offset = QPointF(7, -3);
+        stick.local_xf.angle = 20;
+        stick.local_xf.scale = QPointF(0.6, 1.3);
+        stick.local_xf.flip_v = true;
+        stick.global_xf.angle = 10;
+        stick.global_xf.scale = QPointF(1.2, 1.2);
+        const QLineF skeleton = stick.my_line;
+        const qreal len = stick.my_line.length();
+        auto near = [](QPointF a, QPointF b) { return QLineF(a, b).length() < 1e-3; };
+        // a point of the shape away from its centre, to watch it turn
+        auto marker = [&] { return stick.ShapeFrame().map(stick.ShapeCentre(len) + QPointF(9, 14)); };
+        for (bool global : {false, true}) {
+            const QPointF centre = stick.DrawnCentre();
+            stick.MoveDrawnShape(QPointF(25, -40), global);
+            QVERIFY2(near(stick.DrawnCentre(), centre + QPointF(25, -40)), "the move did not follow the drag");
+            const QPointF pivot = stick.DrawnCentre();
+            const QPointF before = marker();
+            stick.TurnDrawnShape(35, global);
+            QVERIFY2(near(stick.DrawnCentre(), pivot), "the turn moved the centre");
+            QTransform expected;
+            expected.translate(pivot.x(), pivot.y());
+            expected.rotate(35);
+            expected.translate(-pivot.x(), -pivot.y());
+            QVERIFY2(near(marker(), expected.map(before)), "the turn is not 35 degrees on screen about the centre");
+        }
+        QCOMPARE(stick.my_line, skeleton); // the skeleton never moves
+    }
+
+    // The DISPLACE tool through real mouse events: a click selects and leaves no undo step, a drag
+    // on the stick moves its drawn shape (not the skeleton) as one undo step, and dragging the knob
+    // a quarter turn about the centre turns the shape a quarter turn
+    void DisplaceToolMovesAndTurnsViaRealMouseEvents()
+    {
+        struct Restore { MyView *v; ~Restore() { v->SetTool(NOTOOL); } } restore{view};
+        AddFrame();
+        view->resize(800, 600);
+        StickData *stick = DrawStick(QPointF(200, 200), QPointF(200, 320));
+        const QLineF skeleton = stick->my_line;
+        view->SetTool(DISPLACE);
+        auto at = [this](QPointF scene) { return view->mapFromScene(scene); };
+        // QUndoStack's index stops growing at the undo limit, its signal doesn't
+        QSignalSpy pushes(&view->undo_stack, &QUndoStack::indexChanged);
+
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(200, 260)));
+        QCOMPARE(CurrentFrame()->CurrentStick(), stick);
+        QCOMPARE(pushes.count(), 0);
+
+        const QPointF centre = stick->DrawnCentre();
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(200, 260)));
+        QTest::mouseMove(view->viewport(), at(QPointF(230, 270)));
+        QTest::mouseMove(view->viewport(), at(QPointF(260, 280)));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(260, 280)));
+        QCOMPARE(stick->my_line, skeleton);
+        const QPointF dragged = view->mapToScene(at(QPointF(260, 280))) - view->mapToScene(at(QPointF(200, 260)));
+        QVERIFY2(QLineF(stick->DrawnCentre(), centre + dragged).length() < 1e-3, "the shape did not follow the drag");
+        QCOMPARE(pushes.count(), 1);
+
+        QPointF pivot, knob;
+        QVERIFY(view->DisplaceHandles(&pivot, &knob));
+        const QPointF arm = knob - pivot;
+        auto turned = [&](qreal degrees) { return pivot + QTransform().rotate(degrees).map(arm); };
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(knob));
+        QTest::mouseMove(view->viewport(), at(turned(45)));
+        QTest::mouseMove(view->viewport(), at(turned(90)));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(turned(90)));
+        QCOMPARE(stick->my_line, skeleton);
+        QVERIFY2(QLineF(stick->DrawnCentre(), pivot).length() < 1e-3, "the turn moved the centre");
+        // pixel rounding of the two mouse positions: a degree or two
+        QVERIFY2(qAbs(stick->local_xf.angle - 90) < 3, qPrintable(QString("turned by %1").arg(stick->local_xf.angle)));
+        QCOMPARE(pushes.count(), 2);
     }
 
     // Group D bug 3: the scale tool must scale a MULTILINE's per-vertex thickness

@@ -356,6 +356,10 @@ private slots:
     void on_lineThicknessSlider_sliderMoved(int position);
 
     void on_clampToolBtn_clicked();
+    void on_displaceToolBtn_clicked();
+    void on_copyStickBtn_clicked();
+    void on_pasteStickBtn_clicked();
+    void on_pasteStickAtOriginBtn_clicked();
 
     void on_addPolyBtn_clicked();
 
@@ -414,6 +418,8 @@ private:
     void RefreshTransformed(StickData *cs);
     /// @brief The two flip check boxes: sets the edited set's flip as one undo step.
     void SetTransformFlip(bool horizontal, bool on);
+    /// @brief The "Reset transform" button: puts the edited set back to rest, as one undo step.
+    void ResetTransform();
     QTabBar *transform_mode_bar = nullptr;  ///< "Local" | "Global" above the Stick Transform sliders
     QCheckBox *flip_h_check = nullptr;      ///< Stick Transform: mirror across the stick
     QCheckBox *flip_v_check = nullptr;      ///< Stick Transform: mirror along the stick

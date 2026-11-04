@@ -144,6 +144,30 @@ StickFigureData *LoadStickFigureData(const QString &name);
 void MergeStickFigures(StickFigure* main_stick_figure, StickData* main_stick,StickFigure* to_join);
 void SplitStickFigures(StickFigure* split, StickData* origin,StickFigure* branch);
 
+/**
+ * @brief Copies a stick and every stick hanging from it into a pure-data record: the branch
+ *        the "Copy sticks" button buffers (MyView::CopyStickBranch()).
+ * @param root the stick to copy; its descendants (StickData::children) come along, except, for
+ *        a master, the stepchildren hanging from its P1 and their chains.
+ * @return a new record, owned by the caller. Its master_stick is the copy of @p root, with no
+ *         parent; the tree, the stepchild flags and the IK links inside the branch are kept.
+ */
+StickFigureData *ExtractStickBranch(const StickData *root);
+
+/**
+ * @brief Pastes a copy of a branch at a stick (MyView::PasteStickBranch()).
+ * @param figure the live figure @p stick belongs to; it takes ownership of the new sticks.
+ * @param stick the selected stick the branch is pasted at, or nullptr to paste into an EMPTY
+ *        @p figure: the root becomes its master and the branch stays where it was copied.
+ * @param branch a record from ExtractStickBranch(); left untouched, so it can be pasted again.
+ * @param at_origin false: the branch hangs from @p stick, its root's P1 on the stick's P2.
+ *        true: its root's P1 goes on the stick's P1 and it hangs from the stick's parent, beside
+ *        the stick and on its side; on a master it hangs from the master, as a stepchild chain.
+ * @return the new sticks, in record order (the branch root first), each with a live view.
+ */
+QList<StickData*> GraftStickBranch(StickFigure *figure, StickData *stick, const StickFigureData &branch,
+                                   bool at_origin);
+
 // ------------------------------------------------------------- IK (myview.cpp DRAW_IK) ----
 // Pure-model half of the inverse-kinematics feature: chain bookkeeping and the FABRIK
 // solve itself. MyView (myview.h/cpp) owns the tool state and hit-testing that decide

@@ -940,6 +940,96 @@ void MergeStickFigures(StickFigure* main_stick_figure, StickData* main_stick,Sti
     }
     SanitizeFigureIkChains(main_stick_figure);
 }
+
+/// @details Appends @p stick to the children list of every one of its ancestors: the
+/// flattened all-descendants form the tree keeps (see PopulateLiveStickFigure()).
+static void AppendToAncestors(StickData *stick)
+{
+    for(StickData *ancestor = stick->parent; ancestor != nullptr; ancestor = ancestor->parent)
+        ancestor->children.append(stick);
+}
+
+/// @details The branch is the root plus its `children`, which already lists every descendant.
+/// A master (the one stick with no parent) leaves out the stepchildren hanging from its P1 and
+/// their chains: a chain is on the side of its stick hanging from the master, the same test
+/// Weld() and MergeStickFigures() use. Clone() copies no tree pointer, so parent and the IK
+/// links are remapped by index; an IK link leaving the branch stays null, and
+/// GraftStickBranch()'s sanitize drops that chain.
+StickFigureData *ExtractStickBranch(const StickData *root)
+{
+    StickFigureData *branch = new StickFigureData();
+    QList<const StickData*> sources;
+    sources.append(root);
+    for(StickData *child : root->children){
+        if(root->parent == nullptr){
+            const StickData *first = child;
+            while(first->parent != root)
+                first = first->parent;
+            if(first->stepchild)
+                continue;
+        }
+        sources.append(child);
+    }
+    for(const StickData *source : sources)
+        branch->stick_list.append(source->Clone());
+    for(int i = 0; i < sources.count(); i++){
+        StickData *copy = branch->stick_list[i];
+        if(i > 0) // the root keeps no parent: it is the record's master
+            copy->parent = branch->stick_list.value(sources.indexOf(sources[i]->parent));
+        copy->ik_start = branch->stick_list.value(sources.indexOf(sources[i]->ik_start));
+        copy->ik_target = branch->stick_list.value(sources.indexOf(sources[i]->ik_target));
+    }
+    for(StickData *copy : branch->stick_list)
+        AppendToAncestors(copy);
+    branch->master_stick = branch->stick_list.first();
+    branch->current_stick = branch->master_stick;
+    return branch;
+}
+
+/// @details Every pasted stick takes the side the root lands on, since a child of a stepchild is
+/// a stepchild (EndDrawing()). At a stick's end that is the stick's own side. At its origin the
+/// root sits where the stick does, so it takes the stick's side and hangs from the stick's parent;
+/// a master has no parent, and its origin is where its stepchildren start (SelectOrigin()). A
+/// branch never holds a master's stepchildren (ExtractStickBranch() leaves them out), so every
+/// stick but the root hangs from its copied parent. Into an empty figure (no @p stick) the root
+/// becomes the master, so nothing is a stepchild, and the branch stays where it was copied, since
+/// there is no joint to move it to.
+QList<StickData*> GraftStickBranch(StickFigure *figure, StickData *stick, const StickFigureData &branch,
+                                   bool at_origin)
+{
+    QList<StickData*> pasted;
+    const StickData *root = branch.master_stick;
+    StickData *parent = stick == nullptr ? nullptr
+            : (at_origin && stick->parent != nullptr) ? stick->parent : stick;
+    const bool stepchild = stick != nullptr && (stick->stepchild || (at_origin && stick->parent == nullptr));
+    QPointF shift;
+    if(stick != nullptr)
+        shift = (at_origin ? stick->my_line.p1() : stick->my_line.p2()) - root->my_line.p1();
+    for(StickData *source : branch.stick_list){
+        StickData *copy = source->Clone();
+        copy->my_line.translate(shift);
+        copy->stepchild = stepchild;
+        pasted.append(copy);
+    }
+    for(int i = 0; i < pasted.count(); i++){
+        const StickData *source = branch.stick_list[i];
+        if(source == root)
+            pasted[i]->parent = parent;
+        else
+            pasted[i]->parent = pasted.value(branch.stick_list.indexOf(source->parent), parent);
+        pasted[i]->ik_start = pasted.value(branch.stick_list.indexOf(source->ik_start));
+        pasted[i]->ik_target = pasted.value(branch.stick_list.indexOf(source->ik_target));
+    }
+    if(stick == nullptr)
+        figure->master_stick = pasted.first();
+    for(StickData *copy : pasted){
+        AppendToAncestors(copy);
+        figure->stick_list.append(copy);
+        FramePresenter::AttachView(copy, figure->scene)->Refresh(0);
+    }
+    SanitizeFigureIkChains(figure); // a chain the copy cut in half goes back to IK_NONE
+    return pasted;
+}
 // i genitori dello stick sono stepchild e invertono direzione fino al vecchio
 // master stick che mantiene la stessa direzione
 // la catena diretta diviene stepchild, vecchio master incluso

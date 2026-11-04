@@ -54,6 +54,8 @@
 #define ROTATEVIEW 27   ///< drag to rotate the VIEW about the viewport centre (Shift: 15° steps);
                         ///< unlike ROTATESCENE no figure moves, renders/exports never see it
 #define ZOOMVIEW 28     ///< drag to zoom the VIEW: right/up = in, left/down = out (Shift: 10% steps)
+#define DISPLACE 29     ///< select like NOTOOL, then move/turn the current stick's drawn shape with its
+                        ///< handles: edits its Stick Transform (local_xf, or global_xf when displace_global)
 #define DRAW_IK 23      ///< creates/edits inverse-kinematics chains (StickData::IK_START/
                         ///< IK_NODE/IK_TARGET_ON/IK_TARGET_OFF): first click on an eligible
                         ///< stick's start handle begins a chain, second click on a
@@ -245,7 +247,45 @@ public:
      */
     QPointF TextureArrowAnchor(const StickData *stick, qreal angle) const;
 
+    /// The set the DISPLACE tool edits: global_xf when true, local_xf otherwise. Widget keeps it in
+    /// step with the Stick Transform tab's Local | Global bar, so the tab shows what the tool edits.
+    bool displace_global = false;
+    /**
+     * @brief Where the DISPLACE tool's two handles are, in scene coordinates.
+     * @param centre out: the drawn shape's centre (StickData::DrawnCentre()), the move handle.
+     * @param knob out: the rotation knob, a screen-constant distance from the centre along the
+     *        drawn stick's direction.
+     * @return false when there are no handles: another tool, draw mode, or no live current stick.
+     *
+     * Public for the same reason TextureArrowPoints() is: the tests aim at the handles.
+     */
+    bool DisplaceHandles(QPointF *centre, QPointF *knob) const;
+
     StickFigureData* copy_stick_figure_buffer = nullptr; ///< owned copy-paste buffer (pure data since Phase 2b)
+    StickFigureData* stick_copy_buffer = nullptr; ///< owned "Copy sticks" buffer (ExtractStickBranch()): master_stick is the copied stick; nullptr until the first copy
+
+    /**
+     * @brief "Copy sticks" (Transform tab): buffers the selected stick and every stick hanging
+     *        from it, replacing the previous copy. Takes no undo step: the document is unchanged.
+     * @return an empty string on success, or why nothing was copied (no single stick selected);
+     *         the caller shows it as a warning.
+     */
+    QString CopyStickBranch();
+
+    /**
+     * @brief "Paste sticks" / "Paste sticks at origin" (Transform tab): pastes a copy of the
+     *        buffered branch at the selected stick, as one undo step, and selects the pasted root.
+     * @param at_origin false: the copy hangs from the stick's end. true: from the stick's origin,
+     *        i.e. beside it on its parent; on the master, from its origin as a stepchild chain
+     *        (see GraftStickBranch()).
+     * @return an empty string on success, or why nothing was pasted (nothing copied yet, or
+     *         neither a single stick nor an empty layer selected); the caller shows it as a warning.
+     *
+     * With no stick selected and an empty current layer, both buttons paste the branch into that
+     * layer as it was copied, its root becoming the master. The buffer is left as it is, so the
+     * same branch can be pasted again, in any frame or figure.
+     */
+    QString PasteStickBranch(bool at_origin = false);
 
     // ---- Freehand draw mode (myview.cpp) ---------------------------------------------
     // A FREEHAND stick is an IMAGE-like raster stick painted interactively. Draw mode is
@@ -944,6 +984,18 @@ private:
     int sel_box_gesture = 0;          ///< 0 nessuno, 1 scala (uniforme), 2 rotazione: drag di una maniglia della box
     int texture_arrow_gesture = 0;    ///< 0 nessuno, 1 coda (offset), 2 punta (angolo + scala): drag della freccia della texture
     bool texture_arrow_is_fill = true;///< quale delle due frecce è sotto trascinamento
+    // ---- DISPLACE tool: a drag on the current stick, its centre square or its knob ----
+    int displace_gesture = 0;         ///< 0 none, 1 moving the drawn shape, 2 turning it about its centre
+    bool displace_undo_taken = false; ///< the gesture's StoreUndo() is deferred to the first real move, so a plain click leaves no empty undo step
+    StickXf displace_xf0;             ///< the edited set at press: every move re-applies the whole drag to it, so nothing drifts
+    QPointF displace_press;           ///< press point, scene coordinates
+    QPointF displace_centre;          ///< drawn centre at press: the turn's pivot
+    /// @brief 1 on the centre handle, 2 on the knob, 0 elsewhere (DisplaceHandles()).
+    int HitDisplaceHandle(const QPointF &scene) const;
+    /// @brief Latches the press for a move (1) or turn (2) of the current stick's drawn shape.
+    void BeginDisplace(int gesture);
+    /// @brief Applies the whole drag from the press to the latched set, and refreshes what moved.
+    void DragDisplace(const QPointF &scene);
     /**
      * @brief The arrow's tail, latched at press for the duration of a tip drag.
      *
@@ -1156,6 +1208,13 @@ private:
      * @return CurrentStick() if it matches and has a live view, else nullptr.
      */
     StickData *PolySessionStick(qint32 wanted_type);
+
+    /**
+     * @brief The one stick "Copy sticks"/"Paste sticks" act on.
+     * @return the current stick, or nullptr when there is none, a multi-selection is active, or
+     *         it is still being drawn (it joins stick_list only at the second click).
+     */
+    StickData *SingleSelectedStick() const;
 
     /**
      * @brief Removes one stick (and its subtree) from the model, the scene and the
