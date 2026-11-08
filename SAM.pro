@@ -64,6 +64,7 @@ SOURCES += \
     src/stkformat.cpp \
     src/textureoptionsdialog.cpp \
     src/updatecheck.cpp \
+    src/vectorshape.cpp \
     src/widget.cpp
 
 HEADERS += \
@@ -96,6 +97,7 @@ HEADERS += \
     src/textureoptionsdialog.h \
     src/updatecheck.h \
     src/uiItems.h \
+    src/vectorshape.h \
     src/widget.h
 
 FORMS += \

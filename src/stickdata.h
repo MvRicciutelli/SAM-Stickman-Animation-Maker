@@ -13,6 +13,7 @@
 #include <QString>
 #include <QStringList>
 #include <QTransform>
+#include <vectorshape.h> // VectorShape: the shape layers of a VECTOR stick
 
 class StickGraphicsItem; // defined in stick.h; forward-declared to avoid a header cycle
 
@@ -75,10 +76,14 @@ public:
                         ///< draw mode (myview.cpp). Rendered/transformed/serialized
                         ///< exactly like IMAGE (see IsImageType()); its one image never
                         ///< enters the image-variant list widget (23 is the DRAW_IK tool id)
-        TEXT = 25       ///< paragraph of text laid out along the stick; the skeleton is
+        TEXT = 25,      ///< paragraph of text laid out along the stick; the skeleton is
                         ///< invisible (drawn only while `text` is empty, i.e. during the
                         ///< 2-click drawing preview). Content/font/layout live in the
                         ///< text_* fields below, placement in the Stick Transform (local_xf)
+        VECTOR = 30     ///< a stack of bezier shape layers (vector_shapes), each with its own
+                        ///< fill and stroke, in the stick's normalized local frame like a
+                        ///< POLYGON's vertices. The skeleton is drawn only while no shape is
+                        ///< visible (26-29 are view/displace tool ids)
     };
 
     /**
@@ -133,6 +138,20 @@ public:
      * note on BrushStroke (abrbrush.h) for why those three are not stored twice.
      */
     BrushStroke StrokeBrush() const;
+
+    /// @brief Where a paint lives, as pointers the Style column's controls read and write through.
+    struct PaintRef {
+        QPen *pen;                   ///< the stroke paint and width
+        QBrush *brush;               ///< the fill
+        bool *brush_follows_stick;   ///< see brush_follows_stick
+        bool *texture_tiled;         ///< see texture_tiled
+    };
+    /**
+     * @brief The paint the Style column acts on: shape @p shape_index of a VECTOR stick (what it
+     *        really paints), or this stick's own fields for any other type or an invalid index.
+     * @return pointers into this record, valid until its shape list next changes.
+     */
+    PaintRef Paint(int shape_index);
 
     /**
      * @brief Builds an empty stick record with safe defaults (LINE type, no images).
@@ -194,13 +213,16 @@ public:
     /// The newest record format this build reads AND writes; operator>> refuses anything above
     /// it (RejectNewerVersion()), because a newer record's extra fields would be read as the
     /// start of the next record and desync the whole stream.
-    static constexpr qint32 CURRENT_VERSION = 10;
+    static constexpr qint32 CURRENT_VERSION = 11;
+    /// Format of a VECTOR stick's shape list, written at its head: the shapes have a version of
+    /// their own so they can grow fields without raising every stick record's.
+    static constexpr qint32 VECTOR_SHAPES_VERSION = 1;
     qint32 version = CURRENT_VERSION; ///< serialization format version of this record; 2 adds the
                                      ///< IK fields below, 3 adds TEXT's text_v_stretch, 4 adds
                                      ///< brush_follows_stick, 5 adds texture_tiled, 6 adds
                                      ///< stroke_brush, 7 adds MULTILINE's vertex_parents, 8 its
                                      ///< vertex_caps, 9 local_xf's offset/angle/scale, 10 its flips and
-                                     ///< global_xf — all gated in operator<</operator>> so files saved before
+                                     ///< global_xf, 11 the VECTOR type (vector_shapes) — all gated in operator<</operator>> so files saved before
                                      ///< those fields existed still load (and operator>> then
                                      ///< raises the record to CURRENT_VERSION)
     qint32 stick_type = StickType::LINE;///< StickType value; drives painting and serialization
@@ -377,6 +399,15 @@ public:
      * @return the re-rooted parent list.
      */
     static QList<qint32> ReRootTree(QList<qint32> parents, int new_root);
+
+    /**
+     * @brief VECTOR only: the shape layers, in drawing order (the last one is drawn on top).
+     *
+     * Values, not pointers: deleting the stick, Clone(), an undo snapshot and the shape clipboard
+     * copy or free all of it with no ownership rule. Coordinates are normalized stick-local
+     * (PolygonTransform()), so the shapes move, turn and scale with the stick.
+     */
+    QList<VectorShape> vector_shapes;
 
     // ------- TEXT only. Placement reuses the IMAGE fields (img_offset for the h/v -----
     // ------- offset, img_angle_offset for the extra rotation), so the offset panel ----
@@ -644,7 +675,9 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data);
  * img_angle, recomputed from it), z, pen width/colour, brush colour, img_offset,
  * img_w_scale/img_h_scale, img_angle_offset, local_xf/global_xf (their flips switch at the
  * midpoint, since a mirror cannot be blended) and — only when the two poses agree on the
- * vertex count — polygon_points/vertex_widths/vertex_curvatures. A raster image cannot
+ * vertex count — polygon_points/vertex_widths/vertex_curvatures. A VECTOR stick's shapes blend
+ * node by node (positions, handles, pen width, solid colours) only when the poses' shape lists
+ * are VectorShapesCompatible(); otherwise they keep the target's. A raster image cannot
  * be blended, so an IMAGE/FREEHAND stick keeps the target's picture and only its
  * placement moves.
  */

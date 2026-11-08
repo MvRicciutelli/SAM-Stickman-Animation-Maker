@@ -283,6 +283,7 @@ void MyView::MoveStickFigureZ(int increment, int mode)
 {
     if(draw_mode)
         ExitDrawMode(); // riordinare i layer chiude la sessione di disegno
+    ExitVectorMode();
     if(my_stick_figure_widget_list->count() <= 1 )
         return;
     // selezione multipla: applica lo spostamento a ogni figura selezionata, in un
@@ -415,6 +416,9 @@ void MyView::mousePressEvent(QMouseEvent *event)
         }
         return;
     }
+    // the vector tools (and Ctrl on a vector stick) come before the canvas tool, like draw mode
+    if(VectorMousePress(event))
+        return;
     if(!is_right_pressed && !is_middle_pressed){
     switch(tool)
     {
@@ -582,6 +586,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
             case DRAWIMG:
             case DRAWFREEHAND:
             case DRAWTEXT:
+            case DRAWVECTOR:
             {
                 DrawCmd(&coord,(int)tool);
                 break;
@@ -971,11 +976,16 @@ void MyView::keyPressEvent(QKeyEvent *event)
             ExitDrawMode();
         return;
     }
+    if(VectorKeyPress(event))
+        return;
     switch(event->key())
     {
         case(Qt::Key_Cancel):
         case(Qt::Key_Delete):
         {
+            // selected vector anchors go first, then Ctrl-selected vertices: the stick only after them
+            if(DeleteSelectedVectorNodes())
+                break;
             // vertici selezionati con Ctrl: Canc cancella quelli, non lo stick
             if(DeleteSelectedVertices())
                 break;
@@ -1043,6 +1053,7 @@ void MyView::keyPressEvent(QKeyEvent *event)
                 case DRAWCIRCLE:
                 case DRAWFREEHAND: // Esc prima del 2° click scarta l'anteprima gialla a metà
                 case DRAWTEXT:     // idem per il testo (dopo il 2° click c'è il prompt, non un Esc)
+                case DRAWVECTOR:   // before the 2nd click; after it, Esc ends vector mode (VectorKeyPress())
                 {
                     if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr &&
                             my_animation->CurrentFrame()->CurrentStickFigure()->draw_count==1)
@@ -1162,12 +1173,22 @@ void MyView::tabletEvent(QTabletEvent *event)
 }
 
 /**
- * @details Only job: a double click ends a DRAWPOLY/DRAWMULTI vertex session. The
- * first press of the pair has already been delivered to mousePressEvent() and has
- * placed the final vertex, so closing the session is all that's left to do.
+ * @details A double click ends a DRAWPOLY/DRAWMULTI vertex session, and vector draw mode.
+ * The first press of the pair has already been delivered to mousePressEvent() and has
+ * placed the final vertex, so closing the session is all that's left to do. Every other
+ * vector gesture (a Ctrl edit, the lasso, a bucket) takes it as the press it replaces:
+ * re-grabbing an anchor right after clicking it is a double click to Qt.
  */
 void MyView::mouseDoubleClickEvent(QMouseEvent *event)
 {
+    // vector draw mode: the first press of the pair placed the last anchor; the double click leaves
+    if(event->button() == Qt::LeftButton && vector_tool == VT_PEN){
+        ExitVectorMode();
+        return;
+    }
+    MapMyCoords(coord, event->pos());
+    if(event->button() == Qt::LeftButton && VectorMousePress(event))
+        return;
     if(event->button() == Qt::LeftButton && (tool == DRAWPOLY || tool == DRAWMULTI)
             && poly_session_active){
         FinishPolygonSession();
@@ -1266,6 +1287,11 @@ void MyView::DrawCmd(QPointF* point, int mode)
                 new_stick->vertex_curvatures << 0.0f << 0.0f;
                 new_stick->vertex_caps << my_vertex_cap << my_vertex_cap;
             }
+            else if(mode == DRAWVECTOR){
+                // the shapes come in vector mode, after the 2nd click: until then the skeleton
+                // is the preview of the gesture
+                new_stick->stick_type = StickData::VECTOR;
+            }
             else if(mode == DRAWTEXT){
                 // il testo arriva al 3° passo (dopo il 2° click, sotto): finché è vuoto lo
                 // stick dipinge la sua spina, che è esattamente l'anteprima del gesto
@@ -1327,6 +1353,10 @@ void MyView::DrawCmd(QPointF* point, int mode)
             // la posizione è fissata, l'anteprima gialla LINE diventa un FREEHAND invisibile
             // (NoPen); EnterDrawMode() gli assegna il canvas. La creazione ha già fatto
             // StoreUndo() sopra, quindi non ne serve un altro
+            // the vector stick enters vector draw mode right after its 2nd click (spec); the 1st
+            // click's StoreUndo() covers the stick, every anchor then takes its own step
+            if(mode == DRAWVECTOR)
+                EnterVectorMode();
             if(mode == DRAWFREEHAND){
                 StickData *fh = my_animation->CurrentFrame()->CurrentStick();
                 fh->stick_type = StickData::FREEHAND;
@@ -1733,6 +1763,9 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
  */
 void MyView::ExitDrawMode()
 {
+    // every place that ends a drawing session (frame/layer changes, file operations, paste,
+    // inbetweens...) must end a vector session as well: one call covers them all
+    ExitVectorMode();
     if(!draw_mode)
         return;
     DiscardPixelSelection(); // a floating pixel selection is baked into the canvas before cropping
@@ -2293,6 +2326,7 @@ void MyView::ConvertStick(StickData *stick, int new_type, const QImage &image,
         return;
     if(draw_mode)
         ExitDrawMode(); // finalizza il canvas prima dello snapshot
+    ExitVectorMode();
     StoreUndo();
 
     // --- ciò che solo il tipo di origine sa leggere va perso ---
@@ -2300,6 +2334,7 @@ void MyView::ConvertStick(StickData *stick, int new_type, const QImage &image,
         stick->view->RemoveImagesFromListWidget(); // agisce solo se è ANCORA un IMAGE
         stick->view->selected_vertices.clear();
         stick->view->ClearPolygonPreview();
+        stick->view->selected_vector_nodes.clear();
     }
     qDeleteAll(stick->stick_img_list);
     stick->stick_img_list.clear();
@@ -2310,6 +2345,7 @@ void MyView::ConvertStick(StickData *stick, int new_type, const QImage &image,
     stick->vertex_curvatures.clear();
     stick->vertex_parents.clear();
     stick->vertex_caps.clear();
+    stick->vector_shapes.clear();
     stick->text.clear();
     stick->img_offset = QPointF(0, 0);
     stick->img_angle_offset = 0;
@@ -2411,6 +2447,7 @@ void MyView::DeselectAllVertices()
             s->view->Refresh(0);
         }
     }
+    ClearVectorSelections(); // the vector anchors follow the same rule
 }
 
 /**
@@ -2584,6 +2621,17 @@ void MyView::drawForeground(QPainter *painter, const QRectF &rect)
             QPointF hs[9]; for(int i = 0; i < 9; i++) hs[i] = CanvasToScene(h[i]);
             DrawTransformHandles(painter, hs, true);
         }
+        painter->restore();
+    }
+
+    // --- vector anchor lasso in progress (dashed trace) --------------------------------
+    if(vec_gesture == VG_LASSO && vec_lasso.size() >= 2){
+        painter->save();
+        QPen lasso_pen(QColor(0, 120, 255), 1, Qt::DashLine);
+        lasso_pen.setCosmetic(true);
+        painter->setPen(lasso_pen);
+        painter->setBrush(Qt::NoBrush);
+        painter->drawPolyline(vec_lasso);
         painter->restore();
     }
 
@@ -3208,6 +3256,10 @@ bool MyView::TextureArrowPoints(bool for_fill, QPointF *tail, QPointF *tip) cons
     // qualcosa che non si vede. Stessi predicati con cui UpdateSliders() spegne i selettori
     if(for_fill ? !stick->PaintsFill() : !stick->PaintsStroke())
         return false;
+    // a vector stick paints its SHAPES' brushes, which the arrow does not aim (yet): their
+    // placement is edited through the texture and gradient dialogs
+    if(stick->stick_type == StickData::VECTOR)
+        return false;
     const QBrush brush = CurrentTextureBrush(for_fill);
     // una tinta unita e il vuoto non hanno una geometria da mostrare, come per AlignBrush().
     // Texture e gradiente sì, ognuno la propria: ReadArrow() le porta entrambe in unità di scena
@@ -3719,6 +3771,7 @@ void MyView::ChangeTool()
         FinishPolygonSession();
     poly_drag_idx = -1;
     poly_vertex_drag = false;
+    ExitVectorMode(); // switching tool leaves vector draw mode too (spec)
     switch(tool)
     {
         case(NOTOOL):
@@ -3732,6 +3785,7 @@ void MyView::ChangeTool()
         case(DRAWTRAPEZOID):
         case(DRAWIMG):
         case(DRAWTEXT):
+        case(DRAWVECTOR):
         {
             my_animation->UpdateTab(tool); // updates ui panels
             if(!my_animation->current_frame->stick_figures.isEmpty()
@@ -3888,6 +3942,11 @@ void MyView::mouseReleaseEvent(QMouseEvent *event)
         QGraphicsView::mouseReleaseEvent(event);
         return;
     }
+    if(VectorMouseRelease(event)){
+        is_pressed = false;
+        QGraphicsView::mouseReleaseEvent(event);
+        return;
+    }
     if(event->button()==Qt::LeftButton){
         is_pressed = false;
         // DRAWMULTI: a handle pressed and released without dragging reopens the session, so
@@ -3989,6 +4048,8 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         }
         return;
     }
+    if(VectorMouseMove(event))
+        return;
     switch(tool)
     {
         case CLAMP:
@@ -4175,6 +4236,7 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         case DRAWIMG:
         case DRAWFREEHAND: // anteprima gialla della linea tra 1° e 2° click, come un DRAW normale
         case DRAWTEXT:     // idem: la spina segue il mouse finché il testo è vuoto
+        case DRAWVECTOR:   // the skeleton follows the mouse until the second click
         {
         // durante il disegno,l'estremo libero della linea segue il mouse
             if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr && my_animation->CurrentFrame()->CurrentStickFigure() != nullptr)
@@ -4550,6 +4612,12 @@ void MyView::MoveToFrame(Frame* frame){
     // No-op se non si è in draw mode; i chiamanti UI escono già prima di StoreUndo
     if(draw_mode)
         ExitDrawMode();
+    // a real frame change leaves vector mode and drops the anchor selection of the frame being
+    // left; an undo/redo restores the CURRENT frame through here and keeps both, like the pen
+    if(frame != my_animation->current_frame){
+        ExitVectorMode();
+        ClearVectorSelections();
+    }
     // il cambio frame invalida la sessione poligono e la selezione vertici (stato UI
     // del frame lasciato); i flag da soli non tengono puntatori, basta azzerarli
     poly_session_active = false;
@@ -4929,6 +4997,7 @@ void MyView::RestoreFrameSnapshot(int command_tag, int mode, FrameData *snapshot
     poly_session_extends = false;
     poly_drag_idx = -1;
     poly_vertex_drag = false;
+    vec_gesture = VG_NONE; // a vector drag in progress named anchors of the stick being rebuilt
     ClearMultiSelection(); // le figure selezionate stanno per essere ricostruite
     ik_drawing = false; // idem per una creazione di catena IK a metà: vedi MoveToFrame()
     ClearIkPreviewItems();
@@ -5025,6 +5094,15 @@ QString MyView::GenerateInbetweens(int start_index, int count)
             if(from_figure->stick_list[s]->stick_type != to_figure->stick_list[s]->stick_type){
                 return tr("Stick %1 of stickfigure %2 is not of the same type in the two frames.")
                         .arg(s).arg(f);
+            }
+            // vector shapes interpolate only between identical structures (spec): only the
+            // movement of their anchors and handles can be inbetweened
+            if(from_figure->stick_list[s]->stick_type == StickData::VECTOR
+                    && !VectorShapesCompatible(from_figure->stick_list[s]->vector_shapes,
+                                               to_figure->stick_list[s]->vector_shapes)){
+                return tr("The vector stick %1 of stickfigure %2 has different shapes in the two frames: "
+                          "both frames need the same number of shapes, and each shape the same number "
+                          "of vertices and the same open/closed state.").arg(s).arg(f);
             }
         }
     }
@@ -5380,65 +5458,19 @@ void MyView::SetGraphics(bool all, int attribute){
     // TUTTE le figure selezionate, senza rompere la selezione (spec)
     if(all && MultiSelectionActive()){
         for(StickFigure *S : multi_selection){
-            for(StickData *s : S->stick_list){
-                if(attribute == ATTRIBUTE_PENCOLOR){
-                    CopyPenPaint(&s->pen, my_pen);
-                    s->brush_follows_stick = my_brush_follows_stick;
-                    s->stroke_brush = my_stroke_brush;
-                }
-                else if(attribute == ATTRIBUTE_PENWIDTH)
-                    s->pen.setWidth(my_pen.width());
-                else if(attribute == ATTRIBUTE_BRUSHCOLOR){
-                    s->brush = my_brush;
-                    s->brush_follows_stick = my_brush_follows_stick;
-                    s->texture_tiled = my_texture_tiled;
-                }
-                if(s->view)
-                    s->view->Refresh(0);
-            }
+            for(StickData *s : S->stick_list)
+                ApplyStyleToStick(s, attribute, true);
             S->UpdateIcon();
         }
         my_animation->current_frame->UpdateIcon();  // vedi le note in coda a questo metodo
         my_animation->UpdateStyleControls();
         return;
     }
-    if(!all){
-        if(attribute == ATTRIBUTE_PENCOLOR)
-        {
-            CopyPenPaint(&my_animation->CurrentFrame()->CurrentStick()->pen, my_pen);
-            my_animation->CurrentFrame()->CurrentStick()->brush_follows_stick = my_brush_follows_stick;
-            my_animation->CurrentFrame()->CurrentStick()->stroke_brush = my_stroke_brush;
-        }
-        else if(attribute== ATTRIBUTE_PENWIDTH)
-        {
-            my_animation->CurrentFrame()->CurrentStick()->pen.setWidth(my_pen.width());
-        }
-        else if(attribute== ATTRIBUTE_BRUSHCOLOR)
-        {
-            my_animation->CurrentFrame()->CurrentStick()->brush = my_brush;
-            my_animation->CurrentFrame()->CurrentStick()->brush_follows_stick = my_brush_follows_stick;
-            my_animation->CurrentFrame()->CurrentStick()->texture_tiled = my_texture_tiled;
-        }
-        if(my_animation->CurrentFrame()->CurrentStick()->view)
-            my_animation->CurrentFrame()->CurrentStick()->view->Refresh(0);
-    }
+    if(!all)
+        ApplyStyleToStick(my_animation->CurrentFrame()->CurrentStick(), attribute, false);
     else{
-        for(StickData * s:my_animation->CurrentFrame()->CurrentStickFigure()->stick_list){
-            if(attribute == ATTRIBUTE_PENCOLOR){
-                CopyPenPaint(&s->pen, my_pen);
-                s->brush_follows_stick = my_brush_follows_stick;
-                s->stroke_brush = my_stroke_brush;
-            }
-            else if(attribute== ATTRIBUTE_PENWIDTH)
-                s->pen.setWidth(my_pen.width());
-            else if(attribute== ATTRIBUTE_BRUSHCOLOR){
-                s->brush = my_brush;
-                s->brush_follows_stick = my_brush_follows_stick;
-                s->texture_tiled = my_texture_tiled;
-            }
-            if(s->view)
-                s->view->Refresh(0);
-        }
+        for(StickData * s:my_animation->CurrentFrame()->CurrentStickFigure()->stick_list)
+            ApplyStyleToStick(s, attribute, true);
     }
 
     my_animation->CurrentFrame()->CurrentStickFigure()->UpdateIcon();
@@ -5452,6 +5484,36 @@ void MyView::SetGraphics(bool all, int attribute){
     // solo sulla selezione: le caselle e gli slider che dipendono da cosa è dipinto lo stick
     // vanno rivalutati qui, o restano come per il riempimento precedente
     my_animation->UpdateStyleControls();
+    emit VectorShapesChanged(); // a vector stick's layer thumbnails show the new paint
+}
+
+/// @details The stick's own fields always take the paint (a VECTOR stick draws its skeleton with
+/// them while it has no shape); a VECTOR stick's shapes take it too, being what it really paints:
+/// the current shape for a single-stick Apply, every shape for an "all" one.
+void MyView::ApplyStyleToStick(StickData *s, int attribute, bool all_shapes)
+{
+    if(attribute == ATTRIBUTE_PENCOLOR){
+        CopyPenPaint(&s->pen, my_pen);
+        s->brush_follows_stick = my_brush_follows_stick;
+        s->stroke_brush = my_stroke_brush;
+    }
+    else if(attribute == ATTRIBUTE_PENWIDTH)
+        s->pen.setWidth(my_pen.width());
+    else if(attribute == ATTRIBUTE_BRUSHCOLOR){
+        s->brush = my_brush;
+        s->brush_follows_stick = my_brush_follows_stick;
+        s->texture_tiled = my_texture_tiled;
+    }
+    if(s->stick_type == StickData::VECTOR){
+        if(all_shapes){
+            for(VectorShape &shape : s->vector_shapes)
+                ApplyStyleToShape(shape, attribute);
+        }
+        else if(my_animation->CurrentVectorShape(s) >= 0)
+            ApplyStyleToShape(s->vector_shapes[my_animation->CurrentVectorShape(s)], attribute);
+    }
+    if(s->view)
+        s->view->Refresh(0);
 }
 /**
  * @details Breaks the current figure at the selected stick: that stick and its subtree
@@ -5618,4 +5680,619 @@ void MyView::DisplayPreview(int idx){
 
     scene()->addItem(render_img);
     //item->setZValue(0);
+}
+
+// ---------------------------------------------------------------------------------------
+// VECTOR sticks: vector draw mode, node editing, the shape layers and their clipboard.
+// Like the POLYGON session, nothing here stores a StickData*: the stick is always
+// VectorStick(), re-derived from CurrentStick(), so an undo, a delete or a frame switch in
+// the middle of a gesture can never leave a dangling pointer behind.
+// ---------------------------------------------------------------------------------------
+
+/// @details Drops one shape from a node selection, shifting the entries of the shapes above it
+/// down by one, so the selection keeps naming the same nodes after a removal.
+static void DropShapeFromSelection(QSet<QPair<int,int>> &selection, int removed)
+{
+    QSet<QPair<int,int>> kept;
+    for(const QPair<int,int> &key : selection){
+        if(key.first < removed)
+            kept.insert(key);
+        else if(key.first > removed)
+            kept.insert(qMakePair(key.first - 1, key.second));
+    }
+    selection = kept;
+}
+
+StickData *MyView::VectorStick() const
+{
+    if(my_animation->current_frame == nullptr || my_animation->current_frame->stick_figures.isEmpty())
+        return nullptr;
+    StickFigure *fig = my_animation->CurrentFrame()->CurrentStickFigure();
+    if(fig == nullptr || fig->draw_count != 0)
+        return nullptr; // a stick still being drawn (between its two clicks) has no shapes yet
+    StickData *cs = my_animation->CurrentFrame()->CurrentStick();
+    if(cs != nullptr && cs->stick_type == StickData::VECTOR && cs->view)
+        return cs;
+    return nullptr;
+}
+
+/// @details Only one vector tool is active at a time, and only on a selected VECTOR stick:
+/// asking for a tool with no such stick gives VT_NONE. Leaving the pen finishes the shape
+/// being drawn; any change drops a gesture in progress.
+void MyView::SetVectorTool(int vector_tool_id)
+{
+    if(vector_tool_id != VT_NONE && VectorStick() == nullptr)
+        vector_tool_id = VT_NONE;
+    if(vector_tool == VT_PEN && vector_tool_id != VT_PEN)
+        EndVectorShape();
+    vec_gesture = VG_NONE;
+    vec_lasso.clear();
+    const bool changed = vector_tool != vector_tool_id;
+    vector_tool = vector_tool_id;
+    if(viewport())
+        viewport()->update(); // a lasso trace in the foreground goes with the gesture
+    if(changed)
+        emit VectorToolChanged(vector_tool);
+}
+
+void MyView::EnterVectorMode()
+{
+    SetVectorTool(VT_PEN);
+}
+
+void MyView::ExitVectorMode()
+{
+    if(vector_tool != VT_NONE)
+        SetVectorTool(VT_NONE);
+}
+
+/// @details A shape with a single anchor draws nothing, so it is removed here. That is not an
+/// undo step of its own: the press that placed the anchor already took one, and undoing it
+/// brings back the state before the anchor, which is the same picture.
+void MyView::EndVectorShape()
+{
+    const int idx = vec_drawing_shape;
+    vec_drawing_shape = -1;
+    StickData *s = VectorStick();
+    if(s == nullptr)
+        return;
+    s->view->vector_active_shape = -1;
+    s->view->vector_preview_active = false;
+    if(idx >= 0 && idx < s->vector_shapes.size() && s->vector_shapes[idx].nodes.size() < 2){
+        s->vector_shapes.removeAt(idx);
+        DropShapeFromSelection(s->view->selected_vector_nodes, idx);
+        if(my_animation->vector_shape_row >= s->vector_shapes.size())
+            my_animation->vector_shape_row = s->vector_shapes.size() - 1;
+    }
+    VectorEdited(s);
+}
+
+/// @details The common tail of every vector edit: repaint the stick, refresh the layer and frame
+/// thumbnails, and tell the vector panel its rows may have changed.
+void MyView::VectorEdited(StickData *stick)
+{
+    stick->view->Refresh(0);
+    StickFigure *fig = my_animation->CurrentFrame()->CurrentStickFigure();
+    if(fig != nullptr){
+        fig->UpdateIcon();
+        if(fig->linked_item)
+            fig->linked_item->setIcon(*fig->stick_figure_icon);
+    }
+    my_animation->current_frame->UpdateIcon();
+    emit VectorShapesChanged();
+}
+
+void MyView::ClearVectorSelections()
+{
+    if(my_animation->current_frame == nullptr || my_animation->current_frame->stick_figures.isEmpty())
+        return;
+    for(StickData *s : my_animation->CurrentFrame()->total_sticks){
+        if(s->stick_type == StickData::VECTOR && s->view && !s->view->selected_vector_nodes.isEmpty()){
+            s->view->selected_vector_nodes.clear();
+            s->view->Refresh(0);
+        }
+    }
+}
+
+/// @details Every vector gesture starts here, ahead of the tool switch: the vector tools own every
+/// left click (the right button ends an open shape in pen mode), and Ctrl+click edits nodes and
+/// handles both in a vector tool and on the selection tools. A consumed press clears is_pressed,
+/// so no tool drag in mouseMoveEvent() can start from it.
+bool MyView::VectorMousePress(QMouseEvent *event)
+{
+    const bool ctrl = event->modifiers() & Qt::ControlModifier;
+    const bool select_tool = tool == NOTOOL || tool == CLAMP || tool == DISPLACE;
+    if(vector_tool == VT_NONE && !(ctrl && select_tool))
+        return false;
+    StickData *s = VectorStick();
+    if(s == nullptr){
+        ExitVectorMode(); // the stick went away under the tool (undo, delete, another selection)
+        return false;
+    }
+    if(event->button() == Qt::RightButton){
+        if(vector_tool != VT_PEN)
+            return false;
+        EndVectorShape(); // right click: the open shape ends, the next click starts a new one
+        is_right_pressed = false;
+        return true;
+    }
+    if(event->button() != Qt::LeftButton)
+        return false;
+    vec_press_pos = event->pos();
+    vec_last = coord;
+    if(ctrl){
+        if(!VectorEditPress(s, event->modifiers())){
+            // Ctrl+click on no node: the node selection lapses (Shift keeps it)
+            if(!(event->modifiers() & Qt::ShiftModifier) && !s->view->selected_vector_nodes.isEmpty()){
+                s->view->selected_vector_nodes.clear();
+                s->view->Refresh(0);
+            }
+            if(vector_tool == VT_NONE)
+                return false; // the selection tool's own Ctrl+click (pivot, vertices) carries on
+        }
+        is_pressed = false;
+        return true;
+    }
+    is_pressed = false;
+    switch(vector_tool){
+    case VT_PEN:
+        VectorPenPress(s);
+        break;
+    case VT_LASSO:
+        vec_gesture = VG_LASSO;
+        vec_lasso.clear();
+        vec_lasso << coord;
+        break;
+    case VT_FILL:
+    case VT_STROKE:
+        BucketVectorShape(coord, vector_tool == VT_FILL);
+        break;
+    }
+    return true;
+}
+
+/// @details One undo step per anchor, as for a MULTILINE vertex. The drag that may follow turns
+/// the new anchor smooth and belongs to the same step (VG_PLACE takes no snapshot of its own).
+void MyView::VectorPenPress(StickData *s)
+{
+    const QTransform to_scene = s->PolygonTransform();
+    if(vec_drawing_shape >= s->vector_shapes.size())
+        vec_drawing_shape = -1; // an undo took the shape away
+    StoreUndo();
+    VectorNode node;
+    node.pos = to_scene.inverted().map(coord);
+    if(vec_drawing_shape >= 0){
+        VectorShape &shape = s->vector_shapes[vec_drawing_shape];
+        if(shape.nodes.size() >= 2
+                && QLineF(to_scene.map(shape.nodes[0].pos), coord).length() <= PolyPickRadius()){
+            // a click on the first anchor closes the shape; a drag shapes that anchor's handles
+            shape.closed = true;
+            vec_edit_shape = vec_drawing_shape;
+            vec_edit_node = 0;
+            vec_close_on_release = true;
+            vec_gesture = VG_PLACE;
+            vec_needs_undo = true;
+            s->view->Refresh(0);
+            return;
+        }
+        shape.nodes << node;
+    }
+    else{
+        VectorShape shape;
+        shape.name = tr("Shape %1").arg(s->vector_shapes.size() + 1);
+        shape.pen = my_pen;
+        shape.brush = my_brush;
+        shape.brush_follows_stick = my_brush_follows_stick;
+        shape.texture_tiled = my_texture_tiled;
+        shape.stroke_brush = my_stroke_brush;
+        shape.nodes << node;
+        s->vector_shapes << shape; // a new shape goes on top
+        vec_drawing_shape = s->vector_shapes.size() - 1;
+        my_animation->vector_shape_row = vec_drawing_shape;
+        emit VectorShapesChanged(); // a new row for the panel
+    }
+    vec_edit_shape = vec_drawing_shape;
+    vec_edit_node = s->vector_shapes[vec_drawing_shape].nodes.size() - 1;
+    vec_close_on_release = false;
+    vec_gesture = VG_PLACE;
+    vec_needs_undo = true;
+    s->view->vector_active_shape = vec_drawing_shape;
+    s->view->Refresh(0);
+}
+
+/// @details Handles are tested first, since they are drawn above the anchors and only where they
+/// are shown (selected anchors, and the shape being drawn); then the nearest anchor within the
+/// pick radius. The undo snapshot waits for a real drag, so a plain click leaves no empty step.
+bool MyView::VectorEditPress(StickData *s, Qt::KeyboardModifiers modifiers)
+{
+    const QTransform to_scene = s->PolygonTransform();
+    const float radius = PolyPickRadius();
+    QSet<QPair<int,int>> &selection = s->view->selected_vector_nodes;
+    for(int i = s->vector_shapes.size() - 1; i >= 0; i--){
+        const VectorShape &shape = s->vector_shapes[i];
+        if(!shape.visible)
+            continue;
+        for(int j = 0; j < shape.nodes.size(); j++){
+            if(!selection.contains(qMakePair(i, j)) && i != vec_drawing_shape)
+                continue;
+            const VectorNode &node = shape.nodes[j];
+            for(int side = 0; side < 2; side++){
+                const QPointF handle = side == 0 ? node.in_handle : node.out_handle;
+                if(handle.isNull())
+                    continue;
+                if(QLineF(to_scene.map(node.pos + handle), coord).length() <= radius){
+                    vec_gesture = VG_HANDLE;
+                    vec_edit_shape = i;
+                    vec_edit_node = j;
+                    vec_edit_side = side;
+                    vec_needs_undo = true;
+                    return true;
+                }
+            }
+        }
+    }
+    int best_shape = -1, best_node = -1;
+    qreal best = radius;
+    for(int i = s->vector_shapes.size() - 1; i >= 0; i--){
+        const VectorShape &shape = s->vector_shapes[i];
+        if(!shape.visible)
+            continue;
+        for(int j = 0; j < shape.nodes.size(); j++){
+            const qreal d = QLineF(to_scene.map(shape.nodes[j].pos), coord).length();
+            if(d <= best){
+                best = d;
+                best_shape = i;
+                best_node = j;
+            }
+        }
+    }
+    if(best_shape < 0)
+        return false;
+    const QPair<int,int> key(best_shape, best_node);
+    if(modifiers & Qt::ShiftModifier){
+        if(selection.contains(key)){
+            selection.remove(key); // Shift on a selected anchor takes it out, and nothing moves
+            s->view->Refresh(0);
+            return true;
+        }
+        selection.insert(key);
+    }
+    else if(!selection.contains(key)){
+        selection.clear(); // a click on an unselected anchor: single selection
+        selection.insert(key);
+    }
+    // (a click on an anchor already selected keeps the set, so a multi-selection can be dragged)
+    my_animation->vector_shape_row = best_shape;
+    vec_gesture = VG_MOVE;
+    vec_edit_shape = best_shape; // every gesture names its anchor: the move's range check reads it
+    vec_edit_node = best_node;
+    vec_needs_undo = true;
+    s->view->Refresh(0);
+    emit VectorShapesChanged(); // the panel follows the shape just picked
+    return true;
+}
+
+bool MyView::VectorMouseMove(QMouseEvent *event)
+{
+    StickData *s = VectorStick();
+    if(vec_gesture != VG_NONE && (event->buttons() & Qt::LeftButton)){
+        if(s == nullptr){
+            vec_gesture = VG_NONE;
+            return true;
+        }
+        if(vec_gesture == VG_LASSO){
+            vec_lasso << coord;
+            if(viewport())
+                viewport()->update();
+            return true;
+        }
+        if(vec_needs_undo){
+            // below the drag threshold it is still a click
+            if((event->pos() - vec_press_pos).manhattanLength() < QApplication::startDragDistance())
+                return true;
+            if(vec_gesture != VG_PLACE)
+                StoreUndo(); // a placed anchor's press already took the step
+            vec_needs_undo = false;
+        }
+        if(vec_edit_shape >= s->vector_shapes.size()){
+            vec_gesture = VG_NONE;
+            return true;
+        }
+        const QTransform to_local = s->PolygonTransform().inverted();
+        if(vec_gesture == VG_PLACE){
+            VectorNode &node = s->vector_shapes[vec_edit_shape].nodes[vec_edit_node];
+            const QPointF drag = to_local.map(coord) - node.pos;
+            node.out_handle = drag;
+            node.in_handle = -drag;
+            node.smooth = true;
+        }
+        else if(vec_gesture == VG_MOVE){
+            const QPointF delta = to_local.map(coord) - to_local.map(vec_last);
+            for(const QPair<int,int> &key : s->view->selected_vector_nodes)
+                if(key.first < s->vector_shapes.size() && key.second < s->vector_shapes[key.first].nodes.size())
+                    s->vector_shapes[key.first].nodes[key.second].pos += delta;
+        }
+        else if(vec_gesture == VG_HANDLE){
+            VectorNode &node = s->vector_shapes[vec_edit_shape].nodes[vec_edit_node];
+            const QPointF handle = to_local.map(coord) - node.pos;
+            QPointF &dragged = vec_edit_side == 0 ? node.in_handle : node.out_handle;
+            QPointF &other = vec_edit_side == 0 ? node.out_handle : node.in_handle;
+            dragged = handle;
+            if(event->modifiers() & Qt::AltModifier)
+                node.smooth = false; // Alt breaks the anchor into a corner
+            else if(node.smooth){
+                // the other handle stays on the same line, keeping its own length
+                const qreal len = QLineF(QPointF(0, 0), handle).length();
+                const qreal other_len = QLineF(QPointF(0, 0), other).length();
+                if(len > 1e-9)
+                    other = -handle * (other_len > 1e-9 ? other_len / len : 1.0);
+            }
+        }
+        vec_last = coord;
+        s->view->Refresh(1);
+        return true;
+    }
+    if(vector_tool == VT_PEN && s != nullptr){
+        // the next segment follows the mouse
+        if(vec_drawing_shape >= s->vector_shapes.size())
+            vec_drawing_shape = -1;
+        s->view->vector_active_shape = vec_drawing_shape;
+        s->view->vector_preview_active = vec_drawing_shape >= 0;
+        s->view->vector_preview_point = coord;
+        s->view->Refresh(1);
+        return true;
+    }
+    return false;
+}
+
+bool MyView::VectorMouseRelease(QMouseEvent *event)
+{
+    if(event->button() != Qt::LeftButton || vec_gesture == VG_NONE)
+        return false;
+    const int gesture = vec_gesture;
+    vec_gesture = VG_NONE;
+    StickData *s = VectorStick();
+    if(s == nullptr)
+        return true;
+    if(gesture == VG_LASSO){
+        LassoSelectVectorNodes(vec_lasso, event->modifiers() & Qt::ShiftModifier);
+        vec_lasso.clear();
+        if(viewport())
+            viewport()->update();
+        return true;
+    }
+    if(gesture == VG_PLACE && vec_close_on_release){
+        vec_close_on_release = false;
+        vec_drawing_shape = -1; // closed: the next click starts a new shape
+        s->view->vector_active_shape = -1;
+        s->view->vector_preview_active = false;
+    }
+    if(gesture == VG_PLACE || !vec_needs_undo)
+        VectorEdited(s); // something changed
+    else
+        s->view->Refresh(0); // a click that only picked an anchor
+    vec_needs_undo = false;
+    return true;
+}
+
+/// @details Esc, Enter and the Delete key while a vector tool is active. Esc and Enter both leave
+/// the tool (spec: they exit vector draw mode); Delete removes the selected anchors and, with
+/// none selected, leaves the tool and lets the key delete the stick as usual.
+bool MyView::VectorKeyPress(QKeyEvent *event)
+{
+    if(vector_tool == VT_NONE)
+        return false;
+    switch(event->key()){
+    case Qt::Key_Escape:
+    case Qt::Key_Return:
+    case Qt::Key_Enter:
+        ExitVectorMode();
+        return true;
+    case Qt::Key_Delete:
+    case Qt::Key_Cancel:
+        if(DeleteSelectedVectorNodes())
+            return true;
+        ExitVectorMode();
+        return false;
+    default:
+        return false;
+    }
+}
+
+void MyView::LassoSelectVectorNodes(const QPolygonF &lasso, bool add)
+{
+    StickData *s = VectorStick();
+    if(s == nullptr)
+        return;
+    QSet<QPair<int,int>> &selection = s->view->selected_vector_nodes;
+    if(!add)
+        selection.clear();
+    const QTransform to_scene = s->PolygonTransform();
+    for(int i = 0; i < s->vector_shapes.size(); i++){
+        const VectorShape &shape = s->vector_shapes[i];
+        if(!shape.visible)
+            continue;
+        for(int j = 0; j < shape.nodes.size(); j++)
+            if(lasso.containsPoint(to_scene.map(shape.nodes[j].pos), Qt::OddEvenFill))
+                selection.insert(qMakePair(i, j));
+    }
+    s->view->Refresh(0);
+}
+
+/// @details One undo step for every selected anchor of every vector stick in the frame. A shape
+/// left with fewer than two anchors draws nothing and goes as well.
+bool MyView::DeleteSelectedVectorNodes()
+{
+    if(my_animation->current_frame == nullptr || my_animation->current_frame->stick_figures.isEmpty())
+        return false;
+    QList<StickData*> holders;
+    for(StickData *s : my_animation->CurrentFrame()->total_sticks)
+        if(s->stick_type == StickData::VECTOR && s->view && !s->view->selected_vector_nodes.isEmpty())
+            holders << s;
+    if(holders.isEmpty())
+        return false;
+    EndVectorShape(); // the shape being drawn is finished first, so no index moves under it
+    StoreUndo();
+    for(StickData *s : holders){
+        QList<QPair<int,int>> picked = s->view->selected_vector_nodes.values();
+        std::sort(picked.begin(), picked.end(), std::greater<QPair<int,int>>());
+        for(const QPair<int,int> &key : picked)
+            if(key.first < s->vector_shapes.size() && key.second < s->vector_shapes[key.first].nodes.size())
+                s->vector_shapes[key.first].nodes.removeAt(key.second);
+        s->view->selected_vector_nodes.clear();
+        for(int i = s->vector_shapes.size() - 1; i >= 0; i--)
+            if(s->vector_shapes[i].nodes.size() < 2)
+                s->vector_shapes.removeAt(i);
+        if(my_animation->vector_shape_row >= s->vector_shapes.size())
+            my_animation->vector_shape_row = s->vector_shapes.size() - 1;
+        VectorEdited(s);
+    }
+    return true;
+}
+
+/// @details The current paint (the Style column's my_* state) onto one shape, by the same rules
+/// SetGraphics() applies to a stick: the whole brush, the whole pen paint through CopyPenPaint().
+void MyView::ApplyStyleToShape(VectorShape &shape, int attribute) const
+{
+    if(attribute == ATTRIBUTE_PENCOLOR){
+        CopyPenPaint(&shape.pen, my_pen);
+        shape.brush_follows_stick = my_brush_follows_stick;
+        shape.stroke_brush = my_stroke_brush;
+    }
+    else if(attribute == ATTRIBUTE_PENWIDTH)
+        shape.pen.setWidthF(my_pen.widthF());
+    else if(attribute == ATTRIBUTE_BRUSHCOLOR){
+        shape.brush = my_brush;
+        shape.brush_follows_stick = my_brush_follows_stick;
+        shape.texture_tiled = my_texture_tiled;
+    }
+}
+
+bool MyView::BucketVectorShape(const QPointF &scene_pos, bool fill)
+{
+    StickData *s = VectorStick();
+    if(s == nullptr)
+        return false;
+    const int idx = ShapeAt(*s, scene_pos, PolyPickRadius());
+    if(idx < 0)
+        return false;
+    StoreUndo();
+    VectorShape &shape = s->vector_shapes[idx];
+    if(fill)
+        ApplyStyleToShape(shape, ATTRIBUTE_BRUSHCOLOR);
+    else{
+        ApplyStyleToShape(shape, ATTRIBUTE_PENCOLOR);
+        ApplyStyleToShape(shape, ATTRIBUTE_PENWIDTH); // the bucket gives the whole border
+    }
+    my_animation->vector_shape_row = idx;
+    VectorEdited(s);
+    my_animation->UpdateStyleControls(); // the sliders now echo this shape's paint
+    return true;
+}
+
+/// @details @p delta > 0 moves towards the front (a higher index is drawn later). The shape being
+/// drawn is finished first, so the pen never keeps an index that moved.
+bool MyView::MoveVectorShape(int index, int delta)
+{
+    StickData *s = VectorStick();
+    if(s == nullptr)
+        return false;
+    EndVectorShape();
+    if(index < 0 || index >= s->vector_shapes.size())
+        return false;
+    const int target = qBound(0, index + delta, int(s->vector_shapes.size()) - 1);
+    if(target == index)
+        return false;
+    StoreUndo();
+    s->vector_shapes.move(index, target);
+    s->view->selected_vector_nodes.clear();
+    my_animation->vector_shape_row = target;
+    VectorEdited(s);
+    return true;
+}
+
+bool MyView::DeleteVectorShapes(QList<int> indices)
+{
+    StickData *s = VectorStick();
+    if(s == nullptr || indices.isEmpty())
+        return false;
+    EndVectorShape();
+    std::sort(indices.begin(), indices.end(), std::greater<int>());
+    indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+    StoreUndo();
+    for(int idx : indices){
+        if(idx < 0 || idx >= s->vector_shapes.size())
+            continue;
+        s->vector_shapes.removeAt(idx);
+        DropShapeFromSelection(s->view->selected_vector_nodes, idx);
+    }
+    my_animation->vector_shape_row = qMin(my_animation->vector_shape_row, int(s->vector_shapes.size()) - 1);
+    VectorEdited(s);
+    return true;
+}
+
+void MyView::SetVectorShapeVisible(int index, bool visible)
+{
+    StickData *s = VectorStick();
+    if(s == nullptr || index < 0 || index >= s->vector_shapes.size()
+            || s->vector_shapes[index].visible == visible)
+        return;
+    StoreUndo();
+    s->vector_shapes[index].visible = visible;
+    if(!visible){
+        // a hidden shape's anchors can't stay selected: Delete would remove what nobody sees
+        QSet<QPair<int,int>> &selection = s->view->selected_vector_nodes;
+        for(auto it = selection.begin(); it != selection.end(); )
+            it = it->first == index ? selection.erase(it) : std::next(it);
+    }
+    VectorEdited(s);
+}
+
+void MyView::RenameVectorShape(int index, const QString &name)
+{
+    StickData *s = VectorStick();
+    if(s == nullptr || index < 0 || index >= s->vector_shapes.size()
+            || s->vector_shapes[index].name == name)
+        return;
+    StoreUndo();
+    s->vector_shapes[index].name = name;
+    emit VectorShapesChanged();
+}
+
+/// @details The buffer holds the shapes in SCENE space, so a paste can put them back where they
+/// were drawn whatever stick receives them. It is a plain value list: replaced whole by the next
+/// copy, freed with the view, and its textures shared copy-on-write with the source.
+int MyView::CopyVectorShapes(QList<int> indices)
+{
+    StickData *s = VectorStick();
+    if(s == nullptr)
+        return 0;
+    std::sort(indices.begin(), indices.end());
+    indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+    const QTransform to_scene = s->PolygonTransform();
+    QList<VectorShape> copied;
+    for(int idx : indices)
+        if(idx >= 0 && idx < s->vector_shapes.size())
+            copied << MapShape(s->vector_shapes[idx], to_scene);
+    if(copied.isEmpty())
+        return 0; // nothing selected: the previous copy stays
+    vector_clipboard = copied;
+    return copied.size();
+}
+
+QString MyView::PasteVectorShapes()
+{
+    StickData *s = VectorStick();
+    if(s == nullptr)
+        return tr("Select a vector stick to paste the shapes into.");
+    if(vector_clipboard.isEmpty())
+        return tr("No shape has been copied yet.");
+    EndVectorShape();
+    StoreUndo();
+    const QTransform to_local = s->PolygonTransform().inverted();
+    for(const VectorShape &shape : vector_clipboard)
+        s->vector_shapes << MapShape(shape, to_local); // on top, in their copied order
+    my_animation->vector_shape_row = s->vector_shapes.size() - 1;
+    VectorEdited(s);
+    return QString();
 }

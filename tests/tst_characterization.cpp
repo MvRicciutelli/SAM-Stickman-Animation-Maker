@@ -105,6 +105,37 @@ class TestCharacterization : public QObject
         return drawn;
     }
 
+    // A closed or open square shape in a VECTOR stick's normalized local frame: corner anchors,
+    // no handles. @p brush fills it, no pen outlines it unless one is set afterwards.
+    static VectorShape SquareShape(QPointF origin, qreal size, const QBrush &brush, bool closed = true)
+    {
+        VectorShape shape;
+        shape.closed = closed;
+        shape.brush = brush;
+        shape.pen = QPen(Qt::NoPen);
+        for (const QPointF &corner : { QPointF(0, 0), QPointF(size, 0), QPointF(size, size), QPointF(0, size) }) {
+            VectorNode node;
+            node.pos = origin + corner;
+            shape.nodes << node;
+        }
+        return shape;
+    }
+
+    // DrawStick() turned into a finished VECTOR stick holding @p shapes, selected, as
+    // ConvertStick() leaves a converted stick (img_angle tracking the spine)
+    StickData *AddVectorStick(QPointF from, QPointF to, const QList<VectorShape> &shapes)
+    {
+        StickData *stick = DrawStick(from, to);
+        stick->stick_type = StickData::VECTOR;
+        stick->img_angle = -atan2(stick->my_line.dx(), stick->my_line.dy()) * 180 / M_PI;
+        stick->vector_shapes = shapes;
+        stick->view->Refresh(0);
+        view->my_animation->UpdateSelection(stick);
+        // it was selected as a LINE: make its top shape current, as selecting a vector stick does
+        view->my_animation->vector_shape_row = shapes.count() - 1;
+        return stick;
+    }
+
     // Group D bug 2: changing the master stick reverses the spine (p1<->p2) of the sticks
     // on the parent chain. A POLYGON/MULTILINE in that chain must keep its shape in scene
     // space (its vertices are stored normalized to the reversed spine's frame; before the
@@ -147,7 +178,20 @@ class TestCharacterization : public QObject
         else
             want << QPointF(120, 180) << QPointF(180, 180) << QPointF(150, 240);
         QTransform inv = mid->PolygonTransform().inverted();
-        for (const QPointF &p : want)
+        if (middle_type == StickData::VECTOR) {
+            // the same points as one closed shape's anchors, each with two bezier handles
+            VectorShape shape;
+            shape.closed = true;
+            for (const QPointF &p : want) {
+                VectorNode node;
+                node.pos = inv.map(p);
+                node.in_handle = inv.map(p - QPointF(10, 5)) - node.pos;
+                node.out_handle = inv.map(p + QPointF(12, -4)) - node.pos;
+                shape.nodes << node;
+            }
+            mid->vector_shapes << shape;
+        }
+        else for (const QPointF &p : want)
             mid->polygon_points.append(inv.map(p));
         if (middle_type == StickData::MULTILINE) {
             mid->vertex_widths << 3 << 4 << 5 << 6;        // per-vertex incl. endpoints
@@ -174,6 +218,11 @@ class TestCharacterization : public QObject
         auto scene_verts = [&](StickData *s) {
             QList<QPointF> v;
             QTransform t = s->PolygonTransform();
+            if (s->stick_type == StickData::VECTOR) { // anchors and handle tips
+                for (const VectorNode &n : s->vector_shapes[0].nodes)
+                    v << t.map(n.pos) << t.map(n.pos + n.in_handle) << t.map(n.pos + n.out_handle);
+                return v;
+            }
             if (s->stick_type == StickData::MULTILINE) v << s->DrawnLine().p1();
             for (const QPointF &p : s->polygon_points) v << t.map(p);
             if (s->stick_type == StickData::MULTILINE) v << s->DrawnLine().p2();
@@ -192,7 +241,8 @@ class TestCharacterization : public QObject
             }
             return edges;
         };
-        QSet<QString> edges_before = scene_edges(mid);
+        // (edges only exist for a multiline: its parents list is what pairs the vertices up)
+        QSet<QString> edges_before = middle_type == StickData::MULTILINE ? scene_edges(mid) : QSet<QString>();
 
         fig->SetMaster(gc);
         QCOMPARE(fig->master_stick, gc); // the change actually happened
@@ -3292,6 +3342,7 @@ private slots:
     void ChangeMasterKeepsPolygonShape()   { ChangeMasterKeepsVertexShape(StickData::POLYGON); }
     void ChangeMasterKeepsMultilineShape() { ChangeMasterKeepsVertexShape(StickData::MULTILINE); }
     void ChangeMasterKeepsTransformedMultilineShape() { ChangeMasterKeepsVertexShape(StickData::MULTILINE, true); }
+    void ChangeMasterKeepsVectorShape() { ChangeMasterKeepsVertexShape(StickData::VECTOR, true); }
 
     // The Stick Transform (local_xf.offset/_angle/_scale, record version 9) moves the shape of
     // EVERY type on top of its own geometry, while the skeleton stays put. Rendered on a RECT
@@ -6935,6 +6986,503 @@ private slots:
         QVERIFY(!IsNewerRelease("v0.8.5", "0.9.0"));
         QVERIFY(!IsNewerRelease("", "0.9.0"));
         QVERIFY(!IsNewerRelease("latest", "0.9.0"));
+    }
+
+    // A VECTOR stick (record v11) streams its shape layers: anchors with both handles, open and
+    // closed shapes, name and visibility, and each shape's OWN paint — a texture fill and stroke,
+    // a gradient, a border tip, the anchoring and tiling flags — through the stream, Clone(), and
+    // an image table that writes a texture shared by fill and stroke once. A newer shape-list
+    // format is refused rather than misread.
+    void VectorStickRoundTrip()
+    {
+        QImage tile(4, 4, QImage::Format_ARGB32);
+        tile.fill(qRgb(255, 0, 0));
+        QImage tip(8, 8, QImage::Format_Alpha8);
+        tip.fill(200);
+
+        StickData source;
+        source.stick_type = StickData::VECTOR;
+        source.my_line = QLineF(10, 10, 10, 110);
+        VectorShape open = SquareShape(QPointF(0, 0), 0.3, QBrush(tile), false);
+        open.name = "open";
+        open.visible = false;
+        open.nodes[1].out_handle = QPointF(0.1, 0.2);
+        open.nodes[2].in_handle = QPointF(-0.05, 0.01);
+        open.nodes[2].smooth = true;
+        open.pen = QPen(QBrush(tile), 3);
+        open.texture_tiled = false;
+        open.brush_follows_stick = false;
+        open.stroke_brush.stamp = tip;
+        open.stroke_brush.spacing = 40;
+        open.stroke_brush.angle_jitter = 12;
+        QLinearGradient gradient(0, 0, 1, 1);
+        gradient.setCoordinateMode(QGradient::ObjectMode);
+        gradient.setColorAt(0, Qt::blue);
+        gradient.setColorAt(1, Qt::green);
+        VectorShape closed = SquareShape(QPointF(0.2, 0.4), 0.5, QBrush(gradient));
+        closed.name = "closed";
+        closed.pen = QPen(Qt::black, 2.5);
+        source.vector_shapes << open << closed;
+
+        auto check = [&](const StickData &loaded) {
+            QCOMPARE(loaded.stick_type, (qint32)StickData::VECTOR);
+            QCOMPARE(loaded.vector_shapes.count(), 2);
+            for (int i = 0; i < 2; i++) {
+                const VectorShape &a = source.vector_shapes[i], &b = loaded.vector_shapes[i];
+                QCOMPARE(b.name, a.name);
+                QCOMPARE(b.visible, a.visible);
+                QCOMPARE(b.closed, a.closed);
+                QCOMPARE(b.brush_follows_stick, a.brush_follows_stick);
+                QCOMPARE(b.texture_tiled, a.texture_tiled);
+                QCOMPARE(b.pen.widthF(), a.pen.widthF());
+                QCOMPARE(b.brush.style(), a.brush.style());
+                QCOMPARE(b.nodes.count(), a.nodes.count());
+                for (int j = 0; j < a.nodes.count(); j++) {
+                    QCOMPARE(b.nodes[j].pos, a.nodes[j].pos);
+                    QCOMPARE(b.nodes[j].in_handle, a.nodes[j].in_handle);
+                    QCOMPARE(b.nodes[j].out_handle, a.nodes[j].out_handle);
+                    QCOMPARE(b.nodes[j].smooth, a.nodes[j].smooth);
+                }
+            }
+            const VectorShape &textured = loaded.vector_shapes[0];
+            QCOMPARE(QColor(textured.brush.textureImage().pixel(1, 1)), QColor(Qt::red));
+            QCOMPARE(QColor(textured.pen.brush().textureImage().pixel(1, 1)), QColor(Qt::red));
+            QCOMPARE(textured.stroke_brush.stamp.size(), QSize(8, 8));
+            QCOMPARE(textured.stroke_brush.spacing, 40);
+            QCOMPARE(textured.stroke_brush.angle_jitter, 12);
+            QVERIFY(loaded.vector_shapes[1].brush.gradient() != nullptr);
+            QCOMPARE(loaded.vector_shapes[1].brush.gradient()->stops(), gradient.stops());
+        };
+
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << source;
+        }
+        StickData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+            QCOMPARE(in.status(), QDataStream::Ok);
+            QVERIFY(in.atEnd());
+        }
+        QCOMPARE(loaded.version, StickData::CURRENT_VERSION);
+        check(loaded);
+
+        StickData *clone = source.Clone();
+        check(*clone);
+        delete clone;
+
+        // through a file's image table: the texture the fill and the stroke share is one entry
+        ImageTable table;
+        ImageTable *previous = InstallImageTable(&table);
+        QByteArray indexed;
+        {
+            QDataStream out(&indexed, QIODevice::WriteOnly);
+            out << source;
+        }
+        StickData from_table;
+        {
+            QDataStream in(&indexed, QIODevice::ReadOnly);
+            in >> from_table;
+            QCOMPARE(in.status(), QDataStream::Ok);
+        }
+        InstallImageTable(previous);
+        int tile_entries = 0;
+        for (const QImage &image : table.images)
+            if (!image.isNull() && image.size() == tile.size() && QColor(image.pixel(1, 1)) == QColor(Qt::red))
+                tile_entries++;
+        QCOMPARE(tile_entries, 1);
+        check(from_table);
+
+        // the shape list's own format version (1), its count (2), then the first name's length
+        // (8 bytes of UTF-16) and its first letter: a later format must be refused
+        QByteArray header;
+        {
+            QDataStream out(&header, QIODevice::WriteOnly);
+            out << StickData::VECTOR_SHAPES_VERSION << (qint32)2 << QString("open");
+        }
+        const int at = bytes.indexOf(header);
+        QVERIFY(at > 0);
+        QByteArray newer = bytes;
+        newer[at + 3] = char(StickData::VECTOR_SHAPES_VERSION + 1);
+        file_load_error.clear();
+        StickData refused;
+        {
+            QDataStream in(&newer, QIODevice::ReadOnly);
+            in >> refused;
+            QCOMPARE(in.status(), QDataStream::ReadCorruptData);
+        }
+        QVERIFY(!file_load_error.isEmpty());
+        QVERIFY(refused.vector_shapes.isEmpty());
+        file_load_error.clear();
+    }
+
+    // The DRAWVECTOR tool end to end through real events: two clicks place the stick and enter
+    // vector draw mode; a click is a corner, a click-and-drag a smooth anchor whose handles follow
+    // the drag, a click on the first anchor closes the shape, a right click ends an open one.
+    // One undo step per anchor (the drag adds none), an undo mid-session keeps the pen working,
+    // and Enter, Esc, a double click and a tool switch all leave the mode.
+    void DrawVectorViaRealMouseEvents()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        auto at = [this](QPointF p) { return view->mapFromScene(p); };
+        auto scene_of = [this, at](QPointF p) { return view->mapToScene(at(p)); }; // what a click really hits
+        auto click = [this, at](QPointF p, Qt::MouseButton button = Qt::LeftButton) {
+            QTest::mouseClick(view->viewport(), button, Qt::NoModifier, at(p));
+        };
+        auto near = [](QPointF a, QPointF b) { return QLineF(a, b).length() < 0.01; };
+
+        view->SetTool(DRAWVECTOR);
+        click(QPointF(100, 100));
+        click(QPointF(100, 300));
+        StickData *v = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(v->stick_type, (qint32)StickData::VECTOR);
+        QCOMPARE(view->vector_tool, (int)MyView::VT_PEN);
+        QVERIFY(v->vector_shapes.isEmpty());
+
+        QSignalSpy pushes(&view->undo_stack, &QUndoStack::indexChanged);
+        click(QPointF(200, 100));
+        QCOMPARE(v->vector_shapes.count(), 1);
+        QCOMPARE(v->vector_shapes[0].nodes.count(), 1);
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(300, 150)));
+        QTest::mouseMove(view->viewport(), at(QPointF(320, 150)));
+        QTest::mouseMove(view->viewport(), at(QPointF(340, 160)));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(340, 160)));
+        const QTransform to_scene = v->PolygonTransform();
+        const VectorNode smooth = v->vector_shapes[0].nodes[1];
+        QVERIFY(smooth.smooth);
+        const QPointF anchor = scene_of(QPointF(300, 150)), dragged = scene_of(QPointF(340, 160));
+        QVERIFY(near(to_scene.map(smooth.pos), anchor));
+        QVERIFY(near(to_scene.map(smooth.pos + smooth.out_handle), dragged));
+        QVERIFY(near(to_scene.map(smooth.pos + smooth.in_handle), 2 * anchor - dragged)); // symmetric
+        QVERIFY(v->vector_shapes[0].nodes[0].out_handle.isNull()); // the corner stays sharp
+        click(QPointF(250, 250));
+        click(QPointF(201, 101)); // on the first anchor: closes the shape
+        QVERIFY(v->vector_shapes[0].closed);
+        QCOMPARE(v->vector_shapes[0].nodes.count(), 3);
+        QCOMPARE(pushes.count(), 4); // one step per anchor and for the close; the drag took none
+
+        // a right click ends an open shape, and the next click starts another one on top
+        click(QPointF(400, 100));
+        click(QPointF(450, 120));
+        click(QPointF(500, 100), Qt::RightButton);
+        QCOMPARE(v->vector_shapes.count(), 2);
+        QVERIFY(!v->vector_shapes[1].closed);
+        QCOMPARE(v->vector_shapes[1].nodes.count(), 2);
+        click(QPointF(400, 250));
+        QCOMPARE(v->vector_shapes.count(), 3);
+
+        // undo in the middle of the session takes that anchor (and its new shape) back; the frame
+        // is rebuilt from the snapshot, and the pen keeps drawing on the rebuilt stick
+        view->undo_stack.undo();
+        v = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(v->vector_shapes.count(), 2);
+        QCOMPARE(view->vector_tool, (int)MyView::VT_PEN);
+        click(QPointF(420, 260));
+        click(QPointF(470, 260));
+        QCOMPARE(v->vector_shapes.count(), 3);
+        QCOMPARE(v->vector_shapes[2].nodes.count(), 2);
+
+        QTest::keyClick(view, Qt::Key_Return); // Enter leaves; the two-anchor shape stays
+        QCOMPARE(view->vector_tool, (int)MyView::VT_NONE);
+        QCOMPARE(v->vector_shapes.count(), 3);
+
+        // the panel's pen re-enters; Esc leaves, dropping a lone anchor that draws nothing
+        view->EnterVectorMode();
+        QCOMPARE(view->vector_tool, (int)MyView::VT_PEN);
+        click(QPointF(600, 400));
+        QCOMPARE(v->vector_shapes.count(), 4);
+        QTest::keyClick(view, Qt::Key_Escape);
+        QCOMPARE(view->vector_tool, (int)MyView::VT_NONE);
+        QCOMPARE(v->vector_shapes.count(), 3);
+        QCOMPARE(CurrentStickFigure()->stick_list.last(), v); // Esc did not delete the stick
+
+        view->EnterVectorMode();
+        QTest::mouseDClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(600, 450)));
+        QCOMPARE(view->vector_tool, (int)MyView::VT_NONE);
+
+        view->EnterVectorMode();
+        view->SetTool(NOTOOL);
+        QCOMPARE(view->vector_tool, (int)MyView::VT_NONE);
+    }
+
+    // Each shape is painted with its own paint, in list order (the last on top), and hidden ones
+    // not at all; the skeleton only shows while nothing is visible. Tiling is per shape: a
+    // non-tiling texture on one shape is clipped to its single tile while the other one tiles.
+    void VectorShapesRenderPerShapePaintInLayerOrder()
+    {
+        StickData v;
+        v.stick_type = StickData::VECTOR;
+        v.my_line = QLineF(100, 50, 100, 150); // pointing down: local (x, y) -> (100 + 100x, 50 + 100y)
+        v.img_angle = 0;
+        v.pen = QPen(Qt::black, 4);
+        auto render = [](StickData *data) {
+            QGraphicsScene render_scene;
+            render_scene.setSceneRect(0, 0, 200, 200);
+            render_scene.addItem(new StickGraphicsItem(data)); // the scene owns the view
+            QImage img(200, 200, QImage::Format_ARGB32);
+            img.fill(Qt::white);
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 200, 200), QRectF(0, 0, 200, 200));
+            painter.end();
+            return img;
+        };
+        const QPoint overlap(105, 105), only_red(65, 65), only_blue(140, 140), skeleton(100, 80);
+
+        QCOMPARE(render(&v).pixelColor(skeleton), QColor(Qt::black)); // nothing yet: the spine shows
+
+        v.vector_shapes << SquareShape(QPointF(-0.4, 0.1), 0.6, QBrush(Qt::red))   // scene 60..120
+                        << SquareShape(QPointF(-0.1, 0.4), 0.6, QBrush(Qt::blue)); // scene 90..150
+        QImage img = render(&v);
+        QCOMPARE(img.pixelColor(overlap), QColor(Qt::blue)); // the later shape is on top
+        QCOMPARE(img.pixelColor(only_red), QColor(Qt::red));
+        QCOMPARE(img.pixelColor(only_blue), QColor(Qt::blue));
+        QCOMPARE(img.pixelColor(QPoint(100, 55)), QColor(Qt::white)); // shapes visible: no spine
+
+        v.vector_shapes.move(1, 0);
+        QCOMPARE(render(&v).pixelColor(overlap), QColor(Qt::red));
+        v.vector_shapes[1].visible = false; // the red one, now on top
+        img = render(&v);
+        QCOMPARE(img.pixelColor(overlap), QColor(Qt::blue));
+        QCOMPARE(img.pixelColor(only_red), QColor(Qt::white));
+
+        // tiling: a 10 px green tile placed at the stick's origin (scene 100..110 x 50..60)
+        QImage tile(10, 10, QImage::Format_ARGB32);
+        tile.fill(Qt::green);
+        v.vector_shapes[1].visible = true;
+        v.vector_shapes[0].brush = QBrush(tile); // blue square, 90..150
+        v.vector_shapes[1].brush = QBrush(tile); // red square, 60..120, tiling
+        v.vector_shapes[0].texture_tiled = false;
+        img = render(&v);
+        QCOMPARE(img.pixelColor(only_blue), QColor(Qt::white)); // its one instance is elsewhere
+        QCOMPARE(img.pixelColor(only_red), QColor(Qt::green));  // the other shape still tiles
+        v.vector_shapes[0].texture_tiled = true;
+        QCOMPARE(render(&v).pixelColor(only_blue), QColor(Qt::green));
+    }
+
+    // Ctrl+drag on an anchor moves it (one undo step, none for a plain click), Ctrl+drag on a
+    // smooth anchor's handle keeps the opposite handle on its line at its own length (Alt breaks
+    // it), the lasso selects the anchors inside it, Delete removes them as one step (a shape left
+    // with fewer than two goes too), and the selection lapses when another stick is selected.
+    void VectorNodeEditingLassoAndDelete()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        view->SetTool(NOTOOL);
+        auto at = [this](QPointF p) { return view->mapFromScene(p); };
+        auto scene_of = [this, at](QPointF p) { return view->mapToScene(at(p)); };
+        // a 100 px stick pointing down from (300, 100): local (x, y) -> (300 + 100x, 100 + 100y)
+        VectorShape square = SquareShape(QPointF(0, 0), 1.0, QBrush(Qt::gray));
+        VectorShape small = SquareShape(QPointF(1.5, 0), 0.5, QBrush(Qt::gray));
+        StickData *v = AddVectorStick(QPointF(300, 100), QPointF(300, 200), { square, small });
+        QCOMPARE(view->VectorStick(), v);
+        auto node_scene = [&](int shape, int node) {
+            return v->PolygonTransform().map(v->vector_shapes[shape].nodes[node].pos);
+        };
+        auto near = [](QPointF a, QPointF b, qreal tol = 0.01) { return QLineF(a, b).length() < tol; };
+
+        // Ctrl+click on the anchor at (400, 100) selects it and takes no step...
+        QSignalSpy pushes(&view->undo_stack, &QUndoStack::indexChanged);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::ControlModifier, at(QPointF(400, 100)));
+        QCOMPARE(v->view->selected_vector_nodes, (QSet<QPair<int,int>>{ qMakePair(0, 1) }));
+        QCOMPARE(pushes.count(), 0);
+        // ...and a Ctrl+drag moves it by the drag, as one step
+        const QPointF start = node_scene(0, 1);
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::ControlModifier, at(QPointF(400, 100)));
+        QTest::mouseMove(view->viewport(), at(QPointF(420, 110)));
+        QTest::mouseMove(view->viewport(), at(QPointF(430, 120)));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::ControlModifier, at(QPointF(430, 120)));
+        const QPointF moved_to = start + scene_of(QPointF(430, 120)) - scene_of(QPointF(400, 100));
+        QVERIFY2(near(node_scene(0, 1), moved_to),
+                 qPrintable(QString("anchor at %1,%2 instead of %3,%4 (view scale %5)").arg(node_scene(0, 1).x()).arg(node_scene(0, 1).y())
+                            .arg(moved_to.x()).arg(moved_to.y()).arg(view->transform().m11())));
+        QCOMPARE(pushes.count(), 1);
+        QCOMPARE(CurrentFrame()->CurrentStick(), v); // a node edit, not a stick rotation
+        QCOMPARE(v->my_line, QLineF(300, 100, 300, 200));
+
+        // a smooth anchor: dragging its out handle swings the in handle to the opposite side
+        VectorNode &corner = v->vector_shapes[0].nodes[2]; // at (400, 200)
+        corner.smooth = true;
+        corner.out_handle = QPointF(0.2, 0);
+        corner.in_handle = QPointF(-0.1, 0);
+        v->view->selected_vector_nodes = { qMakePair(0, 2) };
+        v->view->Refresh(0);
+        const QPointF tip = v->PolygonTransform().map(corner.pos + corner.out_handle); // (420, 200)
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::ControlModifier, at(tip));
+        QTest::mouseMove(view->viewport(), at(tip + QPointF(0, 15)));
+        QTest::mouseMove(view->viewport(), at(QPointF(400, 230)));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::ControlModifier, at(QPointF(400, 230)));
+        const VectorNode &bent = v->vector_shapes[0].nodes[2];
+        const QPointF out_dir = bent.out_handle / QLineF(QPointF(), bent.out_handle).length();
+        const QPointF in_dir = bent.in_handle / QLineF(QPointF(), bent.in_handle).length();
+        QVERIFY(near(out_dir, -in_dir, 1e-6));                          // collinear, opposite
+        QVERIFY(qAbs(QLineF(QPointF(), bent.in_handle).length() - 0.1) < 1e-6); // its own length
+        QVERIFY(bent.smooth);
+        QCOMPARE(pushes.count(), 2);
+
+        // the lasso: around the two left anchors of the big square (x = 300)
+        view->SetVectorTool(MyView::VT_LASSO);
+        QCOMPARE(view->vector_tool, (int)MyView::VT_LASSO);
+        const QList<QPointF> loop = { QPointF(280, 80), QPointF(330, 80), QPointF(330, 230), QPointF(280, 230), QPointF(280, 81) };
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(loop[0]));
+        for (int i = 1; i < loop.count(); i++)
+            QTest::mouseMove(view->viewport(), at(loop[i]));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(loop.last()));
+        QCOMPARE(v->view->selected_vector_nodes, (QSet<QPair<int,int>>{ qMakePair(0, 0), qMakePair(0, 3) }));
+        QCOMPARE(v->my_line, QLineF(300, 100, 300, 200)); // the lasso took the press, not the tool
+        // plus the three anchors of the small square with Shift: two lassos, one selection
+        view->LassoSelectVectorNodes(QPolygonF({ QPointF(440, 90), QPointF(560, 90), QPointF(560, 160), QPointF(440, 160) }), true);
+        QCOMPARE(v->view->selected_vector_nodes.count(), 6);
+
+        // Delete: one step; the big square keeps two anchors, the small one is left with none
+        pushes.clear();
+        QTest::keyClick(view, Qt::Key_Delete);
+        QCOMPARE(pushes.count(), 1);
+        QCOMPARE(v->vector_shapes.count(), 1);
+        QCOMPARE(v->vector_shapes[0].nodes.count(), 2);
+        QVERIFY(v->view->selected_vector_nodes.isEmpty());
+        QCOMPARE(CurrentStickFigure()->stick_list.contains(v), true); // the stick stays
+        view->SetVectorTool(MyView::VT_NONE);
+
+        // selecting another stick drops the anchor selection
+        StickData *other = DrawStick(QPointF(600, 100), QPointF(600, 200));
+        view->my_animation->UpdateSelection(v);
+        v->view->selected_vector_nodes = { qMakePair(0, 0) };
+        view->my_animation->UpdateSelection(other);
+        QVERIFY(v->view->selected_vector_nodes.isEmpty());
+        QCOMPARE(view->VectorStick(), nullptr);
+        QCOMPARE(view->my_animation->vector_shape_row, -1);
+    }
+
+    // The buckets give the topmost shape under the click the Style column's current fill, or its
+    // whole border (paint and width), as one undo step each. Copied shapes paste into ANY vector
+    // stick where they were drawn, from a buffer that survives a frame change. Inbetweens blend
+    // matching shapes anchor by anchor, and are refused, changing nothing, when the two keyframes'
+    // shapes differ in count, anchors or open/closed state.
+    void VectorBucketCopyPasteAndInbetween()
+    {
+        struct Restore {
+            MyView *v; QPen pen; QBrush brush;
+            ~Restore(){ v->my_pen = pen; v->my_brush = brush; v->SetVectorTool(MyView::VT_NONE); }
+        } restore{view, view->my_pen, view->my_brush};
+        AddFrame();
+        view->resize(800, 600);
+        view->SetTool(NOTOOL);
+        auto at = [this](QPointF p) { return view->mapFromScene(p); };
+        StickData *a = AddVectorStick(QPointF(200, 100), QPointF(200, 200),
+                                      { SquareShape(QPointF(-0.5, 0), 1.0, QBrush(Qt::gray)),       // 150..250 x 100..200
+                                        SquareShape(QPointF(0, 0.5), 0.3, QBrush(Qt::darkGray)) }); // 200..230 x 150..180
+
+        QSignalSpy pushes(&view->undo_stack, &QUndoStack::indexChanged);
+        view->my_brush = QBrush(Qt::green);
+        view->SetVectorTool(MyView::VT_FILL);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(215, 165)));
+        QCOMPARE(a->vector_shapes[1].brush.color(), QColor(Qt::green)); // the top one under the click
+        QCOMPARE(a->vector_shapes[0].brush.color(), QColor(Qt::gray));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(170, 120)));
+        QCOMPARE(a->vector_shapes[0].brush.color(), QColor(Qt::green));
+        QCOMPARE(pushes.count(), 2);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(600, 500)));
+        QCOMPARE(pushes.count(), 2); // nothing there: no step
+        view->my_pen = QPen(Qt::magenta, 7);
+        view->SetVectorTool(MyView::VT_STROKE);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(170, 120)));
+        QCOMPARE(a->vector_shapes[0].pen.color(), QColor(Qt::magenta));
+        QCOMPARE(a->vector_shapes[0].pen.widthF(), 7.0);
+        QCOMPARE(a->vector_shapes[1].pen.style(), Qt::NoPen);
+        QCOMPARE(pushes.count(), 3);
+        QCOMPARE(view->my_animation->vector_shape_row, 0); // the shape painted becomes current
+        view->SetVectorTool(MyView::VT_NONE);
+
+        // copy the big square, paste it into a stick turned the other way: same scene anchors
+        QCOMPARE(view->CopyVectorShapes({ 0 }), 1);
+        auto scene_anchors = [](StickData *s, int shape) {
+            QList<QPointF> points;
+            for (const VectorNode &n : s->vector_shapes[shape].nodes)
+                points << s->PolygonTransform().map(n.pos);
+            return points;
+        };
+        const QList<QPointF> copied = scene_anchors(a, 0);
+        StickData *b = AddVectorStick(QPointF(500, 300), QPointF(420, 240), {});
+        QCOMPARE(view->PasteVectorShapes(), QString());
+        QCOMPARE(b->vector_shapes.count(), 1);
+        QList<QPointF> pasted = scene_anchors(b, 0);
+        for (int i = 0; i < copied.count(); i++)
+            QVERIFY(QLineF(pasted[i], copied[i]).length() < 1e-6);
+        QCOMPARE(b->vector_shapes[0].pen.color(), QColor(Qt::magenta));
+        QCOMPARE(b->vector_shapes[0].pen.widthF(), 7.0); // widths stay absolute
+        QCOMPARE(view->PasteVectorShapes(), QString()); // the buffer stays: paste again
+        QCOMPARE(b->vector_shapes.count(), 2);
+        AddFrame();
+        StickData *c = AddVectorStick(QPointF(100, 100), QPointF(100, 300), {});
+        QCOMPARE(view->PasteVectorShapes(), QString()); // it survives the frame change
+        QCOMPARE(c->vector_shapes.count(), 1);
+        DrawStick(QPointF(600, 100), QPointF(600, 200)); // a LINE becomes the current stick
+        QVERIFY(!view->PasteVectorShapes().isEmpty());
+
+        // inbetweens: the same structure in both keyframes, the anchors moved
+        auto keyframe = [&](qreal size) {
+            AddFrame();
+            AddVectorStick(QPointF(300, 100), QPointF(300, 200),
+                           { SquareShape(QPointF(0, 0), size, QBrush(Qt::gray)),
+                             SquareShape(QPointF(0, 0), size / 2, QBrush(Qt::gray), false) });
+            return CurrentFrame();
+        };
+        keyframe(0.2);
+        keyframe(0.6);
+        const int start = view->my_animation->frame_list.count() - 2;
+        QCOMPARE(view->GenerateInbetweens(start, 1), QString());
+        StickData *mid = view->my_animation->frame_list[start + 1]->stick_figures[0]->stick_list.last();
+        QCOMPARE(mid->stick_type, (qint32)StickData::VECTOR);
+        QVERIFY(QLineF(mid->vector_shapes[0].nodes[2].pos, QPointF(0.4, 0.4)).length() < 1e-6);
+        QVERIFY(QLineF(mid->vector_shapes[1].nodes[2].pos, QPointF(0.2, 0.2)).length() < 1e-6);
+
+        // ...and refused when they differ: one anchor fewer, a shape fewer, open instead of closed
+        auto refused = [&](std::function<void(QList<VectorShape>&)> differ) {
+            keyframe(0.2);
+            StickData *last = keyframe(0.6)->stick_figures[0]->stick_list.last();
+            differ(last->vector_shapes);
+            const int frames = view->my_animation->frame_list.count();
+            QSignalSpy steps(&view->undo_stack, &QUndoStack::indexChanged);
+            const QString why = view->GenerateInbetweens(frames - 2, 2);
+            return !why.isEmpty() && view->my_animation->frame_list.count() == frames && steps.count() == 0;
+        };
+        QVERIFY(refused([](QList<VectorShape> &s) { s[0].nodes.removeLast(); }));
+        QVERIFY(refused([](QList<VectorShape> &s) { s.removeLast(); }));
+        QVERIFY(refused([](QList<VectorShape> &s) { s[1].closed = true; }));
+    }
+
+    // The Style column acts on a vector stick's CURRENT SHAPE, which is what it paints: the Apply
+    // buttons (SetGraphics()) write it, "all" writes every shape, and selecting the stick makes
+    // its top shape current. Converting the stick away drops its shapes.
+    void VectorStyleTargetsTheCurrentShape()
+    {
+        struct Restore {
+            MyView *v; QBrush brush;
+            ~Restore(){ v->my_brush = brush; }
+        } restore{view, view->my_brush};
+        AddFrame();
+        StickData *v = AddVectorStick(QPointF(300, 100), QPointF(300, 200),
+                                      { SquareShape(QPointF(0, 0), 0.5, QBrush(Qt::gray)),
+                                        SquareShape(QPointF(0, 0), 0.3, QBrush(Qt::gray)) });
+        QCOMPARE(view->my_animation->vector_shape_row, 1); // selecting it made the top shape current
+        QCOMPARE(view->my_animation->CurrentVectorShape(v), 1);
+        view->my_brush = QBrush(Qt::yellow);
+        view->SetGraphics(false, ATTRIBUTE_BRUSHCOLOR);
+        QCOMPARE(v->vector_shapes[1].brush.color(), QColor(Qt::yellow));
+        QCOMPARE(v->vector_shapes[0].brush.color(), QColor(Qt::gray));
+        QCOMPARE(v->Paint(1).brush, &v->vector_shapes[1].brush);
+        QCOMPARE(v->Paint(-1).brush, &v->brush); // no current shape: the stick's own
+        view->my_brush = QBrush(Qt::cyan);
+        view->SetGraphics(true, ATTRIBUTE_BRUSHCOLOR);
+        QCOMPARE(v->vector_shapes[0].brush.color(), QColor(Qt::cyan));
+        QCOMPARE(v->vector_shapes[1].brush.color(), QColor(Qt::cyan));
+
+        view->ConvertStick(v, StickData::POLYGON);
+        QVERIFY(v->vector_shapes.isEmpty());
+        QCOMPARE(view->my_animation->CurrentVectorShape(v), -1);
     }
 };
 

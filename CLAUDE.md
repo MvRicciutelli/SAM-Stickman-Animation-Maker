@@ -89,7 +89,7 @@ void Widget::on_someBtn_clicked(){
   `Extract*Data()`/`PopulateLive*()`.
 - New serialized fields: use `qint32` and explicit `double`, never `int`/`qreal`.
 - Raising a format means raising its `CURRENT_VERSION` (`Animation` 3, `StickFigureData` 1,
-  `StickData` 10). `operator<<` gates newer fields on the record's version; `operator>>` raises an
+  `StickData` 11). `operator<<` gates newer fields on the record's version; `operator>>` raises an
   older record to current at its end.
 - Newer-than-supported files are refused (`RejectNewerVersion()` + `file_load_error`, shown through
   `MyView::ReportRejectedFile()`). A refused load must change nothing: parse into pure data first, and
@@ -123,6 +123,15 @@ void Widget::on_someBtn_clicked(){
   them BEFORE changing `polygon_points`, and keep widths, curvatures, caps and parents parallel in every
   vertex operation. `DeletePolygonPoint()` takes its branches along. `paint()` fills all bands and
   (reversed) discs as one `WindingFill` path.
+
+**VECTOR stick** (`docs/ARCH_VECTOR.md`)
+- `vector_shapes` are values in normalized stick-local space (through `PolygonTransform()`); handles are
+  OFFSETS from the anchor; the hand-written `CopyFrom()` must copy them.
+- Per-shape paint reuses the stick's helpers through `paint_shape`/`PaintRef`: never read
+  `data->brush_follows_stick`/`texture_tiled`/`stroke_brush` directly in a paint helper.
+- Vector tools never store a `StickData*` (`VectorStick()` re-derives it); every gesture names its
+  shape and anchor index.
+- Inbetweens only between `VectorShapesCompatible()` shapes; the panel refresh connections stay queued.
 
 **Fill, stroke, texture, opacity, brush border, layout** (`docs/ARCH_STYLE_PAINT.md`)
 - `pen`/`brush` are whole `QPen`/`QBrush`: patterns, images and gradients need no new fields.
@@ -224,6 +233,10 @@ release/tst_characterization.exe
 - A brush border is stamped at scene scale, so a dab is resampled when zoomed in or exported larger.
   The tinted dab is rebuilt every `paint()`; if a crowded frame drags, cache it on `StickGraphicsItem`.
 - Tiling is fill-only: a stroke texture always repeats.
+- VECTOR shapes have no texture arrow handle (v1 scope).
+- Vector layer thumbnails (`VectorShapeIcon`) ignore brush borders and texture placement.
+- VECTOR is not a "Convert to" target.
+- `.stk`/`.nodes` export a vector stick as a plain segment.
 
 ## Tooling
 

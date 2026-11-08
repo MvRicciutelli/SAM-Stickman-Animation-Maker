@@ -47,10 +47,10 @@ one rather than an old header with new content.
 
 Three versions are on the wire and each is checked: the `.sam` header
 (`Animation::CURRENT_VERSION`, 3), `StickFigureData::version` (1) and `StickData::version`
-(`StickData::CURRENT_VERSION`, 10). `FrameData` has none. **Raising a format means raising its
+(`StickData::CURRENT_VERSION`, 11). `FrameData` has none. **Raising a format means raising its
 `CURRENT_VERSION` constant** — the in-class default of `version` is that constant, so a writer
 and the reader's limit cannot drift apart. The stick record is the one that matters most: it
-went 2→10 while the file header stayed at 3, so a newer build's `.sam` can hold a too-new
+went 2→11 while the file header stayed at 3, so a newer build's `.sam` can hold a too-new
 stick under a perfectly supported header, discoverable only mid-stream.
 
 **A stick record read from an older version is raised to `CURRENT_VERSION` at the end of

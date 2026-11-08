@@ -368,6 +368,7 @@ private slots:
     void on_addIkBtn_clicked();
 
     void on_drawTextBtn_clicked();
+    void on_drawVectorBtn_clicked();
 
 private:
     Ui::Widget *ui;
@@ -411,6 +412,13 @@ private:
      * Must run after BuildStyleCombos(), which creates the four check boxes it groups.
      */
     void BuildStyleTabs();
+
+    /**
+     * @brief Builds advanced_vector_tab, the VECTOR panel: the pen/lasso/fill/border tools, the
+     *        shape layer list (visibility, rename, thumbnail) and its Up/Down/Delete/Copy/Paste
+     *        buttons, and assigns refresh_vector_panel.
+     */
+    void BuildVectorPanel();
 
     /// @brief The parameter set the "Stick Transform" tab edits on @p cs: local_xf or global_xf.
     StickXf &EditedXf(StickData *cs) const;
@@ -555,6 +563,8 @@ private:
      *        input (same role blockSignals() plays for the IK checkbox).
      */
     bool text_panel_sync = false;
+    /// True while refresh_vector_panel rebuilds the layer rows: the list's signals are then echoes, not edits.
+    bool vector_panel_sync = false;
 
     /**
      * @brief True once the current text-panel editing session has taken its undo

@@ -385,6 +385,13 @@ public:
      */
     bool StrokeWithBrush(QPainter *painter, const QPainterPath &shape) const;
 
+    /// @brief Whether the paint being drawn follows the stick: paint_shape's flag, or the stick's.
+    bool PaintFollowsStick() const;
+    /// @brief Whether the fill being drawn tiles: paint_shape's flag, or the stick's.
+    bool PaintTiled() const;
+    /// @brief The stored border brush of what is being drawn: paint_shape's, or the stick's.
+    const BrushStroke &PaintStrokeBrush() const;
+
     //-------- variables----------//
     /**
      * @brief True while MyView::UpdateOnionSkins() is rendering ghost frames: paint()
@@ -414,6 +421,28 @@ public:
     int poly_preview_parent = -1;     ///< MULTILINE: vertex the preview hangs from; -1 = P2
     qint32 poly_preview_cap = StickData::CAP_ROUND; ///< MULTILINE: VertexCap the preview is drawn with
     QPointF poly_preview_point;       ///< preview vertex, normalized stick-local coords
+
+    // ------- VECTOR UI-only state, same rules as the POLYGON state above ---------------
+    QSet<QPair<int,int>> selected_vector_nodes; ///< (shape, node) picked with Ctrl or the lasso; drawn orange, handles shown
+    int vector_active_shape = -1;     ///< shape being drawn by MyView's vector mode (its handles show), -1 when none
+    bool vector_preview_active = false; ///< true while the next segment follows the mouse in vector mode
+    QPointF vector_preview_point;     ///< the cursor end of that segment, SCENE coordinates
+
+    /**
+     * @brief The VECTOR shape paint() is filling right now, or nullptr: while set, the paint
+     *        helpers (AlignBrush(), SingleInstancePath(), FillAndStroke(), StrokeWithBrush())
+     *        read its anchoring, tiling and border brush instead of the stick's.
+     *
+     * The one seam through which every shape reuses the stick's whole fill/stroke machinery.
+     */
+    const VectorShape *paint_shape = nullptr;
+
+    /**
+     * @brief Draws a VECTOR stick's editing overlay: node squares, the handles of the selected
+     *        nodes and of the shape being drawn, and the next-segment preview.
+     * @param painter the painter, in scene coordinates.
+     */
+    void PaintVectorOverlay(QPainter *painter);
 
     /**
      * @brief Recomputes the cached bounding rect.

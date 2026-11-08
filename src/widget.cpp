@@ -130,6 +130,8 @@ QWidget * advanced_vertex_tab;
 QWidget * advanced_text_tab; ///< pannello dei TEXT stick; costruito nel ctor di Widget
 std::function<void(StickData *)> refresh_text_panel; ///< vedi uiItems.h
 std::function<void(StickData *)> refresh_transform_panel; ///< vedi uiItems.h
+QWidget * advanced_vector_tab = nullptr; ///< VECTOR panel, built by Widget::BuildVectorPanel()
+std::function<void(StickData *)> refresh_vector_panel; ///< see uiItems.h
 QWidget * advanced_draw_tab; ///< freehand draw-mode panel (brush/eraser/size/opacity/color); built in Widget's ctor
 QWidget * advanced_ik_tab;
 QCheckBox * ik_active_check;
@@ -163,6 +165,54 @@ QString FFMPEGPath = "";
  * `ui->` counterpart, builds the canvas (`scene`/`view`) and the four advanced-property
  * tabs, then loads (or creates, on first run) the default library and config.json.
  */
+/// @details A 10x10 pixel-art tool icon (one string per pixel row, '.' transparent, the other letters
+/// a small palette), doubled to 20x20 without filtering so it stays crisp. Shared by the draw-mode
+/// and vector panels.
+static QIcon PixelIcon(const char *const rows[10])
+{
+    QImage img(10, 10, QImage::Format_ARGB32);
+    img.fill(Qt::transparent);
+    for(int y = 0; y < 10; y++)
+        for(int x = 0; x < 10; x++){
+            switch(rows[y][x]){
+            case 'k': img.setPixel(x, y, qRgb(0, 0, 0)); break;
+            case 'w': img.setPixel(x, y, qRgb(255, 255, 255)); break;
+            case 'g': img.setPixel(x, y, qRgb(128, 128, 128)); break;
+            case 'l': img.setPixel(x, y, qRgb(192, 192, 192)); break;
+            case 'b': img.setPixel(x, y, qRgb(176, 112, 48)); break;
+            case 'p': img.setPixel(x, y, qRgb(255, 160, 176)); break;
+            case 'd': img.setPixel(x, y, qRgb(192, 96, 112)); break;
+            }
+        }
+    return QIcon(QPixmap::fromImage(img.scaled(20, 20)));
+}
+
+/// @details A dashed 10x10 outline icon (the selection tools), light grey because black vanishes on
+/// the application's dark background.
+static QIcon DashedIcon(const QPolygon &shape)
+{
+    QPixmap pm(10, 10);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    QPen pen(QColor(192, 192, 192), 0);
+    pen.setDashPattern({ 1, 1 });
+    p.setPen(pen);
+    p.drawPolygon(shape);
+    return QIcon(pm.scaled(20, 20));
+}
+
+/// @details The panels' tool buttons (draw mode, vector): flat until hovered (raised), sunken while
+/// pressed or active, like Paint's tool buttons.
+static QString ToolButtonStyle()
+{
+    return
+        "QToolButton { border: 2px solid transparent; background: transparent; padding: 0px; }"
+        "QToolButton:hover { border: 2px outset #c0c0c0; background: #e8e8e8; }"
+        "QToolButton:checked { border: 2px inset #c0c0c0; background: #ffffff; }"
+        "QToolButton:checked:hover { background: #e4ecf8; }"
+        "QToolButton:pressed { border: 2px inset #a0a0a0; background: #c8c8c8; }";
+}
+
 Widget::Widget(QWidget *parent)
     : QWidget(parent)
     , ui(new Ui::Widget)
@@ -674,76 +724,37 @@ Widget::Widget(QWidget *parent)
     {
         QVBoxLayout *col = new QVBoxLayout(advanced_draw_tab);
 
-        // strumenti draw mode (mutuamente esclusivi): pennello, gomma, e i due strumenti di
-        // selezione pixel (rettangolo, lazo). Il QButtonGroup garantisce l'esclusività; ogni
-        // click instrada su MyView::SetDrawTool(), che scarta la selezione passando a pennello/gomma.
-        // icone alla Paint di Windows XP, disegnate a 10x10 pixel per pixel (una riga di
-        // caratteri per riga di pixel, '.' trasparente, le altre lettere sono la palette) e
-        // raddoppiate a 20x20 senza filtro, così restano pixel art nitida
-        auto pixel_icon = [](const char *const rows[10]){
-            QImage img(10, 10, QImage::Format_ARGB32);
-            img.fill(Qt::transparent);
-            for(int y = 0; y < 10; y++)
-                for(int x = 0; x < 10; x++){
-                    switch(rows[y][x]){
-                    case 'k': img.setPixel(x, y, qRgb(0, 0, 0)); break;
-                    case 'w': img.setPixel(x, y, qRgb(255, 255, 255)); break;
-                    case 'g': img.setPixel(x, y, qRgb(128, 128, 128)); break;
-                    case 'l': img.setPixel(x, y, qRgb(192, 192, 192)); break;
-                    case 'b': img.setPixel(x, y, qRgb(176, 112, 48)); break;
-                    case 'p': img.setPixel(x, y, qRgb(255, 160, 176)); break;
-                    case 'd': img.setPixel(x, y, qRgb(192, 96, 112)); break;
-                    }
-                }
-            return QIcon(QPixmap::fromImage(img.scaled(20, 20)));
-        };
+        // draw-mode tools (mutually exclusive): brush, eraser and the two pixel-selection tools
+        // (rectangle, lasso). The QButtonGroup keeps them exclusive; every click goes to
+        // MyView::SetDrawTool(), which drops the selection when switching to brush/eraser.
+        // Windows XP Paint-style icons, see PixelIcon()
         static const char *const brush_rows[10] = {
             ".......kk.", "......kbbk", ".....kbbk.", "....kbbk..", "...kllk...",
             "..klgk....", ".kkkk.....", "kkkk......", "kkk.......", "k........." };
         static const char *const eraser_rows[10] = {
             "....kkkkkk", "...kwwwwwk", "..kwwwwwkk", ".kwwwwwkdk", "kkkkkkkddk",
             "kpppppkddk", "kpppppkdk.", "kpppppkk..", "kkkkkkk...", ".........." };
-        // i due strumenti di selezione: contorno tratteggiato 1-on/1-off come in Paint
-        // (rettangolo e stella "a mano libera"), grigio chiaro perché il nero sparisce sullo
-        // sfondo scuro dell'applicazione
-        auto dashed_icon = [](const QPolygon &shape){
-            QPixmap pm(10, 10);
-            pm.fill(Qt::transparent);
-            QPainter p(&pm);
-            QPen pen(QColor(192, 192, 192), 0);
-            pen.setDashPattern({ 1, 1 });
-            p.setPen(pen);
-            p.drawPolygon(shape);
-            return QIcon(pm.scaled(20, 20));
-        };
+        // the two selection tools: a 1-on/1-off dashed outline as in Paint (a rectangle and a
+        // "freehand" star), see DashedIcon()
         const QPolygon rect_shape({ QPoint(0, 0), QPoint(9, 0), QPoint(9, 9), QPoint(0, 9) });
         const QPolygon lasso_shape({ QPoint(4, 0), QPoint(6, 3), QPoint(9, 3), QPoint(7, 6), QPoint(8, 9),
                                      QPoint(4, 7), QPoint(1, 9), QPoint(2, 5), QPoint(0, 2), QPoint(3, 3) });
-
-        // piatti finché il mouse non ci passa sopra (rilievo), incassati mentre sono premuti
-        // o attivi: lo stesso comportamento dei bottoni strumento di Paint
-        const QString tool_style =
-            "QToolButton { border: 2px solid transparent; background: transparent; padding: 0px; }"
-            "QToolButton:hover { border: 2px outset #c0c0c0; background: #e8e8e8; }"
-            "QToolButton:checked { border: 2px inset #c0c0c0; background: #ffffff; }"
-            "QToolButton:checked:hover { background: #e4ecf8; }"
-            "QToolButton:pressed { border: 2px inset #a0a0a0; background: #c8c8c8; }";
 
         QHBoxLayout *tool_row = new QHBoxLayout();
         tool_row->setSpacing(1);
         QButtonGroup *tool_group = new QButtonGroup(advanced_draw_tab);
         struct { const char *label; int id; QIcon icon; } draw_tools[] = {
-            { "Brush",  MyView::DT_BRUSH,      pixel_icon(brush_rows) },
-            { "Eraser", MyView::DT_ERASER,     pixel_icon(eraser_rows) },
-            { "Select", MyView::DT_SEL_RECT,   dashed_icon(rect_shape) },
-            { "Lasso",  MyView::DT_SEL_LASSO,  dashed_icon(lasso_shape) } };
+            { "Brush",  MyView::DT_BRUSH,      PixelIcon(brush_rows) },
+            { "Eraser", MyView::DT_ERASER,     PixelIcon(eraser_rows) },
+            { "Select", MyView::DT_SEL_RECT,   DashedIcon(rect_shape) },
+            { "Lasso",  MyView::DT_SEL_LASSO,  DashedIcon(lasso_shape) } };
         for(const auto &dt : draw_tools){
             QToolButton *b = new QToolButton(advanced_draw_tab);
             b->setIcon(dt.icon);
             b->setIconSize(QSize(20, 20));
             b->setFixedSize(26, 26);
             b->setToolTip(tr(dt.label));
-            b->setStyleSheet(tool_style);
+            b->setStyleSheet(ToolButtonStyle());
             b->setCheckable(true);
             if(dt.id == MyView::DT_BRUSH) b->setChecked(true);
             tool_group->addButton(b, dt.id);
@@ -979,6 +990,7 @@ Widget::Widget(QWidget *parent)
         // niente addStretch finale: lo splitter con la griglia riempie lo spazio verticale
     }
 
+    BuildVectorPanel(); // the VECTOR panel: after view exists, like the panels above
     BuildStyleCombos(); // dopo che view esiste: legge my_brush/my_pen per i due segnacolore
     BuildStyleTabs();   // e subito dopo: raggruppa le caselle che BuildStyleCombos() ha creato
     BuildResizableSidebars();
@@ -1225,6 +1237,8 @@ Widget::~Widget()
     delete advanced_draw_tab;
     advanced_transform_tab->setParent(nullptr);
     delete advanced_transform_tab;
+    advanced_vector_tab->setParent(nullptr);
+    delete advanced_vector_tab;
     qDeleteAll(frame_copy_buffer); // il buffer copia-frame è nostro (era un globale mai liberato)
     delete ui;
 }
@@ -2155,10 +2169,14 @@ void Widget::BuildStyleCombos()
         if(view->my_animation->current_frame == nullptr)
             return;
         StickData *current = view->my_animation->CurrentFrame()->CurrentStick();
-        if(current == nullptr || current->brush_follows_stick == on)
+        if(current == nullptr)
+            return;
+        // a vector stick's current shape, otherwise the stick (StickData::Paint())
+        bool &follows = *current->Paint(view->my_animation->CurrentVectorShape(current)).brush_follows_stick;
+        if(follows == on)
             return;
         view->StoreUndo(CMD_SIMPLE);
-        current->brush_follows_stick = on;
+        follows = on;
         if(current->view)
             current->view->Refresh(0);
         if(view->my_animation->CurrentFrame()->CurrentStickFigure())
@@ -2180,10 +2198,13 @@ void Widget::BuildStyleCombos()
         if(view->my_animation->current_frame == nullptr)
             return;
         StickData *current = view->my_animation->CurrentFrame()->CurrentStick();
-        if(current == nullptr || current->texture_tiled == on)
+        if(current == nullptr)
+            return;
+        bool &tiled = *current->Paint(view->my_animation->CurrentVectorShape(current)).texture_tiled;
+        if(tiled == on)
             return;
         view->StoreUndo(CMD_SIMPLE);
-        current->texture_tiled = on;
+        tiled = on;
         if(current->view)
             current->view->Refresh(0);
         if(view->my_animation->CurrentFrame()->CurrentStickFigure())
@@ -2772,8 +2793,10 @@ void Widget::SetPaintOpacity(bool for_fill, int percent, bool live)
     StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
     if(cs == nullptr)
         return;
-    if(for_fill ? !fadeable(cs->brush)
-                : (cs->pen.style() == Qt::NoPen || !fadeable(cs->pen.brush())))
+    // a vector stick's current shape, otherwise the stick (StickData::Paint())
+    const StickData::PaintRef paint = cs->Paint(view->my_animation->CurrentVectorShape(cs));
+    if(for_fill ? !fadeable(*paint.brush)
+                : (paint.pen->style() == Qt::NoPen || !fadeable(paint.pen->brush())))
         return;
     bool &latch = for_fill ? sliderFlags.fillOpacity : sliderFlags.penOpacity;
     if(!latch){
@@ -2781,9 +2804,9 @@ void Widget::SetPaintOpacity(bool for_fill, int percent, bool live)
         latch = true;
     }
     if(for_fill)
-        cs->brush = tinted(cs->brush);
+        *paint.brush = tinted(*paint.brush);
     else
-        cs->pen.setBrush(tinted(cs->pen.brush()));
+        paint.pen->setBrush(tinted(paint.pen->brush()));
     if(cs->view)
         cs->view->Refresh(0);
     if(view->my_animation->CurrentFrame()->CurrentStickFigure())
@@ -3612,3 +3635,197 @@ void Widget::on_drawTextBtn_clicked()
     view->SetTool(DRAWTEXT);
 }
 
+void Widget::on_drawVectorBtn_clicked()
+{
+    view->SetTool(DRAWVECTOR);
+}
+
+/// @details A layer row's thumbnail: the shape alone, fitted into the icon, filled and outlined
+/// with its own brush and pen. ponytail: plain QPainter calls, so a brush border shows as the pen
+/// and a texture keeps its scene-scale placement; the canvas and the figure icon are exact.
+static QIcon VectorShapeIcon(const VectorShape &shape, const QTransform &to_scene)
+{
+    QPixmap pm(32, 32);
+    pm.fill(Qt::transparent);
+    const QPainterPath path = VectorPath(shape, to_scene);
+    const QRectF box = path.controlPointRect();
+    const qreal extent = qMax(box.width(), box.height());
+    if(extent > 1e-6){
+        QPainter p(&pm);
+        p.setRenderHint(QPainter::Antialiasing);
+        const qreal k = 26.0 / extent;
+        p.translate(16, 16);
+        p.scale(k, k);
+        p.translate(-box.center());
+        QPen pen(shape.pen);
+        if(pen.widthF() * k < 1.0){
+            pen.setCosmetic(true); // a pen thinner than a pixel at this scale would vanish
+            pen.setWidthF(1.0);
+        }
+        p.setPen(pen);
+        p.setBrush(shape.brush);
+        p.drawPath(path);
+    }
+    return QIcon(pm);
+}
+
+/// @details The VECTOR panel: the four vector tools, the shape layers and their buttons. The rows
+/// list the top shape first, as a layer panel does, so row r is shape count-1-r. Every action is a
+/// MyView method (reachable from the tests, which do not link this file); the panel only maps rows
+/// to shape indices and is echoed back through refresh_vector_panel.
+void Widget::BuildVectorPanel()
+{
+    advanced_vector_tab = new QWidget();
+    QVBoxLayout *col = new QVBoxLayout(advanced_vector_tab);
+
+    static const char *const pen_rows[10] = {
+        "........kk", ".......kgk", "......kgk.", ".....kgk..", "..kkkkk...",
+        ".kwwwk....", "kwwkwk....", "kwkwk.....", "kkwk......", "kk........" };
+    static const char *const fill_rows[10] = {
+        "...kk.....", "..k..k....", "..kkkkk...", ".kwwwwwk..", "kwwwwwwwk.",
+        ".kwwwwwk.p", "..kwwwk.pp", "...kwk..pp", "....k....p", ".........." };
+    static const char *const stroke_rows[10] = {
+        "dddddddddd", "dddddddddd", "dd......dd", "dd......dd", "dd......dd",
+        "dd......dd", "dd......dd", "dd......dd", "dddddddddd", "dddddddddd" };
+    const QPolygon lasso_shape({ QPoint(4, 0), QPoint(6, 3), QPoint(9, 3), QPoint(7, 6), QPoint(8, 9),
+                                 QPoint(4, 7), QPoint(1, 9), QPoint(2, 5), QPoint(0, 2), QPoint(3, 3) });
+    QHBoxLayout *tool_row = new QHBoxLayout();
+    tool_row->setSpacing(1);
+    QButtonGroup *tools = new QButtonGroup(advanced_vector_tab);
+    tools->setExclusive(false); // "no tool" is a state too: clicking the active tool turns it off
+    struct { const char *tip; int id; QIcon icon; } entries[] = {
+        { QT_TR_NOOP("Pen: draw shapes. Click = sharp corner, click and drag = curve, click the first "
+                     "point = close, right click = end an open shape. Esc, Enter or a double click = done."),
+          MyView::VT_PEN, PixelIcon(pen_rows) },
+        { QT_TR_NOOP("Lasso: drag around points to select them (Shift adds). Delete removes them."),
+          MyView::VT_LASSO, DashedIcon(lasso_shape) },
+        { QT_TR_NOOP("Fill bucket: click a shape to give it the current fill (Style column)."),
+          MyView::VT_FILL, PixelIcon(fill_rows) },
+        { QT_TR_NOOP("Border bucket: click a shape to give it the current border, width included (Style column)."),
+          MyView::VT_STROKE, PixelIcon(stroke_rows) } };
+    for(const auto &entry : entries){
+        QToolButton *b = new QToolButton(advanced_vector_tab);
+        b->setIcon(entry.icon);
+        b->setIconSize(QSize(20, 20));
+        b->setFixedSize(26, 26);
+        b->setToolTip(tr(entry.tip));
+        b->setStyleSheet(ToolButtonStyle());
+        b->setCheckable(true);
+        tools->addButton(b, entry.id);
+        tool_row->addWidget(b);
+    }
+    tool_row->addStretch();
+    col->addLayout(tool_row);
+    connect(tools, &QButtonGroup::idClicked, this, [this, tools](int id){
+        view->SetVectorTool(tools->button(id)->isChecked() ? id : int(MyView::VT_NONE));
+    });
+    // the buttons follow the tool however it changes (Esc, a tool switch, a selection change)
+    connect(view, &MyView::VectorToolChanged, this, [tools](int active){
+        for(QAbstractButton *b : tools->buttons()){
+            QSignalBlocker mute(b);
+            b->setChecked(tools->id(b) == active);
+        }
+    });
+    QLabel *hint = new QLabel(tr("Ctrl+drag moves points and curve handles; Alt+drag on a handle "
+                                 "makes a sharp corner."), advanced_vector_tab);
+    hint->setWordWrap(true);
+    col->addWidget(hint);
+
+    QListWidget *layers = new QListWidget(advanced_vector_tab);
+    layers->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    layers->setIconSize(QSize(32, 32));
+    layers->setToolTip(tr("Shape layers, front first. Checked = visible; double-click to rename."));
+    col->addWidget(layers, 1);
+    QGridLayout *layer_buttons = new QGridLayout();
+    QPushButton *up_btn = new QPushButton(tr("Up"), advanced_vector_tab);
+    QPushButton *down_btn = new QPushButton(tr("Down"), advanced_vector_tab);
+    QPushButton *delete_btn = new QPushButton(tr("Delete"), advanced_vector_tab);
+    QPushButton *copy_btn = new QPushButton(tr("Copy"), advanced_vector_tab);
+    QPushButton *paste_btn = new QPushButton(tr("Paste"), advanced_vector_tab);
+    up_btn->setToolTip(tr("Move the shape one step towards the front"));
+    down_btn->setToolTip(tr("Move the shape one step towards the back"));
+    copy_btn->setToolTip(tr("Copy the selected shapes, to paste them into any vector stick"));
+    paste_btn->setToolTip(tr("Paste the copied shapes on top of this stick's, where they were drawn"));
+    layer_buttons->addWidget(up_btn, 0, 0);
+    layer_buttons->addWidget(down_btn, 0, 1);
+    layer_buttons->addWidget(delete_btn, 0, 2);
+    layer_buttons->addWidget(copy_btn, 1, 0);
+    layer_buttons->addWidget(paste_btn, 1, 1);
+    col->addLayout(layer_buttons);
+
+    auto shape_of = [](QListWidgetItem *item){ return item->data(Qt::UserRole).toInt(); };
+    auto selected_shapes = [layers, shape_of]{
+        QList<int> indices;
+        for(QListWidgetItem *item : layers->selectedItems())
+            indices << shape_of(item);
+        return indices;
+    };
+
+    refresh_vector_panel = [this, layers](StickData *cs){
+        vector_panel_sync = true;
+        layers->clear();
+        if(cs != nullptr && cs->stick_type == StickData::VECTOR){
+            const QTransform to_scene = cs->PolygonTransform();
+            for(int i = cs->vector_shapes.size() - 1; i >= 0; i--){
+                const VectorShape &shape = cs->vector_shapes[i];
+                QListWidgetItem *item = new QListWidgetItem(VectorShapeIcon(shape, to_scene), shape.name, layers);
+                item->setData(Qt::UserRole, i);
+                item->setFlags(item->flags() | Qt::ItemIsEditable | Qt::ItemIsUserCheckable);
+                item->setCheckState(shape.visible ? Qt::Checked : Qt::Unchecked);
+            }
+            const int current = view->my_animation->CurrentVectorShape(cs);
+            if(current >= 0)
+                layers->setCurrentRow(cs->vector_shapes.size() - 1 - current);
+        }
+        vector_panel_sync = false;
+    };
+    // queued: the edits that announce themselves can run from inside one of the list's own
+    // signals (a rename, a visibility toggle), and rebuilding the rows there would delete the
+    // very item being reported
+    auto refresh_current = [this]{
+        StickData *cs = view->VectorStick();
+        if(cs != nullptr && refresh_vector_panel)
+            refresh_vector_panel(cs);
+    };
+    connect(view, &MyView::VectorShapesChanged, this, refresh_current, Qt::QueuedConnection);
+    connect(&view->undo_stack, &QUndoStack::indexChanged, this, refresh_current, Qt::QueuedConnection);
+
+    connect(layers, &QListWidget::currentRowChanged, this, [this, layers, shape_of](int){
+        if(vector_panel_sync || layers->currentItem() == nullptr)
+            return;
+        view->my_animation->vector_shape_row = shape_of(layers->currentItem());
+        view->my_animation->UpdateStyleControls(); // the Style column follows the shape
+    });
+    connect(layers, &QListWidget::itemChanged, this, [this, shape_of](QListWidgetItem *item){
+        if(vector_panel_sync)
+            return;
+        StickData *cs = view->VectorStick();
+        const int i = shape_of(item);
+        if(cs == nullptr || i < 0 || i >= cs->vector_shapes.size())
+            return;
+        const bool visible = item->checkState() == Qt::Checked;
+        if(visible != cs->vector_shapes[i].visible)
+            view->SetVectorShapeVisible(i, visible);
+        else if(item->text() != cs->vector_shapes[i].name)
+            view->RenameVectorShape(i, item->text());
+    });
+    connect(up_btn, &QPushButton::clicked, this, [this, layers, shape_of]{
+        if(layers->currentItem() != nullptr)
+            view->MoveVectorShape(shape_of(layers->currentItem()), +1);
+    });
+    connect(down_btn, &QPushButton::clicked, this, [this, layers, shape_of]{
+        if(layers->currentItem() != nullptr)
+            view->MoveVectorShape(shape_of(layers->currentItem()), -1);
+    });
+    connect(delete_btn, &QPushButton::clicked, this, [this, selected_shapes]{
+        view->DeleteVectorShapes(selected_shapes());
+    });
+    connect(copy_btn, &QPushButton::clicked, this, [this, selected_shapes]{
+        view->CopyVectorShapes(selected_shapes());
+    });
+    connect(paste_btn, &QPushButton::clicked, this, [this]{
+        const QString why = view->PasteVectorShapes();
+        if(!why.isEmpty())
+            QMessageBox::warning(this, tr("Paste shapes"), why);
+    });
+}

@@ -1951,6 +1951,55 @@ QPushButton:pressed{
            </widget>
           </item>
           <item>
+           <widget class="QPushButton" name="drawVectorBtn">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="MinimumExpanding" vsizetype="Minimum">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>25</width>
+              <height>25</height>
+             </size>
+            </property>
+            <property name="maximumSize">
+             <size>
+              <width>50</width>
+              <height>50</height>
+             </size>
+            </property>
+            <property name="toolTip">
+             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Vector stick tool:&lt;/p&gt;&lt;p&gt;Click twice to place the stick, then draw shapes: a click adds a sharp corner, click and drag adds a curve, clicking the first point closes the shape, a right click ends an open one. Esc, Enter, a double click or another tool finish drawing. The Vector Shapes tab lists the shapes as layers, re-enters drawing (pen), selects points with a lasso and paints fills and borders with its buckets; Ctrl+drag moves points and bezier handles.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">QPushButton {
+    qproperty-icon: url(&quot; &quot;); /* empty image */
+    qproperty-iconSize: 16px 16px; /* space for the background image */
+    image: url(:/resources/addvector_00001.png);
+    width: 50px;
+    height: 50px;
+    background-repeat: no-repeat;
+	border: 0px solid #5A5A5A;
+}
+QPushButton:hover{
+    image: url(:/resources/addvector_00002.png);
+    background-repeat: no-repeat;
+	background-color: rgb(25, 25, 25)
+}
+QPushButton:pressed{
+    image: url(:/resources/addvector_00003.png);
+    background-repeat: no-repeat;
+}
+</string>
+            </property>
+            <property name="text">
+             <string/>
+            </property>
+           </widget>
+          </item>
+          <item>
            <spacer name="horizontalSpacer">
             <property name="orientation">
              <enum>Qt::Horizontal</enum>

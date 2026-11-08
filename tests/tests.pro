@@ -35,7 +35,8 @@ SOURCES += \
     ../src/stick.cpp \
     ../src/stickdata.cpp \
     ../src/stickfiguredata.cpp \
-    ../src/stkformat.cpp
+    ../src/stkformat.cpp \
+    ../src/vectorshape.cpp
 
 HEADERS += \
     ../src/abrbrush.h \
@@ -59,7 +60,8 @@ HEADERS += \
     ../src/kritabundle.h \
     ../src/stkformat.h \
     ../src/style.h \
-    ../src/uiItems.h
+    ../src/uiItems.h \
+    ../src/vectorshape.h
 
 # Media Foundation: l'encoder H.264 di Windows usato da mfvideo.cpp
 win32: LIBS += -lmfplat -lmfreadwrite -lmfuuid -lole32

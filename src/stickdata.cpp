@@ -324,6 +324,7 @@ void StickData::CopyFrom(const StickData &source)
     vertex_curvatures = source.vertex_curvatures;
     vertex_parents = source.vertex_parents;
     vertex_caps = source.vertex_caps;
+    vector_shapes = source.vector_shapes;
     text = source.text;
     text_font = source.text_font;
     text_align = source.text_align;
@@ -353,19 +354,20 @@ void StickData::CopyFrom(const StickData &source)
     }
 }
 
-/**
- * @details Fills in the three derived numbers of the stored BrushStroke. `pen.brush().color()`
- * rather than `pen.color()` because the two disagree for a pen whose paint is not solid, and the
- * brush's is the one an opacity slider has been writing into (see ReadPaintOpacity()). The width
- * floor keeps a hairline pen (width 0, "one device pixel") from asking for a zero-size dab.
- */
+StickData::PaintRef StickData::Paint(int shape_index)
+{
+    if (stick_type == VECTOR && shape_index >= 0 && shape_index < vector_shapes.size()) {
+        VectorShape &shape = vector_shapes[shape_index];
+        return { &shape.pen, &shape.brush, &shape.brush_follows_stick, &shape.texture_tiled };
+    }
+    return { &pen, &brush, &brush_follows_stick, &texture_tiled };
+}
+
+/// @details The derivation is StrokeBrushFor()'s (vectorshape.cpp), shared with a VECTOR stick's
+/// shapes so a shape's brush border and a stick's cannot mean two things.
 BrushStroke StickData::StrokeBrush() const
 {
-    BrushStroke brush = stroke_brush;
-    brush.color = pen.brush().color();
-    brush.size = qMax(1.0, pen.widthF());
-    brush.opacity = ReadPaintOpacity(pen.brush());
-    return brush;
+    return StrokeBrushFor(stroke_brush, pen);
 }
 
 /**
@@ -578,7 +580,8 @@ static QTransform LengthMap(const StickData &d, qreal new_len, qreal old_len)
     case StickData::IMAGE:
     case StickData::FREEHAND:
     case StickData::POLYGON:
-    case StickData::MULTILINE: {
+    case StickData::MULTILINE:
+    case StickData::VECTOR: {
         QTransform placement;
         placement.rotate(d.img_angle_offset);
         const QPointF c = placement.map(d.img_offset);
@@ -953,6 +956,27 @@ void InterpolateStickData(StickData &target, const StickData &start, const Stick
     }
     MixFloatList(target.vertex_widths, start.vertex_widths, end.vertex_widths, t);
     MixFloatList(target.vertex_curvatures, start.vertex_curvatures, end.vertex_curvatures, t);
+    // vector shapes: only between identical structures (same number of shapes, of anchors,
+    // same closure). MyView::GenerateInbetweens() refuses the others first; this is the guard
+    if (VectorShapesCompatible(start.vector_shapes, end.vector_shapes)
+            && VectorShapesCompatible(target.vector_shapes, start.vector_shapes)) {
+        for (int i = 0; i < target.vector_shapes.size(); i++) {
+            VectorShape &shape = target.vector_shapes[i];
+            const VectorShape &a = start.vector_shapes[i];
+            const VectorShape &b = end.vector_shapes[i];
+            for (int j = 0; j < shape.nodes.size(); j++) {
+                shape.nodes[j].pos = MixPoint(a.nodes[j].pos, b.nodes[j].pos, t);
+                shape.nodes[j].in_handle = MixPoint(a.nodes[j].in_handle, b.nodes[j].in_handle, t);
+                shape.nodes[j].out_handle = MixPoint(a.nodes[j].out_handle, b.nodes[j].out_handle, t);
+            }
+            // width and colours as for the stick: the colour only between two flat paints
+            shape.pen.setWidthF(Mix(a.pen.widthF(), b.pen.widthF(), t));
+            if (IsSolidFill(a.pen.brush()) && IsSolidFill(b.pen.brush()))
+                shape.pen.setColor(MixColor(a.pen.color(), b.pen.color(), t));
+            if (IsSolidFill(a.brush) && IsSolidFill(b.brush))
+                shape.brush.setColor(MixColor(a.brush.color(), b.brush.color(), t));
+        }
+    }
 }
 
 /**
@@ -986,6 +1010,88 @@ static void ReadXfFlips(QDataStream &stream, StickXf &xf)
     stream >> xf.flip_h >> xf.flip_v;
 }
 
+/// @details The stored half of a border brush (see StickData::stroke_brush): the tip through the
+/// image table like every other image field, then spacing, angle and the three jitters. Shared by
+/// a stick record and each shape of a VECTOR stick.
+static void WriteStrokeBrush(QDataStream &stream, const BrushStroke &brush)
+{
+    WriteRecordImage(stream, brush.stamp);
+    stream << brush.spacing;
+    stream << brush.angle;
+    stream << brush.size_jitter;
+    stream << brush.angle_jitter;
+    stream << brush.opacity_jitter;
+}
+
+static void ReadStrokeBrush(QDataStream &stream, BrushStroke &brush)
+{
+    ReadRecordImage(stream, brush.stamp);
+    // the tip is a mask: only its alpha counts (the RGB is black by contract, see
+    // AbrBrush::stamp), and keeping it at 8 bits instead of 32 makes it cost a quarter
+    if (!brush.stamp.isNull() && brush.stamp.format() != QImage::Format_Alpha8) {
+        brush.stamp = brush.stamp.convertToFormat(QImage::Format_Alpha8);
+        PoolImage(brush.stamp); // share again: the conversion detached the buffer
+    }
+    stream >> brush.spacing;
+    stream >> brush.angle;
+    stream >> brush.size_jitter;
+    stream >> brush.angle_jitter;
+    stream >> brush.opacity_jitter;
+}
+
+/// @details A VECTOR stick's shapes: their own format version, the count, then each shape's
+/// layer fields, its nodes and its paint. Pen, brush and border tip go through the same
+/// image-table helpers as the stick's own, so a .sam writes a texture shared by many shapes once.
+static void WriteVectorShapes(QDataStream &stream, const QList<VectorShape> &shapes)
+{
+    stream << StickData::VECTOR_SHAPES_VERSION;
+    stream << (qint32)shapes.size();
+    for (const VectorShape &shape : shapes) {
+        stream << shape.name << shape.visible << shape.closed;
+        stream << (qint32)shape.nodes.size();
+        for (const VectorNode &node : shape.nodes)
+            stream << node.pos << node.in_handle << node.out_handle << node.smooth;
+        WriteRecordPen(stream, shape.pen);
+        WriteRecordBrush(stream, shape.brush);
+        stream << shape.brush_follows_stick << shape.texture_tiled;
+        WriteStrokeBrush(stream, shape.stroke_brush);
+    }
+}
+
+static void ReadVectorShapes(QDataStream &stream, QList<VectorShape> &shapes)
+{
+    qint32 format = 0;
+    stream >> format;
+    if (RejectNewerVersion(stream, "vector shapes", format, StickData::VECTOR_SHAPES_VERSION))
+        return;
+    qint32 count = 0;
+    stream >> count;
+    // the counts come from the file: a corrupt one must not make us allocate without end
+    if (stream.status() != QDataStream::Ok || count < 0 || count > 100000)
+        return;
+    for (qint32 i = 0; i < count; i++) {
+        VectorShape shape;
+        qint32 num_nodes = 0;
+        stream >> shape.name >> shape.visible >> shape.closed >> num_nodes;
+        if (stream.status() != QDataStream::Ok || num_nodes < 0 || num_nodes > 1000000)
+            break;
+        for (qint32 j = 0; j < num_nodes; j++) {
+            VectorNode node;
+            stream >> node.pos >> node.in_handle >> node.out_handle >> node.smooth;
+            if (stream.status() != QDataStream::Ok)
+                break;
+            shape.nodes.append(node);
+        }
+        ReadRecordPen(stream, shape.pen);
+        ReadRecordBrush(stream, shape.brush);
+        stream >> shape.brush_follows_stick >> shape.texture_tiled;
+        ReadStrokeBrush(stream, shape.stroke_brush);
+        if (stream.status() != QDataStream::Ok)
+            break; // truncated file: no shapes made up from data that is not there
+        shapes.append(shape);
+    }
+}
+
 QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
 {
     stream << (double)stick_data.z; // explicit double: qreal itself is float on some Qt builds
@@ -1013,12 +1119,7 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
     if (stick_data.version >= 6) {
         // il pennello del contorno: solo la metà MEMORIZZATA di BrushStroke — colore, diametro
         // e opacità sono quelli della penna, che è già qui sopra, e StrokeBrush() li rimette
-        WriteRecordImage(stream, stick_data.stroke_brush.stamp);
-        stream << stick_data.stroke_brush.spacing;
-        stream << stick_data.stroke_brush.angle;
-        stream << stick_data.stroke_brush.size_jitter;
-        stream << stick_data.stroke_brush.angle_jitter;
-        stream << stick_data.stroke_brush.opacity_jitter;
+        WriteStrokeBrush(stream, stick_data.stroke_brush);
     }
     if (stick_data.version >= 2) {
         // ruolo IK: ortogonale allo stick_type, quindi fuori dal blocco type-gated sotto;
@@ -1040,7 +1141,7 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
         WriteXfBody(stream, stick_data.global_xf);
         WriteXfFlips(stream, stick_data.global_xf);
     }
-    if ((stick_data.stick_type == StickData::CIRCLE) || stick_data.IsImageType() || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE) || (stick_data.stick_type == StickData::TEXT)) {
+    if ((stick_data.stick_type == StickData::CIRCLE) || stick_data.IsImageType() || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE) || (stick_data.stick_type == StickData::TEXT) || (stick_data.stick_type == StickData::VECTOR)) {
         if (stick_data.IsImageType()) {
             // stick_img può essere nullo solo per un record ricostruito da un file corrotto:
             // meglio serializzare una QSize vuota che dereferenziare un puntatore nullo
@@ -1103,6 +1204,8 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
             if (stick_data.version >= 3)
                 stream << stick_data.text_v_stretch; // lo stretch verticale non è nel QFont
         }
+        if (stick_data.stick_type == StickData::VECTOR)
+            WriteVectorShapes(stream, stick_data.vector_shapes); // the type exists from v11 on
     }
 
     return stream;
@@ -1139,20 +1242,7 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
         stream >> stick_data.texture_tiled;
     }
     if (stick_data.version >= 6) {
-        ReadRecordImage(stream, stick_data.stroke_brush.stamp);
-        // la punta è una maschera: solo il canale alpha conta (l'RGB è nero per contratto,
-        // vedi AbrBrush::stamp), e tenerla a 8 bit invece che a 32 la fa costare un quarto
-        if (!stick_data.stroke_brush.stamp.isNull()
-                && stick_data.stroke_brush.stamp.format() != QImage::Format_Alpha8) {
-            stick_data.stroke_brush.stamp =
-                    stick_data.stroke_brush.stamp.convertToFormat(QImage::Format_Alpha8);
-            PoolImage(stick_data.stroke_brush.stamp); // ricondividi: la conversione stacca il buffer
-        }
-        stream >> stick_data.stroke_brush.spacing;
-        stream >> stick_data.stroke_brush.angle;
-        stream >> stick_data.stroke_brush.size_jitter;
-        stream >> stick_data.stroke_brush.angle_jitter;
-        stream >> stick_data.stroke_brush.opacity_jitter;
+        ReadStrokeBrush(stream, stick_data.stroke_brush);
     }
     if (stick_data.version >= 2) {
         stream >> stick_data.ik_role;
@@ -1169,7 +1259,7 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
         ReadXfBody(stream, stick_data.global_xf);
         ReadXfFlips(stream, stick_data.global_xf);
     }
-    if (stick_data.IsImageType() || (stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE) || (stick_data.stick_type == StickData::TEXT)) {
+    if (stick_data.IsImageType() || (stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE) || (stick_data.stick_type == StickData::TEXT) || (stick_data.stick_type == StickData::VECTOR)) {
         QSize mysize;
         if (stick_data.IsImageType()) {
             // letta solo per restare allineati al formato: le dimensioni vere arrivano con
@@ -1288,6 +1378,8 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
                 stick_data.text_font.setFamily("Arial");
             }
         }
+        if (stick_data.stick_type == StickData::VECTOR)
+            ReadVectorShapes(stream, stick_data.vector_shapes);
     }
     // before v9 the offset and rotation of IMAGE/POLYGON/TEXT (and an IMAGE's scale) were the
     // img_* fields, which the image panel edited: that panel is the Stick Transform now, so they

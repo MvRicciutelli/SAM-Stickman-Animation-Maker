@@ -81,6 +81,33 @@ Frame *Animation::DeleteFrame(Frame *frame){
     }
     return current_frame;
 }
+/// @details A VECTOR stick's anchor selection and drawing preview belong to it only while it is the
+/// selected stick (spec: any selection is cancelled once the stick is deselected), and the current
+/// shape row is the current stick's: a newly selected vector stick starts on its top shape. Called
+/// by the three UpdateSelection() overloads with the stick that was current before them.
+void Animation::SwitchVectorStick(StickData *old_stick, StickData *new_stick)
+{
+    if(old_stick == new_stick)
+        return;
+    if(old_stick != nullptr && old_stick->stick_type == StickData::VECTOR && old_stick->view != nullptr){
+        old_stick->view->selected_vector_nodes.clear();
+        old_stick->view->vector_active_shape = -1;
+        old_stick->view->vector_preview_active = false;
+        old_stick->view->Refresh(0);
+    }
+    vector_shape_row = (new_stick != nullptr && new_stick->stick_type == StickData::VECTOR)
+                     ? new_stick->vector_shapes.size() - 1 : -1;
+}
+
+/// @details The current stick, or nullptr when there is no current figure (after some undo
+/// restores) — CurrentStick() alone would dereference that null figure.
+static StickData *CurrentStickOrNull(Frame *frame)
+{
+    if(frame == nullptr || frame->CurrentStickFigure() == nullptr)
+        return nullptr;
+    return frame->CurrentStick();
+}
+
 void Animation::UpdateSelection(QPointF point)
 {
     float distBuffer;
@@ -89,6 +116,7 @@ void Animation::UpdateSelection(QPointF point)
     int selectedIdx = -1;
     if(current_frame->stick_figures.isEmpty())
         return;
+    StickData *previous = CurrentStickOrNull(current_frame);
     scene->clearSelection();
     StickFigure *selectedStickFigure = nullptr;
     if(current_frame->CurrentStickFigure() != nullptr){
@@ -127,6 +155,7 @@ void Animation::UpdateSelection(QPointF point)
 
     current_frame->CurrentStickFigure() = selectedStickFigure;
     current_frame->CurrentStick() = current_frame->CurrentStickFigure()->stick_list[selectedIdx];
+    SwitchVectorStick(previous, current_frame->CurrentStick());
     current_frame->CurrentStickFigure()->Highlight(true);
     if(current_frame->CurrentStick()->view){
         current_frame->CurrentStick()->view->setSelected(true);
@@ -192,6 +221,12 @@ void Animation::UpdateTab(int t){
         // posizionamento è la Stick Transform qui sotto
         my_tab_widget->insertTab(1,advanced_text_tab,"Text Editing");
     }
+    else if(t == StickData::VECTOR){
+        // shape layers and the vector tools; placement is the Stick Transform below.
+        // Null in the test binary, which has no panels
+        if(advanced_vector_tab != nullptr)
+            my_tab_widget->insertTab(1,advanced_vector_tab,"Vector Shapes");
+    }
     // la Stick Transform vale per ogni tipo: dopo il pannello del tipo, prima delle Libraries
     // (indexOf() di un library_tab nullo, nei test, è -1, e insertTab(-1) accoda)
     my_tab_widget->insertTab(my_tab_widget->indexOf(library_tab), advanced_transform_tab, "Stick Transform");
@@ -213,6 +248,7 @@ void Animation::UpdateSelection(StickData* s)
     //update current frame
 
     // update current stickfigure
+    StickData *previous = CurrentStickOrNull(current_frame);
     scene->clearSelection();
     // dopo un ripristino undo/redo lo stickfigure corrente può essere legittimamente nullo
     // (vedi il commento nell'overload UpdateSelection(QPointF)): niente Highlight in quel caso
@@ -231,6 +267,7 @@ void Animation::UpdateSelection(StickData* s)
     if(current_frame->CurrentStickFigure() != nullptr && !current_frame->CurrentStickFigure()->stick_list.isEmpty())
     {
      current_frame->CurrentStick() = s;
+     SwitchVectorStick(previous, s);
      if(s->view){
          s->view->setSelected(true);
          s->view->selected = true;
@@ -245,6 +282,7 @@ void Animation::UpdateSelection(StickFigure* S)
     //update current frame
     if(S==current_frame->CurrentStickFigure())
         return;
+    StickData *previous = CurrentStickOrNull(current_frame);
     // update current stickfigure
     if(current_frame->CurrentStickFigure() !=nullptr)
     {
@@ -260,6 +298,7 @@ void Animation::UpdateSelection(StickFigure* S)
     if(!S->stick_list.isEmpty()){
         current_frame->SelectStick(S); //update selected stick
     }
+    SwitchVectorStick(previous, CurrentStickOrNull(current_frame));
 
 
 }
@@ -277,11 +316,23 @@ void Animation::UpdateSelection(StickFigure* S)
  * re-enter an edit — so SetGraphics() can call it mid-edit, which the whole of UpdateSliders()
  * (which drives every slider in the panel) could not safely be.
  */
+int Animation::CurrentVectorShape(const StickData *stick) const
+{
+    if(stick == nullptr || stick->stick_type != StickData::VECTOR
+            || vector_shape_row < 0 || vector_shape_row >= stick->vector_shapes.size())
+        return -1;
+    return vector_shape_row;
+}
+
 void Animation::UpdateStyleControls()
 {
     StickData *cs = current_frame == nullptr ? nullptr : current_frame->CurrentStick();
     if(cs == nullptr)
         return;
+    // a VECTOR stick paints its shapes: the controls show its current shape's paint
+    const StickData::PaintRef paint = cs->Paint(CurrentVectorShape(cs));
+    const QBrush &fill = *paint.brush;
+    const QPen &stroke = *paint.pen;
     // texture e gradiente hanno entrambi una geometria da ancorare/puntare, ognuno attraverso
     // campi propri (vedi MyView::ReadArrow()); una tinta unita e il vuoto no
     auto has_geometry = [](const QBrush &b){
@@ -293,16 +344,16 @@ void Animation::UpdateStyleControls()
     // dei due abbia qualcosa da ancorare.
     if(brush_follows_check != nullptr){
         QSignalBlocker mute(brush_follows_check);
-        brush_follows_check->setChecked(cs->brush_follows_stick);
-        brush_follows_check->setEnabled(has_geometry(cs->brush)
-                                       || (cs->pen.style() != Qt::NoPen
-                                           && has_geometry(cs->pen.brush())));
+        brush_follows_check->setChecked(*paint.brush_follows_stick);
+        brush_follows_check->setEnabled(has_geometry(fill)
+                                       || (stroke.style() != Qt::NoPen
+                                           && has_geometry(stroke.brush())));
     }
     // la ripetizione della texture: solo il RIEMPIMENTO ha qualcosa da ripetere
     if(texture_tiled_check != nullptr){
         QSignalBlocker mute(texture_tiled_check);
-        texture_tiled_check->setChecked(cs->texture_tiled);
-        texture_tiled_check->setEnabled(cs->brush.style() == Qt::TexturePattern);
+        texture_tiled_check->setChecked(*paint.texture_tiled);
+        texture_tiled_check->setEnabled(fill.style() == Qt::TexturePattern);
     }
     // le due frecce: nulla da rileggere dallo stick — sono stato dell'interfaccia, non del
     // disegno — quindi qui solo l'abilitazione, senza eco e senza QSignalBlocker
@@ -310,10 +361,12 @@ void Animation::UpdateStyleControls()
     // anche quando il pennello contiene una geometria: PaintsFill()/PaintsStroke(), gli stessi
     // predicati con cui UpdateSliders() spegne i due selettori di tipo
     if(fill_texture_arrow_check != nullptr && stroke_texture_arrow_check != nullptr){
-        fill_texture_arrow_check->setEnabled(cs->PaintsFill() && has_geometry(cs->brush));
-        stroke_texture_arrow_check->setEnabled(cs->PaintsStroke()
-                                               && cs->pen.style() != Qt::NoPen
-                                               && has_geometry(cs->pen.brush()));
+        // (no arrows on a VECTOR stick yet: see MyView::TextureArrowPoints())
+        const bool aims = cs->stick_type != StickData::VECTOR;
+        fill_texture_arrow_check->setEnabled(aims && cs->PaintsFill() && has_geometry(fill));
+        stroke_texture_arrow_check->setEnabled(aims && cs->PaintsStroke()
+                                               && stroke.style() != Qt::NoPen
+                                               && has_geometry(stroke.brush()));
     }
     // l'opacità: gli slider agiscono ORA sullo stick selezionato, quindi vanno riallineati a
     // quel che lo stick ha davvero — altrimenti il primo tocco gli imporrebbe il valore rimasto
@@ -322,23 +375,23 @@ void Animation::UpdateStyleControls()
     // basta sapere che solo il vuoto non ha nulla da sbiadire.
     auto fadeable = [](const QBrush &b){ return b.style() != Qt::NoBrush; };
     if(brush_opacity_slider != nullptr && brush_opacity_spinbox != nullptr){
-        const bool can_fade = fadeable(cs->brush);
+        const bool can_fade = fadeable(fill);
         brush_opacity_slider->setEnabled(can_fade);
         brush_opacity_spinbox->setEnabled(can_fade);
         if(can_fade){
             QSignalBlocker mute_slider(brush_opacity_slider), mute_box(brush_opacity_spinbox);
-            const int percent = qRound(ReadPaintOpacity(cs->brush) * 100.0);
+            const int percent = qRound(ReadPaintOpacity(fill) * 100.0);
             brush_opacity_slider->setValue(percent);
             brush_opacity_spinbox->setValue(percent);
         }
     }
     if(pen_opacity_slider != nullptr && pen_opacity_spinbox != nullptr){
-        const bool can_fade = cs->pen.style() != Qt::NoPen && fadeable(cs->pen.brush());
+        const bool can_fade = stroke.style() != Qt::NoPen && fadeable(stroke.brush());
         pen_opacity_slider->setEnabled(can_fade);
         pen_opacity_spinbox->setEnabled(can_fade);
         if(can_fade){
             QSignalBlocker mute_slider(pen_opacity_slider), mute_box(pen_opacity_spinbox);
-            const int percent = qRound(ReadPaintOpacity(cs->pen.brush()) * 100.0);
+            const int percent = qRound(ReadPaintOpacity(stroke.brush()) * 100.0);
             pen_opacity_slider->setValue(percent);
             pen_opacity_spinbox->setValue(percent);
         }
@@ -392,6 +445,10 @@ void Animation::UpdateSliders(){
         // (nullo nei test, dove il pannello non esiste)
         if(refresh_text_panel)
             refresh_text_panel(cs);
+    }
+    else if(cs->stick_type == StickData::VECTOR){
+        if(refresh_vector_panel)
+            refresh_vector_panel(cs);
     }
     edit_line_thickness_slider->setValue(cs->pen.width());
     elongate_spinbox->setValue(  current_frame->CurrentStick()->my_line.length());

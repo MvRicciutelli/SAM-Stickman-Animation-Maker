@@ -68,6 +68,12 @@ extern std::function<void(StickData *)> refresh_text_panel;
  *        in the test binary.
  */
 extern std::function<void(StickData *)> refresh_transform_panel;
+extern QWidget * advanced_vector_tab;   ///< VECTOR panel: vector tools and shape layers (Widget::BuildVectorPanel()); null in the test binary
+/**
+ * @brief Rebuilds advanced_vector_tab's layer rows from a VECTOR stick. Same hook pattern as
+ *        refresh_text_panel: called by Animation::UpdateSliders(), null in the test binary.
+ */
+extern std::function<void(StickData *)> refresh_vector_panel;
 extern QWidget * advanced_ik_tab;       ///< "IK properties" panel, shown only when the selected stick has an IK role (built in Widget's ctor)
 extern QCheckBox * ik_active_check;     ///< the "Chain active" toggle inside advanced_ik_tab (IK_TARGET_ON <-> IK_TARGET_OFF)
 extern QWidget * library_tab;           ///< the "Libraries" tab page in my_tab_widget; UpdateTab() must never strip it while rebuilding the per-stick-type advanced tabs

@@ -70,6 +70,8 @@ QWidget *advanced_draw_tab = nullptr;    // il tab draw mode non è esercitato d
 QWidget *advanced_vertex_tab = nullptr;
 QWidget *advanced_text_tab = nullptr;     // il pannello testo non è esercitato dai test
 std::function<void(StickData *)> refresh_text_panel; // nullo: UpdateSliders() lo salta
+QWidget *advanced_vector_tab = nullptr;  // no vector panel in the tests: UpdateTab() skips it when null
+std::function<void(StickData *)> refresh_vector_panel; // empty: UpdateSliders() skips it
 QWidget *advanced_ik_tab = nullptr;      // il tab IK non è esercitato dai test (UpdateSliders lo salta se null)
 QCheckBox *ik_active_check = nullptr;
 QWidget *library_tab = nullptr;          // nullo nei test: la guardia in UpdateTab() confronta puntatori e non trova mai match, comportamento invariato

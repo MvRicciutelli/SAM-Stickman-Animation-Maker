@@ -174,7 +174,8 @@ static bool PainterIsLocalFor(const StickData *d)
 {
     return !(d->stick_type == StickData::LINE
           || d->stick_type == StickData::POLYGON
-          || d->stick_type == StickData::MULTILINE);
+          || d->stick_type == StickData::MULTILINE
+          || d->stick_type == StickData::VECTOR);
 }
 
 /// @details The stick's own frame, exactly as the type branches of paint() install it on the
@@ -254,6 +255,23 @@ static QBrush SceneAnchoredGradient(const QBrush &source, const QRectF &box,
     return out;
 }
 
+/// @details The three paint settings a VECTOR shape carries for itself: while paint() fills a
+/// shape, paint_shape points at it and these answer for it; otherwise they are the stick's.
+bool StickGraphicsItem::PaintFollowsStick() const
+{
+    return paint_shape != nullptr ? paint_shape->brush_follows_stick : data->brush_follows_stick;
+}
+
+bool StickGraphicsItem::PaintTiled() const
+{
+    return paint_shape != nullptr ? paint_shape->texture_tiled : data->texture_tiled;
+}
+
+const BrushStroke &StickGraphicsItem::PaintStrokeBrush() const
+{
+    return paint_shape != nullptr ? paint_shape->stroke_brush : data->stroke_brush;
+}
+
 /**
  * @details See the header for why this exists at all and for the texture-vs-gradient split.
  */
@@ -266,7 +284,7 @@ QBrush StickGraphicsItem::AlignBrush(const QBrush &source) const
     const QGradient *gradient = source.gradient();
 
     if(gradient != nullptr && gradient->coordinateMode() == QGradient::ObjectMode
-            && !data->brush_follows_stick){
+            && !PaintFollowsStick()){
         // un ObjectMode non si sgancia dalla forma ritoccandone il transform: È definito
         // rispetto al bounding box della forma. Va riespresso, e ancorato alla scena.
         // Un item senza scena non viene mai dipinto, quindi lì il rettangolo è indifferente.
@@ -275,7 +293,7 @@ QBrush StickGraphicsItem::AlignBrush(const QBrush &source) const
                                      painter_is_local ? StickLocalFrame(data).inverted()
                                                       : QTransform());
     }
-    if(data->brush_follows_stick == painter_is_local)
+    if(PaintFollowsStick() == painter_is_local)
         return source; // il brush è già nel frame che serve: niente da fare
 
     const QTransform local = (gradient != nullptr
@@ -300,7 +318,7 @@ QTransform StickGraphicsItem::TextureToScene(const QBrush &source) const
 {
     if(source.style() != Qt::TexturePattern)
         return QTransform();
-    if(!data->brush_follows_stick)
+    if(!PaintFollowsStick())
         return source.transform();
     return source.transform() * StickLocalFrame(data);
 }
@@ -319,7 +337,7 @@ qreal StickGraphicsItem::BrushFrameAngle(const StickData *data)
 QPainterPath StickGraphicsItem::SingleInstancePath(const QBrush &source) const
 {
     QPainterPath instance;
-    if(data->texture_tiled || source.style() != Qt::TexturePattern)
+    if(PaintTiled() || source.style() != Qt::TexturePattern)
         return instance;
     const QImage tile = source.textureImage();
     if(tile.isNull())
@@ -359,7 +377,7 @@ void StickGraphicsItem::FillAndStroke(QPainter *painter, const QBrush &fill,
     const qreal opacity = FillOpacity(fill);
     // un contorno a pennello non è tracciato dalla penna: il riempimento va comunque disegnato
     // senza penna, e il profilo timbrato dopo
-    const bool brush_border = !data->stroke_brush.stamp.isNull() && data->StrokesAPath();
+    const bool brush_border = !PaintStrokeBrush().stamp.isNull() && data->StrokesAPath();
     if(instance.isEmpty() && opacity >= 1.0 && !brush_border){
         draw();                  // il caso normale: un solo passaggio, come è sempre stato
         return;
@@ -391,11 +409,12 @@ void StickGraphicsItem::FillAndStroke(QPainter *painter, const QBrush &fill,
 /// border showing BEHIND the brush on the canvas.
 bool StickGraphicsItem::StrokeWithBrush(QPainter *painter, const QPainterPath &shape) const
 {
-    if(data->stroke_brush.stamp.isNull() || !data->StrokesAPath())
+    if(PaintStrokeBrush().stamp.isNull() || !data->StrokesAPath())
         return false;
-    if(data->pen.style() == Qt::NoPen)
+    const QPen &pen = paint_shape != nullptr ? paint_shape->pen : data->pen;
+    if(pen.style() == Qt::NoPen)
         return true; // nessun contorno richiesto: nulla da timbrare, ma nemmeno da tracciare
-    BrushStroke brush = data->StrokeBrush();
+    BrushStroke brush = StrokeBrushFor(PaintStrokeBrush(), pen);
     if(onion_render)
         brush.color = Qt::gray;
     StampAlongPath(painter, PainterIsLocalFor(data) ? StickLocalFrame(data).map(shape) : shape,
@@ -519,6 +538,34 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
             FillAndStroke(painter, data->brush, CurvedPath(poly, curvatures, true));
         }
         PaintVertexSquares(painter, poly);
+    }
+    else if(data->stick_type == StickData::VECTOR){
+        // one shape at a time, in list order (the last on top), each with its own paint:
+        // paint_shape makes AlignBrush()/FillAndStroke()/StrokeWithBrush() answer for it
+        const QTransform to_scene = data->PolygonTransform();
+        bool any_visible = false;
+        for(const VectorShape &shape : data->vector_shapes){
+            if(!shape.visible || shape.nodes.size() < 2)
+                continue;
+            any_visible = true;
+            paint_shape = &shape;
+            QPen shape_pen(shape.pen);
+            if(onion_render)
+                shape_pen.setColor(Qt::gray); // like the stick's own pen: flat grey
+            else
+                shape_pen.setBrush(AlignBrush(shape.pen.brush()));
+            painter->setPen(shape_pen);
+            FillAndStroke(painter, shape.brush, VectorPath(shape, to_scene));
+            paint_shape = nullptr;
+        }
+        // the skeleton shows only while there is nothing else to see: it is the 2-click preview
+        if(!any_visible){
+            const QLineF drawn = data->DrawnLine();
+            painter->setPen(onion_render ? QPen(Qt::gray, data->pen.widthF()) : data->pen);
+            painter->setBrush(Qt::NoBrush);
+            painter->drawLine(drawn);
+        }
+        PaintVectorOverlay(painter);
     }
     else if(data->stick_type == StickData::MULTILINE){
         QPolygonF chain = ScenePolygon(); // P1 + interni + P2 (+ anteprima in coda)
@@ -809,6 +856,64 @@ void StickGraphicsItem::PaintVertexSquares(QPainter *painter, const QPolygonF &v
     painter->setBrush(Qt::NoBrush);
 }
 
+/// @details Live-UI only, like PaintVertexSquares(): never in an onion render, and invisible in
+/// icons and exports because those render view-less clones that are never selected. Handles show
+/// for the selected nodes and for every node of the shape being drawn; the pen is cosmetic so the
+/// overlay keeps its size at any zoom.
+void StickGraphicsItem::PaintVectorOverlay(QPainter *painter)
+{
+    if(onion_render || (!selected && selected_vector_nodes.isEmpty()))
+        return;
+    const QTransform t = data->PolygonTransform();
+    painter->save();
+    QPen handle_pen(QColor(0, 120, 255), 1);
+    handle_pen.setCosmetic(true);
+    const float s = handle_size * 0.5f;
+    const float r = handle_size * 0.2f;
+    // the next segment while drawing: from the last node, along its out handle, to the cursor
+    if(vector_preview_active && vector_active_shape >= 0
+            && vector_active_shape < data->vector_shapes.size()
+            && !data->vector_shapes[vector_active_shape].nodes.isEmpty()){
+        const VectorNode &last = data->vector_shapes[vector_active_shape].nodes.last();
+        QPainterPath next;
+        next.moveTo(t.map(last.pos));
+        if(last.out_handle.isNull())
+            next.lineTo(vector_preview_point);
+        else
+            next.cubicTo(t.map(last.pos + last.out_handle), vector_preview_point, vector_preview_point);
+        QPen preview(handle_pen);
+        preview.setStyle(Qt::DashLine);
+        painter->setPen(preview);
+        painter->setBrush(Qt::NoBrush);
+        painter->drawPath(next);
+    }
+    for(int i = 0; i < data->vector_shapes.size(); i++){
+        const VectorShape &shape = data->vector_shapes[i];
+        if(!shape.visible)
+            continue;
+        for(int j = 0; j < shape.nodes.size(); j++){
+            const VectorNode &node = shape.nodes[j];
+            const QPointF at = t.map(node.pos);
+            const bool picked = selected_vector_nodes.contains(qMakePair(i, j));
+            if(picked || i == vector_active_shape){
+                painter->setPen(handle_pen);
+                painter->setBrush(Qt::white);
+                for(const QPointF &h : {node.in_handle, node.out_handle}){
+                    if(h.isNull())
+                        continue;
+                    const QPointF tip = t.map(node.pos + h);
+                    painter->drawLine(at, tip);
+                    painter->drawEllipse(tip, r, r);
+                }
+            }
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(picked ? QColor(0xff, 0xa5, 0x00) : QColor(Qt::red));
+            painter->drawRect(QRectF(at.x() - s/2, at.y() - s/2, s, s));
+        }
+    }
+    painter->restore();
+}
+
 // bounding rectangle deve essere sempre "positivo"
 QRectF StickGraphicsItem::boundingRect() const
 {
@@ -864,6 +969,23 @@ QRectF StickGraphicsItem::ConstructBr()
                  | TextFrame(data).mapRect(local);
         float m = data->pen.widthF() + handle_size;
         return r.adjusted(-m, -m, m, m);
+    }
+    if(data->stick_type == StickData::VECTOR){
+        // the shapes (control points included), the anchors' handles and the next-segment
+        // preview, plus the spine; a margin for the thickest pen and the anchor squares
+        const QTransform t = data->PolygonTransform();
+        QPolygonF points;
+        points << data->my_line.p1() << data->my_line.p2();
+        float m = data->pen.widthF() + handle_size;
+        for(const VectorShape &shape : data->vector_shapes){
+            for(const VectorNode &node : shape.nodes)
+                points << t.map(node.pos) << t.map(node.pos + node.in_handle)
+                       << t.map(node.pos + node.out_handle);
+            m = qMax(m, float(shape.pen.widthF()) + handle_size);
+        }
+        if(vector_preview_active)
+            points << vector_preview_point;
+        return points.boundingRect().adjusted(-m, -m, m, m);
     }
     if(data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE){
         // i vertici possono estendersi ben oltre il cerchio della linea base: unisci i
@@ -1057,7 +1179,7 @@ void StickGraphicsItem::Rotate(QPointF *point)
         if(child->view)
             child->view->Refresh(1);
     }
-    if((data->IsImageType() ||data->stick_type == StickData::CIRCLE|| data->stick_type == StickData::RECT || data->stick_type == StickData::TAPER || data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE || data->stick_type == StickData::TEXT) && !traslationOnly){
+    if((data->IsImageType() ||data->stick_type == StickData::CIRCLE|| data->stick_type == StickData::RECT || data->stick_type == StickData::TAPER || data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE || data->stick_type == StickData::TEXT || data->stick_type == StickData::VECTOR) && !traslationOnly){
         data->img_angle = angle;
     }
 
@@ -1086,7 +1208,7 @@ void StickGraphicsItem::Rotate(float angle){
         if(child->view)
             child->view->Refresh(1);
     }
-    if(data->IsImageType() ||data->stick_type == StickData::CIRCLE|| data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::TAPER || data->stick_type == StickData::RECT || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE || data->stick_type == StickData::TEXT){
+    if(data->IsImageType() ||data->stick_type == StickData::CIRCLE|| data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::TAPER || data->stick_type == StickData::RECT || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE || data->stick_type == StickData::TEXT || data->stick_type == StickData::VECTOR){
         data->img_angle = -angle-90;
     }
 }
@@ -1115,7 +1237,7 @@ void StickGraphicsItem::Manipulate(QPointF *point, bool rigid_children)
             if(child->IsImageType() || child->stick_type == StickData::RECT
                     || child->stick_type == StickData::TRAPEZOID || child->stick_type == StickData::TAPER
                     || child->stick_type == StickData::POLYGON || child->stick_type == StickData::MULTILINE
-                    || child->stick_type == StickData::TEXT){
+                    || child->stick_type == StickData::TEXT || child->stick_type == StickData::VECTOR){
                 child->img_angle = -atan2(child->my_line.dx(),child->my_line.dy())*180/M_PI;
             }
             if(child->view)
@@ -1127,7 +1249,7 @@ void StickGraphicsItem::Manipulate(QPointF *point, bool rigid_children)
     if(data->IsImageType() || data->stick_type == StickData::RECT
             || data->stick_type == StickData::TRAPEZOID || data->stick_type == StickData::TAPER|| data->stick_type == StickData::CIRCLE
             || data->stick_type == StickData::POLYGON || data->stick_type == StickData::MULTILINE
-            || data->stick_type == StickData::TEXT){
+            || data->stick_type == StickData::TEXT || data->stick_type == StickData::VECTOR){
         data->img_angle= -atan2(data->my_line.dx(),data->my_line.dy())*180/M_PI;
     }
     Refresh(0);
@@ -1569,6 +1691,11 @@ void StickGraphicsItem::Scale(float scale_factor){
     if(data->stick_type == StickData::MULTILINE){
         for(float &w : data->vertex_widths)
             w = (w/previous_factor)*scale_factor;
+    }
+    // a VECTOR strokes each shape with its own pen: the same incremental scaling
+    if(data->stick_type == StickData::VECTOR){
+        for(VectorShape &shape : data->vector_shapes)
+            shape.pen.setWidthF((shape.pen.widthF()/previous_factor)*scale_factor);
     }
     if(data->stick_type == StickData::RECT){
         data->img_w_scale = (data->img_w_scale/previous_factor)*scale_factor;

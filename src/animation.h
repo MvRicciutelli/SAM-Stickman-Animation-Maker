@@ -60,6 +60,19 @@ public:
     void ClearAnimation();
     void UpdateSliders();
 
+    /// The current shape layer of the selected VECTOR stick: the vector panel's row, the target of
+    /// the Style column's live controls and of the Apply buttons. Selection state like
+    /// current_frame, hence here; clamp it with CurrentVectorShape().
+    int vector_shape_row = -1;
+    /// @brief vector_shape_row if it is a valid shape index of @p stick (a VECTOR stick), else -1.
+    int CurrentVectorShape(const StickData *stick) const;
+    /**
+     * @brief Selection bookkeeping of a change of current stick: clears the anchor selection and
+     *        drawing preview of @p old_stick if it is a VECTOR stick, and points vector_shape_row
+     *        at @p new_stick's top shape (-1 when it is not a VECTOR stick). No-op when they match.
+     */
+    void SwitchVectorStick(StickData *old_stick, StickData *new_stick);
+
     /**
      * @brief Re-evaluates the three Style-column check boxes that depend on what the selected
      *        stick is PAINTED WITH: "Texture follows stick" and the two "Show texture handle".

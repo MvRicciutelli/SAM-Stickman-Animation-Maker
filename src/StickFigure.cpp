@@ -24,6 +24,15 @@ bool StickFigure::start_stick_figure_scale = false;
 static QList<QPointF> CaptureVertexScenePositions(StickData *s)
 {
     QList<QPointF> pts;
+    if(s->stick_type == StickData::VECTOR){
+        // VECTOR: per anchor, the point and its two handles (offsets: their tips are captured)
+        QTransform t = s->PolygonTransform();
+        for(const VectorShape &shape : s->vector_shapes)
+            for(const VectorNode &node : shape.nodes)
+                pts << t.map(node.pos) << t.map(node.pos + node.in_handle)
+                    << t.map(node.pos + node.out_handle);
+        return pts;
+    }
     if(s->stick_type != StickData::POLYGON && s->stick_type != StickData::MULTILINE)
         return pts;
     // MULTILINE: anche gli estremi DISEGNATI, in testa e in coda — con una Stick Transform non
@@ -70,6 +79,19 @@ static void ReanchorVertexScenePositions(StickData *s, QList<QPointF> scene_pts)
     // sfasato, salterebbero di colpo (Group D follow-up). Ricalcolo PRIMA di ribaccare.
     s->img_angle = -atan2(s->my_line.dx(), s->my_line.dy())*180/M_PI;
     QTransform inv = s->PolygonTransform().inverted();
+    if(s->stick_type == StickData::VECTOR){
+        int k = 0; // CaptureVertexScenePositions()'s order: anchor, in handle tip, out handle tip
+        for(VectorShape &shape : s->vector_shapes)
+            for(VectorNode &node : shape.nodes){
+                if(k + 2 >= scene_pts.length())
+                    return;
+                node.pos = inv.map(scene_pts[k]);
+                node.in_handle = inv.map(scene_pts[k + 1]) - node.pos;
+                node.out_handle = inv.map(scene_pts[k + 2]) - node.pos;
+                k += 3;
+            }
+        return;
+    }
     for(int i = 0; i < s->polygon_points.length() && i < scene_pts.length(); i++)
         s->polygon_points[i] = inv.map(scene_pts[i]);
 }
@@ -212,7 +234,8 @@ void StickFigure::PreviewDrawing(QPointF *point)
             (stick_buffer->stick_type == StickData::TAPER)||
             (stick_buffer->stick_type == StickData::POLYGON)||
             (stick_buffer->stick_type == StickData::MULTILINE)||
-            (stick_buffer->stick_type == StickData::TEXT)){
+            (stick_buffer->stick_type == StickData::TEXT)||
+            (stick_buffer->stick_type == StickData::VECTOR)){
         stick_buffer->img_angle= -atan2(stick_buffer->my_line.dx(),stick_buffer->my_line.dy())*180/M_PI;
     }
 }
@@ -1845,7 +1868,8 @@ void SolveIkChain(StickData *chain_start, const QPointF &desired_target_pos)
         if(chain[i]->IsImageType() || chain[i]->stick_type == StickData::RECT
                 || chain[i]->stick_type == StickData::TRAPEZOID || chain[i]->stick_type == StickData::TAPER
                 || chain[i]->stick_type == StickData::CIRCLE || chain[i]->stick_type == StickData::POLYGON
-                || chain[i]->stick_type == StickData::MULTILINE){
+                || chain[i]->stick_type == StickData::MULTILINE
+                || chain[i]->stick_type == StickData::VECTOR){
             chain[i]->img_angle = float(-atan2(chain[i]->my_line.dx(), chain[i]->my_line.dy())*180.0/M_PI);
         }
     }

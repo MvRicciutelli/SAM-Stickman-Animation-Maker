@@ -50,6 +50,9 @@
                         ///< free-end click, then a prompt for the paragraph. The skeleton
                         ///< is only visible during the 2-click preview; id == the stick
                         ///< type, same convention as DRAWIMG/DRAWFREEHAND
+#define DRAWVECTOR 30   ///< draw a vector stick (StickData::VECTOR): 2 clicks for the stick, then
+                        ///< vector draw mode (MyView::VT_PEN) until Esc/Enter/double click/tool
+                        ///< switch; id == the stick type, same convention as DRAWTEXT
 #define PANVIEW 26      ///< drag to pan the VIEW: only the viewport moves, the frame is untouched
 #define ROTATEVIEW 27   ///< drag to rotate the VIEW about the viewport centre (Shift: 15° steps);
                         ///< unlike ROTATESCENE no figure moves, renders/exports never see it
@@ -377,6 +380,69 @@ public:
      */
     void DrawStrokeUndo();
     void DrawStrokeRedo();
+
+    // ---- VECTOR sticks (myview.cpp, end of file) -------------------------------------
+    // A VECTOR stick holds bezier shape layers (StickData::vector_shapes). Its tools are
+    // modal like draw mode, but act on the CURRENT stick rather than a stored pointer:
+    // VectorStick() re-derives it on every use. The panel (widget.cpp) is a thin shell
+    // over the public methods below, which the tests call directly. The current shape
+    // layer is Animation::vector_shape_row.
+    /// @brief The vector tools, selected by SetVectorTool(); VT_PEN is vector draw mode.
+    enum VectorTool {
+        VT_NONE = 0,  ///< no vector tool: the canvas tool works as usual
+        VT_PEN,       ///< vector draw mode: clicks place anchors (drag = smooth), click the first anchor to close
+        VT_LASSO,     ///< drag a lasso to select anchors (Shift adds)
+        VT_FILL,      ///< click a shape to give it the current fill (my_brush)
+        VT_STROKE     ///< click a shape to give it the current border (my_pen, my_stroke_brush)
+    };
+    int vector_tool = VT_NONE;          ///< active VectorTool
+    QList<VectorShape> vector_clipboard; ///< copied shapes, in SCENE space; a value list, replaced whole by every copy
+
+    /// @brief The current stick if it is a finished VECTOR stick with a live view, else nullptr.
+    StickData *VectorStick() const;
+    /// @brief Switches the vector tool (VT_NONE without a vector stick); leaving the pen ends the shape being drawn.
+    void SetVectorTool(int vector_tool_id);
+    /// @brief Enters vector draw mode on the current vector stick (the panel's pen button, the 2nd click of DRAWVECTOR).
+    void EnterVectorMode();
+    /**
+     * @brief Leaves whatever vector tool is active. Safe to call when none is (no-op); reached
+     *        from Esc/Enter/double click, any tool switch, and everywhere draw mode is left
+     *        (ExitDrawMode() calls it).
+     */
+    void ExitVectorMode();
+    /// @brief Finishes the shape the pen is drawing (removed if it has a single anchor); the pen stays active.
+    void EndVectorShape();
+    /// @brief Clears the anchor selection of every vector stick in the current frame.
+    void ClearVectorSelections();
+    /// @brief Selects the anchors of the visible shapes inside @p lasso (scene), adding to the selection when @p add.
+    void LassoSelectVectorNodes(const QPolygonF &lasso, bool add);
+    /// @brief Delete key: removes the selected anchors (and shapes left with fewer than two) as one undo step.
+    /// @return false when no anchor was selected.
+    bool DeleteSelectedVectorNodes();
+    /**
+     * @brief Bucket click: gives the topmost visible shape under @p scene_pos the current fill
+     *        (@p fill) or the current border (paint, width and border brush), as one undo step.
+     * @return false when no shape is there.
+     */
+    bool BucketVectorShape(const QPointF &scene_pos, bool fill);
+    /// @brief Moves shape @p index by @p delta places in the drawing order (> 0 = towards the front), as one undo step.
+    bool MoveVectorShape(int index, int delta);
+    /// @brief Deletes the shapes at @p indices, as one undo step.
+    bool DeleteVectorShapes(QList<int> indices);
+    /// @brief Shows or hides one shape, as one undo step.
+    void SetVectorShapeVisible(int index, bool visible);
+    /// @brief Renames one shape, as one undo step.
+    void RenameVectorShape(int index, const QString &name);
+    /// @brief Copies the shapes at @p indices into vector_clipboard (in scene space). @return how many.
+    int CopyVectorShapes(QList<int> indices);
+    /**
+     * @brief Pastes vector_clipboard on top of the current vector stick's shapes, where they were
+     *        drawn, as one undo step. The clipboard stays, so it can be pasted again.
+     * @return an empty string on success, or why nothing was pasted.
+     */
+    QString PasteVectorShapes();
+    /// @brief Applies one SetGraphics() attribute of the current paint (my_pen/my_brush/...) to a shape.
+    void ApplyStyleToShape(VectorShape &shape, int attribute) const;
 
     /**
      * @brief Undo/redo entry point for every UI trigger (toolbar buttons + Ctrl+Z/Y
@@ -856,6 +922,14 @@ signals:
      */
     void DrawModeChanged(bool active);
 
+    /// @brief Fired when the vector tool changes (SetVectorTool()), however it changes; the
+    ///        vector panel keeps its tool buttons in sync with it.
+    void VectorToolChanged(int vector_tool_id);
+
+    /// @brief Fired after an edit of the current vector stick's shapes (or of which one is
+    ///        current); the vector panel rebuilds its layer rows from it.
+    void VectorShapesChanged();
+
 
     // QWidget interface
 protected:
@@ -886,6 +960,40 @@ private:
     bool poly_drag_needs_undo = false;///< DRAWMULTI handle pressed but not dragged yet: the undo snapshot waits for a real drag, a plain click reopens the session
     QPoint poly_press_pos;            ///< viewport position of that press, for the drag threshold
     bool poly_vertex_drag = false;    ///< true while a Ctrl-drag of the selected vertices (NOTOOL/CLAMP) is in progress
+
+    // ------- VECTOR gesture state: indices into the current vector stick's shapes, never ----
+    // ------- a pointer (see VectorStick()); every use re-checks them against the stick -------
+    enum VectorGesture { VG_NONE = 0, VG_PLACE, VG_MOVE, VG_HANDLE, VG_LASSO };
+    int vec_gesture = VG_NONE;        ///< the left-button gesture in progress: anchor placed by the pen (its drag sets the handles), anchors moved, a handle dragged, a lasso
+    int vec_drawing_shape = -1;       ///< the shape the pen is adding anchors to; -1 = the next click starts a new one
+    int vec_edit_shape = -1;          ///< shape of the anchor/handle the gesture acts on
+    int vec_edit_node = -1;           ///< its anchor
+    int vec_edit_side = 0;            ///< VG_HANDLE: 0 = in handle, 1 = out handle
+    bool vec_needs_undo = false;      ///< the gesture has not passed the drag threshold yet (no snapshot, no change)
+    bool vec_close_on_release = false;///< the press closed the shape: it ends at the release
+    QPoint vec_press_pos;             ///< viewport position of the press, for the drag threshold
+    QPointF vec_last;                 ///< scene position of the previous move, for VG_MOVE's delta
+    QPolygonF vec_lasso;              ///< VG_LASSO's trace, scene coordinates
+
+    /// @brief The vector half of mousePressEvent(); true when the press was the vector tool's.
+    bool VectorMousePress(QMouseEvent *event);
+    /// @brief A pen click: a new anchor (on a new shape if none is being drawn), or the close click.
+    void VectorPenPress(StickData *stick);
+    /// @brief Ctrl+press: picks a handle or an anchor of @p stick under the cursor. @return false on a miss.
+    bool VectorEditPress(StickData *stick, Qt::KeyboardModifiers modifiers);
+    /// @brief The vector half of mouseMoveEvent(); true when it handled the move.
+    bool VectorMouseMove(QMouseEvent *event);
+    /// @brief The vector half of mouseReleaseEvent(); true when it ended a vector gesture.
+    bool VectorMouseRelease(QMouseEvent *event);
+    /// @brief The vector half of keyPressEvent(); true when it consumed the key.
+    bool VectorKeyPress(QKeyEvent *event);
+    /// @brief Repaints @p stick, refreshes the layer/frame thumbnails and emits VectorShapesChanged().
+    void VectorEdited(StickData *stick);
+    /**
+     * @brief SetGraphics()'s per-stick step: one attribute of the current paint onto @p stick and,
+     *        for a VECTOR stick, onto its current shape (or every shape when @p all_shapes).
+     */
+    void ApplyStyleToStick(StickData *stick, int attribute, bool all_shapes);
 
     // ------- DRAW_IK tool state. Like the POLYGON session above, no StickData* is ------
     // ------- stored for the pending chain start: IkPendingStart() re-derives it from ---
