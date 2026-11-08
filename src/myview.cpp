@@ -3910,6 +3910,7 @@ void MyView::mouseReleaseEvent(QMouseEvent *event)
         sel_box_gesture = 0; // end of any drag of a transformation box handle
         texture_arrow_gesture = 0; // end of any drag of a texture arrow
         displace_gesture = 0; // end of any DISPLACE move/turn
+        manipulate_keep_shape = false; // the next Alt drag latches its own shape
         if(band_dragging){
             band_dragging = false;
             // the rubber band always goes away at release (the selection stays)
@@ -4194,9 +4195,30 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
             if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr && my_animation->CurrentFrame()->CurrentStick()!=nullptr)
             {
                 if(is_pressed){
-                    if(my_animation->CurrentFrame()->CurrentStick()->view)
-                        my_animation->CurrentFrame()->CurrentStick()->view->Manipulate(&coord);
-                    elongate_spinbox->setValue(my_animation->CurrentFrame()->CurrentStick()->my_line.length());
+                    StickData *stick = my_animation->CurrentFrame()->CurrentStick();
+                    // Alt: only the handle moves, the drawn shape stays where it was when Alt went
+                    // down (latched then, so pressing it mid-drag works and nothing drifts). Not
+                    // for the plain skeleton types (spec): there Alt is a normal Plastic Move.
+                    // Ctrl: the whole chain below follows rigidly, any type, with or without Alt
+                    const bool keep_shape = (event->modifiers() & Qt::AltModifier)
+                            && stick->stick_type != StickData::LINE && stick->stick_type != StickData::TAPER
+                            && stick->stick_type != StickData::RECT && stick->stick_type != StickData::CIRCLE;
+                    const bool rigid_children = event->modifiers() & Qt::ControlModifier;
+                    if(keep_shape && !manipulate_keep_shape){
+                        manipulate_frame0 = stick->ShapeFrame();
+                        manipulate_len0 = stick->my_line.length();
+                    }
+                    manipulate_keep_shape = keep_shape;
+                    if(stick->view)
+                        stick->view->Manipulate(&coord, rigid_children);
+                    if(keep_shape){
+                        stick->KeepDrawnShape(manipulate_frame0, manipulate_len0);
+                        if(stick->view)
+                            stick->view->Refresh(0);
+                        if(refresh_transform_panel)
+                            refresh_transform_panel(stick); // the tab shows the re-solved local set
+                    }
+                    elongate_spinbox->setValue(stick->my_line.length());
                 }
             }
             break;

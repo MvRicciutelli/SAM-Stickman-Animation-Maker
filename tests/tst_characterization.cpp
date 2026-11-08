@@ -3808,6 +3808,139 @@ private slots:
         QCOMPARE(pushes.count(), 2);
     }
 
+    // StickData::KeepDrawnShape(), Alt + Plastic Move's math: after P2 moves (turning and
+    // stretching the spine), re-solving the local set draws every type's outline where it was,
+    // under an ancestor's mirrored non-uniform global, the stick's own uniform global and a
+    // flipped, stretched, offset local. The outlines are read through the same formulas paint()
+    // uses, independent of the per-type length map inside KeepDrawnShape()
+    void KeepDrawnShapeHoldsEveryTypeInPlace()
+    {
+        StickData arm;
+        arm.stick_type = StickData::LINE;
+        arm.my_line = QLineF(60, 40, 100, 100);
+        arm.global_xf.angle = -25;
+        arm.global_xf.scale = QPointF(1.5, 0.8);
+        arm.global_xf.flip_h = true;
+        auto outline = [](const StickData &s) {
+            const qreal len = s.my_line.length(), w = s.img_w_scale;
+            switch (s.stick_type) {
+            case StickData::LINE:
+                return QPolygonF({s.DrawnLine().p1(), s.DrawnLine().p2()});
+            case StickData::CIRCLE:
+                return s.ShapeFrame().map(QPolygonF({QPointF(-w * len / 2, 0), QPointF(w * len / 2, len)}));
+            case StickData::POLYGON:
+            case StickData::IMAGE:
+                return s.PolygonTransform().map(QPolygonF({QPointF(-0.3, 0.1), QPointF(0.4, 0.9), QPointF(0, 0.5)}));
+            default: // RECT, TAPER, TRAPEZOID: widths across, the length along
+                return s.ShapeFrame().map(QPolygonF({QPointF(-w / 2, 0), QPointF(w / 2, 0), QPointF(w / 2, len)}));
+            }
+        };
+        for (int type : {int(StickData::LINE), int(StickData::RECT), int(StickData::TAPER),
+                         int(StickData::CIRCLE), int(StickData::POLYGON), int(StickData::IMAGE)}) {
+            StickData stick;
+            stick.stick_type = type;
+            stick.img_w_scale = 12;
+            stick.img_offset = QPointF(3, 5);
+            stick.img_angle_offset = 15;
+            stick.my_line = QLineF(100, 100, 160, 180);
+            stick.img_angle = float(-qAtan2(60, 80) * 180.0 / M_PI);
+            stick.parent = &arm;
+            stick.local_xf.offset = QPointF(7, -3);
+            stick.local_xf.angle = 20;
+            stick.local_xf.scale = QPointF(0.6, 1.3);
+            stick.local_xf.flip_v = true;
+            stick.global_xf.angle = 10;
+            stick.global_xf.scale = QPointF(1.2, 1.2);
+            const QPolygonF before = outline(stick);
+            const QTransform frame0 = stick.ShapeFrame();
+            const qreal len0 = stick.my_line.length();
+            stick.my_line.setP2(QPointF(40, 210)); // turned and longer, as Manipulate() leaves it
+            stick.img_angle = float(-qAtan2(stick.my_line.dx(), stick.my_line.dy()) * 180.0 / M_PI);
+            stick.KeepDrawnShape(frame0, len0);
+            const QPolygonF after = outline(stick);
+            for (int i = 0; i < before.size(); i++)
+                QVERIFY2(QLineF(before[i], after[i]).length() < 1e-3,
+                         qPrintable(QString("type %1 point %2 moved by %3").arg(type).arg(i)
+                                    .arg(QLineF(before[i], after[i]).length())));
+            QVERIFY(stick.local_xf.flip_v && !stick.local_xf.flip_h);
+        }
+    }
+
+    // Plastic Move's modifiers through real mouse events, on a parent -> child -> grandchild chain.
+    // Alt on a plain LINE (also TAPER/RECT/CIRCLE, spec) is a normal Plastic Move: the shape follows
+    // and the child's P1 is re-anchored on the end. On a TRAPEZOID, Ctrl alone then Ctrl+Alt (Alt
+    // going down mid-drag): the handle follows the cursor, the drawn line stays where it was when Alt
+    // went down, and child and grandchild shift rigidly with the free end. Each gesture is one undo step
+    void PlasticMoveAltKeepsShapeCtrlMovesChainRigidly()
+    {
+        struct Restore { MyView *v; ~Restore() { v->SetTool(NOTOOL); } } restore{view};
+        AddFrame();
+        view->resize(800, 600);
+        StickFigure *figure = CurrentStickFigure();
+        StickData *stick = DrawStick(QPointF(200, 200), QPointF(200, 320));
+        StickData *child = DrawStick(QPointF(200, 320), QPointF(260, 380));
+        StickData *grandchild = DrawStick(QPointF(260, 380), QPointF(300, 380));
+        QCOMPARE(grandchild->parent, child);
+        view->SetTool(MANIPULATE);
+        auto at = [this](QPointF scene) { return view->mapFromScene(scene); };
+        auto cursor = [&](QPointF scene) { return view->mapToScene(at(scene)); }; // pixel-rounded
+        auto move = [&](QPointF scene, Qt::KeyboardModifiers mods) {
+            const QPoint p = at(scene);
+            QMouseEvent ev(QEvent::MouseMove, QPointF(p), QPointF(view->viewport()->mapToGlobal(p)),
+                           Qt::NoButton, Qt::LeftButton, mods);
+            QApplication::sendEvent(view->viewport(), &ev);
+        };
+        auto near = [](QPointF a, QPointF b) { return QLineF(a, b).length() < 1e-3; };
+        QSignalSpy pushes(&view->undo_stack, &QUndoStack::indexChanged);
+
+        // Alt on a LINE: ignored
+        const QLineF grandchild_line = grandchild->my_line;
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::AltModifier, at(QPointF(200, 260)));
+        QCOMPARE(CurrentFrame()->CurrentStick(), stick);
+        move(QPointF(230, 330), Qt::AltModifier);
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::AltModifier, at(QPointF(230, 330)));
+        QVERIFY(stick->local_xf.IsIdentity());
+        QCOMPARE(stick->DrawnLine(), stick->my_line);
+        QVERIFY(near(child->my_line.p1(), cursor(QPointF(230, 330))));
+        QCOMPARE(grandchild->my_line, grandchild_line);
+        QCOMPARE(pushes.count(), 1);
+
+        // Ctrl, then Ctrl+Alt, on a TRAPEZOID
+        stick->stick_type = StickData::TRAPEZOID;
+        stick->img_angle = float(-qAtan2(stick->my_line.dx(), stick->my_line.dy()) * 180.0 / M_PI);
+        stick->img_w_scale = 20;
+        stick->img_h_scale = 10;
+        const QLineF before_line = stick->my_line, child_line = child->my_line;
+        // select it now: the tab switch to the new type has undo side effects of its own
+        view->my_animation->UpdateSelection(stick);
+        pushes.clear();
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::ControlModifier, at(QPointF(210, 250)));
+        QCOMPARE(CurrentFrame()->CurrentStick(), stick);
+        move(QPointF(250, 320), Qt::ControlModifier);
+        QCOMPARE(stick->DrawnLine(), stick->my_line); // no Alt yet: the shape follows
+        const QLineF drawn = stick->DrawnLine();
+        move(QPointF(270, 360), Qt::ControlModifier | Qt::AltModifier);
+        move(QPointF(290, 340), Qt::ControlModifier | Qt::AltModifier);
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::ControlModifier | Qt::AltModifier,
+                            at(QPointF(290, 340)));
+        QVERIFY2(near(stick->my_line.p2(), cursor(QPointF(290, 340))), "the handle did not follow the cursor");
+        QVERIFY2(near(stick->DrawnLine().p1(), drawn.p1()) && near(stick->DrawnLine().p2(), drawn.p2()),
+                 "the drawn shape moved");
+        const QPointF shift = stick->my_line.p2() - before_line.p2();
+        QVERIFY2(near(child->my_line.p1(), child_line.p1() + shift) && near(child->my_line.p2(), child_line.p2() + shift),
+                 "the child did not shift rigidly");
+        QVERIFY2(near(grandchild->my_line.p1(), grandchild_line.p1() + shift)
+                 && near(grandchild->my_line.p2(), grandchild_line.p2() + shift),
+                 "the grandchild did not shift rigidly");
+        QCOMPARE(pushes.count(), 1);
+
+        view->undo_stack.undo();
+        figure = CurrentStickFigure(); // undo rebuilt the figure
+        QCOMPARE(figure->stick_list[figure->stick_list.count() - 3]->my_line, before_line);
+        QCOMPARE(figure->stick_list[figure->stick_list.count() - 2]->my_line, child_line);
+        QVERIFY(figure->stick_list[figure->stick_list.count() - 3]->local_xf.IsIdentity());
+    }
+
     // Group D bug 3: the scale tool must scale a MULTILINE's per-vertex thickness
     // (vertex_widths) along with its shape, and a POLYGON's outline pen. Replicates the
     // buffers mousePressEvent's SCALE case caches, then calls StickGraphicsItem::Scale().

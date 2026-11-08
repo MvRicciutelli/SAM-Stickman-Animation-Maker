@@ -2743,7 +2743,7 @@ QPushButton:pressed{
                                 </size>
                                </property>
                                <property name="toolTip">
-                                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Plastic Move Tool:&lt;/p&gt;&lt;p&gt;this tool freely moves the stick endpoint&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Plastic Move Tool:&lt;/p&gt;&lt;p&gt;this tool freely moves the stick endpoint.&lt;/p&gt;&lt;p&gt;Alt: move only the handle, the drawn shape stays where it is (its Stick Transform makes up the difference). Not for line, taper, rectangle and circle sticks.&lt;/p&gt;&lt;p&gt;Ctrl: the chain below moves rigidly with the endpoint. Works with Alt too.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
                                </property>
                                <property name="styleSheet">
                                 <string notr="true">QPushButton {

@@ -109,6 +109,32 @@ it and then drags its shape, so one gesture picks and moves. What the tool does:
 - **No empty undo steps.** The `StoreUndo()` waits for the first move past Qt's drag distance, so a
   click that only selects pushes nothing.
 
+**Alt + Plastic Move** (MANIPULATE) moves only the handle, on every type except LINE, TAPER,
+RECT and CIRCLE (spec: there Alt is a plain Plastic Move). P2 (and the joint the children hang
+from) follows the cursor, and `StickData::KeepDrawnShape()` re-solves `local_xf` so the stick's
+own shape is drawn where it was when Alt went down. `mouseMoveEvent()` latches `ShapeFrame()` and
+the length at that moment (`manipulate_frame0`/`manipulate_len0`), so Alt can go down mid-drag and
+nothing drifts. The solve needs how each type's geometry follows the length (`LengthMap()`):
+- LINE/RECT/TAPER/TRAPEZOID stretch along the stick.
+- CIRCLE stretches both ways.
+- Images, POLYGON and MULTILINE vertices stretch both ways about their `img_offset` placement.
+- TEXT doesn't stretch; its wrap width still reflows.
+
+Limits:
+- It edits only the local set, so the children follow the joint as in a plain Plastic Move.
+- With a non-uniform OWN global, a turning spine would need a shear, so the nearest set is kept.
+- A TAPER's round caps and the painter-scaled strokes stretch with the compensating scale, like
+  any Stick Transform scale.
+
+**Ctrl + Plastic Move**, on every type and combinable with Alt, translates every descendant by the
+free end's displacement (`Manipulate(point, rigid_children)`), so the chain below keeps its
+shape. Without Ctrl only the direct children's P1 is re-anchored, which stretches and turns them.
+A master's stepchildren hang from P1 and never move.
+
+`KeepDrawnShapeHoldsEveryTypeInPlace` (checked to fail with the solve disabled) and
+`PlasticMoveAltKeepsShapeCtrlMovesChainRigidly` (checked to fail without the rigid move and without
+the type exclusion) pin it.
+
 **"Reset transform"** in the tab (`Widget::ResetTransform()`) puts the shown set back to rest as one
 undo step, or does nothing when it already is.
 

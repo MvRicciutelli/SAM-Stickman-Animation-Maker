@@ -984,6 +984,10 @@ private:
     int sel_box_gesture = 0;          ///< 0 nessuno, 1 scala (uniforme), 2 rotazione: drag di una maniglia della box
     int texture_arrow_gesture = 0;    ///< 0 nessuno, 1 coda (offset), 2 punta (angolo + scala): drag della freccia della texture
     bool texture_arrow_is_fill = true;///< quale delle due frecce è sotto trascinamento
+    // ---- MANIPULATE + Alt: the handle moves, the drawn shape stays (StickData::KeepDrawnShape()) ----
+    bool manipulate_keep_shape = false; ///< Alt held at the last move of this drag; false when the shape below is not latched
+    QTransform manipulate_frame0;       ///< the current stick's ShapeFrame() when Alt went down
+    qreal manipulate_len0 = 0;          ///< its spine length when Alt went down
     // ---- DISPLACE tool: a drag on the current stick, its centre square or its knob ----
     int displace_gesture = 0;         ///< 0 none, 1 moving the drawn shape, 2 turning it about its centre
     bool displace_undo_taken = false; ///< the gesture's StoreUndo() is deferred to the first real move, so a plain click leaves no empty undo step

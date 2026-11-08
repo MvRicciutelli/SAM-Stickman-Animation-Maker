@@ -1,3 +1,6 @@
+# Fail fast on a wrong kit: the sources need Qt 6 (built with 6.6.1)
+lessThan(QT_MAJOR_VERSION, 6): error("SAM requires Qt 6 (built with 6.6.1). Select a Qt 6 kit in Projects > Build & Run.")
+
 QT       += core gui
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets

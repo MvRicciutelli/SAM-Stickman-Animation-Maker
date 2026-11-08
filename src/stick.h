@@ -125,8 +125,11 @@ public:
     /**
      * @brief Interactive manipulation: moves the free end, dragging children along.
      * @param point mouse position in scene coordinates.
+     * @param rigid_children true (Ctrl) translates every descendant by the free end's displacement,
+     *        so the chain keeps its shape; false re-anchors only the direct children's P1, which
+     *        stretches and turns them.
      */
-    void Manipulate(QPointF* point);
+    void Manipulate(QPointF* point, bool rigid_children = false);
 
     
 

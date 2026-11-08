@@ -562,6 +562,64 @@ void StickData::TurnDrawnShape(qreal degrees, bool global)
     xf.angle = float(std::remainder(xf.angle + delta, 360.0)); // same rotation, kept in the sliders' range
 }
 
+/// @details How a type's geometry, in the stick's own frame, follows the spine length: the map that
+/// takes the geometry built at @p new_len onto the one built at @p old_len. LINE/RECT/TAPER/TRAPEZOID
+/// stretch along the stick only, a CIRCLE both ways about P1, the types placed through
+/// img_angle_offset/img_offset (images, polygon and multiline vertices) both ways about that placement,
+/// and TEXT not at all (only its wrap width follows the length, which no transform can undo).
+static QTransform LengthMap(const StickData &d, qreal new_len, qreal old_len)
+{
+    const qreal k = old_len / new_len;
+    switch (d.stick_type) {
+    case StickData::TEXT:
+        return QTransform();
+    case StickData::CIRCLE:
+        return QTransform::fromScale(k, k);
+    case StickData::IMAGE:
+    case StickData::FREEHAND:
+    case StickData::POLYGON:
+    case StickData::MULTILINE: {
+        QTransform placement;
+        placement.rotate(d.img_angle_offset);
+        const QPointF c = placement.map(d.img_offset);
+        return QTransform::fromTranslate(-c.x(), -c.y()) * QTransform::fromScale(k, k)
+             * QTransform::fromTranslate(c.x(), c.y());
+    }
+    default:
+        return QTransform::fromScale(1, k);
+    }
+}
+
+/**
+ * @details The local set X that is needed solves geometry(new)·X·rest = geometry(old)·old_frame,
+ * with rest = own global · spine · ancestors' globals (AfterSet()) and geometry(old) =
+ * geometry(new)·LengthMap(). X is then read back as a set with the same flips: its linear part is
+ * flip·scale·R(angle), so row 1 gives the angle and the across scale, row 2 projected on the
+ * turned +y the along scale, and the offset is whatever is left at the origin. Exact unless a
+ * non-uniform own global meets a turning spine: the shear that would need is beyond a set, so the
+ * nearest one is kept.
+ */
+void StickData::KeepDrawnShape(const QTransform &old_frame, qreal old_len)
+{
+    const qreal len = my_line.length();
+    if (len < 1e-6 || old_len < 1e-6)
+        return; // a zero-length spine has no frame to solve in
+    const QTransform x = LengthMap(*this, len, old_len) * old_frame * AfterSet(*this, false).inverted();
+    const qreal fx = local_xf.flip_h ? -1 : 1; // the along scale is read unsigned, so no fy
+    const qreal angle = qAtan2(fx * x.m12(), fx * x.m11()) * 180.0 / M_PI;
+    QTransform turn;
+    turn.rotate(angle);
+    const QPointF along = turn.map(QPointF(0, 1));
+    local_xf.angle = float(std::remainder(angle, 360.0));
+    local_xf.scale = QPointF(qMax(1e-6, QLineF(0, 0, x.m11(), x.m12()).length()),
+                             qMax(1e-6, qAbs(x.m21() * along.x() + x.m22() * along.y())));
+    local_xf.offset = QPointF(0, 0);
+    const QPointF rest = x.map(QPointF(0, 0)) - LocalTransform(len).map(QPointF(0, 0));
+    QTransform unturn;
+    unturn.rotate(-local_xf.angle); // the float the set keeps, so LocalTransform() turns by the same
+    local_xf.offset = unturn.map(rest);
+}
+
 QList<StickData*> CloneForRender(const QList<StickData*> &sticks)
 {
     QHash<const StickData*, StickData*> clone_of;

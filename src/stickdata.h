@@ -476,6 +476,13 @@ public:
      *        DrawnCentre(), by editing local_xf, or global_xf when @p global.
      */
     void TurnDrawnShape(qreal degrees, bool global);
+    /**
+     * @brief Re-solves local_xf after the spine changed, so the shape is drawn where it was drawn
+     *        with ShapeFrame() @p old_frame at spine length @p old_len (Alt + Plastic Move).
+     * @param old_frame ShapeFrame() before the spine changed.
+     * @param old_len my_line.length() before the spine changed.
+     */
+    void KeepDrawnShape(const QTransform &old_frame, qreal old_len);
 
     /**
      * @brief Role of a stick inside an inverse-kinematics chain (the DRAW_IK tool,

@@ -1091,15 +1091,25 @@ void StickGraphicsItem::Rotate(float angle){
     }
 }
 // this freely elongates sticks
-void StickGraphicsItem::Manipulate(QPointF *point)
+void StickGraphicsItem::Manipulate(QPointF *point, bool rigid_children)
 {
+    const QPointF moved_by = *point - data->my_line.p2();
     // set the new point
     data->my_line.setP2(*point);
     for(int i= 0; i<data->children.length();i++)
     {
         StickData* child = data->children[i];
+        if(child->stepchild && this->IsMaster())
+            continue; // a master's stepchildren hang from P1, which doesn't move
+        if(rigid_children){
+            // children holds every descendant: all of them shift with the free end, unturned
+            child->my_line.translate(moved_by);
+            if(child->view)
+                child->view->Refresh(0);
+            continue;
+        }
         //effettua la traslazione dovuta alla manipolazione dell'estremo libero
-        if(!(child->stepchild && this->IsMaster()) && child->parent == data){
+        if(child->parent == data){
             QPointF pfBuf = child->my_line.p2();
             child->my_line = QLineF(*point,pfBuf);
             if(child->IsImageType() || child->stick_type == StickData::RECT
