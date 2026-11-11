@@ -132,6 +132,12 @@ void Widget::on_someBtn_clicked(){
 - Vector tools never store a `StickData*` (`VectorStick()` re-derives it); every gesture names its
   shape and anchor index.
 - Inbetweens only between `VectorShapesCompatible()` shapes; the panel refresh connections stay queued.
+- A shape's depth is an OFFSET from the stick's `z` (`depth_offset`), read only through
+  `StickData::VectorShapeDepth()` and only while `vector_depth_enabled`; the hand-written `CopyFrom()`
+  must copy the switch. `VECTOR_SHAPES_VERSION` is 2 (offsets trail each shape, the switch trails the list).
+- Shapes at another depth are painted by `VectorShapeLayerItem` helper items: only
+  `StickGraphicsItem::SyncShapeLayers()` may create, destroy or scene-add them, and shape painting goes
+  through `PaintVectorShapes()`. Never assume one scene item per stick.
 
 **Fill, stroke, texture, opacity, brush border, layout** (`docs/ARCH_STYLE_PAINT.md`)
 - `pen`/`brush` are whole `QPen`/`QBrush`: patterns, images and gradients need no new fields.
@@ -147,10 +153,11 @@ void Widget::on_someBtn_clicked(){
 - Icon buttons paint through the stylesheet `image:` property, never `background-image:`. Sidebar and
   shrink behaviour is set in `widget.ui` plus `BottomRowSplitter`; read the doc before changing sizes.
 
-**Release** (`docs/ARCH_RELEASE.md`): `VERSION` in `SAM.pro` is the single source. The installer is
-per-user on purpose. Attach the installer to the GitHub release as `SAM-Setup.exe`. Bundled brush and
-pattern packs are third-party CC0/CC BY and stay outside SAM's license (verify a license and add a
-NOTICE.md row before adding a pack).
+**Release** (`docs/ARCH_RELEASE.md`): `VERSION` in `SAM.pro` is the single source; it reaches the code
+only through the generated `version.h` (`APP_VERSION`), never a `-D` define or a literal in a `.ui`.
+The installer is per-user on purpose. Attach the installer to the GitHub release as `SAM-Setup.exe`.
+Bundled brush and pattern packs are third-party CC0/CC BY and stay outside SAM's license (verify a
+license and add a NOTICE.md row before adding a pack).
 
 ## Conventions
 

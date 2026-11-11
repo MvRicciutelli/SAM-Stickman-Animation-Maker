@@ -3,8 +3,12 @@
 `installer/build-installer.ps1` builds Release in a sibling `build-SAM-installer`,
 stages `installer/out/app` (exe + `windeployqt` + LICENSE/NOTICE/LICENSES; `-SkipInstaller`
 stops there, a portable folder) and compiles `installer/SAM.iss` with Inno Setup 6.
-Version = `VERSION` in the `.pro`, the one source of truth: it reaches the code as
-`APP_VERSION`, which the About box and the update check both read.
+Version = `VERSION` in the `.pro`, the one source of truth. qmake writes it into `version.h`
+in the build directory (`QMAKE_SUBSTITUTES`, template `src/version.h.in`) as `APP_VERSION`,
+which the window title, the About box and the update check read. Keep it a generated header,
+never a `-D` define: make does not track compiler flags, so after a bump a define left
+`updatecheck.o` on the old version and the app offered an update to the version it already
+was. The template is parsed as qmake syntax: quotes stay escaped, and no apostrophes.
 
 **Update check** (`updatecheck.h/.cpp`, called from `MyMainWindow`'s constructor): asks
 GitHub's `releases/latest` in the background, and if its tag is newer (`IsNewerRelease()`:

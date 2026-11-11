@@ -216,7 +216,8 @@ public:
     static constexpr qint32 CURRENT_VERSION = 11;
     /// Format of a VECTOR stick's shape list, written at its head: the shapes have a version of
     /// their own so they can grow fields without raising every stick record's.
-    static constexpr qint32 VECTOR_SHAPES_VERSION = 1;
+    /// 2 adds each shape's depth_offset and the stick's vector_depth_enabled.
+    static constexpr qint32 VECTOR_SHAPES_VERSION = 2;
     qint32 version = CURRENT_VERSION; ///< serialization format version of this record; 2 adds the
                                      ///< IK fields below, 3 adds TEXT's text_v_stretch, 4 adds
                                      ///< brush_follows_stick, 5 adds texture_tiled, 6 adds
@@ -408,6 +409,23 @@ public:
      * (PolygonTransform()), so the shapes move, turn and scale with the stick.
      */
     QList<VectorShape> vector_shapes;
+
+    /**
+     * @brief VECTOR only: true when each shape is drawn at its own depth instead of the stick's.
+     *
+     * Off (the default), every shape is drawn at z, in layer order. On, a shape is drawn at
+     * VectorShapeDepth(), which can put it in front of or behind OTHER sticks of the frame; shapes
+     * sharing a depth keep their layer order. The offsets survive switching it off and on again.
+     */
+    bool vector_depth_enabled = false;
+
+    /**
+     * @brief The frame-wide depth shape @p shape_index is drawn at.
+     * @return z while vector_depth_enabled is off, z + the shape's depth_offset otherwise. An
+     *         offset rather than an absolute depth, so whatever moves the stick's z (the Depth
+     *         tab, a layer reorder, an inbetween) carries the shapes along.
+     */
+    double VectorShapeDepth(int shape_index) const;
 
     // ------- TEXT only. Placement reuses the IMAGE fields (img_offset for the h/v -----
     // ------- offset, img_angle_offset for the extra rotation), so the offset panel ----

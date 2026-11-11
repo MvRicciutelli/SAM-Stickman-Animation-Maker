@@ -1,4 +1,5 @@
 #include "updatecheck.h"
+#include "version.h"
 #include <QDesktopServices>
 #include <QJsonDocument>
 #include <QJsonObject>

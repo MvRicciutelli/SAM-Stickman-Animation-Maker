@@ -325,6 +325,7 @@ void StickData::CopyFrom(const StickData &source)
     vertex_parents = source.vertex_parents;
     vertex_caps = source.vertex_caps;
     vector_shapes = source.vector_shapes;
+    vector_depth_enabled = source.vector_depth_enabled;
     text = source.text;
     text_font = source.text_font;
     text_align = source.text_align;
@@ -361,6 +362,15 @@ StickData::PaintRef StickData::Paint(int shape_index)
         return { &shape.pen, &shape.brush, &shape.brush_follows_stick, &shape.texture_tiled };
     }
     return { &pen, &brush, &brush_follows_stick, &texture_tiled };
+}
+
+/// @details The one place a shape's depth is derived, so paint (StickGraphicsItem), the bucket's
+/// hit test (ShapeAt()) and the vector panel cannot disagree about it.
+double StickData::VectorShapeDepth(int shape_index) const
+{
+    if (!vector_depth_enabled || shape_index < 0 || shape_index >= vector_shapes.size())
+        return z;
+    return z + vector_shapes[shape_index].depth_offset;
 }
 
 /// @details The derivation is StrokeBrushFor()'s (vectorshape.cpp), shared with a VECTOR stick's
@@ -975,6 +985,7 @@ void InterpolateStickData(StickData &target, const StickData &start, const Stick
                 shape.pen.setColor(MixColor(a.pen.color(), b.pen.color(), t));
             if (IsSolidFill(a.brush) && IsSolidFill(b.brush))
                 shape.brush.setColor(MixColor(a.brush.color(), b.brush.color(), t));
+            shape.depth_offset = Mix(a.depth_offset, b.depth_offset, t);
         }
     }
 }
@@ -1042,8 +1053,11 @@ static void ReadStrokeBrush(QDataStream &stream, BrushStroke &brush)
 /// @details A VECTOR stick's shapes: their own format version, the count, then each shape's
 /// layer fields, its nodes and its paint. Pen, brush and border tip go through the same
 /// image-table helpers as the stick's own, so a .sam writes a texture shared by many shapes once.
-static void WriteVectorShapes(QDataStream &stream, const QList<VectorShape> &shapes)
+/// Format 2 appends each shape's depth offset to the shape and the stick's per-shape-depth switch
+/// after the last one, so the head of the block (version, count, first shape) reads as in format 1.
+static void WriteVectorShapes(QDataStream &stream, const StickData &stick_data)
 {
+    const QList<VectorShape> &shapes = stick_data.vector_shapes;
     stream << StickData::VECTOR_SHAPES_VERSION;
     stream << (qint32)shapes.size();
     for (const VectorShape &shape : shapes) {
@@ -1055,11 +1069,14 @@ static void WriteVectorShapes(QDataStream &stream, const QList<VectorShape> &sha
         WriteRecordBrush(stream, shape.brush);
         stream << shape.brush_follows_stick << shape.texture_tiled;
         WriteStrokeBrush(stream, shape.stroke_brush);
+        stream << (double)shape.depth_offset;
     }
+    stream << stick_data.vector_depth_enabled;
 }
 
-static void ReadVectorShapes(QDataStream &stream, QList<VectorShape> &shapes)
+static void ReadVectorShapes(QDataStream &stream, StickData &stick_data)
 {
+    QList<VectorShape> &shapes = stick_data.vector_shapes;
     qint32 format = 0;
     stream >> format;
     if (RejectNewerVersion(stream, "vector shapes", format, StickData::VECTOR_SHAPES_VERSION))
@@ -1086,10 +1103,14 @@ static void ReadVectorShapes(QDataStream &stream, QList<VectorShape> &shapes)
         ReadRecordBrush(stream, shape.brush);
         stream >> shape.brush_follows_stick >> shape.texture_tiled;
         ReadStrokeBrush(stream, shape.stroke_brush);
+        if (format >= 2)
+            stream >> shape.depth_offset;
         if (stream.status() != QDataStream::Ok)
             break; // truncated file: no shapes made up from data that is not there
         shapes.append(shape);
     }
+    if (format >= 2)
+        stream >> stick_data.vector_depth_enabled;
 }
 
 QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
@@ -1205,7 +1226,7 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
                 stream << stick_data.text_v_stretch; // lo stretch verticale non è nel QFont
         }
         if (stick_data.stick_type == StickData::VECTOR)
-            WriteVectorShapes(stream, stick_data.vector_shapes); // the type exists from v11 on
+            WriteVectorShapes(stream, stick_data); // the type exists from v11 on
     }
 
     return stream;
@@ -1379,7 +1400,7 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
             }
         }
         if (stick_data.stick_type == StickData::VECTOR)
-            ReadVectorShapes(stream, stick_data.vector_shapes);
+            ReadVectorShapes(stream, stick_data);
     }
     // before v9 the offset and rotation of IMAGE/POLYGON/TEXT (and an IMAGE's scale) were the
     // img_* fields, which the image panel edited: that panel is the Stick Transform now, so they

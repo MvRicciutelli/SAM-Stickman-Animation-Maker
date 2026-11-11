@@ -9,7 +9,7 @@ class QWidget;
 /**
  * @brief Tells whether a GitHub release tag names a newer version than this build.
  * @param tag the release's tag, "v1.2.0" or "1.2.0".
- * @param current this build's version (APP_VERSION, from VERSION in SAM.pro).
+ * @param current this build's version (APP_VERSION in the generated version.h, from VERSION in SAM.pro).
  * @return true only for a strictly newer version; trailing zeros don't count ("v1.0" is not
  *         newer than "1.0.0") and a tag that isn't a version at all is never newer.
  */

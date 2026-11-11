@@ -81,6 +81,12 @@ MyView::MyView(QWidget *parent) : QGraphicsView(parent)
     my_pen.setCapStyle(Qt::RoundCap);
     stick_library_buffer = new FrameData();
     undo_stack.setUndoLimit(MAXUNDO);
+    // the vector Transform box is drawn in the foreground, outside any item's rect: an undo or redo
+    // that changes the anchors or drops their selection must repaint it
+    connect(&undo_stack, &QUndoStack::indexChanged, this, [this](int){
+        if(vector_tool == VT_TRANSFORM && viewport())
+            viewport()->update();
+    });
     // autosave triggering moved here from StoreUndo() (Phase 4): indexChanged fires
     // on every push/undo/redo, which is a more correct autosave trigger than the old
     // "only on a fresh edit" behavior (undo/redo are edits too, worth autosaving)
@@ -2635,6 +2641,15 @@ void MyView::drawForeground(QPainter *painter, const QRectF &rect)
         painter->restore();
     }
 
+    // --- the vector Transform tool's box around the selected anchors: the figure box's look,
+    // outline included (no scene item draws this one) ----------------------------------
+    QPointF vector_box[9];
+    if(VectorTransformHandles(vector_box)){
+        painter->save();
+        DrawTransformHandles(painter, vector_box, true);
+        painter->restore();
+    }
+
     // --- figure selection lasso in progress (dotted trace) ----------------------------
     if(band_dragging && band_is_lasso && band_poly.size() >= 2){
         painter->save();
@@ -3078,6 +3093,17 @@ void MyView::RemoveSelectionDecorations()
 //              rubber band for PICKING figures is chosen by the Selection menu checkbox
 //              (mymainwindow.cpp, MyView::stickfig_lasso) — separate from draw-mode's lasso.
 
+/// @details The nine handles of a transformation box around @p r: 0-3 the corners clockwise from
+/// the top left, 4-7 the side midpoints from the top, 8 the rotation knob @p gap above the top
+/// side. Shared by the stickfigure box and the vector Transform tool's box.
+static void BoxHandles(const QRectF &r, double gap, QPointF out[9])
+{
+    out[0] = r.topLeft();  out[1] = r.topRight();  out[2] = r.bottomRight();  out[3] = r.bottomLeft();
+    out[4] = (r.topLeft()+r.topRight())/2.0;     out[5] = (r.topRight()+r.bottomRight())/2.0;
+    out[6] = (r.bottomRight()+r.bottomLeft())/2.0; out[7] = (r.bottomLeft()+r.topLeft())/2.0;
+    out[8] = QPointF(r.center().x(), r.top() - gap);
+}
+
 /**
  * @details Transformation-box handles (stile del gizmo della selezione pixel, applicato
  * alla selezione di figure): 8 quadretti sul bounding box axis-aligned + un pomello di
@@ -3086,12 +3112,7 @@ void MyView::RemoveSelectionDecorations()
  */
 void MyView::SelectionHandles(QPointF out[9]) const
 {
-    QRectF r = SelectionBoundingBox();
-    double gap = const_cast<MyView*>(this)->PolyPickRadius() * 3.0;
-    out[0] = r.topLeft();  out[1] = r.topRight();  out[2] = r.bottomRight();  out[3] = r.bottomLeft();
-    out[4] = (r.topLeft()+r.topRight())/2.0;     out[5] = (r.topRight()+r.bottomRight())/2.0;
-    out[6] = (r.bottomRight()+r.bottomLeft())/2.0; out[7] = (r.bottomLeft()+r.topLeft())/2.0;
-    out[8] = QPointF(r.center().x(), r.top() - gap);
+    BoxHandles(SelectionBoundingBox(), const_cast<MyView*>(this)->PolyPickRadius() * 3.0, out);
 }
 
 /// @details Which transformation-box handle a scene click grabs: 8 the rotation knob (checked
@@ -5703,6 +5724,17 @@ static void DropShapeFromSelection(QSet<QPair<int,int>> &selection, int removed)
     selection = kept;
 }
 
+/// @details Puts every anchor of one shape into a node selection, or takes them all out.
+static void SelectShapeNodes(QSet<QPair<int,int>> &selection, int shape, int count, bool select)
+{
+    for(int j = 0; j < count; j++){
+        if(select)
+            selection.insert(qMakePair(shape, j));
+        else
+            selection.remove(qMakePair(shape, j));
+    }
+}
+
 StickData *MyView::VectorStick() const
 {
     if(my_animation->current_frame == nullptr || my_animation->current_frame->stick_figures.isEmpty())
@@ -5779,6 +5811,8 @@ void MyView::VectorEdited(StickData *stick)
             fig->linked_item->setIcon(*fig->stick_figure_icon);
     }
     my_animation->current_frame->UpdateIcon();
+    if(vector_tool == VT_TRANSFORM && viewport())
+        viewport()->update(); // the Transform box is drawn in the foreground, outside the stick's rect
     emit VectorShapesChanged();
 }
 
@@ -5820,6 +5854,8 @@ bool MyView::VectorMousePress(QMouseEvent *event)
         return false;
     vec_press_pos = event->pos();
     vec_last = coord;
+    if(vector_tool == VT_TRANSFORM && viewport())
+        viewport()->update(); // any press may change the selection the foreground box is drawn around
     if(ctrl){
         if(!VectorEditPress(s, event->modifiers())){
             // Ctrl+click on no node: the node selection lapses (Shift keeps it)
@@ -5847,8 +5883,202 @@ bool MyView::VectorMousePress(QMouseEvent *event)
     case VT_STROKE:
         BucketVectorShape(coord, vector_tool == VT_FILL);
         break;
+    case VT_TRANSFORM:
+        VectorTransformPress(s, event->modifiers());
+        break;
     }
     return true;
+}
+
+/**
+ * @details The Transform tool works on the ANCHOR selection (selected_vector_nodes), so whatever
+ * the lasso or a Ctrl+click picked before is what it transforms, and a "selected shape" is simply a
+ * shape with every anchor selected. The press goes to the first of:
+ * - a handle of the box (VG_SCALE/VG_ROTATE). It comes before the anchors, since a box corner
+ *   often sits on one: Ctrl+click still picks that anchor alone.
+ * - an anchor or a shown curve handle, by VectorEditPress()'s own rules (Shift toggles, a drag
+ *   moves the selection);
+ * - a shape: all its anchors become the selection, and Shift adds the shape or takes it out. A
+ *   shape that already has selected anchors keeps the selection as it is, so that a drag moves
+ *   it (several shapes, or a few anchors picked by the lasso); if only some of its anchors were
+ *   selected, a release without a drag then takes the whole shape (vec_click_shape);
+ * - empty canvas: a lasso (Shift adds), which as a plain click drops the selection.
+ * As everywhere in the vector tools, the undo snapshot waits for the drag threshold.
+ */
+void MyView::VectorTransformPress(StickData *s, Qt::KeyboardModifiers modifiers)
+{
+    vec_click_shape = -1;
+    const int handle = HitVectorTransformHandle(coord);
+    if(handle >= 0){
+        vec_gesture = handle == 8 ? VG_ROTATE : VG_SCALE;
+        vec_box_handle = handle;
+        vec_box0 = VectorSelectionBox();
+        vec_press_scene = coord;
+        vec_shapes0 = s->vector_shapes;
+        vec_edit_shape = 0; // the gesture acts on the whole selection: name a shape that exists
+        vec_edit_node = 0;
+        vec_needs_undo = true;
+        return;
+    }
+    if(!VectorEditPress(s, modifiers)){
+        const int hit = ShapeAt(*s, coord, PolyPickRadius());
+        if(hit < 0){
+            vec_gesture = VG_LASSO;
+            vec_lasso.clear();
+            vec_lasso << coord;
+        }
+        else{
+            QSet<QPair<int,int>> &selection = s->view->selected_vector_nodes;
+            const int count = s->vector_shapes[hit].nodes.size();
+            bool whole = true, any = false;
+            for(int j = 0; j < count; j++){
+                const bool picked = selection.contains(qMakePair(hit, j));
+                whole = whole && picked;
+                any = any || picked;
+            }
+            const bool shift = modifiers & Qt::ShiftModifier;
+            if(shift)
+                SelectShapeNodes(selection, hit, count, !whole);
+            else if(!any){
+                selection.clear();
+                SelectShapeNodes(selection, hit, count, true);
+            }
+            else if(!whole)
+                vec_click_shape = hit;
+            my_animation->vector_shape_row = hit;
+            if(!(shift && whole)){ // Shift on a selected shape only took it out: nothing to drag
+                vec_gesture = VG_MOVE;
+                vec_edit_shape = hit;
+                vec_edit_node = 0;
+                vec_needs_undo = true;
+            }
+            s->view->Refresh(0);
+            emit VectorShapesChanged(); // the panel follows the shape just picked
+        }
+    }
+}
+
+/// @details The knob first, as in the figure box. Unlike the figure box, the scale squares win
+/// over whatever lies under them (see VectorTransformPress()).
+int MyView::HitVectorTransformHandle(const QPointF &scene) const
+{
+    QPointF h[9];
+    if(!VectorTransformHandles(h))
+        return -1;
+    const float radius = const_cast<MyView*>(this)->PolyPickRadius();
+    for(int i : { 8, 0, 1, 2, 3, 4, 5, 6, 7 })
+        if(QLineF(scene, h[i]).length() <= radius)
+            return i;
+    return -1;
+}
+
+/// @details Anchors alone would cut through a curve, so the bezier between two selected
+/// neighbours counts too (QPainterPath::boundingRect() is the curve's exact extent, not its
+/// control points'). A segment with only one end selected is left out: it is not transformed
+/// rigidly, so no box could hold it.
+QRectF MyView::VectorSelectionBox() const
+{
+    StickData *s = VectorStick();
+    if(s == nullptr)
+        return QRectF();
+    const QSet<QPair<int,int>> &selection = s->view->selected_vector_nodes;
+    const QTransform to_scene = s->PolygonTransform();
+    QRectF box;
+    int anchors = 0;
+    auto grow = [&box, &anchors](const QPointF &p){
+        if(anchors == 0)
+            box = QRectF(p, QSizeF(0, 0));
+        else
+            box.setCoords(qMin(box.left(), p.x()), qMin(box.top(), p.y()),
+                          qMax(box.right(), p.x()), qMax(box.bottom(), p.y()));
+        anchors++;
+    };
+    for(int i = 0; i < s->vector_shapes.size(); i++){
+        const VectorShape &shape = s->vector_shapes[i];
+        const int n = shape.nodes.size();
+        for(int j = 0; j < n; j++){
+            if(!selection.contains(qMakePair(i, j)))
+                continue;
+            const VectorNode &a = shape.nodes[j];
+            grow(to_scene.map(a.pos));
+            const int k = j + 1 < n ? j + 1 : (shape.closed ? 0 : -1);
+            if(k < 0 || k == j || !selection.contains(qMakePair(i, k)))
+                continue;
+            const VectorNode &b = shape.nodes[k];
+            if(a.out_handle.isNull() && b.in_handle.isNull())
+                continue; // a straight segment stays between its two anchors
+            QPainterPath curve(to_scene.map(a.pos));
+            curve.cubicTo(to_scene.map(a.pos + a.out_handle), to_scene.map(b.pos + b.in_handle),
+                          to_scene.map(b.pos));
+            const QRectF bulge = curve.boundingRect();
+            grow(bulge.topLeft());
+            grow(bulge.bottomRight());
+        }
+    }
+    return anchors >= 2 ? box : QRectF();
+}
+
+bool MyView::VectorTransformHandles(QPointF out[9]) const
+{
+    if(vector_tool != VT_TRANSFORM)
+        return false;
+    const QRectF box = VectorSelectionBox();
+    if(box.isNull())
+        return false;
+    BoxHandles(box, const_cast<MyView*>(this)->PolyPickRadius() * 3.0, out);
+    return true;
+}
+
+/**
+ * @details Scale: the handle opposite the grabbed one stays put and the grabbed one follows the
+ * cursor (by the drag, so grabbing it off-centre does not jump). A side handle scales its own axis
+ * only, and an axis the box has no extent on is left alone. Dragging past the fixed handle mirrors
+ * the selection, as in any vector editor. Rotation is about the box centre, by the angle the cursor
+ * swept around it: y points down, so atan2 grows clockwise on screen, which is QTransform::rotate()'s
+ * sense (the DISPLACE knob's convention).
+ */
+QTransform MyView::VectorGestureTransform(const QPointF &scene, bool constrain) const
+{
+    if(vec_gesture == VG_ROTATE){
+        const QPointF centre = vec_box0.center();
+        const QPointF from = vec_press_scene - centre, to = scene - centre;
+        qreal turned = std::remainder((atan2(to.y(), to.x()) - atan2(from.y(), from.x())) * 180.0 / M_PI, 360.0);
+        if(constrain)
+            turned = qRound(turned / 15.0) * 15.0;
+        return QTransform::fromTranslate(-centre.x(), -centre.y()) * QTransform().rotate(turned)
+                * QTransform::fromTranslate(centre.x(), centre.y());
+    }
+    static const int opposite[8] = { 2, 3, 0, 1, 6, 7, 4, 5 };
+    QPointF h[9];
+    BoxHandles(vec_box0, 0, h);
+    const QPointF grabbed = h[vec_box_handle], fixed = h[opposite[vec_box_handle]];
+    const QPointF target = grabbed + scene - vec_press_scene;
+    const QPointF span = grabbed - fixed;
+    const bool corner = vec_box_handle < 4;
+    const bool along_x = (corner || vec_box_handle == 5 || vec_box_handle == 7) && qAbs(span.x()) > 1e-9;
+    const bool along_y = (corner || vec_box_handle == 4 || vec_box_handle == 6) && qAbs(span.y()) > 1e-9;
+    qreal sx = along_x ? (target.x() - fixed.x()) / span.x() : 1.0;
+    qreal sy = along_y ? (target.y() - fixed.y()) / span.y() : 1.0;
+    if(constrain && along_x && along_y)
+        sx = sy = qAbs(sx) > qAbs(sy) ? sx : sy;
+    return QTransform::fromTranslate(-fixed.x(), -fixed.y()) * QTransform::fromScale(sx, sy)
+            * QTransform::fromTranslate(fixed.x(), fixed.y());
+}
+
+/// @details The gesture is expressed in the scene and the anchors live in the stick's frame, so the
+/// map is conjugated through PolygonTransform(): exact under any Stick Transform. Each anchor is
+/// rebuilt from its state at the press, never from the previous move.
+void MyView::ApplyVectorTransform(StickData *s, const QTransform &scene_xf)
+{
+    const QTransform to_scene = s->PolygonTransform();
+    const QTransform local = to_scene * scene_xf * to_scene.inverted();
+    for(const QPair<int,int> &key : s->view->selected_vector_nodes){
+        if(key.first >= s->vector_shapes.size() || key.first >= vec_shapes0.size())
+            continue;
+        if(key.second >= s->vector_shapes[key.first].nodes.size() || key.second >= vec_shapes0[key.first].nodes.size())
+            continue;
+        s->vector_shapes[key.first].nodes[key.second] = MapNode(vec_shapes0[key.first].nodes[key.second], local);
+    }
 }
 
 /// @details One undo step per anchor, as for a MULTILINE vertex. The drag that may follow turns
@@ -6028,8 +6258,12 @@ bool MyView::VectorMouseMove(QMouseEvent *event)
                     other = -handle * (other_len > 1e-9 ? other_len / len : 1.0);
             }
         }
+        else if(vec_gesture == VG_SCALE || vec_gesture == VG_ROTATE)
+            ApplyVectorTransform(s, VectorGestureTransform(coord, event->modifiers() & Qt::ShiftModifier));
         vec_last = coord;
         s->view->Refresh(1);
+        if(vector_tool == VT_TRANSFORM && viewport())
+            viewport()->update(); // the box is drawn in the foreground
         return true;
     }
     if(vector_tool == VT_PEN && s != nullptr){
@@ -6051,6 +6285,9 @@ bool MyView::VectorMouseRelease(QMouseEvent *event)
         return false;
     const int gesture = vec_gesture;
     vec_gesture = VG_NONE;
+    vec_shapes0.clear();
+    if(vector_tool == VT_TRANSFORM && viewport())
+        viewport()->update(); // the box settles on the selection as the gesture left it
     StickData *s = VectorStick();
     if(s == nullptr)
         return true;
@@ -6067,6 +6304,13 @@ bool MyView::VectorMouseRelease(QMouseEvent *event)
         s->view->vector_active_shape = -1;
         s->view->vector_preview_active = false;
     }
+    if(gesture == VG_MOVE && vec_needs_undo && vec_click_shape >= 0 && vec_click_shape < s->vector_shapes.size()){
+        // the Transform tool, a click on a shape with only some anchors selected: the whole shape
+        s->view->selected_vector_nodes.clear();
+        SelectShapeNodes(s->view->selected_vector_nodes, vec_click_shape,
+                         s->vector_shapes[vec_click_shape].nodes.size(), true);
+    }
+    vec_click_shape = -1;
     if(gesture == VG_PLACE || !vec_needs_undo)
         VectorEdited(s); // something changed
     else
@@ -6257,6 +6501,58 @@ void MyView::RenameVectorShape(int index, const QString &name)
     StoreUndo();
     s->vector_shapes[index].name = name;
     emit VectorShapesChanged();
+}
+
+/// @details The three depth edits end the same way: VectorEdited(), then Frame::Refresh() like
+/// the stick Depth buttons, which re-adds the frame's views in total_sticks order. A shape layer
+/// made by the edit would otherwise sit last in the scene and win every tie with a stick at the
+/// same depth until the next frame change; re-added, it stacks right after its own stick.
+void MyView::SetVectorDepthEnabled(bool enabled)
+{
+    StickData *s = VectorStick();
+    if(s == nullptr || s->vector_depth_enabled == enabled)
+        return;
+    StoreUndo();
+    s->vector_depth_enabled = enabled;
+    VectorEdited(s);
+    my_animation->CurrentFrame()->Refresh();
+}
+
+/// @details Stored as an offset from the stick's z (VectorShape::depth_offset). A depth closer
+/// to the stick's than the spin box can express (it has two decimals, and z is often a float
+/// rounded value such as 1.0099999) is the stick's: the shape goes back to the layer order
+/// instead of onto a layer of its own a hair away.
+void MyView::SetVectorShapeDepth(const QList<int> &indices, double depth)
+{
+    StickData *s = VectorStick();
+    if(s == nullptr || indices.isEmpty())
+        return;
+    double offset = qBound(double(MINDEPTH), depth, double(MAXDEPTH)) - s->z;
+    if(qAbs(offset) < 0.005)
+        offset = 0;
+    StoreUndo();
+    for(int idx : indices)
+        if(idx >= 0 && idx < s->vector_shapes.size())
+            s->vector_shapes[idx].depth_offset = offset;
+    VectorEdited(s);
+    my_animation->CurrentFrame()->Refresh();
+}
+
+void MyView::ResetVectorShapeDepths()
+{
+    StickData *s = VectorStick();
+    if(s == nullptr)
+        return;
+    bool any_offset = false;
+    for(const VectorShape &shape : s->vector_shapes)
+        any_offset = any_offset || shape.depth_offset != 0;
+    if(!any_offset)
+        return; // nothing to restore: no empty undo step
+    StoreUndo();
+    for(VectorShape &shape : s->vector_shapes)
+        shape.depth_offset = 0;
+    VectorEdited(s);
+    my_animation->CurrentFrame()->Refresh();
 }
 
 /// @details The buffer holds the shapes in SCENE space, so a paste can put them back where they

@@ -1,6 +1,7 @@
 #include "vectorshape.h"
 #include "stickdata.h"
 #include <QPainterPathStroker>
+#include <algorithm>
 
 /// @details A segment is straight only when BOTH inner handles are zero: one handle alone still
 /// bends it (the other control point then sits on its anchor), which is how a corner node next to
@@ -30,15 +31,21 @@ QPainterPath VectorPath(const VectorShape &shape, const QTransform &to_scene)
 
 /// @details A handle is an offset, so it maps through the LINEAR part of @p xf: map both of its
 /// ends and subtract, which drops the translation whatever the matrix is.
+VectorNode MapNode(const VectorNode &node, const QTransform &xf)
+{
+    VectorNode mapped = node;
+    mapped.pos = xf.map(node.pos);
+    mapped.in_handle = xf.map(node.pos + node.in_handle) - mapped.pos;
+    mapped.out_handle = xf.map(node.pos + node.out_handle) - mapped.pos;
+    return mapped;
+}
+
+/// @details Node by node through MapNode(), so a shape and a lone node map by the same rule.
 VectorShape MapShape(const VectorShape &shape, const QTransform &xf)
 {
     VectorShape mapped = shape;
-    for(VectorNode &node : mapped.nodes){
-        const QPointF pos = xf.map(node.pos);
-        node.in_handle = xf.map(node.pos + node.in_handle) - pos;
-        node.out_handle = xf.map(node.pos + node.out_handle) - pos;
-        node.pos = pos;
-    }
+    for(VectorNode &node : mapped.nodes)
+        node = MapNode(node, xf);
     return mapped;
 }
 
@@ -52,12 +59,20 @@ bool VectorShapesCompatible(const QList<VectorShape> &a, const QList<VectorShape
     return true;
 }
 
-/// @details Top first, i.e. from the end of the list, which is the order they are painted in
-/// reverse. The outline test widens the path by the pick radius so a hairline stays clickable.
+/// @details Top first, i.e. the order they are painted in, reversed: the layer order, re-sorted
+/// by depth (stable, so equal depths keep their layer order) when the stick uses per-shape depths.
+/// The outline test widens the path by the pick radius so a hairline stays clickable.
 int ShapeAt(const StickData &stick, const QPointF &scene_pt, qreal radius)
 {
     const QTransform to_scene = stick.PolygonTransform();
-    for(int i = stick.vector_shapes.size() - 1; i >= 0; i--){
+    QList<int> order;
+    for(int i = 0; i < stick.vector_shapes.size(); i++)
+        order << i;
+    std::stable_sort(order.begin(), order.end(), [&stick](int a, int b){
+        return stick.VectorShapeDepth(a) < stick.VectorShapeDepth(b);
+    });
+    for(int k = order.size() - 1; k >= 0; k--){
+        const int i = order[k];
         const VectorShape &shape = stick.vector_shapes[i];
         if(!shape.visible || shape.nodes.size() < 2)
             continue;

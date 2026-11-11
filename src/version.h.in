@@ -1,0 +1,10 @@
+// Template for version.h. qmake fills it in and writes the result into the build directory
+// (QMAKE_SUBSTITUTES in SAM.pro). To change the version, edit VERSION in SAM.pro, not this file.
+// qmake parses every line as its own syntax: keep the quotes escaped and write no apostrophes.
+#ifndef VERSION_H
+#define VERSION_H
+
+/** @brief The version of this build, e.g. 1.2.0: the value of VERSION in SAM.pro. */
+#define APP_VERSION \"$$VERSION\"
+
+#endif // VERSION_H

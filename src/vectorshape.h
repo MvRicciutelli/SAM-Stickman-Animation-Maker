@@ -47,6 +47,9 @@ struct VectorShape
     bool brush_follows_stick = true; ///< see StickData::brush_follows_stick
     bool texture_tiled = true;       ///< see StickData::texture_tiled
     BrushStroke stroke_brush;        ///< see StickData::stroke_brush
+    double depth_offset = 0;         ///< own depth, as a distance from the owning stick's z; read only
+                                     ///< while StickData::vector_depth_enabled. 0 = in the stick's own
+                                     ///< plane, where the layer order decides (see StickData::VectorShapeDepth())
 };
 
 /**
@@ -58,6 +61,12 @@ struct VectorShape
  *         segment of a closed shape. Empty for a shape with no node.
  */
 QPainterPath VectorPath(const VectorShape &shape, const QTransform &to_scene);
+
+/**
+ * @brief One node mapped through @p xf: the anchor through the whole map, the handles (offsets)
+ *        through its linear part. The Transform tool maps the selected nodes with it.
+ */
+VectorNode MapNode(const VectorNode &node, const QTransform &xf);
 
 /**
  * @brief The shape with its nodes and handles mapped through @p xf (handles stay offsets).
@@ -73,7 +82,8 @@ VectorShape MapShape(const VectorShape &shape, const QTransform &xf);
 bool VectorShapesCompatible(const QList<VectorShape> &a, const QList<VectorShape> &b);
 
 /**
- * @brief Index of the topmost visible shape of @p stick under @p scene_pt, or -1.
+ * @brief Index of the topmost visible shape of @p stick under @p scene_pt, or -1. "Topmost" is
+ *        the drawing order: the layer order, or the shapes' own depths when the stick uses them.
  * @param radius pick tolerance in scene units around the outline (the stroke counts at least
  *        half its pen width).
  *

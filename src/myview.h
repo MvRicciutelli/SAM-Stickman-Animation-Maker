@@ -393,7 +393,9 @@ public:
         VT_PEN,       ///< vector draw mode: clicks place anchors (drag = smooth), click the first anchor to close
         VT_LASSO,     ///< drag a lasso to select anchors (Shift adds)
         VT_FILL,      ///< click a shape to give it the current fill (my_brush)
-        VT_STROKE     ///< click a shape to give it the current border (my_pen, my_stroke_brush)
+        VT_STROKE,    ///< click a shape to give it the current border (my_pen, my_stroke_brush)
+        VT_TRANSFORM  ///< click shapes (Shift adds/removes) or anchors, lasso on empty space; a drag moves the
+                      ///< selected anchors and a transformation box scales and turns them
     };
     int vector_tool = VT_NONE;          ///< active VectorTool
     QList<VectorShape> vector_clipboard; ///< copied shapes, in SCENE space; a value list, replaced whole by every copy
@@ -433,6 +435,16 @@ public:
     void SetVectorShapeVisible(int index, bool visible);
     /// @brief Renames one shape, as one undo step.
     void RenameVectorShape(int index, const QString &name);
+    /// @brief Turns the current vector stick's per-shape depth on or off, as one undo step.
+    void SetVectorDepthEnabled(bool enabled);
+    /**
+     * @brief Gives the shapes at @p indices the frame-wide depth @p depth, as one undo step.
+     * @param depth clamped to the stick depth range (MINDEPTH..MAXDEPTH); the stick's own depth
+     *        puts a shape back in the stick's plane. Only shows while per-shape depth is on.
+     */
+    void SetVectorShapeDepth(const QList<int> &indices, double depth);
+    /// @brief Puts every shape back at the stick's own depth (the layer order decides again), as one undo step.
+    void ResetVectorShapeDepths();
     /// @brief Copies the shapes at @p indices into vector_clipboard (in scene space). @return how many.
     int CopyVectorShapes(QList<int> indices);
     /**
@@ -443,6 +455,18 @@ public:
     QString PasteVectorShapes();
     /// @brief Applies one SetGraphics() attribute of the current paint (my_pen/my_brush/...) to a shape.
     void ApplyStyleToShape(VectorShape &shape, int attribute) const;
+    /**
+     * @brief The scene box around the current vector stick's selected anchors and the curves
+     *        between them; the Transform tool's box.
+     * @return a null rectangle with fewer than two anchors selected, or all of them on one point.
+     */
+    QRectF VectorSelectionBox() const;
+    /**
+     * @brief The Transform tool's nine handles around VectorSelectionBox(), in SelectionHandles()'s
+     *        order (0-3 corners, 4-7 sides, 8 the rotation knob), scene coordinates.
+     * @return false when the tool is not VT_TRANSFORM or there is no box.
+     */
+    bool VectorTransformHandles(QPointF out[9]) const;
 
     /**
      * @brief Undo/redo entry point for every UI trigger (toolbar buttons + Ctrl+Z/Y
@@ -963,8 +987,8 @@ private:
 
     // ------- VECTOR gesture state: indices into the current vector stick's shapes, never ----
     // ------- a pointer (see VectorStick()); every use re-checks them against the stick -------
-    enum VectorGesture { VG_NONE = 0, VG_PLACE, VG_MOVE, VG_HANDLE, VG_LASSO };
-    int vec_gesture = VG_NONE;        ///< the left-button gesture in progress: anchor placed by the pen (its drag sets the handles), anchors moved, a handle dragged, a lasso
+    enum VectorGesture { VG_NONE = 0, VG_PLACE, VG_MOVE, VG_HANDLE, VG_LASSO, VG_SCALE, VG_ROTATE };
+    int vec_gesture = VG_NONE;        ///< the left-button gesture in progress: anchor placed by the pen (its drag sets the handles), anchors moved, a handle dragged, a lasso, the Transform box scaled or turned
     int vec_drawing_shape = -1;       ///< the shape the pen is adding anchors to; -1 = the next click starts a new one
     int vec_edit_shape = -1;          ///< shape of the anchor/handle the gesture acts on
     int vec_edit_node = -1;           ///< its anchor
@@ -974,6 +998,11 @@ private:
     QPoint vec_press_pos;             ///< viewport position of the press, for the drag threshold
     QPointF vec_last;                 ///< scene position of the previous move, for VG_MOVE's delta
     QPolygonF vec_lasso;              ///< VG_LASSO's trace, scene coordinates
+    int vec_click_shape = -1;         ///< Transform tool, VG_MOVE pressed on a shape with only some anchors selected: a release without a drag selects that whole shape; -1 otherwise
+    int vec_box_handle = -1;          ///< VG_SCALE: the box handle being dragged (0-7, VectorTransformHandles() order)
+    QRectF vec_box0;                  ///< VG_SCALE/VG_ROTATE: the selection box at the press, scene
+    QPointF vec_press_scene;          ///< VG_SCALE/VG_ROTATE: scene position of the press
+    QList<VectorShape> vec_shapes0;   ///< VG_SCALE/VG_ROTATE: the shapes at the press; the WHOLE drag is re-applied to them each move, so nothing drifts
 
     /// @brief The vector half of mousePressEvent(); true when the press was the vector tool's.
     bool VectorMousePress(QMouseEvent *event);
@@ -981,6 +1010,20 @@ private:
     void VectorPenPress(StickData *stick);
     /// @brief Ctrl+press: picks a handle or an anchor of @p stick under the cursor. @return false on a miss.
     bool VectorEditPress(StickData *stick, Qt::KeyboardModifiers modifiers);
+    /**
+     * @brief A press of the Transform tool: a box handle, else an anchor or curve handle, else a
+     *        shape (all its anchors), else the start of a lasso.
+     */
+    void VectorTransformPress(StickData *stick, Qt::KeyboardModifiers modifiers);
+    /// @brief Which Transform box handle @p scene grabs: 0-7 a scale square, 8 the rotation knob, -1 none.
+    int HitVectorTransformHandle(const QPointF &scene) const;
+    /**
+     * @brief The scene transform a VG_SCALE/VG_ROTATE drag stands for, from the press to @p scene.
+     * @param constrain Shift: a corner scales both axes alike, the knob turns in 15 degree steps.
+     */
+    QTransform VectorGestureTransform(const QPointF &scene, bool constrain) const;
+    /// @brief Maps the selected anchors of @p stick, as they were at the press (vec_shapes0), through @p scene_xf.
+    void ApplyVectorTransform(StickData *stick, const QTransform &scene_xf);
     /// @brief The vector half of mouseMoveEvent(); true when it handled the move.
     bool VectorMouseMove(QMouseEvent *event);
     /// @brief The vector half of mouseReleaseEvent(); true when it ended a vector gesture.

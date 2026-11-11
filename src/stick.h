@@ -16,6 +16,7 @@
 
 extern QLabel *dbg_lbl;
 class StickFigure;
+class VectorShapeLayerItem;
 
 /**
  * @brief The view: paints a StickData, handles mouse-driven interaction, owns nothing
@@ -438,6 +439,45 @@ public:
     const VectorShape *paint_shape = nullptr;
 
     /**
+     * @brief The extra scene items that paint this VECTOR stick's shapes having a depth of their
+     *        own (StickData::vector_depth_enabled), one per distinct VectorShape::depth_offset.
+     *
+     * Owned by this view and kept in the same scene as it by SyncShapeLayers(), the only code
+     * that creates or destroys one. Empty for every other stick.
+     */
+    QList<VectorShapeLayerItem*> shape_layers;
+
+    /**
+     * @brief Brings shape_layers in line with the record: one layer per depth offset in use, each
+     *        at its z and in this view's scene. Also applies the stick's own z.
+     *
+     * Runs whenever the view enters or leaves a scene (itemChange()) and on every Refresh(), so
+     * no caller has to remember it.
+     */
+    void SyncShapeLayers();
+
+    /**
+     * @brief The layer that paints @p shape, or nullptr when this view paints it itself: the
+     *        shape sits in the stick's own plane, per-shape depth is off, or its layer does not
+     *        exist yet (it is then drawn with the stick rather than not at all).
+     */
+    VectorShapeLayerItem *ShapeLayer(const VectorShape &shape) const;
+
+    /**
+     * @brief The layer in front of everything else this stick paints, or nullptr when that is
+     *        the view itself. Whoever it is paints the editing overlay, so a raised shape cannot
+     *        cover its own anchors.
+     */
+    VectorShapeLayerItem *TopShapeLayer() const;
+
+    /**
+     * @brief Paints the visible shapes that belong to @p layer, in layer order.
+     * @param painter the painter, in scene coordinates.
+     * @param layer the layer being painted, or nullptr for the shapes this view paints itself.
+     */
+    void PaintVectorShapes(QPainter *painter, const VectorShapeLayerItem *layer);
+
+    /**
      * @brief Draws a VECTOR stick's editing overlay: node squares, the handles of the selected
      *        nodes and of the shape being drawn, and the next-segment preview.
      * @param painter the painter, in scene coordinates.
@@ -488,6 +528,11 @@ public:
      * @return distance between p and l's free end (P2).
      */
     float MeasureDistanceFromLine(QPointF p, QLineF l);
+protected:
+    /**
+     * @brief Keeps shape_layers in the scene this view is in (they are separate scene items).
+     */
+    QVariant itemChange(GraphicsItemChange change, const QVariant &value) override;
 private:
     //-------- methods----------//
 
@@ -522,6 +567,41 @@ private:
     QRectF ConstructBr();
     /// @brief ConstructBr() of an image, shape or LINE before the Stick Transform moves it.
     QRectF UntransformedBr();
+};
+
+/**
+ * @brief Paints the shapes of one VECTOR stick that share one depth other than the stick's own.
+ *
+ * A QGraphicsItem has a single z, so a shape that must show in front of (or behind) ANOTHER stick
+ * cannot be painted by its own stick's item: it gets this helper, a top-level item at
+ * StickData::z + depth_offset that paints through its owner (StickGraphicsItem::PaintVectorShapes()).
+ * It holds no data of its own and takes no mouse input. Created, kept in the owner's scene and
+ * destroyed only by StickGraphicsItem::SyncShapeLayers(); since it follows its owner into every
+ * scene, icons, onion skins and exports get it without knowing it exists.
+ */
+class VectorShapeLayerItem : public QGraphicsItem
+{
+public:
+    /**
+     * @param owner_view the stick view whose shapes this paints; it owns this item.
+     * @param offset the VectorShape::depth_offset of the shapes this paints.
+     */
+    VectorShapeLayerItem(StickGraphicsItem *owner_view, double offset);
+
+    /// @brief Unregisters from the owner: a scene being cleared may destroy this before it.
+    ~VectorShapeLayerItem();
+
+    /// @return the owner's bounding rect: the shapes are inside it by construction.
+    QRectF boundingRect() const override;
+
+    /// @brief Paints the owner's shapes at this layer's depth (and the edit overlay when topmost).
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
+
+    /// @brief To be called right before the owner's bounding rect changes (prepareGeometryChange() is protected).
+    void OwnerGeometryChanging() { prepareGeometryChange(); }
+
+    StickGraphicsItem *owner = nullptr; ///< non-owning; set to nullptr by the owner before it deletes this
+    double depth_offset = 0;            ///< the VectorShape::depth_offset this layer paints
 };
 
 /**

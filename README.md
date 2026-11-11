@@ -139,8 +139,8 @@ folder. Anything placed in `installer\content\` (brushes, patterns, libraries,
 figures) is copied into the user's `Documents\SAM` on install, without overwriting
 files already there.
 
-The version number comes from `VERSION` in `SAM.pro`. The About box and the window
-title carry their own copy of it and must be updated by hand.
+The version number comes from `VERSION` in `SAM.pro`, and that is the only place to change
+it: the window title, the About box, the update check and the installer all read it from there.
 
 ### Tests
 

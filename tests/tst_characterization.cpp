@@ -7262,6 +7262,128 @@ private slots:
         QCOMPARE(render(&v).pixelColor(only_blue), QColor(Qt::green));
     }
 
+    // A VECTOR stick's shapes can each have a depth of their own (vector_depth_enabled, off by
+    // default): a raised shape shows in front of ANOTHER stick, a lowered one behind it, shapes
+    // sharing a depth keep the layer order, and with the switch off the offsets are ignored. The
+    // offsets and the switch survive the stream and Clone(), the bucket's hit test follows the
+    // drawing order, and on the live canvas the three panel actions are one undo step each and
+    // keep one helper item per depth in the scene.
+    void VectorShapeDepthInterleavesWithOtherSticks()
+    {
+        StickData v;
+        v.stick_type = StickData::VECTOR;
+        v.my_line = QLineF(100, 50, 100, 150); // pointing down: local (x, y) -> (100 + 100x, 50 + 100y)
+        v.img_angle = 0;
+        v.vector_shapes << SquareShape(QPointF(-0.4, 0.1), 0.6, QBrush(Qt::red))   // scene 60..120
+                        << SquareShape(QPointF(-0.1, 0.4), 0.6, QBrush(Qt::blue)); // scene 90..150
+        StickData cover; // another stick, one depth unit above, hiding all of the first
+        cover.stick_type = StickData::VECTOR;
+        cover.my_line = v.my_line;
+        cover.img_angle = 0;
+        cover.z = 1;
+        cover.vector_shapes << SquareShape(QPointF(-0.5, 0), 1.0, QBrush(Qt::green)); // scene 50..150
+        auto render = [](const QList<StickData*> &sticks) {
+            QGraphicsScene render_scene;
+            render_scene.setSceneRect(0, 0, 200, 200);
+            for (StickData *data : sticks)
+                render_scene.addItem(new StickGraphicsItem(data)); // the scene owns the views
+            QImage img(200, 200, QImage::Format_ARGB32);
+            img.fill(Qt::white);
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 200, 200), QRectF(0, 0, 200, 200));
+            painter.end();
+            return img;
+        };
+        const QPoint overlap(105, 105), only_red(65, 65), only_blue(140, 140);
+
+        // the depth decides in a one-shot render scene too, whatever order the views were added in
+        QCOMPARE(render({ &v, &cover }).pixelColor(overlap), QColor(Qt::green));
+        QCOMPARE(render({ &cover, &v }).pixelColor(overlap), QColor(Qt::green));
+
+        v.vector_shapes[0].depth_offset = 2; // the red one, to depth 2: above the cover
+        QCOMPARE(render({ &v, &cover }).pixelColor(only_red), QColor(Qt::green)); // switch off: ignored
+        QCOMPARE(ShapeAt(v, QPointF(105, 105), 1), 1);
+        v.vector_depth_enabled = true;
+        QImage img = render({ &v, &cover });
+        QCOMPARE(img.pixelColor(only_red), QColor(Qt::red));
+        QCOMPARE(img.pixelColor(overlap), QColor(Qt::red));    // red over the cover over blue
+        QCOMPARE(img.pixelColor(only_blue), QColor(Qt::green)); // blue stayed in the stick's plane
+        QCOMPARE(ShapeAt(v, QPointF(105, 105), 1), 0);          // the bucket hits what is on top
+        QCOMPARE(v.VectorShapeDepth(0), 2.0);
+        QCOMPARE(v.VectorShapeDepth(1), 0.0);
+
+        v.vector_shapes[1].depth_offset = 2; // the same depth: the layer order decides again
+        img = render({ &v, &cover });
+        QCOMPARE(img.pixelColor(overlap), QColor(Qt::blue));
+        QCOMPARE(img.pixelColor(only_red), QColor(Qt::red));
+
+        v.z = 1.5; // the stick above the cover, one shape sent below it
+        v.vector_shapes[0].depth_offset = 0;
+        v.vector_shapes[1].depth_offset = -1;
+        img = render({ &v, &cover });
+        QCOMPARE(img.pixelColor(only_red), QColor(Qt::red));
+        QCOMPARE(img.pixelColor(only_blue), QColor(Qt::green));
+        QCOMPARE(img.pixelColor(overlap), QColor(Qt::red));
+
+        // the switch and the offsets survive the stream and Clone()
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << v;
+        }
+        StickData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+            QCOMPARE(in.status(), QDataStream::Ok);
+            QVERIFY(in.atEnd());
+        }
+        StickData *clone = v.Clone();
+        for (const StickData *copy : { static_cast<const StickData*>(&loaded), static_cast<const StickData*>(clone) }) {
+            QVERIFY(copy->vector_depth_enabled);
+            QCOMPARE(copy->vector_shapes[0].depth_offset, 0.0);
+            QCOMPARE(copy->vector_shapes[1].depth_offset, -1.0);
+        }
+        delete clone;
+
+        // live canvas: the panel's three actions (MyView::SetVectorDepthEnabled() and friends)
+        AddFrame();
+        StickData *a = AddVectorStick(QPointF(200, 100), QPointF(200, 200),
+                                      { SquareShape(QPointF(-0.5, 0), 1.0, QBrush(Qt::gray)),
+                                        SquareShape(QPointF(0, 0.5), 0.3, QBrush(Qt::darkGray)) });
+        QSignalSpy steps(&view->undo_stack, &QUndoStack::indexChanged);
+        view->SetVectorShapeDepth({ 0 }, 5.0);
+        QCOMPARE(a->vector_shapes[0].depth_offset, 5.0 - a->z);
+        QVERIFY(a->view->shape_layers.isEmpty()); // stored, but the switch is off: no layer
+        view->SetVectorDepthEnabled(true);
+        QCOMPARE(steps.count(), 2);
+        QCOMPARE(a->view->shape_layers.count(), 1);
+        QCOMPARE(a->view->shape_layers[0]->scene(), a->view->scene());
+        QCOMPARE(a->view->shape_layers[0]->zValue(), 5.0);
+        view->SetVectorShapeDepth({ 0 }, a->z); // the stick's own depth: back in its plane
+        QCOMPARE(a->vector_shapes[0].depth_offset, 0.0);
+        QVERIFY(a->view->shape_layers.isEmpty());
+        view->ResetVectorShapeDepths();
+        QCOMPARE(steps.count(), 3); // nothing to reset: no step
+        view->SetVectorShapeDepth({ 0, 1 }, 7.0);
+        QCOMPARE(a->view->shape_layers.count(), 1); // one layer for the two shapes at one depth
+        view->ResetVectorShapeDepths();
+        QCOMPARE(steps.count(), 5);
+        QVERIFY(a->view->shape_layers.isEmpty());
+        QVERIFY(a->vector_depth_enabled); // reset restores the order, it does not switch the option off
+
+        view->undo_stack.undo(); // the reset: both shapes back on their layer, in the scene
+        a = view->VectorStick();
+        QVERIFY(a != nullptr);
+        QCOMPARE(a->vector_shapes[1].depth_offset, 7.0 - a->z);
+        QCOMPARE(a->view->shape_layers.count(), 1);
+        QCOMPARE(a->view->shape_layers[0]->scene(), a->view->scene());
+        const int items_with_layer = scene->items().count();
+        view->SetVectorDepthEnabled(false);
+        QVERIFY(view->VectorStick()->view->shape_layers.isEmpty());
+        QCOMPARE(scene->items().count(), items_with_layer - 1); // the layer left the scene with it
+    }
+
     // Ctrl+drag on an anchor moves it (one undo step, none for a plain click), Ctrl+drag on a
     // smooth anchor's handle keeps the opposite handle on its line at its own length (Alt breaks
     // it), the lasso selects the anchors inside it, Delete removes them as one step (a shape left
@@ -7354,6 +7476,111 @@ private slots:
         QVERIFY(v->view->selected_vector_nodes.isEmpty());
         QCOMPARE(view->VectorStick(), nullptr);
         QCOMPARE(view->my_animation->vector_shape_row, -1);
+    }
+
+    // The Transform tool, with real mouse events: a click on a shape selects all its anchors (Shift adds
+    // another shape), a drag moves the selection, the box's corner scales it about the opposite corner
+    // and its knob turns it about the box centre, one undo step each and none for a click. On empty
+    // canvas it lassoes anchors, a click on a shape with only some of them selected takes the whole
+    // shape, and a click on empty canvas drops the selection.
+    void VectorTransformToolSelectsMovesScalesAndTurns()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        view->SetTool(NOTOOL);
+        auto at = [this](QPointF p) { return view->mapFromScene(p); };
+        auto scene_of = [this, at](QPointF p) { return view->mapToScene(at(p)); };
+        auto near = [](QPointF a, QPointF b, qreal tol = 0.01) { return QLineF(a, b).length() < tol; };
+        // local (x, y) -> (300 + 100x, 100 + 100y): the big square spans 300..400 x 100..200 and
+        // the small one 450..500 x 100..150
+        StickData *v = AddVectorStick(QPointF(300, 100), QPointF(300, 200),
+                                      { SquareShape(QPointF(0, 0), 1.0, QBrush(Qt::gray)),
+                                        SquareShape(QPointF(1.5, 0), 0.5, QBrush(Qt::gray)) });
+        auto node_scene = [&](int shape, int node) {
+            return v->PolygonTransform().map(v->vector_shapes[shape].nodes[node].pos);
+        };
+        auto drag = [&](QPointF from, QPointF to) {
+            QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(from));
+            QTest::mouseMove(view->viewport(), at((from + to) / 2));
+            QTest::mouseMove(view->viewport(), at(to));
+            QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(to));
+        };
+        view->SetVectorTool(MyView::VT_TRANSFORM);
+        QCOMPARE(view->vector_tool, (int)MyView::VT_TRANSFORM);
+        QSignalSpy pushes(&view->undo_stack, &QUndoStack::indexChanged);
+
+        // a click inside the big square selects its four anchors; Shift+click adds the small one
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(350, 150)));
+        QCOMPARE(v->view->selected_vector_nodes.count(), 4);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::ShiftModifier, at(QPointF(475, 125)));
+        QCOMPARE(v->view->selected_vector_nodes.count(), 8);
+        QCOMPARE(pushes.count(), 0);
+        QVERIFY(near(view->VectorSelectionBox().topLeft(), QPointF(300, 100)));
+        QVERIFY(near(view->VectorSelectionBox().bottomRight(), QPointF(500, 200)));
+
+        // a drag on a selected shape moves both, as one step
+        const QPointF move = scene_of(QPointF(370, 160)) - scene_of(QPointF(350, 150));
+        drag(QPointF(350, 150), QPointF(370, 160));
+        QCOMPARE(pushes.count(), 1);
+        QVERIFY(near(node_scene(0, 0), QPointF(300, 100) + move));
+        QVERIFY(near(node_scene(1, 2), QPointF(500, 150) + move));
+        QCOMPARE(v->my_line, QLineF(300, 100, 300, 200)); // the shapes moved, not the stick
+
+        // the bottom-right corner, dragged right: the top-left corner stays, x stretches
+        QPointF h[9];
+        QVERIFY(view->VectorTransformHandles(h));
+        const QRectF box0 = view->VectorSelectionBox();
+        const QPointF stretch = scene_of(h[2] + QPointF(100, 0)) - scene_of(h[2]);
+        const qreal sx = (box0.width() + stretch.x()) / box0.width();
+        const qreal sy = (box0.height() + stretch.y()) / box0.height();
+        const QPointF before = node_scene(0, 2);
+        drag(h[2], h[2] + QPointF(100, 0));
+        QCOMPARE(pushes.count(), 2);
+        QVERIFY(near(node_scene(0, 0), box0.topLeft()));
+        const QPointF scaled(box0.left() + (before.x() - box0.left()) * sx,
+                             box0.top() + (before.y() - box0.top()) * sy);
+        QVERIFY2(near(node_scene(0, 2), scaled, 0.05),
+                 qPrintable(QString("%1,%2 instead of %3,%4").arg(node_scene(0, 2).x()).arg(node_scene(0, 2).y())
+                            .arg(scaled.x()).arg(scaled.y())));
+
+        // the knob, swept a quarter turn round the box centre: every anchor turns about it
+        QVERIFY(view->VectorTransformHandles(h));
+        const QPointF centre = view->VectorSelectionBox().center();
+        const QPointF knob = h[8], swept = centre + QPointF(centre.y() - knob.y(), 0);
+        const QPointF from = scene_of(knob) - centre, to = scene_of(swept) - centre;
+        const qreal turned = std::atan2(to.y(), to.x()) - std::atan2(from.y(), from.x());
+        const QPointF p = node_scene(1, 0) - centre;
+        const QPointF expected = centre + QPointF(p.x() * cos(turned) - p.y() * sin(turned),
+                                                  p.x() * sin(turned) + p.y() * cos(turned));
+        drag(knob, swept);
+        QCOMPARE(pushes.count(), 3);
+        QVERIFY2(near(node_scene(1, 0), expected, 0.05),
+                 qPrintable(QString("%1,%2 instead of %3,%4").arg(node_scene(1, 0).x()).arg(node_scene(1, 0).y())
+                            .arg(expected.x()).arg(expected.y())));
+
+        // three undos bring the shapes back where they were drawn
+        for (int i = 0; i < 3; i++)
+            view->undo_stack.undo();
+        v = view->VectorStick();
+        QVERIFY(v != nullptr);
+        QVERIFY(near(node_scene(0, 2), QPointF(400, 200)));
+        QVERIFY(near(node_scene(1, 0), QPointF(450, 100)));
+
+        // a lasso on empty canvas picks the two left anchors of the big square...
+        const QList<QPointF> loop = { QPointF(280, 80), QPointF(330, 80), QPointF(330, 230), QPointF(280, 230), QPointF(280, 81) };
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(loop[0]));
+        for (int i = 1; i < loop.count(); i++)
+            QTest::mouseMove(view->viewport(), at(loop[i]));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(loop.last()));
+        QCOMPARE(v->view->selected_vector_nodes, (QSet<QPair<int,int>>{ qMakePair(0, 0), qMakePair(0, 3) }));
+        // ...a click on that square then takes the whole shape...
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(360, 150)));
+        QCOMPARE(v->view->selected_vector_nodes.count(), 4);
+        // ...and a click on empty canvas drops it, all without an undo step
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(600, 400)));
+        QVERIFY(v->view->selected_vector_nodes.isEmpty());
+        QCOMPARE(pushes.count(), 6); // the three undos only
+        view->SetVectorTool(MyView::VT_NONE);
     }
 
     // The buckets give the topmost shape under the click the Style column's current fill, or its

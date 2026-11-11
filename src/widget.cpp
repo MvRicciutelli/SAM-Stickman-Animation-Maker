@@ -3669,7 +3669,7 @@ static QIcon VectorShapeIcon(const VectorShape &shape, const QTransform &to_scen
     return QIcon(pm);
 }
 
-/// @details The VECTOR panel: the four vector tools, the shape layers and their buttons. The rows
+/// @details The VECTOR panel: the five vector tools, the shape layers and their buttons. The rows
 /// list the top shape first, as a layer panel does, so row r is shape count-1-r. Every action is a
 /// MyView method (reachable from the tests, which do not link this file); the panel only maps rows
 /// to shape indices and is echoed back through refresh_vector_panel.
@@ -3687,6 +3687,10 @@ void Widget::BuildVectorPanel()
     static const char *const stroke_rows[10] = {
         "dddddddddd", "dddddddddd", "dd......dd", "dd......dd", "dd......dd",
         "dd......dd", "dd......dd", "dd......dd", "dddddddddd", "dddddddddd" };
+    // a transformation box: four corner squares on a light outline
+    static const char *const transform_rows[10] = {
+        "www....www", "wkwllllwkw", "www....www", ".l......l.", ".l......l.",
+        ".l......l.", ".l......l.", "www....www", "wkwllllwkw", "www....www" };
     const QPolygon lasso_shape({ QPoint(4, 0), QPoint(6, 3), QPoint(9, 3), QPoint(7, 6), QPoint(8, 9),
                                  QPoint(4, 7), QPoint(1, 9), QPoint(2, 5), QPoint(0, 2), QPoint(3, 3) });
     QHBoxLayout *tool_row = new QHBoxLayout();
@@ -3702,7 +3706,12 @@ void Widget::BuildVectorPanel()
         { QT_TR_NOOP("Fill bucket: click a shape to give it the current fill (Style column)."),
           MyView::VT_FILL, PixelIcon(fill_rows) },
         { QT_TR_NOOP("Border bucket: click a shape to give it the current border, width included (Style column)."),
-          MyView::VT_STROKE, PixelIcon(stroke_rows) } };
+          MyView::VT_STROKE, PixelIcon(stroke_rows) },
+        { QT_TR_NOOP("Transform: click a shape to select it (Shift adds or removes one), click a point to "
+                     "select it, drag on empty canvas to lasso points. Drag the selection to move it; the "
+                     "box's squares scale it (Shift on a corner keeps the proportions) and the knob turns "
+                     "it (Shift = 15 degree steps)."),
+          MyView::VT_TRANSFORM, PixelIcon(transform_rows) } };
     for(const auto &entry : entries){
         QToolButton *b = new QToolButton(advanced_vector_tab);
         b->setIcon(entry.icon);
@@ -3753,6 +3762,42 @@ void Widget::BuildVectorPanel()
     layer_buttons->addWidget(paste_btn, 1, 1);
     col->addLayout(layer_buttons);
 
+    // per-shape depth. Off (the default) the shapes are drawn in layer order at the stick's depth;
+    // on, a shape can be given a depth of its own. The slider and spin box have the range and
+    // resolution of the stick Depth tab's (depthSlider/depthSpinbox in widget.ui) and, like those,
+    // only hold a value: nothing changes until "Set depth" is pressed.
+    QCheckBox *depth_check = new QCheckBox(tr("Own depth per shape"), advanced_vector_tab);
+    depth_check->setToolTip(tr("Off: the shapes are drawn in layer order, at the stick's depth.\n"
+                               "On: each shape can have its own depth, in front of or behind other sticks."));
+    QSlider *shape_depth_slider = new QSlider(Qt::Horizontal, advanced_vector_tab);
+    shape_depth_slider->setRange(0, 9999);
+    QDoubleSpinBox *shape_depth_spin = new QDoubleSpinBox(advanced_vector_tab);
+    shape_depth_spin->setDecimals(2);
+    shape_depth_spin->setSingleStep(0.01);
+    QPushButton *set_depth_btn = new QPushButton(tr("Set depth"), advanced_vector_tab);
+    QPushButton *reset_depth_btn = new QPushButton(tr("Reset depths"), advanced_vector_tab);
+    set_depth_btn->setToolTip(tr("Give the selected shapes this depth"));
+    reset_depth_btn->setToolTip(tr("Put every shape back at the stick's depth, so the layer order decides again"));
+    const QList<QWidget*> depth_controls = { shape_depth_slider, shape_depth_spin, set_depth_btn, reset_depth_btn };
+    for(QWidget *control : depth_controls)
+        control->setEnabled(false);
+    QHBoxLayout *depth_value_row = new QHBoxLayout();
+    depth_value_row->addWidget(shape_depth_slider, 1);
+    depth_value_row->addWidget(shape_depth_spin);
+    QHBoxLayout *depth_button_row = new QHBoxLayout();
+    depth_button_row->addWidget(set_depth_btn);
+    depth_button_row->addWidget(reset_depth_btn);
+    col->addWidget(depth_check);
+    col->addLayout(depth_value_row);
+    col->addLayout(depth_button_row);
+    // the slider is integer-stepped, the depth has two decimals: x100, as in the Depth tab
+    connect(shape_depth_slider, &QSlider::valueChanged, this, [shape_depth_spin](int value){
+        shape_depth_spin->setValue(value / 100.0);
+    });
+    connect(shape_depth_spin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [shape_depth_slider](double value){
+        shape_depth_slider->setValue(qRound(value * 100));
+    });
+
     auto shape_of = [](QListWidgetItem *item){ return item->data(Qt::UserRole).toInt(); };
     auto selected_shapes = [layers, shape_of]{
         QList<int> indices;
@@ -3761,9 +3806,13 @@ void Widget::BuildVectorPanel()
         return indices;
     };
 
-    refresh_vector_panel = [this, layers](StickData *cs){
+    refresh_vector_panel = [this, layers, depth_check, depth_controls, shape_depth_spin](StickData *cs){
         vector_panel_sync = true;
         layers->clear();
+        const bool own_depth = cs != nullptr && cs->stick_type == StickData::VECTOR && cs->vector_depth_enabled;
+        depth_check->setChecked(own_depth);
+        for(QWidget *control : depth_controls)
+            control->setEnabled(own_depth);
         if(cs != nullptr && cs->stick_type == StickData::VECTOR){
             const QTransform to_scene = cs->PolygonTransform();
             for(int i = cs->vector_shapes.size() - 1; i >= 0; i--){
@@ -3772,10 +3821,15 @@ void Widget::BuildVectorPanel()
                 item->setData(Qt::UserRole, i);
                 item->setFlags(item->flags() | Qt::ItemIsEditable | Qt::ItemIsUserCheckable);
                 item->setCheckState(shape.visible ? Qt::Checked : Qt::Unchecked);
+                if(own_depth)
+                    item->setToolTip(tr("Depth %1").arg(cs->VectorShapeDepth(i), 0, 'f', 2));
             }
             const int current = view->my_animation->CurrentVectorShape(cs);
-            if(current >= 0)
+            if(current >= 0){
                 layers->setCurrentRow(cs->vector_shapes.size() - 1 - current);
+                if(own_depth)
+                    shape_depth_spin->setValue(cs->VectorShapeDepth(current));
+            }
         }
         vector_panel_sync = false;
     };
@@ -3790,11 +3844,24 @@ void Widget::BuildVectorPanel()
     connect(view, &MyView::VectorShapesChanged, this, refresh_current, Qt::QueuedConnection);
     connect(&view->undo_stack, &QUndoStack::indexChanged, this, refresh_current, Qt::QueuedConnection);
 
-    connect(layers, &QListWidget::currentRowChanged, this, [this, layers, shape_of](int){
+    connect(layers, &QListWidget::currentRowChanged, this, [this, layers, shape_of, shape_depth_spin](int){
         if(vector_panel_sync || layers->currentItem() == nullptr)
             return;
         view->my_animation->vector_shape_row = shape_of(layers->currentItem());
         view->my_animation->UpdateStyleControls(); // the Style column follows the shape
+        StickData *cs = view->VectorStick();
+        if(cs != nullptr && cs->vector_depth_enabled) // and so does the depth, when shapes have their own
+            shape_depth_spin->setValue(cs->VectorShapeDepth(view->my_animation->vector_shape_row));
+    });
+    connect(depth_check, &QCheckBox::toggled, this, [this](bool on){
+        if(!vector_panel_sync)
+            view->SetVectorDepthEnabled(on); // the controls are enabled by the refresh it announces
+    });
+    connect(set_depth_btn, &QPushButton::clicked, this, [this, selected_shapes, shape_depth_spin]{
+        view->SetVectorShapeDepth(selected_shapes(), shape_depth_spin->value());
+    });
+    connect(reset_depth_btn, &QPushButton::clicked, this, [this]{
+        view->ResetVectorShapeDepths();
     });
     connect(layers, &QListWidget::itemChanged, this, [this, shape_of](QListWidgetItem *item){
         if(vector_panel_sync)

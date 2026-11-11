@@ -23,6 +23,7 @@
 #include "stkformat.h"
 #include "uiItems.h"
 #include "updatecheck.h"
+#include "version.h"
 extern QDir program_folder;
 extern qint32 W;
 extern qint32 H;
@@ -48,13 +49,15 @@ QString avi_export_folder;
 QStringList ffmpeg_options;
 /**
  * @details Builds the menu/window from the .ui file. `view` and `central_w` are wired up
- * by the startup code that creates this window (see DoConnections()), not here.
+ * by the startup code that creates this window (see DoConnections()), not here. The .ui
+ * title carries no version: it is appended here from APP_VERSION, so it cannot go stale.
  */
 MyMainWindow::MyMainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MyMainWindow)
 {
     ui->setupUi(this);
+    setWindowTitle(windowTitle() + " V" APP_VERSION);
     CheckForUpdate(this); // in background: a prompt only if GitHub has a newer release
 }
 

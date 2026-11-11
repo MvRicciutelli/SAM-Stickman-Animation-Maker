@@ -43,6 +43,12 @@ StickGraphicsItem::StickGraphicsItem(StickData *stick_data)
  * use-after-free, easier to notice.
  */
 StickGraphicsItem::~StickGraphicsItem(){
+    // the shape layers are this view's: cut their way back first, so their destructor does not
+    // edit the list being walked
+    for(VectorShapeLayerItem *layer : shape_layers){
+        layer->owner = nullptr;
+        delete layer;
+    }
     if(data && data->view == this)
         data->view = nullptr;
     delete stick_handle[0] ;
@@ -422,6 +428,122 @@ bool StickGraphicsItem::StrokeWithBrush(QPainter *painter, const QPainterPath &s
     return true;
 }
 
+/// @details One shape at a time, in list order (the last on top), each with its own paint:
+/// paint_shape makes AlignBrush()/FillAndStroke()/StrokeWithBrush() answer for it. Shared by
+/// paint() (layer == nullptr) and VectorShapeLayerItem::paint(), so a shape looks the same
+/// whichever item draws it.
+void StickGraphicsItem::PaintVectorShapes(QPainter *painter, const VectorShapeLayerItem *layer)
+{
+    const QTransform to_scene = data->PolygonTransform();
+    for(const VectorShape &shape : data->vector_shapes){
+        if(!shape.visible || shape.nodes.size() < 2 || ShapeLayer(shape) != layer)
+            continue;
+        paint_shape = &shape;
+        QPen shape_pen(shape.pen);
+        if(onion_render)
+            shape_pen.setColor(Qt::gray); // like the stick's own pen: flat grey
+        else
+            shape_pen.setBrush(AlignBrush(shape.pen.brush()));
+        painter->setPen(shape_pen);
+        FillAndStroke(painter, shape.brush, VectorPath(shape, to_scene));
+        paint_shape = nullptr;
+    }
+}
+
+/// @details Matched on the stored offset itself, never on a computed depth: the two sides of the
+/// comparison are then the same number by construction, whatever happens to the stick's z.
+VectorShapeLayerItem *StickGraphicsItem::ShapeLayer(const VectorShape &shape) const
+{
+    if(!data->vector_depth_enabled || shape.depth_offset == 0)
+        return nullptr;
+    for(VectorShapeLayerItem *layer : shape_layers)
+        if(layer->depth_offset == shape.depth_offset)
+            return layer;
+    return nullptr;
+}
+
+VectorShapeLayerItem *StickGraphicsItem::TopShapeLayer() const
+{
+    VectorShapeLayerItem *top = nullptr;
+    for(VectorShapeLayerItem *layer : shape_layers)
+        if(layer->depth_offset > (top != nullptr ? top->depth_offset : 0.0))
+            top = layer;
+    return top;
+}
+
+/// @details The stick's z is applied here as well as in paint(): a layer's depth only means
+/// something against the z of the OTHER sticks, and in a throwaway render scene (icons, onion
+/// skins, exports) those are painted exactly once, so paint() would set them too late.
+/// A layer is re-added whenever its scene differs from the view's, which is what makes it follow
+/// the view through Frame::Refresh(), MoveToFrame() and every render scene.
+void StickGraphicsItem::SyncShapeLayers()
+{
+    setZValue(data->z);
+    QList<double> wanted;
+    if(data->stick_type == StickData::VECTOR && data->vector_depth_enabled){
+        for(const VectorShape &shape : data->vector_shapes)
+            if(shape.depth_offset != 0 && !wanted.contains(shape.depth_offset))
+                wanted << shape.depth_offset;
+    }
+    for(int i = shape_layers.size() - 1; i >= 0; i--){
+        if(wanted.removeOne(shape_layers[i]->depth_offset))
+            continue; // still in use, and no longer missing
+        VectorShapeLayerItem *unused = shape_layers.takeAt(i);
+        unused->owner = nullptr;
+        delete unused;
+    }
+    for(double offset : wanted)
+        shape_layers << new VectorShapeLayerItem(this, offset);
+    for(VectorShapeLayerItem *layer : shape_layers){
+        layer->setZValue(data->z + layer->depth_offset);
+        if(layer->scene() == scene())
+            continue;
+        if(layer->scene() != nullptr)
+            layer->scene()->removeItem(layer);
+        if(scene() != nullptr)
+            scene()->addItem(layer);
+    }
+}
+
+QVariant StickGraphicsItem::itemChange(GraphicsItemChange change, const QVariant &value)
+{
+    if(change == ItemSceneHasChanged)
+        SyncShapeLayers();
+    return QGraphicsItem::itemChange(change, value);
+}
+
+VectorShapeLayerItem::VectorShapeLayerItem(StickGraphicsItem *owner_view, double offset)
+{
+    owner = owner_view;
+    depth_offset = offset;
+    setAcceptedMouseButtons(Qt::NoButton); // paint only: a click goes to whatever is underneath
+}
+
+VectorShapeLayerItem::~VectorShapeLayerItem()
+{
+    if(owner != nullptr)
+        owner->shape_layers.removeOne(this);
+}
+
+QRectF VectorShapeLayerItem::boundingRect() const
+{
+    return owner != nullptr ? owner->boundingRect() : QRectF();
+}
+
+/// @details The z is refreshed here like StickGraphicsItem::paint() does for the stick, so a
+/// depth change that reaches the record without a Refresh() (StickFigure::UpdateZ()) still lands.
+void VectorShapeLayerItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
+{
+    Q_UNUSED(option);
+    Q_UNUSED(widget);
+    if(owner == nullptr)
+        return;
+    setZValue(owner->data->z + depth_offset);
+    owner->PaintVectorShapes(painter, this);
+    if(owner->TopShapeLayer() == this)
+        owner->PaintVectorOverlay(painter);
+}
+
 void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
 {
     Q_UNUSED(option);
@@ -540,24 +662,12 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         PaintVertexSquares(painter, poly);
     }
     else if(data->stick_type == StickData::VECTOR){
-        // one shape at a time, in list order (the last on top), each with its own paint:
-        // paint_shape makes AlignBrush()/FillAndStroke()/StrokeWithBrush() answer for it
-        const QTransform to_scene = data->PolygonTransform();
+        // the shapes in the stick's own plane; one with a depth of its own is painted by its
+        // VectorShapeLayerItem, at that depth
+        PaintVectorShapes(painter, nullptr);
         bool any_visible = false;
-        for(const VectorShape &shape : data->vector_shapes){
-            if(!shape.visible || shape.nodes.size() < 2)
-                continue;
-            any_visible = true;
-            paint_shape = &shape;
-            QPen shape_pen(shape.pen);
-            if(onion_render)
-                shape_pen.setColor(Qt::gray); // like the stick's own pen: flat grey
-            else
-                shape_pen.setBrush(AlignBrush(shape.pen.brush()));
-            painter->setPen(shape_pen);
-            FillAndStroke(painter, shape.brush, VectorPath(shape, to_scene));
-            paint_shape = nullptr;
-        }
+        for(const VectorShape &shape : data->vector_shapes)
+            any_visible = any_visible || (shape.visible && shape.nodes.size() >= 2);
         // the skeleton shows only while there is nothing else to see: it is the 2-click preview
         if(!any_visible){
             const QLineF drawn = data->DrawnLine();
@@ -565,7 +675,8 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
             painter->setBrush(Qt::NoBrush);
             painter->drawLine(drawn);
         }
-        PaintVectorOverlay(painter);
+        if(TopShapeLayer() == nullptr)
+            PaintVectorOverlay(painter);
     }
     else if(data->stick_type == StickData::MULTILINE){
         QPolygonF chain = ScenePolygon(); // P1 + interni + P2 (+ anteprima in coda)
@@ -1128,10 +1239,16 @@ void StickGraphicsItem::SetLine(QLineF* line)
 }
 void StickGraphicsItem::Refresh(int mode)
 {
-    prepareGeometryChange();    // necessario chiamare questa funzione per non lasciare trails ed evitare il ghosting durante la manipolazione e il disegno!
+    prepareGeometryChange();    // this call is needed to leave no trails and avoid ghosting while manipulating and drawing!
+    // the shape layers share this view's bounding rect, so they announce the change with it
+    SyncShapeLayers();
+    for(VectorShapeLayerItem *layer : shape_layers)
+        layer->OwnerGeometryChanging();
     br = UpdateBr(mode);
     CalcAngle();
     update();
+    for(VectorShapeLayerItem *layer : shape_layers)
+        layer->update();
 }
 //comando per cambiare la rotazione di uno stick
 void StickGraphicsItem::Rotate(QPointF *point)
@@ -1769,7 +1886,8 @@ void StickGraphicsItem::PopulateImageListWidget(){
 void SceneRemover(QGraphicsScene *scene_to_clear){
     QList<QGraphicsItem*> thingsOnScene = scene_to_clear->items( Qt::AscendingOrder);
     for(QGraphicsItem* i: thingsOnScene){
-        if(i != my_rect)
+        // removing a stick view takes its shape layers along: they are no longer in the scene
+        if(i != my_rect && i->scene() == scene_to_clear)
             scene_to_clear->removeItem(i);
     }
 }

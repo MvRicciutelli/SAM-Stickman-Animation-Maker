@@ -12,9 +12,14 @@ QT += core-private
 
 CONFIG += c++11
 
-VERSION = 0.10.0
-# one source of truth for the version: the About box and the update check read APP_VERSION
-DEFINES += APP_VERSION=\\\"$$VERSION\\\"
+VERSION = 0.11.0
+# The one source of truth for the version. qmake writes it into version.h (APP_VERSION) in the
+# build directory; the window title, the About box and the update check include that header.
+# A header and not a -D define, because make does not track compiler flags: after a bump, a
+# define left every object that was not otherwise rebuilt on the old version.
+version_h.input = $$PWD/src/version.h.in
+version_h.output = $$OUT_PWD/version.h
+QMAKE_SUBSTITUTES += version_h
 QMAKE_TARGET_COMPANY = "Matteo Vittorio Ricciutelli"
 QMAKE_TARGET_PRODUCT = "SAM - Stickman Animation Maker"
 QMAKE_TARGET_DESCRIPTION = "SAM - Stickman Animation Maker"
