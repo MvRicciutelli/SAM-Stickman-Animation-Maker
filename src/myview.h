@@ -207,12 +207,12 @@ public:
      */
     BrushStroke my_stroke_brush;
 
-    // ---- maniglia a freccia della texture (fill e contorno) --------------------------
-    // Un pattern/gradiente/immagine ha tre numeri che nessuna maniglia mostrava: offset,
-    // angolo e scala. La freccia li rende un solo gesto — la coda è l'offset, la direzione
-    // l'angolo, la lunghezza la scala — e ne mostra il valore corrente anche a riposo.
-    // Vivono qui e non su StickData perché sono stato dell'INTERFACCIA (quali maniglie
-    // mostrare), non del disegno: nulla di ciò che si salva o si esporta cambia.
+    // ---- texture arrow handle (fill and stroke) --------------------------------------
+    // A pattern/gradient/image has three numbers that no handle showed: offset, angle
+    // and scale. The arrow makes them a single gesture — the tail is the offset, the
+    // direction the angle, the length the scale — and shows their current value at rest too.
+    // They live here and not on StickData because they are INTERFACE state (which handles
+    // to show), not drawing state: nothing that is saved or exported changes.
     bool show_fill_texture_arrow = false;   ///< draw/grab the fill's texture arrow ("Show texture handle", Fill group)
     bool show_stroke_texture_arrow = false; ///< same for the stroke's ("Show texture handle", Border group)
 
@@ -379,6 +379,7 @@ public:
      *        from `undo_stack`, alive only for the duration of one draw session.
      */
     void DrawStrokeUndo();
+    /** @brief Redo counterpart of DrawStrokeUndo(): reapplies the next undone stroke of the draw session. */
     void DrawStrokeRedo();
 
     // ---- VECTOR sticks (myview.cpp, end of file) -------------------------------------
@@ -394,8 +395,9 @@ public:
         VT_LASSO,     ///< drag a lasso to select anchors (Shift adds)
         VT_FILL,      ///< click a shape to give it the current fill (my_brush)
         VT_STROKE,    ///< click a shape to give it the current border (my_pen, my_stroke_brush)
-        VT_TRANSFORM  ///< click shapes (Shift adds/removes) or anchors, lasso on empty space; a drag moves the
+        VT_TRANSFORM, ///< click shapes (Shift adds/removes) or anchors, lasso on empty space; a drag moves the
                       ///< selected anchors and a transformation box scales and turns them
+        VT_FILL_STROKE ///< VT_FILL and VT_STROKE in one click
     };
     int vector_tool = VT_NONE;          ///< active VectorTool
     QList<VectorShape> vector_clipboard; ///< copied shapes, in SCENE space; a value list, replaced whole by every copy
@@ -422,11 +424,18 @@ public:
     /// @return false when no anchor was selected.
     bool DeleteSelectedVectorNodes();
     /**
+     * @brief Toggles the selected anchors between sharp (no handles) and curved (smooth handles
+     *        along the line through the neighbours), as one undo step. A selection holding any
+     *        sharp anchor becomes all curved, otherwise all sharp.
+     * @return false when no anchor was selected.
+     */
+    bool ToggleVectorNodeCurves();
+    /**
      * @brief Bucket click: gives the topmost visible shape under @p scene_pos the current fill
-     *        (@p fill) or the current border (paint, width and border brush), as one undo step.
+     *        (@p fill) and/or the current border (@p stroke: paint, width and border brush), as one undo step.
      * @return false when no shape is there.
      */
-    bool BucketVectorShape(const QPointF &scene_pos, bool fill);
+    bool BucketVectorShape(const QPointF &scene_pos, bool fill, bool stroke);
     /// @brief Moves shape @p index by @p delta places in the drawing order (> 0 = towards the front), as one undo step.
     bool MoveVectorShape(int index, int delta);
     /// @brief Deletes the shapes at @p indices, as one undo step.
@@ -474,6 +483,10 @@ public:
      *        the global frame undo_stack. Single place so both triggers stay consistent.
      */
     void Undo();
+    /**
+     * @brief Redo counterpart of Undo(): in draw mode reapplies the next undone stroke
+     *        (DrawStrokeRedo()), otherwise redoes the next entry of `undo_stack`.
+     */
     void Redo();
 
     /**
@@ -801,7 +814,7 @@ public:
      */
     void UpdateFrameOrder(Frame *f);
 
-    // ------- multi-selezione di stickfigure (rettangolo/Shift-click/lista layer) ------
+    // ------- multi-selection of stickfigures (rectangle/Shift-click/layer list) -------
 
     /**
      * @brief True while two or more stickfigures are selected together.
@@ -870,6 +883,12 @@ public:
      *          selected. Keyboard-modifier click add/remove is handled separately at press.
      */
     void ApplyBandSelection(const QList<StickFigure*> &touched);
+
+    /**
+     * @brief Selects every figure of the current frame that is not selected now, and
+     *        deselects the selected ones (menu Selection > Select inverse).
+     */
+    void SelectInverse();
 
     /**
      * @brief Center of the multi-selection (mean of every selected stick endpoint) —
@@ -957,12 +976,50 @@ signals:
 
     // QWidget interface
 protected:
+    /**
+     * @brief Ends the gesture: in draw mode closes the stroke (one draw-undo step) or the
+     *        pixel selection; else lets the vector tools finish theirs, or clears every
+     *        drag flag (box handle, texture arrow, pivot, DISPLACE, rubber band) and
+     *        finalizes the stick rotation, refreshing icons and selection decorations.
+     */
     virtual void mouseReleaseEvent(QMouseEvent *event) override;
+    /**
+     * @brief Applies a drag to the model: in draw mode paints the stroke or drags the pixel
+     *        selection, else the vector tools go first; then per active `tool` rotates,
+     *        draws previews, manipulates, elongates, scales or transforms the scene, plus
+     *        the selection gestures (rubber band, box handles, texture arrow, pivot,
+     *        Space-drag). Right button pans and middle button zooms.
+     */
     virtual void mouseMoveEvent(QMouseEvent *event) override;
+    /**
+     * @brief Starts a gesture: draw mode (stroke or pixel selection) and the vector tools
+     *        take the click first, otherwise it branches on `tool`. Takes the StoreUndo()
+     *        snapshot once and buffers the reference values later moves are measured
+     *        against. Ctrl picks polygon vertices, Shift/Alt add/remove figures from the
+     *        multi-selection.
+     */
     virtual void mousePressEvent(QMouseEvent *event) override;
+    /**
+     * @brief In draw mode latches the stylus pressure into draw_pressure_val; ignores the
+     *        event so Qt synthesizes the mouse event that does the painting.
+     */
     virtual void tabletEvent(QTabletEvent *event) override;
+    /**
+     * @brief Double click: leaves vector draw mode, ends a DRAWPOLY/DRAWMULTI vertex
+     *        session, or is treated as a press by the other vector gestures.
+     */
     virtual void mouseDoubleClickEvent(QMouseEvent *event) override;
+    /**
+     * @brief Keyboard shortcuts. Draw mode: Esc/Enter exit, Ctrl+D drops the pixel selection.
+     *        Else Delete removes vector anchors, Ctrl-selected vertices, the multi-selection
+     *        or the selected stick; Esc cancels a half-drawn stick, session or selection;
+     *        Enter ends a polygon/multiline session; Space starts dragging the selection.
+     */
     virtual void keyPressEvent(QKeyEvent *event) override;
+    /**
+     * @brief Releasing Space ends the drag-by-master gesture and refreshes icons and
+     *        selection decorations.
+     */
     virtual void keyReleaseEvent(QKeyEvent *event) override;
     /**
      * @brief Draws every committed IK chain's marker (dotted line start->target + a cross
@@ -1008,7 +1065,14 @@ private:
     bool VectorMousePress(QMouseEvent *event);
     /// @brief A pen click: a new anchor (on a new shape if none is being drawn), or the close click.
     void VectorPenPress(StickData *stick);
-    /// @brief Ctrl+press: picks a handle or an anchor of @p stick under the cursor. @return false on a miss.
+    /**
+     * @brief The first click of a pen shape, on an existing one: an end anchor of an open shape
+     *        continues that shape, the outline of a selected shape gets a new anchor there.
+     * @return false when the click starts a new shape as usual.
+     */
+    bool VectorPenStartOnShape(StickData *stick);
+    /// @brief Ctrl+press: picks a handle or an anchor of @p stick under the cursor (Shift adds the
+    ///        anchor to the selection, Alt takes it out). @return false on a miss.
     bool VectorEditPress(StickData *stick, Qt::KeyboardModifiers modifiers);
     /**
      * @brief A press of the Transform tool: a box handle, else an anchor or curve handle, else a
@@ -1122,7 +1186,7 @@ private:
      */
     StickData *ResolveIkStartForTarget(StickData *target, const QPointF &anchor_p1, StickData *provisional_start);
 
-    // ------- multi-selezione: stato privato -------------------------------------------
+    // ------- multi-selection: private state -------------------------------------------
     QGraphicsEllipseItem *multi_handle = nullptr; ///< thin light-blue transform handle drawn on the pivot (any selection, 1+ figures)
     QGraphicsRectItem *selection_bbox = nullptr;  ///< thin light-blue no-fill bounding box of the current selection (spec)
     QGraphicsRectItem *selection_band = nullptr;  ///< dotted selection rectangle; survives until the selection breaks
@@ -1131,10 +1195,10 @@ private:
     bool pivot_dragging = false;      ///< true while the transform handle/pivot is being relocated (handle drag or Ctrl+drag on empty canvas)
     bool space_dragging = false;      ///< true while Space is held: the selection follows the cursor, dragged by its master stick(s)
     QPointF multi_center_buffer;      ///< pivot captured at gesture start (rotate/scale origin)
-    // ---- transformation box (stile del gizmo della selezione pixel, applicato alle figure) ----
-    int sel_box_gesture = 0;          ///< 0 nessuno, 1 scala (uniforme), 2 rotazione: drag di una maniglia della box
-    int texture_arrow_gesture = 0;    ///< 0 nessuno, 1 coda (offset), 2 punta (angolo + scala): drag della freccia della texture
-    bool texture_arrow_is_fill = true;///< quale delle due frecce è sotto trascinamento
+    // ---- transformation box (styled like the pixel-selection gizmo, applied to figures) ----
+    int sel_box_gesture = 0;          ///< 0 none, 1 scale (uniform), 2 rotation: drag of a box handle
+    int texture_arrow_gesture = 0;    ///< 0 none, 1 tail (offset), 2 tip (angle + scale): drag of the texture arrow
+    bool texture_arrow_is_fill = true;///< which of the two arrows is being dragged
     // ---- MANIPULATE + Alt: the handle moves, the drawn shape stays (StickData::KeepDrawnShape()) ----
     bool manipulate_keep_shape = false; ///< Alt held at the last move of this drag; false when the shape below is not latched
     QTransform manipulate_frame0;       ///< the current stick's ShapeFrame() when Alt went down
@@ -1240,8 +1304,8 @@ private:
      */
     StickData *TextureArrowStick() const;
 
-    bool band_is_lasso = false;       ///< il gesto rubber band in corso è un lazo (senza selection_band scene item)
-    QPolygonF band_poly;              ///< punti del lazo (coordinate di scena) accumulati durante il drag
+    bool band_is_lasso = false;       ///< the rubber band gesture in progress is a lasso (no selection_band scene item)
+    QPolygonF band_poly;              ///< lasso points (scene coordinates) accumulated during the drag
 
     /**
      * @brief The figures the handle/pivot/bbox act on: the multi-selection when 2+ are
@@ -1535,6 +1599,10 @@ private:
 
 
 protected:
+    /**
+     * @brief Mouse wheel steps the current-stick selection up/down the z-order, staying
+     *        within the current figure's sticks.
+     */
     virtual void wheelEvent(QWheelEvent *event) override;
 };
 

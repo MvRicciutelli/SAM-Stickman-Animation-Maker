@@ -142,7 +142,7 @@ undo). No counterproof was done for it.
 ### Interaction (`myview.cpp`, end of file)
 
 `MyView::vector_tool` (`VectorTool`: `VT_NONE`, `VT_PEN`, `VT_LASSO`, `VT_FILL`,
-`VT_STROKE`, `VT_TRANSFORM`; `VT_PEN` is "vector draw mode") is modal like draw mode:
+`VT_STROKE`, `VT_TRANSFORM`, `VT_FILL_STROKE` (both buckets in one click); `VT_PEN` is "vector draw mode") is modal like draw mode:
 `VectorMousePress/Move/Release/KeyPress` run before the tool switch. **No
 `StickData*` is stored**: `VectorStick()` re-derives the current stick on every
 use (the `PolySessionStick()` rule), and gesture state is indices
@@ -157,6 +157,18 @@ closes, a right click ends an open shape, and the next click starts a new top
 shape with the current paint (`my_pen`/`my_brush`/...). One `StoreUndo()` per
 anchor, the placing drag takes none. `EndVectorShape()` drops a one-anchor shape.
 
+`VectorPenStartOnShape()` checks the FIRST click of a pen shape (nothing being drawn)
+before any undo step. On an end anchor of a visible open shape the pen continues that
+shape: a click on the first anchor reverses the node list and swaps each node's in/out
+handles (one undo step; the picture is unchanged) so the pen always appends; a click on
+the last anchor takes no undo step. A click on any other anchor (a middle one, or one of
+a closed shape) starts a new shape as before. Otherwise, on the outline of a SELECTED
+shape (the current layer `CurrentVectorShape()`, or any shape with a selected anchor) a
+new anchor is inserted there as one undo step and becomes the only selected anchor: the
+segment is split with de Casteljau so the path is unchanged, and a straight segment
+(both inner handles null) stays straight. ponytail: the outline is hit by sampling each
+segment 32 times. No drag follows either case. `VectorPenContinuesAndSplitsShapes` pins it.
+
 The mode is entered by `DrawCmd()`'s 2nd click for `DRAWVECTOR` and by the
 panel's pen button. It is left by Esc, Enter, a double click, `SetTool()`
 (`ChangeTool`), a REAL frame change, and `ExitDrawMode()`, which calls
@@ -166,7 +178,8 @@ goes through `MoveToFrame(current)` and must keep the mode.
 
 Editing: Ctrl+press on a selected vector stick (selection tools NOTOOL/CLAMP/
 DISPLACE, or any vector tool) picks handles of selected anchors first, then the
-nearest anchor; Shift toggles. A drag moves the selected anchors (handles follow,
+nearest anchor; Shift adds it (a selected one stays selected), Alt takes a selected one
+out, leaving the rest, and neither drops the selection on a miss. A drag moves the selected anchors (handles follow,
 being offsets). A handle drag keeps a smooth anchor's opposite handle collinear
 at its own length, Alt breaks it to a corner. `StoreUndo()` is deferred to the
 drag threshold, so a click leaves no empty step. A consumed press clears
@@ -175,6 +188,13 @@ treated as the press it replaces (re-grabbing an anchor quickly is a double
 click to Qt). The lasso (`VT_LASSO`, drawn in `drawForeground()`) ends in
 `LassoSelectVectorNodes()`. Delete runs `DeleteSelectedVectorNodes()` first (one
 undo step, shapes left with < 2 anchors go), then the old vertex/stick deletion.
+
+The panel's "Sharp / Curved" button runs `ToggleVectorNodeCurves()` on the selected
+anchors as one undo step. An anchor is curved when it has a handle; a selection with
+any sharp anchor becomes all curved, otherwise all sharp. Curved handles are the
+Catmull-Rom tangent `(next - prev) / 6`, symmetric, `smooth = true`, computed in
+stick-local space (affine-invariant); an end of an open shape gets no handle on its
+missing side. Sharp clears both handles and `smooth`. Pinned by the same test.
 
 **The Transform tool** (`VT_TRANSFORM`) has no selection of its own: it works on the
 anchor selection, so a "selected shape" is a shape with every anchor selected, and

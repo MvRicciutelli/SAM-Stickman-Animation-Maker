@@ -33,10 +33,10 @@ QPointF starting_coord; //mouse click coordinateBuffer
 QPointF coord; //current mouse pos
 float   length_buffer;
 float zoom_lvl_buf;
-FrameData* stick_library_buffer; ///< libreria corrente: solo dati da Phase 2b
+FrameData* stick_library_buffer; ///< current library: data only since Phase 2b
 extern QSpinBox * onion_skin_sb;
-// start_stick_figure_rotation/start_stick_figure_scale sono diventati membri statici di
-// StickFigure (la classe che li consuma) — vedi StickFigure.h
+// start_stick_figure_rotation/start_stick_figure_scale became static members of
+// StickFigure (the class that consumes them) — see StickFigure.h
 bool translate_scene = false;
 bool rotate_scene = false;
 bool scale_scene = false;
@@ -49,8 +49,8 @@ extern qint32 W;
 extern qint32 H;
 extern QGraphicsRectItem* my_rect;
 extern QGraphicsRectItem* limit_rect;
-// play_back è un membro di MyView ora (vedi myview.h);
-// load_file: rimosso — veniva solo scritto (mymainwindow.cpp) e mai letto da nessuno
+// play_back is a MyView member now (see myview.h);
+// load_file: removed — it was only written (mymainwindow.cpp) and never read by anyone
 extern QImage * image_draw_buffer ;
 extern QString animation_path;
 extern int auto_save_interval;
@@ -103,7 +103,7 @@ MyView::MyView(QWidget *parent) : QGraphicsView(parent)
     // the shortcut consumes the key before keyPressEvent sees it, so the dispatch lives here.
     connect(new QShortcut(QKeySequence::Undo, this), &QShortcut::activated, this, [this]{ Undo(); });
     connect(new QShortcut(QKeySequence::Redo, this), &QShortcut::activated, this, [this]{ Redo(); });
-    draw_brush_stamp = MakeRoundBrush(128, draw_brush_hardness, draw_brush_roundness); // punta tonda integrata
+    draw_brush_stamp = MakeRoundBrush(128, draw_brush_hardness, draw_brush_roundness); // built-in round tip
 }
 
 /**
@@ -115,7 +115,7 @@ MyView::MyView(QWidget *parent) : QGraphicsView(parent)
  */
 MyView::~MyView()
 {
-    if (my_animation->current_frame != nullptr) // una view a cui non è mai stato dato un frame non ha nulla da staccare
+    if (my_animation->current_frame != nullptr) // a view that was never given a frame has nothing to detach
     {
         for (StickFigure* S : my_animation->CurrentFrame()->stick_figures)
         {
@@ -129,9 +129,9 @@ MyView::~MyView()
     delete my_animation;
     delete copy_stick_figure_buffer;
     delete stick_copy_buffer; // "Copy sticks" buffer, possibly null
-    qDeleteAll(multi_copy_buffer); // buffer copia della selezione multipla: puro dato
-    // creato nel costruttore, quindi liberato qui: senza questo la libreria corrente
-    // resta allocata fino alla fine del processo
+    qDeleteAll(multi_copy_buffer); // multi-selection copy buffer: pure data
+    // created in the constructor, so freed here: without this the current library
+    // stays allocated until the process ends
     delete stick_library_buffer;
 }
 
@@ -142,20 +142,20 @@ MyView::~MyView()
  */
 void MyView::SetTool(int new_tool)
 {
-    // scegliere QUALSIASI tool esce da draw mode: pennello/gomma sono sotto-strumenti del
-    // pannello draw (non passano da SetTool), quindi ogni SetTool è un tool "non-draw".
-    // Qui perché draw mode può essere stato avviato col tool ancora su NOTOOL (bottone
-    // "Edit drawing"), caso che il ramo DRAWFREEHAND di ChangeTool() non coprirebbe
+    // choosing ANY tool leaves draw mode: brush/eraser are sub-tools of the
+    // draw panel (they don't go through SetTool), so every SetTool is a "non-draw" tool.
+    // Here because draw mode may have been started with the tool still on NOTOOL (the
+    // "Edit drawing" button), a case the DRAWFREEHAND branch of ChangeTool() would not cover
     if(draw_mode)
         ExitDrawMode();
 
     ChangeTool();
 
     tool = new_tool;
-    // maniglia/bounding box appaiono sui tool di selezione, spariscono sugli altri (spec).
-    // NON ricentrare il perno: un cambio tool deve conservare la posizione della maniglia
-    // spostata dall'utente con Ctrl-trascina (una NUOVA selezione la ricentra da sé, via
-    // UpdateMultiSelectionUI(true)). Prima, passare a ROTATE/SCALE la riportava al centro.
+    // the handle/bounding box appear on the selection tools and vanish on the others (spec).
+    // do NOT re-centre the pivot: a tool change must keep the position of the handle
+    // the user moved with Ctrl-drag (a NEW selection re-centres it by itself, via
+    // UpdateMultiSelectionUI(true)). Before, switching to ROTATE/SCALE put it back at the centre.
     UpdateSelectionDecorations(false);
 }
 
@@ -238,33 +238,33 @@ void MyView::DeleteStickFigure()
     bool update_current_stick_figure =  false;
     if(my_stick_figure_widget_list->selectedItems().count() == 1 && my_animation->current_frame->stick_figures.count()>1)
     {
-        //scegli lo stickfigure selzionato dalla lista grafica
+        //pick the stickfigure selected in the graphical list
         QListWidgetItem *current = my_stick_figure_widget_list->selectedItems()[0];
-        // estrai il dato utente salvato in esso, puntatore ad uno stickfigure
+        // extract the user data stored in it, a pointer to a stickfigure
         QVariant  retrieved_data = (current->data(Qt::UserRole));
-        //riconverti il dato
+        //convert the data back
         StickFigure* cs = qvariant_cast<StickFigure*>(retrieved_data);
         update_current_stick_figure = (cs == my_animation->CurrentFrame()->CurrentStickFigure());
 
-        //distruggi l'oggetto della lista
+        //destroy the list item
         my_stick_figure_widget_list->takeItem(my_stick_figure_widget_list->row(current));
         delete current;
         // delete from the total list
         for(StickData*s:cs->stick_list){
             my_animation->CurrentFrame()->total_sticks.removeAll(s);
         }
-        //rimuovilo dal frame e distruggilo
+        //remove it from the frame and destroy it
         StickFigure* ns = my_animation->current_frame->RemoveStickFigure(cs);
-        // Ora controlliamo la nuova selezione non sia nulla e aggiorniamo la selezione
-        // dell'elenco del widget
+        // Now check that the new selection is not null and update the selection
+        // of the widget list
         if(ns!=NULL && ns!=nullptr)
         {
             my_animation->UpdateSelection(ns);
             my_stick_figure_widget_list->clearSelection();
             ns->linked_item->setSelected(true);
-            // senza questo, currentRow() poteva restare sulla riga che Qt seleziona di default dopo
-            // takeItem() invece che su quella di ns: un successivo Move Layer Up/Down avrebbe quindi
-            // spostato una riga diversa da quella su cui viene applicata la Z (my_animation->CurrentFrame()->CurrentStickFigure())
+            // without this, currentRow() could stay on the row Qt selects by default after
+            // takeItem() instead of on ns's: a following Move Layer Up/Down would then have
+            // moved a different row from the one the Z is applied to (my_animation->CurrentFrame()->CurrentStickFigure())
             my_stick_figure_widget_list->setCurrentRow(my_stick_figure_widget_list->row(ns->linked_item));
         }
         my_animation->current_frame->UpdateIcon();
@@ -277,7 +277,7 @@ void MyView::DeleteStickFigure()
     }
 
 }
-//cambia l'ordine di profondità dello stickfigure selezionato
+//change the depth order of the selected stickfigure
 /**
  * @details Keeps two things in step: the model z-order (Frame::StickfigureToTop/
  * ToBottom/AboveBelow(), which restack the sticks) and the layer list widget (the
@@ -288,13 +288,13 @@ void MyView::DeleteStickFigure()
 void MyView::MoveStickFigureZ(int increment, int mode)
 {
     if(draw_mode)
-        ExitDrawMode(); // riordinare i layer chiude la sessione di disegno
+        ExitDrawMode(); // reordering the layers closes the drawing session
     ExitVectorMode();
     if(my_stick_figure_widget_list->count() <= 1 )
         return;
-    // selezione multipla: applica lo spostamento a ogni figura selezionata, in un
-    // ordine che preserva le posizioni relative (senza scavalcamenti tra selezionati)
-    static bool multi_reentry = false; // una sola gesture alla volta esiste, come gli altri latch statici
+    // multi-selection: apply the move to every selected figure, in an
+    // order that preserves the relative positions (no selected figure jumps over another)
+    static bool multi_reentry = false; // only one gesture exists at a time, like the other static latches
     if(MultiSelectionActive() && !multi_reentry){
         multi_reentry = true;
         QList<StickFigure*> ordered = multi_selection;
@@ -302,7 +302,7 @@ void MyView::MoveStickFigureZ(int increment, int mode)
             return my_stick_figure_widget_list->row(a->linked_item)
                  < my_stick_figure_widget_list->row(b->linked_item);
         });
-        // UP e BOTTOM processano dall'alto; DOWN e TOP dal basso (vedi sopra)
+        // UP and BOTTOM process from the top; DOWN and TOP from the bottom (see above)
         if(mode == MODE_DOWN || mode == MODE_TOP)
             std::reverse(ordered.begin(), ordered.end());
         for(StickFigure *S : ordered){
@@ -313,11 +313,11 @@ void MyView::MoveStickFigureZ(int increment, int mode)
             MoveStickFigureZ(increment, mode);
         }
         multi_reentry = false;
-        UpdateMultiSelectionUI(); // ripristina le righe selezionate nella lista layer
+        UpdateMultiSelectionUI(); // restores the selected rows in the layer list
         return;
     }
     int current_index = my_stick_figure_widget_list->currentRow();
-    if(current_index < 0) // nessuna riga selezionata: item(new_idx) sotto tornerebbe nullptr
+    if(current_index < 0) // no row selected: item(new_idx) below would return nullptr
         return;
     if((current_index == 0 && increment<0)||(current_index == my_stick_figure_widget_list->count()-1 && increment>0))
         return;
@@ -333,9 +333,9 @@ void MyView::MoveStickFigureZ(int increment, int mode)
     }
     int new_idx = current_index+increment;
     QListWidgetItem *stick_figure_at_new_idx_item = my_stick_figure_widget_list->item(new_idx);
-    // estrai il dato utente salvato in esso, puntatore ad uno stickfigure
+    // extract the user data stored in it, a pointer to a stickfigure
     QVariant  retrieved_data = (stick_figure_at_new_idx_item->data(Qt::UserRole));
-    //riconverti il dato
+    //convert the data back
     StickFigure* stick_figure_at_new_idx = qvariant_cast<StickFigure*>(retrieved_data);
 
     if(new_idx<my_stick_figure_widget_list->count() && new_idx>=0 && new_idx != current_index){
@@ -355,7 +355,7 @@ void MyView::MoveStickFigureZ(int increment, int mode)
             my_animation->CurrentFrame()->StickfigureAboveBelow(my_animation->CurrentFrame()->CurrentStickFigure(),stick_figure_at_new_idx,0);
 
         }
-        //sposta nella lista grafica il layer dello stickfigure
+        //move the stickfigure's layer in the graphical list
         QListWidgetItem * item = my_stick_figure_widget_list->takeItem(current_index);
         my_stick_figure_widget_list->insertItem(new_idx,item);
         item->setSelected(true);
@@ -466,7 +466,10 @@ void MyView::mousePressEvent(QMouseEvent *event)
                         hit->view->Refresh(0);
                     }
                     else{
-                        DeselectAllVertices(); // Ctrl+click on nothing: deselect everything
+                        // Ctrl+click on nothing: deselect everything (Shift and Alt, which add
+                        // and take out, keep the selection)
+                        if(!(event->modifiers() & (Qt::ShiftModifier | Qt::AltModifier)))
+                            DeselectAllVertices();
                         // Ctrl+click/drag on the empty canvas moves the selection's pivot to the
                         // cursor (replaces the old Space, spec). Not under DISPLACE, which shows
                         // no pivot: it would move it invisibly
@@ -599,12 +602,12 @@ void MyView::mousePressEvent(QMouseEvent *event)
             }
             case(ROTATE):
             {
-                BeginSelectionRotate(); // snapshot + buffer (condiviso col pomello della transformation box)
+                BeginSelectionRotate(); // snapshot + buffer (shared with the transformation box knob)
                 break;
             }
             case(SCALE):
             {
-                BeginSelectionScale(); // snapshot + buffer (condiviso con le maniglie della transformation box)
+                BeginSelectionScale(); // snapshot + buffer (shared with the transformation box handles)
                 break;
             }
             case(MOVESCENE):
@@ -612,7 +615,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
                 StoreUndo();
                 break;
             }
-            // strumenti di sola vista: nessuno StoreUndo, il documento non cambia
+            // view-only tools: no StoreUndo, the document doesn't change
             case(PANVIEW):
             {
                 UnlockViewNavigation();
@@ -622,7 +625,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
             case(ROTATEVIEW):
             case(ZOOMVIEW):
             {
-                // perno = centro della tela, fermo nel punto dello schermo in cui è ora
+                // pivot = centre of the canvas, held at the screen point where it is now
                 UnlockViewNavigation();
                 view_pivot_screen = mapFromScene(my_rect->sceneBoundingRect().center());
                 view_rotate_offset = ViewAngle() - AngleAround(view_pivot_screen, event->pos());
@@ -694,7 +697,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
             {
                 StoreUndo();
                 ArrowSelection();
-                if(my_animation->CurrentFrame()->CurrentStick()==nullptr) break; // niente da selezionare (nessuno stick nel frame)
+                if(my_animation->CurrentFrame()->CurrentStick()==nullptr) break; // nothing to select (no stick in the frame)
                 length_buffer = my_animation->CurrentFrame()->CurrentStick()->my_line.length();
                 break;
             }
@@ -702,7 +705,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
             {
                 StoreUndo();
                 ArrowSelection();
-                if(my_animation->CurrentFrame()->CurrentStick()==nullptr) break; // niente da selezionare (nessuno stick nel frame)
+                if(my_animation->CurrentFrame()->CurrentStick()==nullptr) break; // nothing to select (no stick in the frame)
                 length_buffer = my_animation->CurrentFrame()->CurrentStick()->my_line.length();
 
                 break;
@@ -712,7 +715,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
                 StickFigure *fig = my_animation->current_frame->stick_figures.isEmpty()
                         ? nullptr : my_animation->CurrentFrame()->CurrentStickFigure();
                 float radius = PolyPickRadius();
-                // secondo click della base: chiudi la linea e apri la sessione di vertici
+                // second click of the base: close the line and open the vertex session
                 if(fig != nullptr && fig->draw_count == 1){
                     DrawCmd(&coord,(int)tool);
                     poly_session_active = true;
@@ -721,7 +724,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
                 }
                 StickData *session = PolySessionStick(StickData::POLYGON);
                 if(poly_session_active && session != nullptr){
-                    // Alt: cancella il vertice cliccato invece di aggiungerne uno
+                    // Alt: delete the clicked vertex instead of adding one
                     if(event->modifiers() & Qt::AltModifier){
                         float dist = 0;
                         int vertex_idx = session->view->SelectPolygonPoint(coord, &dist);
@@ -731,12 +734,12 @@ void MyView::mousePressEvent(QMouseEvent *event)
                         }
                         break;
                     }
-                    // click sul punto iniziale della base = chiusura del poligono
+                    // click on the starting point of the base = closing the polygon
                     if(QLineF(coord, session->my_line.p1()).length() <= radius){
                         FinishPolygonSession();
                         break;
                     }
-                    StoreUndo(); // granularità per-vertice: ogni click si annulla da solo
+                    StoreUndo(); // per-vertex granularity: each click undoes on its own
                     int insert_idx = poly_session_extends
                             ? session->view->NearestEdgeInsertIndex(coord)
                             : session->polygon_points.length();
@@ -744,8 +747,8 @@ void MyView::mousePressEvent(QMouseEvent *event)
                     session->view->AddPolygonPoint(coord, insert_idx);
                     break;
                 }
-                poly_session_active = false; // sessione orfana (undo/cambio frame): riparti pulito
-                // vertice esistente: Alt = cancella, altrimenti inizia il trascinamento
+                poly_session_active = false; // orphaned session (undo/frame change): start clean
+                // existing vertex: Alt = delete, otherwise start dragging
                 int vertex_idx = -1;
                 StickData *hit = FindPolygonVertex(coord, &vertex_idx, StickData::POLYGON);
                 if(hit != nullptr){
@@ -758,23 +761,23 @@ void MyView::mousePressEvent(QMouseEvent *event)
                     break;
                 }
                 if(event->modifiers() & Qt::ControlModifier)
-                    break; // Ctrl: il tool può solo spostare vertici esistenti
-                // click sul bordo di un poligono esistente: inserisci UN vertice e
-                // consenti di trascinarlo subito, esattamente come la multilinea (sotto).
-                // Un tempo apriva una sessione persistente (poly_session_extends): il
-                // click SUCCESSIVO dell'utente, spesso non inteso come "aggiungi vertice",
-                // ne inseriva un secondo di nascosto -> "due vertici per click" solo sui
-                // poligoni (Group D). Niente sessione = un vertice per click, come le multilinee.
+                    break; // Ctrl: the tool can only move existing vertices
+                // click on the edge of an existing polygon: insert ONE vertex and
+                // let it be dragged right away, exactly like the multiline (below).
+                // It used to open a persistent session (poly_session_extends): the user's
+                // NEXT click, often not meant as "add vertex",
+                // silently inserted a second one -> "two vertices per click" on polygons
+                // only (Group D). No session = one vertex per click, like the multilines.
                 int insert_idx = -1;
                 StickData *edge_hit = FindPolygonEdge(coord, &insert_idx, StickData::POLYGON);
                 if(edge_hit != nullptr){
                     StoreUndo();
                     my_animation->UpdateSelection(edge_hit);
                     edge_hit->view->AddPolygonPoint(coord, insert_idx);
-                    poly_drag_idx = insert_idx; // il trascinamento aggiusta subito la posizione
+                    poly_drag_idx = insert_idx; // the drag adjusts the position right away
                     break;
                 }
-                // altrimenti: primo click di un nuovo poligono
+                // otherwise: first click of a new polygon
                 DrawCmd(&coord,(int)tool);
                 break;
             }
@@ -783,7 +786,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
                 StickFigure *fig = my_animation->current_frame->stick_figures.isEmpty()
                         ? nullptr : my_animation->CurrentFrame()->CurrentStickFigure();
                 float radius = PolyPickRadius();
-                // secondo click: chiude la base (2 vertici) e apre la sessione di estensione
+                // second click: closes the base (2 vertices) and opens the extension session
                 if(fig != nullptr && fig->draw_count == 1){
                     DrawCmd(&coord,(int)tool);
                     poly_session_active = true;
@@ -796,24 +799,24 @@ void MyView::mousePressEvent(QMouseEvent *event)
                 if(poly_session_active && session != nullptr){
                     int last = session->view->SceneVertices().length() - 1;
                     if(poly_branch_from >= last)
-                        poly_branch_from = -1; // indice non più valido: torna alla linea principale
+                        poly_branch_from = -1; // index no longer valid: back to the main line
                     float dist = 0;
                     int vertex_idx = session->view->SelectPolygonPoint(coord, &dist);
-                    // Alt+click su una maniglia: cancella il vertice (con i rami che ne partono)
-                    // anche a sessione aperta, come fuori sessione. Gli indici cambiano, quindi
-                    // il prossimo punto riprende dalla linea principale
+                    // Alt+click on a handle: delete the vertex (with the branches leaving it)
+                    // even with the session open, as outside a session. The indices change, so
+                    // the next point resumes from the main line
                     if(event->modifiers() & Qt::AltModifier){
                         if(vertex_idx >= 0 && dist <= radius){
                             StoreUndo();
                             session->view->ClearPolygonPreview();
                             poly_branch_from = -1;
                             if(!DeleteVertex(session, vertex_idx))
-                                FinishPolygonSession(); // lo stick intero non c'è più
+                                FinishPolygonSession(); // the whole stick is gone
                         }
                         break;
                     }
-                    // click su una maniglia: il prossimo punto parte da lì (P2 = riprendi la
-                    // linea principale). Nessuna modifica ai dati, quindi niente undo
+                    // click on a handle: the next point starts from there (P2 = resume the
+                    // main line). No change to the data, so no undo
                     if(vertex_idx >= 0 && dist <= radius){
                         poly_branch_from = vertex_idx == last ? -1 : vertex_idx;
                         session->view->SetPolygonPreview(coord, last + 1, poly_branch_from,
@@ -822,17 +825,17 @@ void MyView::mousePressEvent(QMouseEvent *event)
                         break;
                     }
                     session->view->ClearPolygonPreview();
-                    StoreUndo(); // granularità per-vertice, come per il poligono
+                    StoreUndo(); // per-vertex granularity, as for the polygon
                     if(poly_branch_from < 0)
                         session->view->AppendMultilineVertex(coord, my_vertex_cap);
-                    else // il ramo prosegue dal vertice appena aggiunto
+                    else // the branch continues from the vertex just added
                         poly_branch_from = session->view->BranchMultilineVertex(poly_branch_from, coord);
                     break;
                 }
-                poly_session_active = false; // sessione orfana: riparti pulito
-                // vertice esistente: Alt = cancella (sotto i 2 vertici sparisce lo stick
-                // intero), altrimenti trascina — o, se il mouse si rilascia senza trascinare,
-                // riapre la sessione per un ramo da quel vertice (mouseReleaseEvent)
+                poly_session_active = false; // orphaned session: start clean
+                // existing vertex: Alt = delete (below 2 vertices the whole stick
+                // disappears), otherwise drag — or, if the mouse is released without dragging,
+                // reopen the session for a branch from that vertex (mouseReleaseEvent)
                 int vertex_idx = -1;
                 StickData *hit = FindPolygonVertex(coord, &vertex_idx, StickData::MULTILINE);
                 if(hit != nullptr){
@@ -841,8 +844,8 @@ void MyView::mousePressEvent(QMouseEvent *event)
                         DeleteVertex(hit, vertex_idx);
                     }
                     else{
-                        // lo snapshot aspetta il primo vero trascinamento (mouseMoveEvent):
-                        // un semplice click non deve lasciare un passo di undo vuoto
+                        // the snapshot waits for the first real drag (mouseMoveEvent):
+                        // a plain click must not leave an empty undo step
                         my_animation->UpdateSelection(hit);
                         poly_drag_idx = vertex_idx;
                         poly_drag_needs_undo = true;
@@ -850,8 +853,8 @@ void MyView::mousePressEvent(QMouseEvent *event)
                     }
                     break;
                 }
-                // vicino a un segmento esistente (o con Ctrl): nuovo punto al CENTRO del
-                // segmento più vicino, poi il drag lo posiziona
+                // near an existing segment (or with Ctrl): new point at the CENTRE of the
+                // nearest segment, then the drag positions it
                 int insert_idx = -1;
                 StickData *edge_hit = FindPolygonEdge(coord, &insert_idx, StickData::MULTILINE);
                 if(edge_hit != nullptr){
@@ -860,12 +863,12 @@ void MyView::mousePressEvent(QMouseEvent *event)
                     QPolygonF verts = edge_hit->view->SceneVertices();
                     QPointF mid = (verts[edge_hit->MultilineParents()[insert_idx]] + verts[insert_idx]) / 2.0;
                     edge_hit->view->AddPolygonPoint(mid, insert_idx);
-                    poly_drag_idx = insert_idx; // il trascinamento aggiusta subito la posizione
+                    poly_drag_idx = insert_idx; // the drag adjusts the position right away
                     break;
                 }
                 if(event->modifiers() & Qt::ControlModifier)
-                    break; // Ctrl: solo editing di multilinee esistenti, niente nuovo disegno
-                // altrimenti: primo click di una nuova multilinea
+                    break; // Ctrl: only editing of existing multilines, no new drawing
+                // otherwise: first click of a new multiline
                 DrawCmd(&coord,(int)tool);
                 break;
             }
@@ -877,25 +880,25 @@ void MyView::mousePressEvent(QMouseEvent *event)
 
                 StickData *pending = IkPendingStart();
                 if(ik_drawing && pending != nullptr){
-                    // secondo click: valida il target e RI-DERIVA lo start dal ramo del
-                    // target (FindIkTargetCandidate/ResolveIkStartForTarget). Il primo
-                    // click sceglie uno start provvisorio, ma se piu' arti condividono
-                    // l'ancora non puo' sapere quale intende l'utente: lo decide il target.
+                    // second click: validate the target and RE-DERIVE the start from the target's
+                    // branch (FindIkTargetCandidate/ResolveIkStartForTarget). The first
+                    // click picks a provisional start, but if several limbs share
+                    // the anchor it can't know which one the user means: the target decides.
                     StickData *target = FindIkTargetCandidate(fig, pending, coord);
                     StickData *start  = target != nullptr
                             ? ResolveIkStartForTarget(target, pending->my_line.p1(), pending)
                             : nullptr;
                     if(target != nullptr && start != nullptr){
-                        // NIENTE StoreUndo qui: la creazione catena è UN gesto a due click
-                        // il cui snapshot pre-gesto è già stato preso al primo click (sotto,
-                        // prima di IK_START). Un secondo snapshot spezzava l'annullamento in
-                        // due: un solo Undo disfaceva il commit ma lasciava lo start bloccato
-                        // su IK_START (e il target su un ruolo orfano), così ne' lo start ne'
-                        // il target si potevano riselezionare per una nuova catena. Con un
-                        // unico comando, Undo riporta tutto a IK_NONE in un colpo.
+                        // NO StoreUndo here: creating a chain is ONE two-click gesture
+                        // whose pre-gesture snapshot was already taken at the first click (below,
+                        // before IK_START). A second snapshot split the undo in
+                        // two: a single Undo reverted the commit but left the start stuck
+                        // on IK_START (and the target on an orphaned role), so neither the start nor
+                        // the target could be reselected for a new chain. With a
+                        // single command, Undo brings everything back to IK_NONE in one go.
                         if(start != pending){
-                            // lo start giusto è su un ramo diverso che condivide l'ancora:
-                            // libera il provvisorio (ramo sbagliato) e promuovi quello reale
+                            // the right start is on a different branch that shares the anchor:
+                            // release the provisional one (wrong branch) and promote the real one
                             pending->ik_role = StickData::IK_NONE;
                             if(pending->view) pending->view->Refresh(0);
                             start->ik_role = StickData::IK_START;
@@ -903,16 +906,16 @@ void MyView::mousePressEvent(QMouseEvent *event)
                         }
                         CommitIkChain(start, target);
                         ik_drawing = false;
-                        ClearIkPreviewItems(); // NON CancelIkDrawing(): il ruolo appena
-                                               // commesso non va disfatto
+                        ClearIkPreviewItems(); // NOT CancelIkDrawing(): the role just
+                                               // committed must not be undone
                     }
-                    // target non valido: nessuna mutazione, resta in attesa di un altro click
+                    // invalid target: no mutation, keep waiting for another click
                     break;
                 }
 
-                // non in sessione: click su un target esistente lo accende/spegne (Alt =
-                // cancella l'intera catena), altrimenti click su uno start idoneo apre
-                // una nuova sessione di creazione
+                // not in a session: a click on an existing target toggles it on/off (Alt =
+                // delete the whole chain), otherwise a click on a suitable start opens
+                // a new creation session
                 StickData *existing_target = FindIkTargetHandle(fig, coord);
                 if(existing_target != nullptr){
                     StoreUndo();
@@ -925,21 +928,21 @@ void MyView::mousePressEvent(QMouseEvent *event)
                 StickData *candidate = FindIkStartCandidate(fig, coord);
                 if(candidate != nullptr){
                     StoreUndo();
-                    candidate->ik_role = StickData::IK_START; // spec: il primo click commette subito il ruolo
+                    candidate->ik_role = StickData::IK_START; // spec: the first click commits the role right away
                     my_animation->UpdateSelection(candidate);
                     if(candidate->view)
                         candidate->view->Refresh(0);
                     ik_drawing = true;
                     QPen preview_line_pen(Qt::black, 1, Qt::DotLine);
-                    preview_line_pen.setCosmetic(true); // spessore costante a ogni zoom
+                    preview_line_pen.setCosmetic(true); // constant thickness at every zoom
                     ik_preview_line = new QGraphicsLineItem(QLineF(candidate->my_line.p1(), coord));
                     ik_preview_line->setPen(preview_line_pen);
                     ik_preview_line->setZValue(1000);
                     scene()->addItem(ik_preview_line);
-                    // stessa croce del marcatore persistente (drawForeground): dimensione in
-                    // unità di scena legata a handle_size e penna COSMETICA, così è ben
-                    // visibile a ogni zoom. Prima era 10px con penna non-cosmetica da 1 unità:
-                    // su una scena grande a zoom-adatta risultava quasi invisibile (bug Group D).
+                    // same cross as the persistent marker (drawForeground): size in
+                    // scene units tied to handle_size and a COSMETIC pen, so it is clearly
+                    // visible at every zoom. It used to be 10px with a non-cosmetic 1-unit pen:
+                    // on a large scene at fit-zoom it was almost invisible (Group D bug).
                     float s = handle_size * 1.1f;
                     QPainterPath cross_path;
                     cross_path.moveTo(-s,-s); cross_path.lineTo(s,s);
@@ -953,12 +956,12 @@ void MyView::mousePressEvent(QMouseEvent *event)
                     scene()->addItem(ik_preview_cross);
                     break;
                 }
-                // altrimenti: click a vuoto, scartato (spec)
+                // otherwise: click on empty space, discarded (spec)
                 break;
             }
     }
     }
-    UpdateIkOverlay(); // un click DRAW_IK può creare/attivare/cancellare una catena
+    UpdateIkOverlay(); // a DRAW_IK click can create/activate/delete a chain
     //QGraphicsView::mousePressEvent(event);
 }
 
@@ -971,11 +974,11 @@ void MyView::mousePressEvent(QMouseEvent *event)
  */
 void MyView::keyPressEvent(QKeyEvent *event)
 {
-    // draw mode: Esc/Enter escono dalla sessione. Ctrl+Z/Y sono gestiti dai QShortcut del
-    // costruttore (che consumano il tasto prima di qui) e pilotano l'undo locale di sessione
+    // draw mode: Esc/Enter leave the session. Ctrl+Z/Y are handled by the constructor's
+    // QShortcuts (which consume the key before it gets here) and drive the session-local undo
     if(draw_mode){
         if((event->modifiers() & Qt::ControlModifier) && event->key()==Qt::Key_D){
-            DiscardPixelSelection(); // scarta la selezione pixel (spec)
+            DiscardPixelSelection(); // discard the pixel selection (spec)
             return;
         }
         if(event->key()==Qt::Key_Escape || event->key()==Qt::Key_Return || event->key()==Qt::Key_Enter)
@@ -992,10 +995,10 @@ void MyView::keyPressEvent(QKeyEvent *event)
             // selected vector anchors go first, then Ctrl-selected vertices: the stick only after them
             if(DeleteSelectedVectorNodes())
                 break;
-            // vertici selezionati con Ctrl: Canc cancella quelli, non lo stick
+            // vertices selected with Ctrl: Del deletes those, not the stick
             if(DeleteSelectedVertices())
                 break;
-            // con una selezione multipla il tasto Canc elimina tutte le figure selezionate
+            // with a multi-selection the Del key deletes all the selected figures
             if(MultiSelectionActive()){
                 DeleteMultiSelection();
                 break;
@@ -1003,31 +1006,31 @@ void MyView::keyPressEvent(QKeyEvent *event)
             if(scene()->selectedItems().count() == 1 && my_animation->CurrentFrame()->CurrentStickFigure() != nullptr
                     && my_animation->CurrentFrame()->CurrentStickFigure()->draw_count==0)
             {
-                StickGraphicsItem *item = (StickGraphicsItem*)scene()->selectedItems()[0];//oggetto selezionato nella scnea
+                StickGraphicsItem *item = (StickGraphicsItem*)scene()->selectedItems()[0];//object selected in the scene
                 StickData *item_data = item->data;
-                int idx = my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.indexOf(item_data);        // indice corrispondente nella lista ordinata degli oggetti
-                // l'item selezionato nella scena può non appartenere allo stickfigure corrente:
-                // senza questo controllo stick_list[-1] legge fuori dai limiti (l'undo va preso
-                // DOPO, così un Delete a vuoto non lascia uno snapshot senza modifica sullo stack)
+                int idx = my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.indexOf(item_data);        // matching index in the ordered list of objects
+                // the item selected in the scene may not belong to the current stickfigure:
+                // without this check stick_list[-1] reads out of bounds (the undo must be taken
+                // AFTER, so an empty Delete doesn't leave a snapshot with no change on the stack)
                 if(idx < 0)
                     break;
                 StoreUndo();
-                // se si tratta dello stick master e ci sono altri stickfigure, cancella l'intero stickfigure
+                // if it is the master stick and there are other stickfigures, delete the whole stickfigure
                 if(my_animation->CurrentFrame()->CurrentStickFigure()->stick_list[idx] == my_animation->CurrentFrame()->CurrentStickFigure()->master_stick &&
                         my_animation->current_frame->stick_figures.count()>1)
                 {
-                    //estrai dalla lista grafica l'elemento selezionato collegato allo stickfigure
+                    //take from the graphical list the selected item linked to the stickfigure
                     QListWidgetItem * associated_item = my_animation->CurrentFrame()->CurrentStickFigure()->linked_item;
                     my_stick_figure_widget_list->clearSelection();
                     associated_item->setSelected(true);
-                    //cancella lo stickfigure
+                    //delete the stickfigure
                     DeleteStickFigure();
                 }
-                //altrimenti cancella il singolo stick e aggiorna l'iconea del livello
+                //otherwise delete the single stick and update the layer icon
                 else if(my_stick_figure_widget_list->selectedItems().count()==1)
                 {
                     StickData* next_current_stick = my_animation->CurrentFrame()->CurrentStick()->parent;
-                    // questa lista serve per rimuovere dalla totalStick tutti gli stick cancellati
+                    // this list is used to remove all the deleted sticks from total_sticks
                     QList<StickData*> old_stick_list = my_animation->CurrentFrame()->CurrentStickFigure()->stick_list;
                     my_animation->CurrentFrame()->CurrentStickFigure()->DeleteStick( idx);
                     QList<StickData*> survivors = my_animation->CurrentFrame()->CurrentStickFigure()->stick_list;
@@ -1042,7 +1045,7 @@ void MyView::keyPressEvent(QKeyEvent *event)
                     my_animation->CurrentFrame()->CurrentStick() = next_current_stick;
                 }
                 my_animation->current_frame->UpdateIcon();
-                // distruggi l'oggetto
+                // destroy the object
                 qDebug("item deleted");
             }
             break;
@@ -1050,15 +1053,15 @@ void MyView::keyPressEvent(QKeyEvent *event)
         case(Qt::Key_Escape):
         {
             if(MultiSelectionActive()){
-                ClearMultiSelection(); // Esc scioglie la selezione multipla (spec)
+                ClearMultiSelection(); // Esc dissolves the multi-selection (spec)
                 break;
             }
             switch(tool)
             {
                 case(DRAW):
                 case DRAWCIRCLE:
-                case DRAWFREEHAND: // Esc prima del 2° click scarta l'anteprima gialla a metà
-                case DRAWTEXT:     // idem per il testo (dopo il 2° click c'è il prompt, non un Esc)
+                case DRAWFREEHAND: // Esc before the 2nd click discards the half-drawn yellow preview
+                case DRAWTEXT:     // same for text (after the 2nd click there is the prompt, not an Esc)
                 case DRAWVECTOR:   // before the 2nd click; after it, Esc ends vector mode (VectorKeyPress())
                 {
                     if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr &&
@@ -1070,8 +1073,8 @@ void MyView::keyPressEvent(QKeyEvent *event)
                 }
                 case(DRAWPOLY):
                 {
-                    // prima del secondo click della base Esc annulla come per gli altri
-                    // DRAW*; a base completata termina soltanto la sessione di vertici
+                    // before the second click of the base Esc cancels as for the other
+                    // DRAW* tools; once the base is complete it only ends the vertex session
                     if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr &&
                             my_animation->CurrentFrame()->CurrentStickFigure()->draw_count==1)
                     {
@@ -1086,8 +1089,8 @@ void MyView::keyPressEvent(QKeyEvent *event)
                 }
                 case(DRAWMULTI):
                 {
-                    // per la multilinea Esc ANNULLA il disegno (spec): la base a metà si
-                    // scarta come per i DRAW*, uno stick già committato viene eliminato
+                    // for the multiline Esc CANCELS the drawing (spec): the half-drawn base is
+                    // discarded as for the DRAW* tools, an already committed stick is deleted
                     if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr &&
                             my_animation->CurrentFrame()->CurrentStickFigure()->draw_count==1)
                     {
@@ -1096,8 +1099,8 @@ void MyView::keyPressEvent(QKeyEvent *event)
                     }
                     else if(poly_session_active)
                     {
-                        // una sessione riaperta su una linea già finita (click su una
-                        // maniglia) aggiunge solo rami: Esc la chiude, non butta la linea
+                        // a session reopened on an already finished line (click on a
+                        // handle) only adds branches: Esc closes it, it doesn't throw the line away
                         StickData *session = poly_session_resumed ? nullptr
                                                                   : PolySessionStick(StickData::MULTILINE);
                         FinishPolygonSession();
@@ -1126,13 +1129,13 @@ void MyView::keyPressEvent(QKeyEvent *event)
         }
         case(Qt::Key_Space):
         {
-            // Spazio tenuto premuto: trascina la selezione (una o più figure) seguendo il
-            // cursore, come se la si prendesse dallo stick master (spec). Un'unica voce di
-            // undo per il gesto; il movimento avviene in mouseMoveEvent finché è premuto.
+            // Space held down: drags the selection (one or more figures) following the
+            // cursor, as if it were grabbed by the master stick (spec). A single undo
+            // entry for the gesture; the movement happens in mouseMoveEvent while it is held.
             if(ToolUsesSelection() && HasActiveSelection() && !event->isAutoRepeat()){
                 StoreUndo();
                 space_dragging = true;
-                starting_coord = coord; // `coord` è aggiornata da ogni mouseMoveEvent
+                starting_coord = coord; // `coord` is updated by every mouseMoveEvent
             }
             break;
         }
@@ -1175,7 +1178,7 @@ void MyView::tabletEvent(QTabletEvent *event)
 {
     if(draw_mode)
         draw_pressure_val = qBound(0.0, event->pressure(), 1.0);
-    event->ignore(); // non accettato di proposito: Qt sintetizza il QMouseEvent che disegna
+    event->ignore(); // deliberately not accepted: Qt synthesizes the QMouseEvent that draws
 }
 
 /**
@@ -1242,8 +1245,8 @@ void MyView::DrawCmd(QPointF* point, int mode)
 
             my_animation->CurrentFrame()->CurrentStickFigure()->StartDrawing(point, my_pen, my_brush);
             StickData *new_stick = my_animation->CurrentFrame()->CurrentStick();
-            // il costruttore di stick imposta già new_stick->view: la scena vera e propria
-            // riceve l'elemento dentro AttachView(), senza una addItem() separata
+            // the stick constructor already sets new_stick->view: the scene proper
+            // receives the item inside AttachView(), without a separate addItem()
             FramePresenter::AttachView(new_stick, scene());
             if(!my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.isEmpty()){
                new_stick->view->selected = false;
@@ -1253,10 +1256,10 @@ void MyView::DrawCmd(QPointF* point, int mode)
             new_stick->hard_top = hard_top_check->isChecked();
             new_stick->hard_bottom = hard_bottom_check->isChecked();
             new_stick->pen = my_pen;
-            new_stick->brush_follows_stick = my_brush_follows_stick; // come pen/brush: si eredita dallo stato corrente
+            new_stick->brush_follows_stick = my_brush_follows_stick; // like pen/brush: inherited from the current state
             new_stick->texture_tiled = my_texture_tiled;
             new_stick->stroke_brush = my_stroke_brush;
-            // se stiamo usando il tool per generare cerchi cambiamo il tipo dello stick
+            // if we are using the tool to generate circles we change the stick's type
             if(mode == DRAWCIRCLE){
                 new_stick->stick_type = StickData::CIRCLE;
             }
@@ -1288,7 +1291,7 @@ void MyView::DrawCmd(QPointF* point, int mode)
             }
             else if(mode == DRAWMULTI){
                 new_stick->stick_type = StickData::MULTILINE;
-                // larghezza/curvatura per i due estremi iniziali (indici virtuali 0 e 1)
+                // width/curvature for the two initial endpoints (virtual indices 0 and 1)
                 new_stick->vertex_widths << my_pen.widthF() << my_pen.widthF();
                 new_stick->vertex_curvatures << 0.0f << 0.0f;
                 new_stick->vertex_caps << my_vertex_cap << my_vertex_cap;
@@ -1299,15 +1302,15 @@ void MyView::DrawCmd(QPointF* point, int mode)
                 new_stick->stick_type = StickData::VECTOR;
             }
             else if(mode == DRAWTEXT){
-                // il testo arriva al 3° passo (dopo il 2° click, sotto): finché è vuoto lo
-                // stick dipinge la sua spina, che è esattamente l'anteprima del gesto
+                // the text comes at the 3rd step (after the 2nd click, below): while it is empty
+                // the stick paints its spine, which is exactly the preview of the gesture
                 new_stick->stick_type = StickData::TEXT;
             }
             else if(mode == DRAWFREEHAND){
-                // durante il gesto a 2 click lo stick resta una LINE dipinta in GIALLO: è
-                // solo un'anteprima per vedere dove lo si sta piazzando, come un normale
-                // stick. Al secondo click diventa un FREEHAND invisibile (vedi sotto) prima
-                // di entrare in draw mode; nessun placeholder immagine serve finché è LINE
+                // during the 2-click gesture the stick stays a LINE painted in YELLOW: it is
+                // only a preview to see where it is being placed, like a normal
+                // stick. At the second click it becomes an invisible FREEHAND (see below) before
+                // entering draw mode; no image placeholder is needed while it is a LINE
                 QPen preview_pen(Qt::yellow);
                 preview_pen.setWidth(qMax(2, my_pen.width()));
                 preview_pen.setCapStyle(Qt::RoundCap);
@@ -1321,21 +1324,21 @@ void MyView::DrawCmd(QPointF* point, int mode)
             my_animation->CurrentFrame()->CurrentStickFigure()->EndDrawing(point);
             scene()->addItem(my_animation->CurrentFrame()->CurrentStick()->view->stick_handle[0]);
             scene()->addItem(my_animation->CurrentFrame()->CurrentStick()->view->stick_handle[1]);
-            // se questo è il primo stick della stickfigure (= il suo master), colora la maniglia
-            // di verde: StartDrawing() non può farlo da sé (non esiste ancora una view a quel punto,
-            // vedi il suo commento), quindi tocca a questa chiamata subito dopo AttachView()
+            // if this is the first stick of the stickfigure (= its master), colour the handle
+            // green: StartDrawing() can't do it by itself (no view exists yet at that point,
+            // see its comment), so it falls to this call right after AttachView()
             if(my_animation->CurrentFrame()->CurrentStick() == my_animation->CurrentFrame()->CurrentStickFigure()->master_stick){
                 my_animation->CurrentFrame()->CurrentStick()->view->stick_handle[0]->setBrush(QBrush(Qt::green));
                 my_animation->CurrentFrame()->CurrentStick()->view->stick_handle[0]->setZValue(101);
             }
             qDebug("Draw 2 = %f, %f",point->x(),point->y());
-            // 3° passo del testo: inserimento del contenuto. Va PRIMA di UpdateIcon/
-            // UpdateTab/UpdateSelection qui sotto: sono loro a rispecchiare lo stick nel
-            // pannello (Animation::UpdateSliders -> refresh_text_panel) e a ridisegnare
-            // l'anteprima del frame, quindi il testo deve già esserci. Annullare (o
-            // confermare a vuoto) scarta lo stick appena creato, come un Esc a metà
-            // disegno: lo StoreUndo() del 1° click copre già l'intera operazione, e
-            // DeleteWholeStick() aggiorna da sé le icone di figura e frame
+            // 3rd step of the text: entering the content. It must come BEFORE UpdateIcon/
+            // UpdateTab/UpdateSelection below: they are what mirrors the stick into the
+            // panel (Animation::UpdateSliders -> refresh_text_panel) and redraws
+            // the frame preview, so the text must already be there. Cancelling (or
+            // confirming empty) discards the stick just created, like an Esc mid-
+            // drawing: the 1st click's StoreUndo() already covers the whole operation, and
+            // DeleteWholeStick() updates the figure and frame icons by itself
             if(mode == DRAWTEXT){
                 StickData *ts = my_animation->CurrentFrame()->CurrentStick();
                 bool confirmed = false;
@@ -1355,10 +1358,10 @@ void MyView::DrawCmd(QPointF* point, int mode)
             my_animation->current_frame->total_sticks.append(my_animation->CurrentFrame()->CurrentStick());
             my_animation->UpdateSelection(my_animation->CurrentFrame()->CurrentStick());
 
-            // il freehand entra in draw mode subito dopo il secondo click (spec). Ora che
-            // la posizione è fissata, l'anteprima gialla LINE diventa un FREEHAND invisibile
-            // (NoPen); EnterDrawMode() gli assegna il canvas. La creazione ha già fatto
-            // StoreUndo() sopra, quindi non ne serve un altro
+            // the freehand enters draw mode right after the second click (spec). Now that
+            // the position is fixed, the yellow LINE preview becomes an invisible FREEHAND
+            // (NoPen); EnterDrawMode() assigns it the canvas. The creation already did
+            // StoreUndo() above, so another one isn't needed
             // the vector stick enters vector draw mode right after its 2nd click (spec); the 1st
             // click's StoreUndo() covers the stick, every anchor then takes its own step
             if(mode == DRAWVECTOR)
@@ -1418,9 +1421,9 @@ QImage MyView::MakeRoundBrush(int size, int hardness, int roundness)
     mask.fill(Qt::transparent);
     QRadialGradient g(size/2.0, size/2.0, size/2.0);
     g.setColorAt(0.0, QColor(0,0,0,255));
-    // il core deve stare SOTTO 1.0: setColorAt() sostituisce uno stop alla stessa posizione,
-    // quindi a durezza 100 mangerebbe lo stop trasparente del bordo e darebbe la punta più
-    // morbida possibile invece della più dura. A 0.99 la sfumatura è larga meno di un pixel.
+    // the core must sit BELOW 1.0: setColorAt() replaces a stop at the same position,
+    // so at hardness 100 it would eat the transparent edge stop and give the softest
+    // possible tip instead of the hardest. At 0.99 the feather is less than a pixel wide.
     g.setColorAt(qMin(0.99, qBound(0, hardness, 100)/100.0), QColor(0,0,0,255));
     g.setColorAt(1.0, QColor(0,0,0,0));
     QPainter p(&mask);
@@ -1432,9 +1435,9 @@ QImage MyView::MakeRoundBrush(int size, int hardness, int roundness)
     p.translate(-size/2.0, -size/2.0);
     p.drawEllipse(0, 0, size, size);
     p.end();
-    // stessa forma delle punte importate (MaskToStamp): di un timbro conta solo l'alpha,
-    // quindi tenerlo a 8 bit invece che a 32 — qui è poca roba (128x128), ma è il formato
-    // che ogni consumatore si aspetta di poter ricevere indifferentemente
+    // same shape as the imported tips (MaskToStamp): only a stamp's alpha matters,
+    // so keep it at 8 bit instead of 32 — here it is little data (128x128), but it is the format
+    // every consumer expects to be able to receive interchangeably
     return mask.convertToFormat(QImage::Format_Alpha8);
 }
 
@@ -1509,7 +1512,7 @@ void MyView::StampBrush(const QPointF &canvas_px)
     p.setOpacity(dab_opacity);
     if(draw_eraser)
         p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
-    // il dab ruotato è più grande di s: centralo sulle sue dimensioni effettive, non su s
+    // the rotated dab is larger than s: centre it on its actual dimensions, not on s
     p.drawImage(QPointF(canvas_px.x() - dab.width()/2.0, canvas_px.y() - dab.height()/2.0), dab);
     p.end();
 }
@@ -1538,7 +1541,7 @@ void MyView::PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_sce
     // spacing tracks the actual (pressured) dab size, scaled by the user's spacing percentage
     double spacing = qMax(1.0, draw_brush_size * size_factor * (draw_brush_spacing / 100.0));
     if(dist <= 0.0){
-        StampBrush(a);          // inizio pennellata (click singolo): primo dab, la corsa riparte da qui
+        StampBrush(a);          // stroke start (single click): first dab, the run restarts from here
         draw_dab_carry = 0.0;
     } else {
         for(double d = spacing - draw_dab_carry; d <= dist; d += spacing)
@@ -1568,10 +1571,15 @@ void MyView::PushDrawUndo()
         draw_undo.removeLast();
     draw_undo.append(*draw_canvas);
     while(draw_undo.count() > MAXDRAWUNDO)
-        draw_undo.removeFirst(); // scartando dalla testa l'indice corrente scala con la lista
+        draw_undo.removeFirst(); // when dropping from the head the current index shifts along with the list
     draw_undo_idx = draw_undo.count() - 1;
 }
 
+/**
+ * @brief Steps the draw-session-local (image-snapshot) undo chain back by one stroke.
+ * @details Restores the canvas from draw_undo[] and repaints the stick. Reached only through
+ * Undo() in draw mode; it never touches undo_stack. No-op at the oldest snapshot.
+ */
 void MyView::DrawStrokeUndo()
 {
     if(!draw_canvas || draw_undo_idx <= 0)
@@ -1584,6 +1592,11 @@ void MyView::DrawStrokeUndo()
     }
 }
 
+/**
+ * @brief Steps the draw-session-local undo chain forward by one stroke.
+ * @details Counterpart of DrawStrokeUndo(), reached through Redo() in draw mode. No-op once the
+ * newest snapshot is current (PushDrawUndo() drops the redo tail on every new stroke).
+ */
 void MyView::DrawStrokeRedo()
 {
     if(!draw_canvas || draw_undo_idx + 1 >= draw_undo.count())
@@ -1601,10 +1614,15 @@ void MyView::DrawStrokeRedo()
 /// drive the global frame undo_stack. Routing both triggers here keeps them consistent.
 void MyView::Undo()
 {
-    if(draw_mode){ CommitPixelFloat(); DrawStrokeUndo(); } // fondi un'eventuale trasformazione in corso
+    if(draw_mode){ CommitPixelFloat(); DrawStrokeUndo(); } // commit any transformation in progress
     else          undo_stack.undo();
 }
 
+/**
+ * @brief Redo entry point for every UI trigger (toolbar button, Ctrl+Y).
+ * @details Mirror of Undo(): in draw mode it commits a floating pixel selection and steps the
+ * stroke chain, otherwise it redoes on the global undo_stack.
+ */
 void MyView::Redo()
 {
     if(draw_mode){ CommitPixelFloat(); DrawStrokeRedo(); }
@@ -1651,7 +1669,7 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
     QTransform old_disp; // old appearance's centred local pixel -> scene transform
     if(stick->view && stick->stick_img && !stick->stick_img->isNull()){
         old_scaled = stick->view->CalcImg();
-        old_disp = stick->ShapeFrame(); // spina + Stick Transform, come in paint()
+        old_disp = stick->ShapeFrame(); // spine + Stick Transform, as in paint()
         old_disp.rotate(stick->img_angle_offset);
         old_disp.translate(stick->img_offset.x(), stick->img_offset.y());
     }
@@ -1726,13 +1744,13 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
     stick->stick_img = canvas;
     draw_canvas = canvas;
 
-    // lo stick resta nel suo frame reale (scheletro dei 2 click); il canvas DxD copre il
-    // viewport ruotato di theta e centrato su vc
+    // the stick stays in its real frame (2-click skeleton); the DxD canvas covers the
+    // viewport rotated by theta and centred on vc
     stick->img_angle_offset = 0;
     stick->img_offset = img_offset;
-    stick->img_w_scale = float(D * draw_px_scale / len); // CalcImg: il canvas DxD a draw_px_scale unità per pixel
+    stick->img_w_scale = float(D * draw_px_scale / len); // CalcImg: the DxD canvas at draw_px_scale units per pixel
     stick->img_h_scale = float(D * draw_px_scale / len);
-    // la trasformazione locale è appena stata cotta nei pixel (old_disp); le globali no (sopra)
+    // the local transform has just been baked into the pixels (old_disp); the global ones haven't (above)
     stick->local_xf = StickXf();
 
     if(stick->view){
@@ -1743,15 +1761,15 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
     }
     draw_undo.clear();
     draw_undo_idx = -1;
-    PushDrawUndo(); // stato iniziale della sessione
+    PushDrawUndo(); // initial state of the session
     draw_stroking = false;
-    draw_eraser = false; // pennello selezionato all'ingresso (spec)
+    draw_eraser = false; // brush selected on entry (spec)
     draw_tool = DT_BRUSH;
-    draw_selection = QRegion(); draw_sel_bounds = QRect(); // nessuna selezione pixel all'ingresso
+    draw_selection = QRegion(); draw_sel_bounds = QRect(); // no pixel selection on entry
     draw_float_active = false; draw_float = QImage(); draw_sel_gesture = 0;
     draw_sel_t = QPointF(); draw_sel_r = 0; draw_sel_sx = draw_sel_sy = 1;
     draw_mode = true;
-    // mostra subito il pannello draw mode e rendilo il tab attivo (spec)
+    // show the draw mode panel right away and make it the active tab (spec)
     my_animation->UpdateTab(StickData::FREEHAND);
     if(my_tab_widget && advanced_draw_tab)
         my_tab_widget->setCurrentWidget(advanced_draw_tab);
@@ -1924,7 +1942,7 @@ int MyView::HitPixelHandle(const QPointF &scene) const
         return -1;
     QPointF handles[9];
     GizmoHandles(handles);
-    float radius = const_cast<MyView*>(this)->PolyPickRadius(); // schermo-costante, come le altre maniglie
+    float radius = const_cast<MyView*>(this)->PolyPickRadius(); // screen-constant, like the other handles
     for(int i = 0; i < 9; i++){
         if(QLineF(scene, CanvasToScene(handles[i])).length() <= radius)
             return i;
@@ -1986,7 +2004,7 @@ void MyView::CommitPixelFloat()
     cp.end();
     draw_float_active = false;
     draw_float = QImage();
-    PushDrawUndo();                                      // la trasformazione è un passo di undo locale
+    PushDrawUndo();                                      // the transformation is a local undo step
 }
 
 /// @details Commit any float, then forget the selection and reset the gizmo. Reached from a
@@ -2014,7 +2032,7 @@ void MyView::SetPixelSelection(const QRegion &r, int op)
     if(op == 1)      draw_selection = draw_selection.united(r);
     else if(op == 2) draw_selection = draw_selection.subtracted(r);
     else             draw_selection = r;
-    // clampa alla tela: nulla si seleziona fuori dai pixel esistenti
+    // clamp to the canvas: nothing is selected outside the existing pixels
     if(draw_canvas)
         draw_selection = draw_selection.intersected(draw_canvas->rect());
     draw_sel_bounds = draw_selection.boundingRect();
@@ -2067,18 +2085,18 @@ void MyView::DrawSelPress(const QPointF &scene, Qt::KeyboardModifiers mods)
             draw_sel_sx0 = draw_sel_sx; draw_sel_sy0 = draw_sel_sy;
             return;
         }
-        // dentro il box (post-gizmo) = spostamento
+        // inside the box (post-gizmo) = move
         QPointF cp = SceneToCanvas(scene);
         if(PixelGizmo().map(QRectF(draw_sel_bounds)).containsPoint(cp, Qt::OddEvenFill)){
             LiftPixelFloat();
             draw_sel_gesture = 3;
             draw_sel_t0 = draw_sel_t;
-            draw_sel_p0 = cp;                           // ancora in canvas px
+            draw_sel_p0 = cp;                           // anchor in canvas px
             return;
         }
     }
 
-    // nuova selezione (replace, oppure add/subtract con Shift/Alt)
+    // new selection (replace, or add/subtract with Shift/Alt)
     QPointF cp = SceneToCanvas(scene);
     if(draw_tool == DT_SEL_LASSO){
         draw_sel_gesture = 2;
@@ -2088,7 +2106,7 @@ void MyView::DrawSelPress(const QPointF &scene, Qt::KeyboardModifiers mods)
         draw_sel_gesture = 1;
         draw_sel_p0 = cp;
         draw_lasso.clear();
-        draw_lasso << cp << cp;                         // p0 e p1 vivi per l'anteprima del rettangolo
+        draw_lasso << cp << cp;                         // p0 and p1 live for the rectangle preview
     }
 }
 
@@ -2101,8 +2119,8 @@ void MyView::DrawSelMove(const QPointF &scene)
 {
     QPointF cp = SceneToCanvas(scene);
     switch(draw_sel_gesture){
-    case 1: draw_lasso.clear(); draw_lasso << draw_sel_p0 << cp; break; // rettangolo: 2 vertici vivi
-    case 2: draw_lasso << cp; break;                                    // lazo: accumula i punti
+    case 1: draw_lasso.clear(); draw_lasso << draw_sel_p0 << cp; break; // rectangle: 2 live vertices
+    case 2: draw_lasso << cp; break;                                    // lasso: accumulates the points
     case 3: // move
         draw_sel_t = draw_sel_t0 + (cp - draw_sel_p0);
         break;
@@ -2160,14 +2178,14 @@ void MyView::DrawSelRelease(const QPointF &scene)
         QRect rc = QRectF(draw_sel_p0, cp).normalized().toRect().intersected(draw_canvas->rect());
         if(rc.width() > 0 && rc.height() > 0)
             SetPixelSelection(QRegion(rc), draw_sel_op);
-    } else if(draw_sel_gesture == 2){                   // lazo
+    } else if(draw_sel_gesture == 2){                   // lasso
         draw_lasso << cp;
         if(draw_lasso.size() >= 3)
             SetPixelSelection(QRegion(draw_lasso.toPolygon()), draw_sel_op);
         draw_lasso.clear();
     }
-    // gesture 3/4/5 (move/scale/rotate): lo stato gizmo è già aggiornato; il float resta
-    // attivo finché non lo si fonde (Ctrl+D, cambio tool, uscita)
+    // gesture 3/4/5 (move/scale/rotate): the gizmo state is already updated; the float stays
+    // active until it is merged (Ctrl+D, tool change, exit)
     draw_sel_gesture = 0;
     if(draw_target && draw_target->view){
         draw_target->view->update();
@@ -2265,16 +2283,16 @@ bool MyView::DeleteSelectedVertices()
         return false;
     StoreUndo();
     for(StickData *s : holders){
-        // uno stick cancellato per intero si porta via i suoi figli, che possono essere qui
+        // a stick deleted as a whole takes its children with it, which may be in this list
         if(!my_animation->CurrentFrame()->total_sticks.contains(s))
             continue;
         while(!s->view->selected_vertices.isEmpty()){
             int idx = *s->view->selected_vertices.begin();
             int before = s->view->selected_vertices.size();
             if(!DeleteVertex(s, idx))
-                break; // lo stick intero è sparito, con la sua selezione
-            // cancellato, il vertice esce da solo dalla selezione (rimappata); se è rimasto
-            // dov'era il cancellamento è stato rifiutato: toglilo, o il ciclo non finisce
+                break; // the whole stick is gone, with its selection
+            // once deleted, the vertex leaves the (remapped) selection by itself; if it stayed
+            // where it was the deletion was refused: remove it, or the loop never ends
             if(s->view->selected_vertices.size() >= before)
                 s->view->selected_vertices.remove(idx);
         }
@@ -2331,13 +2349,13 @@ void MyView::ConvertStick(StickData *stick, int new_type, const QImage &image,
     if(stick == nullptr || stick->stick_type == new_type)
         return;
     if(draw_mode)
-        ExitDrawMode(); // finalizza il canvas prima dello snapshot
+        ExitDrawMode(); // finalize the canvas before the snapshot
     ExitVectorMode();
     StoreUndo();
 
-    // --- ciò che solo il tipo di origine sa leggere va perso ---
+    // --- whatever only the source type can read is lost ---
     if(stick->view){
-        stick->view->RemoveImagesFromListWidget(); // agisce solo se è ANCORA un IMAGE
+        stick->view->RemoveImagesFromListWidget(); // acts only if it is STILL an IMAGE
         stick->view->selected_vertices.clear();
         stick->view->ClearPolygonPreview();
         stick->view->selected_vector_nodes.clear();
@@ -2359,7 +2377,7 @@ void MyView::ConvertStick(StickData *stick, int new_type, const QImage &image,
     stick->img_h_scale = 1;
     poly_session_active = false;
 
-    // --- il nuovo tipo nasce come lo farebbe DrawCmd(); estremi, IK, penna e pennello restano ---
+    // --- the new type is born as DrawCmd() would make it; endpoints, IK, pen and brush stay ---
     stick->stick_type = new_type;
     stick->img_angle = -atan2(stick->my_line.dx(), stick->my_line.dy())*180/M_PI;
     switch(new_type){
@@ -2372,8 +2390,8 @@ void MyView::ConvertStick(StickData *stick, int new_type, const QImage &image,
         stick->img_w_scale = taper_w_slider->value();
         break;
     case StickData::POLYGON:
-        // un poligono senza vertici non si vede: nasce come un rombo che passa per entrambi
-        // gli estremi (frame locale normalizzato, +y lungo lo stick: P1 = (0,0), P2 = (0,1))
+        // a polygon without vertices is invisible: it is born as a rhombus passing through both
+        // endpoints (normalized local frame, +y along the stick: P1 = (0,0), P2 = (0,1))
         stick->polygon_points = { QPointF(0, 0), QPointF(0.25, 0.5), QPointF(0, 1), QPointF(-0.25, 0.5) };
         break;
     case StickData::MULTILINE:
@@ -2389,7 +2407,7 @@ void MyView::ConvertStick(StickData *stick, int new_type, const QImage &image,
     case StickData::TEXT:
         stick->text = text;
         break;
-    default: // LINE, CIRCLE, FREEHAND (il canvas glielo dà EnterDrawMode, sotto)
+    default: // LINE, CIRCLE, FREEHAND (EnterDrawMode gives it the canvas, below)
         break;
     }
 
@@ -2405,12 +2423,12 @@ void MyView::ConvertStick(StickData *stick, int new_type, const QImage &image,
     }
     my_animation->current_frame->UpdateIcon();
     if(new_type == StickData::FREEHAND)
-        EnterDrawMode(stick, false); // lo StoreUndo() sopra copre già la sessione
+        EnterDrawMode(stick, false); // the StoreUndo() above already covers the session
 }
 
 /**
- * @details handle_size è in pixel di schermo: convertito in unità di scena il raggio
- * di aggancio di vertici e spigoli resta percettivamente costante a ogni zoom.
+ * @details handle_size is in screen pixels: converted to scene units, the snap radius
+ * of vertices and edges stays perceptually constant at every zoom.
  */
 float MyView::PolyPickRadius()
 {
@@ -2427,8 +2445,8 @@ void MyView::FinishPolygonSession()
     poly_session_active = false;
     poly_session_extends = false;
     poly_branch_from = -1;
-    // il null-check serve: ChangeTool() chiama qui a ogni SetTool(), anche prima che
-    // esista il primo frame (fixture dei test / avvio)
+    // the null-check is needed: ChangeTool() calls here on every SetTool(), even before
+    // the first frame exists (test fixture / startup)
     if(my_animation->current_frame == nullptr || my_animation->current_frame->stick_figures.isEmpty())
         return;
     for(StickData *s : my_animation->CurrentFrame()->total_sticks){
@@ -2444,7 +2462,7 @@ void MyView::FinishPolygonSession()
  */
 void MyView::DeselectAllVertices()
 {
-    // vedi FinishPolygonSession() per il null-check su current_frame
+    // see FinishPolygonSession() for the null-check on current_frame
     if(my_animation->current_frame == nullptr || my_animation->current_frame->stick_figures.isEmpty())
         return;
     for(StickData *s : my_animation->CurrentFrame()->total_sticks){
@@ -2528,15 +2546,27 @@ StickData *MyView::IkPendingStart()
     return nullptr;
 }
 
+/**
+ * @brief Forces a viewport repaint so the IK chain markers (drawForeground) refresh.
+ * @details The markers are painted in drawForeground(), which runs on every viewport paint, so
+ * this only matters when nothing but StickData geometry changed (e.g. a FABRIK drag). Also
+ * called by the IK-properties toggle in widget.cpp.
+ */
 void MyView::UpdateIkOverlay()
 {
-    // i marcatori sono disegnati in drawForeground() (ridisegnato a ogni repaint del
-    // viewport); qui basta forzare un repaint per i casi in cui è cambiata solo la
-    // geometria dei dati (es. un drag FABRIK) senza altrimenti sporcare il viewport
+    // the markers are drawn in drawForeground() (redrawn on every repaint of the
+    // viewport); here it is enough to force a repaint for the cases where only the
+    // data geometry changed (e.g. a FABRIK drag) without otherwise dirtying the viewport
     if(viewport() != nullptr)
         viewport()->update();
 }
 
+/**
+ * @brief Paints the interactive-only overlays on top of the scene: IK chain markers, the pixel
+ *        selection gizmo, the transformation box, the texture arrows and the vector tool overlays.
+ * @details Lives in the view's foreground, not in scene items, so exports, icons and onion skins
+ * (which render a separate scene) never see it and it repaints with the viewport for free.
+ */
 void MyView::drawForeground(QPainter *painter, const QRectF &rect)
 {
     QGraphicsView::drawForeground(painter, rect);
@@ -2739,6 +2769,12 @@ void MyView::drawForeground(QPainter *painter, const QRectF &rect)
     }
 }
 
+/**
+ * @brief Removes the two transient DRAW_IK preview items (dotted line and cross), if present.
+ * @details They are the only scene items of a chain that is not committed yet, so they must be
+ * deleted explicitly when the gesture ends or is cancelled; the pointers are nulled so a second
+ * call is harmless.
+ */
 void MyView::ClearIkPreviewItems()
 {
     if(ik_preview_line != nullptr){
@@ -2753,15 +2789,21 @@ void MyView::ClearIkPreviewItems()
     }
 }
 
+/**
+ * @brief Aborts an in-progress IK chain: the pending start goes back to IK_NONE and the
+ *        session state and previews are cleared.
+ * @details Esc and ChangeTool() both route here. Resetting the role unconditionally is safe
+ * because FindIkStartCandidate() only lets IK_NONE sticks become a pending start.
+ */
 void MyView::CancelIkDrawing()
 {
     StickData *pending = IkPendingStart();
     if(pending != nullptr){
-        // sicuro incondizionatamente: FindIkStartCandidate() ammette solo sticks con
-        // ik_role già NONE al primo click, quindi questo non può mai "rubare" un ruolo
-        // che lo stick aveva legittimamente per un'altra catena (si veda la spec: "a
-        // meno che non avesse già un'altra catena ik" — con questa regola di
-        // idoneità quella clausola non è mai raggiungibile)
+        // unconditionally safe: FindIkStartCandidate() only admits sticks with
+        // ik_role already NONE at the first click, so this can never "steal" a role
+        // the stick legitimately had for another chain (see the spec: "unless it
+        // already had another ik chain" — with this eligibility rule that clause
+        // is never reachable)
         pending->ik_role = StickData::IK_NONE;
         if(pending->view)
             pending->view->Refresh(0);
@@ -2770,6 +2812,13 @@ void MyView::CancelIkDrawing()
     ClearIkPreviewItems();
 }
 
+/**
+ * @brief Finds the stick whose start handle (P1) is within the pick radius, among those eligible
+ *        to begin a NEW chain.
+ * @details Eligible means ik_role == IK_NONE and at least one child. On a tie (coincident P1s,
+ * typical of a stepchild sharing its parent's origin) the stepchild wins, otherwise the master
+ * would always take the shared handle and a chain from a stepchild could never be started.
+ */
 StickData *MyView::FindIkStartCandidate(StickFigure *figure, const QPointF &scene_pos)
 {
     if(figure == nullptr) return nullptr;
@@ -2783,10 +2832,10 @@ StickData *MyView::FindIkStartCandidate(StickFigure *figure, const QPointF &scen
         if(dist > radius)
             continue;
         if(best == nullptr){ best = s; best_dist = dist; continue; }
-        // più vicino vince; a PARITÀ (P1 coincidenti — uno stepchild condivide l'origine
-        // del suo genitore, tipicamente il master) si preferisce lo stepchild, altrimenti
-        // il master vinceva sempre il tie sull'handle condiviso e una catena derivata da
-        // uno stepchild non era mai avviabile: il target risultava non selezionabile
+        // the closer wins; on a TIE (coincident P1s — a stepchild shares the origin
+        // of its parent, typically the master) the stepchild is preferred, otherwise
+        // the master always won the tie on the shared handle and a chain derived from
+        // a stepchild could never be started: the target was not selectable
         const float EPS = 0.5f;
         if(dist < best_dist - EPS)
             { best = s; best_dist = dist; }
@@ -2796,6 +2845,12 @@ StickData *MyView::FindIkStartCandidate(StickFigure *figure, const QPointF &scen
     return best;
 }
 
+/**
+ * @brief Finds an already committed chain target (either polarity) whose end handle (P2) is
+ *        within the pick radius.
+ * @details Used by the DRAW_IK press to toggle a target on/off or, with Alt, delete its chain,
+ * before a new chain is considered.
+ */
 StickData *MyView::FindIkTargetHandle(StickFigure *figure, const QPointF &scene_pos)
 {
     if(figure == nullptr) return nullptr;
@@ -2814,27 +2869,41 @@ StickData *MyView::FindIkTargetHandle(StickFigure *figure, const QPointF &scene_
     return best;
 }
 
+/**
+ * @brief Walks up from @p target and returns the chain start anchored at @p anchor_p1 that the
+ *        target is reachable from.
+ * @details The path must be geometrically continuous (each link's P1 on its parent's P2, which
+ * FABRIK assumes). When several limbs share the start anchor, the clicked target's branch picks
+ * the start, not the first click's arbitrary tie-break.
+ */
 StickData *MyView::ResolveIkStartForTarget(StickData *target, const QPointF &anchor_p1, StickData *provisional_start)
 {
     if(target == nullptr) return nullptr;
     float radius = PolyPickRadius();
-    // cammina verso la radice; `child` è l'anello sotto `cur` sul percorso verso il target
+    // walk toward the root; `child` is the link below `cur` on the path to the target
     StickData *child = target;
     for(StickData *cur = target->parent; cur != nullptr; cur = cur->parent){
-        // il giunto dev'essere continuo: la P1 del figlio sta sulla P2 di cur (p0 è posto
-        // esattamente su p2 del genitore in StartDrawing, quindi confronto esatto a meno
-        // del drift float). Uno strappo qui = nessuno start valido più in alto.
+        // the joint must be continuous: the child's P1 sits on cur's P2 (p0 is placed
+        // exactly on the parent's p2 in StartDrawing, so an exact comparison apart from
+        // float drift). A break here = no valid start further up.
         if(QLineF(child->my_line.p1(), cur->my_line.p2()).length() > 0.5f)
             break;
         bool eligible = (cur->ik_role == StickData::IK_NONE) || (cur == provisional_start);
         if(eligible && !cur->children.isEmpty()
                 && QLineF(cur->my_line.p1(), anchor_p1).length() <= radius)
-            return cur; // primo antenato ancorato al punto di start: la radice dell'arto cliccato
+            return cur; // first ancestor anchored at the start point: the root of the clicked limb
         child = cur;
     }
     return nullptr;
 }
 
+/**
+ * @brief The second click's validity test: the nearest stick that can be the chain's target.
+ * @details Eligibility is a whole-segment hit (like FigureAtPoint()) on a stick with no IK role
+ * for which ResolveIkStartForTarget() finds a start. Among several, the one whose P2 is closest
+ * wins, because in a stepchild chain the links touch and the segment test alone always picked
+ * the last one.
+ */
 StickData *MyView::FindIkTargetCandidate(StickFigure *figure, StickData *provisional_start, const QPointF &scene_pos)
 {
     if(figure == nullptr || provisional_start == nullptr) return nullptr;
@@ -2845,13 +2914,13 @@ StickData *MyView::FindIkTargetCandidate(StickFigure *figure, StickData *provisi
     for(StickData *s : figure->stick_list){
         if(s == provisional_start || s->ik_role != StickData::IK_NONE)
             continue;
-        // dev'esserci uno start valido ancorato al primo click e raggiungibile da s con
-        // una spina continua: se piu' arti condividono l'ancora, e' il RAMO del target a
-        // scegliere lo start giusto, non il tie-break arbitrario del primo click (Group D
-        // follow-up: "non si riusciva a selezionare il target con un ramo tra start e fine")
+        // there must be a valid start anchored at the first click and reachable from s with
+        // a continuous spine: if several limbs share the anchor, it is the target's BRANCH
+        // that picks the right start, not the first click's arbitrary tie-break (Group D
+        // follow-up: "the target couldn't be selected with a branch between start and end")
         if(ResolveIkStartForTarget(s, anchor, provisional_start) == nullptr)
             continue;
-        // eligibilità: vicino al SEGMENTO (così il click a metà stick funziona), come FigureAtPoint()
+        // eligibility: near the SEGMENT (so a click mid-stick works), like FigureAtPoint()
         QPointF a = s->my_line.p1(), b = s->my_line.p2();
         QPointF ab = b - a;
         float len2 = ab.x()*ab.x() + ab.y()*ab.y();
@@ -2860,11 +2929,11 @@ StickData *MyView::FindIkTargetCandidate(StickFigure *figure, StickData *provisi
         float seg_dist = QLineF(scene_pos, a + u*ab).length();
         if(seg_dist > qMax(radius, float(s->pen.widthF()/2.0)))
             continue;
-        // ...ma la SCELTA fra più candidati usa la MANIGLIA DI ESTREMITÀ (P2 = l'effettore):
-        // in una catena stepchild gli anelli si toccano, e col solo test di segmento la scelta
-        // scattava sempre sull'ultimo (secondo-ultimo quasi impossibile). La P2 del secondo-
-        // ultimo è sul giunto, quella dell'ultimo sulla punta, quindi la distanza dalla P2
-        // discrimina quando due segmenti condividono il punto cliccato (adjustment 3).
+        // ...but the CHOICE among several candidates uses the ENDPOINT HANDLE (P2 = the effector):
+        // in a stepchild chain the links touch, and with the segment test alone the choice
+        // always landed on the last one (second-to-last almost impossible). The second-to-last's
+        // P2 is on the joint, the last's on the tip, so the distance from P2
+        // discriminates when two segments share the clicked point (adjustment 3).
         float p2_dist = QLineF(scene_pos, s->my_line.p2()).length();
         if(best == nullptr || p2_dist < best_dist){
             best = s;
@@ -2874,7 +2943,7 @@ StickData *MyView::FindIkTargetCandidate(StickFigure *figure, StickData *provisi
     return best;
 }
 
-// ------------------------------------------------ multi-selezione di stickfigure ----
+// ------------------------------------------------ stickfigure multi-selection ----
 
 /**
  * @details Segment-distance hit test (the same metric the pick tools use), against
@@ -2915,10 +2984,10 @@ void MyView::UpdateMultiSelectionUI(bool recenter_pivot)
         return;
     }
     if(recenter_pivot)
-        multi_pivot = SelectionPivotDefault(); // la selezione è cambiata: perno alle origini master (spec)
+        multi_pivot = SelectionPivotDefault(); // the selection changed: pivot at the master origins (spec)
     for(StickFigure *S : my_animation->current_frame->stick_figures)
         S->Highlight(multi_selection.contains(S));
-    // righe della lista layer allineate alla selezione (senza rientrare da segnali)
+    // layer list rows aligned with the selection (without re-entering from signals)
     multi_widget_sync = true;
     my_stick_figure_widget_list->clearSelection();
     for(StickFigure *S : multi_selection){
@@ -2926,7 +2995,7 @@ void MyView::UpdateMultiSelectionUI(bool recenter_pivot)
             S->linked_item->setSelected(true);
     }
     multi_widget_sync = false;
-    UpdateSelectionDecorations(); // maniglia + bounding box (perno già impostato sopra)
+    UpdateSelectionDecorations(); // handle + bounding box (pivot already set above)
 }
 
 /**
@@ -2981,6 +3050,12 @@ QPointF MyView::SelectionPivotDefault() const
     return count > 0 ? sum / count : QPointF(0, 0);
 }
 
+/**
+ * @brief The pivot the transform tools actually rotate/scale about.
+ * @details A single figure uses its persistent handle (master origin + pivot_offset), a
+ * multi-selection the group pivot multi_pivot. Not the bare master origin: the user can drag the
+ * handle elsewhere (see SelectionPivotDefault() for where it starts).
+ */
 QPointF MyView::SelectionPivotCurrent() const
 {
     if(!MultiSelectionActive()){
@@ -3018,9 +3093,9 @@ void MyView::UpdateSelectionDecorations(bool recenter_pivot)
         return;
     }
     if(!MultiSelectionActive()){
-        // singola figura: il perno è persistente, ancorato al master col suo offset — segue
-        // il master quando lo si trascina e NON si resetta al cambio selezione/tool (bug 2);
-        // solo un Ctrl-trascina lo riposiziona (aggiornando pivot_offset)
+        // single figure: the pivot is persistent, anchored to the master with its offset — it follows
+        // the master when it is dragged and is NOT reset on selection/tool change (bug 2);
+        // only a Ctrl-drag repositions it (updating pivot_offset)
         QList<StickFigure*> sel = SelectedFigures();
         StickFigure *S = sel.isEmpty() ? nullptr : sel.first();
         if(S != nullptr && S->master_stick != nullptr)
@@ -3045,12 +3120,17 @@ void MyView::UpdateSelectionDecorations(bool recenter_pivot)
         scene()->addItem(selection_bbox);
     }
     selection_bbox->setRect(SelectionBoundingBox());
-    // le maniglie/box della transformation box sono un overlay di drawForeground: al cambio
-    // selezione vanno ridisegnate esplicitamente, altrimenti quelle della selezione precedente
-    // restano "fantasma" nelle zone non invalidate dallo spostamento dei soli scene item (spec).
+    // the transformation box's handles/box are a drawForeground overlay: on a selection
+    // change they must be redrawn explicitly, otherwise those of the previous selection
+    // stay as "ghosts" in the areas not invalidated by moving just the scene items (spec).
     if(viewport()) viewport()->update();
 }
 
+/**
+ * @brief Removes the pivot handle and the selection bounding box from the scene, if present.
+ * @details Also repaints the viewport: the transformation-box handles live in drawForeground()
+ * and would otherwise linger as ghosts over the area the removed items left uninvalidated.
+ */
 void MyView::RemoveSelectionDecorations()
 {
     if(multi_handle != nullptr){
@@ -3063,8 +3143,8 @@ void MyView::RemoveSelectionDecorations()
         delete selection_bbox;
         selection_bbox = nullptr;
     }
-    // ridisegna il foreground: cancella l'overlay di maniglie/master della selezione appena
-    // rimossa (vedi UpdateSelectionDecorations per il motivo del repaint esplicito).
+    // redraw the foreground: erases the handles/master overlay of the selection just
+    // removed (see UpdateSelectionDecorations for the reason for the explicit repaint).
     if(viewport()) viewport()->update();
 }
 
@@ -3105,10 +3185,10 @@ static void BoxHandles(const QRectF &r, double gap, QPointF out[9])
 }
 
 /**
- * @details Transformation-box handles (stile del gizmo della selezione pixel, applicato
- * alla selezione di figure): 8 quadretti sul bounding box axis-aligned + un pomello di
- * rotazione sopra il lato superiore. Il pomello sta a distanza schermo-costante
- * (PolyPickRadius) così resta grande uguale a ogni zoom.
+ * @details Transformation-box handles (style of the pixel-selection gizmo, applied
+ * to the figure selection): 8 small squares on the axis-aligned bounding box + a rotation
+ * knob above the top side. The knob sits at a screen-constant distance
+ * (PolyPickRadius) so it stays the same size at every zoom.
  */
 void MyView::SelectionHandles(QPointF out[9]) const
 {
@@ -3127,16 +3207,16 @@ int MyView::HitSelectionHandle(const QPointF &scene) const
     QPointF h[9];
     SelectionHandles(h);
     float radius = const_cast<MyView*>(this)->PolyPickRadius();
-    // il pomello di rotazione (8) ha la precedenza: sta sopra il box e non coincide mai con
-    // una maniglia di stick, quindi lo si controlla per primo
+    // the rotation knob (8) has precedence: it sits above the box and never coincides with
+    // a stick handle, so it is checked first
     if(QLineF(scene, h[8]).length() <= radius)
         return 8;
-    // priorità alle maniglie degli stick (spec): se il click cade sopra (o vicino a) un
-    // estremo — maniglia — di uno stick della selezione, NON afferrare una maniglia di scala.
-    // Lascia passare il click alla manipolazione normale dello stick (trasla dal master,
-    // ruota, ecc.). Vale per OGNI maniglia, non solo il master. Gli spigoli del box coincidono
-    // con gli estremi esterni, quindi lì vince la maniglia; per scalare restano lati e pomello.
-    // "vicino" = raggio della maniglia stessa o quello di aggancio, il più grande dei due.
+    // priority to the sticks' handles (spec): if the click falls on (or near) an
+    // endpoint — handle — of a stick of the selection, do NOT grab a scale handle.
+    // Let the click through to the normal stick manipulation (translate from the master,
+    // rotate, etc.). It applies to EVERY handle, not just the master. The box's corners coincide
+    // with the outer endpoints, so the handle wins there; sides and knob remain for scaling.
+    // "near" = the handle's own radius or the snap radius, whichever is larger.
     float handle_r = qMax(radius, float(handle_size) / 2.0f);
     for(StickFigure *S : SelectedFigures())
         for(StickData *s : S->stick_list){
@@ -3149,25 +3229,25 @@ int MyView::HitSelectionHandle(const QPointF &scene) const
     return -1;
 }
 
-/// @details Unico disegnatore del gizmo di trasformazione, condiviso tra la selezione pixel
-/// e la transformation box delle figure (vedi drawForeground). Stile azzurro cosmetico +
-/// quadretti bianchi + pomello: identico per entrambi; l'unica variazione è draw_outline
-/// (il box pixel ruota col gizmo e traccia qui il proprio contorno; il box figure lo prende
-/// dallo scene item selection_bbox).
+/// @details The single drawer of the transformation gizmo, shared between the pixel selection
+/// and the figures' transformation box (see drawForeground). Cosmetic light-blue style +
+/// white small squares + knob: identical for both; the only variation is draw_outline
+/// (the pixel box turns with the gizmo and traces its own outline here; the figure box takes it
+/// from the selection_bbox scene item).
 void MyView::DrawTransformHandles(QPainter *painter, const QPointF pts[9], bool draw_outline)
 {
-    QPen box(QColor(0, 120, 255), 1); box.setCosmetic(true); // azzurro, spessore costante a ogni zoom
+    QPen box(QColor(0, 120, 255), 1); box.setCosmetic(true); // light blue, constant thickness at every zoom
     painter->setPen(box); painter->setBrush(Qt::NoBrush);
     if(draw_outline){
         QPolygonF frame; frame << pts[0] << pts[1] << pts[2] << pts[3];
         painter->drawPolygon(frame);
     }
-    painter->drawLine(pts[4], pts[8]);          // stelo del pomello di rotazione
-    double hz = PolyPickRadius() * 0.6;         // mezza dimensione maniglia (schermo-costante)
+    painter->drawLine(pts[4], pts[8]);          // stem of the rotation knob
+    double hz = PolyPickRadius() * 0.6;         // half the handle size (screen-constant)
     painter->setBrush(Qt::white);
     for(int i = 0; i < 8; i++)
         painter->drawRect(QRectF(pts[i].x()-hz, pts[i].y()-hz, 2*hz, 2*hz));
-    painter->drawEllipse(pts[8], hz, hz);       // pomello di rotazione
+    painter->drawEllipse(pts[8], hz, hz);       // rotation knob
 }
 
 /// @details `CurrentStick()` is safe on a frame with no current figure (it returns a null
@@ -3179,6 +3259,11 @@ StickData *MyView::TextureArrowStick() const
     return const_cast<MyView*>(this)->my_animation->CurrentFrame()->CurrentStick();
 }
 
+/**
+ * @brief The current stick's fill or stroke brush, or an empty brush when there is none.
+ * @details One accessor for the arrow's geometry, its hit test and its drag, so each asks for
+ * "whichever brush this control acts on" the same way.
+ */
 QBrush MyView::CurrentTextureBrush(bool for_fill) const
 {
     StickData *stick = TextureArrowStick();
@@ -3236,8 +3321,8 @@ MyView::ArrowXf MyView::ReadArrow(const QBrush &brush) const
     const qreal turn = ArrowFrameAngle();
     ArrowXf out;
     out.angle = xf.angle + turn;
-    // un gradiente tiene ENTRAMBI in frazioni del box; una texture tiene l'offset già in unità
-    // di lunghezza (del suo frame), e come scala un fattore sui pixel della tile
+    // a gradient keeps BOTH in fractions of the box; a texture keeps the offset already in length
+    // units (of its frame), and as scale a factor on the tile's pixels
     out.offset = QTransform().rotate(turn).map(is_gradient ? xf.offset * unit : xf.offset);
     out.length = xf.scale * unit;
     return out;
@@ -3272,9 +3357,9 @@ bool MyView::TextureArrowPoints(bool for_fill, QPointF *tail, QPointF *tip) cons
     StickData *stick = TextureArrowStick();
     if(stick == nullptr || stick->view == nullptr)
         return false;
-    // un tipo che non passa il pennello al painter non ha un riempimento (o un contorno) da
-    // puntare, per quanta geometria il pennello contenga: la freccia sarebbe una maniglia su
-    // qualcosa che non si vede. Stessi predicati con cui UpdateSliders() spegne i selettori
+    // a type that doesn't pass the brush to the painter has no fill (or stroke) to
+    // aim at, however much geometry the brush holds: the arrow would be a handle on
+    // something that isn't visible. Same predicates UpdateSliders() uses to turn off the selectors
     if(for_fill ? !stick->PaintsFill() : !stick->PaintsStroke())
         return false;
     // a vector stick paints its SHAPES' brushes, which the arrow does not aim (yet): their
@@ -3282,8 +3367,8 @@ bool MyView::TextureArrowPoints(bool for_fill, QPointF *tail, QPointF *tip) cons
     if(stick->stick_type == StickData::VECTOR)
         return false;
     const QBrush brush = CurrentTextureBrush(for_fill);
-    // una tinta unita e il vuoto non hanno una geometria da mostrare, come per AlignBrush().
-    // Texture e gradiente sì, ognuno la propria: ReadArrow() le porta entrambe in unità di scena
+    // a solid colour and an empty brush have no geometry to show, as for AlignBrush().
+    // Texture and gradient do, each its own: ReadArrow() brings both into scene units
     const bool has_tile = (brush.style() == Qt::TexturePattern && !brush.textureImage().isNull());
     if(!has_tile && brush.gradient() == nullptr)
         return false;
@@ -3310,7 +3395,7 @@ QPointF MyView::TextureArrowAnchor(const StickData *stick, qreal angle) const
     const QPointF middle = stick->my_line.pointAt(0.5);
     QLineF axis = stick->my_line;
     if(axis.length() < 1e-6)
-        axis = QLineF(middle, middle + QPointF(1, 0)); // stick di lunghezza nulla: normale arbitraria
+        axis = QLineF(middle, middle + QPointF(1, 0)); // zero-length stick: arbitrary normal
     QPointF normal(-axis.dy() / axis.length(), axis.dx() / axis.length());
     const QPointF direction = QLineF::fromPolar(1.0, -angle).p2();
     if(QPointF::dotProduct(normal, direction) < 0)
@@ -3335,9 +3420,9 @@ bool MyView::HitTextureArrow(const QPointF &scene, bool *for_fill, bool *on_tip)
             if(QLineF(scene, s->my_line.p1()).length() <= handle_r) return false;
             if(QLineF(scene, s->my_line.p2()).length() <= handle_r) return false;
         }
-    // la punta prima della coda, e il riempimento prima del contorno: due frecce con la stessa
-    // trasformazione si sovrappongono esattamente, e senza un ordine fisso quale delle due si
-    // afferra dipenderebbe dal caso
+    // the tip before the tail, and the fill before the stroke: two arrows with the same
+    // transform overlap exactly, and without a fixed order which of the two gets
+    // grabbed would be down to chance
     for(int pass = 0; pass < 2; pass++)
         for(bool fill : { true, false }){
             QPointF tail, tip;
@@ -3368,8 +3453,8 @@ void MyView::DragTextureArrow(const QPointF &scene)
         arrow.offset = scene - TextureArrowAnchor(stick, arrow.angle);
     }
     else{
-        const QLineF shaft(texture_arrow_tail, scene); // coda bloccata al press: vedi il campo
-        arrow.angle = -shaft.angle();       // QLineF conta in senso antiorario, QTransform in orario
+        const QLineF shaft(texture_arrow_tail, scene); // tail locked at press: see the field
+        arrow.angle = -shaft.angle();       // QLineF counts counter-clockwise, QTransform clockwise
         arrow.length = qMax(1.0, shaft.length());
     }
     WriteArrow(&brush, arrow);
@@ -3381,7 +3466,7 @@ void MyView::DragTextureArrow(const QPointF &scene)
     }
     if(stick->view)
         stick->view->Refresh(0);
-    if(viewport()) viewport()->update(); // la freccia stessa è disegnata nel foreground
+    if(viewport()) viewport()->update(); // the arrow itself is drawn in the foreground
 }
 
 // ===== DISPLACE tool ==================================================================
@@ -3409,6 +3494,12 @@ bool MyView::DisplaceHandles(QPointF *centre, QPointF *knob) const
     return true;
 }
 
+/**
+ * @brief Which DISPLACE handle a scene point grabs.
+ * @return 1 on the centre handle, 2 on the knob, 0 elsewhere or when there are no handles.
+ * @details The knob is tested first: it can sit over the centre handle for a very short stick,
+ * and turning is the gesture that would otherwise become unreachable.
+ */
 int MyView::HitDisplaceHandle(const QPointF &scene) const
 {
     QPointF centre, knob;
@@ -3422,6 +3513,12 @@ int MyView::HitDisplaceHandle(const QPointF &scene) const
     return 0;
 }
 
+/**
+ * @brief Latches the press for a move (1) or turn (2) of the current stick's drawn shape.
+ * @details Copies the edited transform set (global_xf or local_xf per displace_global) and the
+ * drawn centre, which DragDisplace() re-applies the whole drag to. The undo snapshot is deferred
+ * to the first real move.
+ */
 void MyView::BeginDisplace(int gesture)
 {
     StickData *stick = TextureArrowStick();
@@ -3480,9 +3577,9 @@ bool MyView::SelectionHandlesActive() const
     return tool == NOTOOL && HasActiveSelection();
 }
 
-/// @details Snapshot pre-gesto + buffer per la rotazione, identici a quelli che il tool
-/// ROTATE preparava inline: perno = SelectionPivotCurrent() (maniglia mobile), angolo
-/// iniziale di ogni stick in angle_buffer2, origine del master in origin_pos_buffer.
+/// @details Pre-gesture snapshot + buffers for the rotation, identical to those the ROTATE
+/// tool used to prepare inline: pivot = SelectionPivotCurrent() (movable handle), initial
+/// angle of each stick in angle_buffer2, master origin in origin_pos_buffer.
 void MyView::BeginSelectionRotate()
 {
     StoreUndo();
@@ -3499,11 +3596,11 @@ void MyView::BeginSelectionRotate()
     }
 }
 
-/// @details Come BeginSelectionRotate() ma per la scala: memorizza lunghezza/spessore di
-/// ogni stick (scale_buffer/width_buffer) e l'origine del master. La scala delle figure è
-/// UNIFORME (StickGraphicsItem::Scale prende un solo fattore), quindi anche le maniglie di
-/// spigolo scalano in modo uniforme come quelle d'angolo (ponytail: non-uniforme fuori scope,
-/// il modello di scala figure non lo supporta).
+/// @details Like BeginSelectionRotate() but for scaling: stores the length/thickness of
+/// each stick (scale_buffer/width_buffer) and the master's origin. The figures' scale is
+/// UNIFORM (StickGraphicsItem::Scale takes a single factor), so the edge handles
+/// also scale uniformly like the corner ones (ponytail: non-uniform is out of scope,
+/// the figure scale model doesn't support it).
 void MyView::BeginSelectionScale()
 {
     StoreUndo();
@@ -3523,9 +3620,9 @@ void MyView::BeginSelectionScale()
     }
 }
 
-/// @details Corpo di rotazione, estratto dalla case ROTATE del mouseMove: singola figura e
-/// multi ruotano attorno alla maniglia (multi_center_buffer). Incrementale (starting_coord
-/// riazzerato a ogni chiamata); ogni stick ruota, poi il master orbita il perno fisso.
+/// @details Rotation body, extracted from the ROTATE case of mouseMove: single figure and
+/// multi rotate about the handle (multi_center_buffer). Incremental (starting_coord
+/// reset on every call); each stick rotates, then the master orbits the fixed pivot.
 void MyView::ApplySelectionRotate()
 {
     if(!HasActiveSelection())
@@ -3555,11 +3652,11 @@ void MyView::ApplySelectionRotate()
     }
     if(single) UpdateSelectionDecorations(false);
     else       UpdateMultiSelectionUI();
-    if(viewport()) viewport()->update(); // ridisegna le maniglie della box che seguono la selezione
+    if(viewport()) viewport()->update(); // redraws the box handles that follow the selection
 }
 
-/// @details Corpo di scala, estratto dalla case SCALE del mouseMove: fattore assoluto
-/// dist(coord)/dist(press) attorno alla maniglia (multi_center_buffer). Uniforme.
+/// @details Scale body, extracted from the SCALE case of mouseMove: absolute factor
+/// dist(coord)/dist(press) about the handle (multi_center_buffer). Uniform.
 void MyView::ApplySelectionScale()
 {
     if(!HasActiveSelection())
@@ -3567,7 +3664,7 @@ void MyView::ApplySelectionScale()
     QPointF center = multi_center_buffer;
     float start_dist = QLineF(starting_coord, center).length();
     if(start_dist < 1)
-        return; // press esattamente sul perno: divisione per (quasi) zero
+        return; // press exactly on the pivot: division by (almost) zero
     float scale_amount = QLineF(coord, center).length() / start_dist;
     bool single = !MultiSelectionActive();
     for(StickFigure *S : SelectedFigures()){
@@ -3589,6 +3686,11 @@ void MyView::ApplySelectionScale()
     if(viewport()) viewport()->update();
 }
 
+/**
+ * @brief Replaces the multi-selection wholesale and refreshes highlight, handle and layer rows.
+ * @details The entry point for the rubber band and the layer list. The first figure becomes the
+ * current one; fewer than two figures makes UpdateMultiSelectionUI() clear everything.
+ */
 void MyView::SetMultiSelectionList(const QList<StickFigure*> &figures)
 {
     multi_selection = figures;
@@ -3613,11 +3715,16 @@ void MyView::AddToMultiSelection(StickFigure *figure)
     UpdateMultiSelectionUI(true);
 }
 
+/**
+ * @brief Removes one figure from the multi-selection (Alt+click).
+ * @details Dropping below two figures clears the multi-selection UI, so the single-selection
+ * handle and bounding box are redrawn right after for the figure that is left.
+ */
 void MyView::RemoveFromMultiSelection(StickFigure *figure)
 {
     multi_selection.removeAll(figure);
-    UpdateMultiSelectionUI(true); // sotto i 2 selezionati la UI azzera tutto da sé
-    // scesi a una sola figura: mostra la maniglia/bounding box della selezione singola
+    UpdateMultiSelectionUI(true); // below 2 selected the UI clears everything by itself
+    // down to a single figure: show the single selection's handle/bounding box
     UpdateSelectionDecorations(true);
 }
 
@@ -3638,22 +3745,22 @@ void MyView::ApplyBandSelection(const QList<StickFigure*> &touched)
         return;
     if(touched.count() >= 2){
         multi_selection = touched;
-        UpdateMultiSelectionUI(true); // box + perno al baricentro della selezione
+        UpdateMultiSelectionUI(true); // box + pivot at the selection's centroid
         return;
     }
-    // 0 o 1 figura: nessuna selezione multipla; la selezione singola (CurrentStickFigure)
-    // diventa la figura racchiusa, oppure nessuna se il band non ne racchiude alcuna
+    // 0 or 1 figure: no multi-selection; the single selection (CurrentStickFigure)
+    // becomes the enclosed figure, or none if the band encloses none
     multi_selection.clear();
     StickFigure *pick = touched.isEmpty() ? nullptr : touched.first();
     for(StickFigure *S : frame->stick_figures)
         S->Highlight(S == pick);
     frame->CurrentStickFigure() = pick;
-    // riallinea la lista layer alla selezione singola senza rientrare dai suoi segnali
+    // realign the layer list to the single selection without re-entering from its signals
     multi_widget_sync = true;
     my_stick_figure_widget_list->clearSelection();
-    // nessuna figura = nessuna riga CORRENTE, non solo nessuna riga selezionata: la lista
-    // seleziona tramite currentItemChanged, che non scatta ricliccando la riga che è già
-    // corrente — la figura appena deselezionata restava così non riselezionabile dalla lista
+    // no figure = no CURRENT row, not just no selected row: the list selects
+    // through currentItemChanged, which doesn't fire when re-clicking the row that is already
+    // current — the figure just deselected thus stayed unselectable from the list
     if(pick == nullptr)
         my_stick_figure_widget_list->setCurrentItem(nullptr);
     if(pick != nullptr){
@@ -3665,24 +3772,46 @@ void MyView::ApplyBandSelection(const QList<StickFigure*> &touched)
         }
     }
     multi_widget_sync = false;
-    RemoveSelectionDecorations();      // via l'eventuale box/perno di una selezione multipla precedente
+    RemoveSelectionDecorations();      // away with any box/pivot of a previous multi-selection
     if(pick != nullptr)
-        UpdateSelectionDecorations(true); // maniglia + bounding box della selezione singola
+        UpdateSelectionDecorations(true); // handle + bounding box of the single selection
 }
 
+/// @details Complements SelectedFigures() within the current frame (stickless figures are
+/// skipped: they cannot carry a selection) and commits the result through
+/// ApplyBandSelection(), so 0, 1 or 2+ figures land in the same states a rubber band gives.
+void MyView::SelectInverse()
+{
+    if(my_animation->current_frame == nullptr)
+        return;
+    QList<StickFigure*> selected = SelectedFigures();
+    QList<StickFigure*> inverse;
+    for(StickFigure *S : my_animation->current_frame->stick_figures){
+        if(!S->stick_list.isEmpty() && !selected.contains(S))
+            inverse.append(S);
+    }
+    ApplyBandSelection(inverse);
+}
+
+/**
+ * @brief Drops the multi-selection: un-highlights, resyncs the layer list, deletes the pivot
+ *        handle, the bounding box and the rubber band, and resets every selection gesture flag.
+ * @details Safe at any time. Figures may already be dead after an undo or frame change, so only
+ * those still in the current frame are touched.
+ */
 void MyView::ClearMultiSelection()
 {
     bool had_selection = !multi_selection.isEmpty();
     for(StickFigure *S : multi_selection){
-        // le figure possono essere già morte (undo/cambio frame): tocca solo le vive
+        // the figures may already be dead (undo/frame change): touch only the live ones
         if(my_animation->current_frame != nullptr
                 && my_animation->current_frame->stick_figures.contains(S)
                 && S != my_animation->CurrentFrame()->CurrentStickFigure())
             S->Highlight(false);
     }
     multi_selection.clear();
-    // riallinea la lista layer alla selezione singola: senza questo le righe restavano
-    // multi-selezionate e la selezione sembrava non essersi rotta
+    // realign the layer list to the single selection: without this the rows stayed
+    // multi-selected and the selection seemed not to have broken
     if(had_selection && my_animation->current_frame != nullptr){
         multi_widget_sync = true;
         my_stick_figure_widget_list->clearSelection();
@@ -3693,7 +3822,7 @@ void MyView::ClearMultiSelection()
         }
         multi_widget_sync = false;
     }
-    RemoveSelectionDecorations(); // maniglia + bounding box
+    RemoveSelectionDecorations(); // handle + bounding box
     if(selection_band != nullptr){
         scene()->removeItem(selection_band);
         delete selection_band;
@@ -3725,6 +3854,11 @@ QPointF MyView::MultiSelectionCenter() const
     return count > 0 ? sum / count : QPointF(0, 0);
 }
 
+/**
+ * @brief The selection as row indices into current_frame->stick_figures.
+ * @details For the undo machinery: figure pointers die on a snapshot restore, indices survive.
+ * Paired with SetMultiSelectionByIndices().
+ */
 QList<int> MyView::MultiSelectionIndices() const
 {
     QList<int> indices;
@@ -3738,6 +3872,11 @@ QList<int> MyView::MultiSelectionIndices() const
     return indices;
 }
 
+/**
+ * @brief Rebuilds the multi-selection from indices after an undo/redo restore.
+ * @details Out-of-range indices are ignored; fewer than two valid figures leaves no
+ * multi-selection (it is cleared instead).
+ */
 void MyView::SetMultiSelectionByIndices(const QList<int> &indices)
 {
     QList<StickFigure*> figures;
@@ -3767,7 +3906,7 @@ void MyView::DeleteMultiSelection()
         if(!my_animation->current_frame->stick_figures.contains(S))
             continue;
         if(my_animation->current_frame->stick_figures.count() <= 1)
-            break; // regola dell'ultimo layer: DeleteStickFigure() rifiuterebbe con un popup a testa
+            break; // last-layer rule: DeleteStickFigure() would refuse with a popup per figure
         my_stick_figure_widget_list->clearSelection();
         if(S->linked_item)
             S->linked_item->setSelected(true);
@@ -3775,7 +3914,7 @@ void MyView::DeleteMultiSelection()
     }
 }
 
-//Esci dallo strumento che stai usando
+//Leave the tool being used
 /**
  * @details Runs when a tool is left (from SetTool()). Its real job is on the DRAW*
  * tools: if a stick is half-drawn (draw_count==1) it is removed from the scene and
@@ -3785,8 +3924,8 @@ void MyView::DeleteMultiSelection()
  */
 void MyView::ChangeTool()
 {
-    // cambiare strumento deselezionata tutti i vertici (spec) e chiude un'eventuale
-    // sessione di aggiunta vertici, qualunque fosse il tool attivo
+    // changing tool deselects all vertices (spec) and closes any vertex-adding
+    // session, whichever tool was active
     DeselectAllVertices();
     if(poly_session_active)
         FinishPolygonSession();
@@ -3812,12 +3951,12 @@ void MyView::ChangeTool()
             if(!my_animation->current_frame->stick_figures.isEmpty()
                     && my_animation->CurrentFrame()->CurrentStickFigure() != nullptr)
             {
-                // se stavi disegnando uno stick e cambi prima di averlo finito, cancellalo!
+                // if you were drawing a stick and switch before finishing it, delete it!
                 if(my_animation->CurrentFrame()->CurrentStickFigure()->draw_count==1)
                 {
-                    // niente removeItem manuale qui: dal Phase 2c CurrentStick() è uno StickData
-                    // (NON un QGraphicsItem — il vecchio cast era un type-pun su un puntatore
-                    // scorrelato, UB); CancelDrawing() stacca già la view dalla scena via
+                    // no manual removeItem here: since Phase 2c CurrentStick() is a StickData
+                    // (NOT a QGraphicsItem — the old cast was a type-pun on an unrelated
+                    // pointer, UB); CancelDrawing() already detaches the view from the scene via
                     // FramePresenter::DetachView()
                     my_animation->CurrentFrame()->CurrentStickFigure()->CancelDrawing();
                 }
@@ -3834,8 +3973,8 @@ void MyView::ChangeTool()
         }
         case(DRAWFREEHAND):
         {
-            // uscendo dal tool freehand: chiudi un'eventuale sessione di disegno (spec:
-            // qualunque altro tool esce da draw mode), oppure scarta una base a metà click
+            // leaving the freehand tool: close any drawing session (spec:
+            // any other tool leaves draw mode), or discard a half-clicked base
             if(draw_mode)
                 ExitDrawMode();
             else if(!my_animation->current_frame->stick_figures.isEmpty()
@@ -3890,7 +4029,7 @@ void MyView::ChangeTool()
             if(!my_animation->current_frame->stick_figures.isEmpty()
                     && my_animation->CurrentFrame()->CurrentStickFigure() != nullptr)
             {
-                // base a metà (un solo click): buttala via come per gli altri DRAW*
+                // half-drawn base (a single click): throw it away as for the other DRAW* tools
                 if(my_animation->CurrentFrame()->CurrentStickFigure()->draw_count==1)
                 {
                     my_animation->CurrentFrame()->CurrentStickFigure()->CancelDrawing();
@@ -3939,7 +4078,7 @@ void MyView::wheelEvent(QWheelEvent *event)
 
 
 
-// mouse rilasciato
+// mouse released
 /**
  * @details Ends a gesture. On left release it finalizes an interactive stick rotation
  * (StickGraphicsItem::EndRotation()) and refreshes the figure icon/layer thumbnail; for
@@ -4255,11 +4394,11 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         case DRAWTAPER:
         case DRAWTRAPEZOID:
         case DRAWIMG:
-        case DRAWFREEHAND: // anteprima gialla della linea tra 1° e 2° click, come un DRAW normale
-        case DRAWTEXT:     // idem: la spina segue il mouse finché il testo è vuoto
+        case DRAWFREEHAND: // yellow preview of the line between the 1st and 2nd click, like a normal DRAW
+        case DRAWTEXT:     // same: the spine follows the mouse while the text is empty
         case DRAWVECTOR:   // the skeleton follows the mouse until the second click
         {
-        // durante il disegno,l'estremo libero della linea segue il mouse
+        // while drawing, the free end of the line follows the mouse
             if(my_animation->CurrentFrame()->CurrentStickFigure() != nullptr && my_animation->CurrentFrame()->CurrentStickFigure() != nullptr)
             {
                 if(my_animation->CurrentFrame()->CurrentStickFigure()->draw_count > 0)
@@ -4311,7 +4450,7 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         {
             StickFigure *fig = my_animation->current_frame->stick_figures.isEmpty()
                     ? nullptr : my_animation->CurrentFrame()->CurrentStickFigure();
-            // la linea base segue il mouse come per gli altri tool DRAW*
+            // the base line follows the mouse as for the other DRAW* tools
             if(fig != nullptr && fig->draw_count > 0){
                 fig->PreviewDrawing(&coord);
                 break;
@@ -4320,11 +4459,11 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                                                                    : StickData::MULTILINE);
             if(session == nullptr)
                 break;
-            // trascinamento di un vertice esistente
+            // dragging an existing vertex
             if(is_pressed && poly_drag_idx >= 0){
                 if(poly_drag_needs_undo){
-                    // sotto la soglia di drag è ancora un click (che riapre la sessione al
-                    // rilascio): solo oltre si prende lo snapshot e il vertice si sposta
+                    // below the drag threshold it is still a click (which reopens the session on
+                    // release): only beyond it is the snapshot taken and the vertex moved
                     if((event->pos() - poly_press_pos).manhattanLength() < QApplication::startDragDistance())
                         break;
                     StoreUndo();
@@ -4333,17 +4472,17 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                 session->view->EditPolygonPoint(poly_drag_idx, coord);
                 break;
             }
-            // anteprima live: il prossimo vertice segue il mouse prima del click
+            // live preview: the next vertex follows the mouse before the click
             if(poly_session_active){
                 int insert_idx;
                 if(tool == DRAWMULTI)
-                    insert_idx = session->view->SceneVertices().length(); // estende la coda
+                    insert_idx = session->view->SceneVertices().length(); // extends the tail
                 else if(poly_session_extends)
                     insert_idx = session->view->NearestEdgeInsertIndex(coord);
                 else
                     insert_idx = session->polygon_points.length();
-                // DRAWMULTI: l'anteprima pende dal vertice da cui partirà il prossimo punto
-                // (i vertici di un ramo sono sempre tondi, gli altri hanno il giunto scelto)
+                // DRAWMULTI: the preview hangs from the vertex the next point will start from
+                // (a branch's vertices are always round, the others have the chosen joint)
                 session->view->SetPolygonPreview(coord, insert_idx,
                                                  tool == DRAWMULTI ? poly_branch_from : -1,
                                                  poly_branch_from >= 0 ? qint32(StickData::CAP_ROUND)
@@ -4353,8 +4492,8 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         }
         case DRAW_IK:
         {
-            // durante la creazione, la linea tratteggiata e la croce seguono il mouse
-            // finché il secondo click non commette (o Esc/cambio tool non annulla)
+            // during creation, the dashed line and the cross follow the mouse
+            // until the second click commits (or Esc/tool change cancels)
             StickData *pending = IkPendingStart();
             if(pending != nullptr && ik_preview_line != nullptr){
                 ik_preview_line->setLine(QLineF(pending->my_line.p1(), coord));
@@ -4365,20 +4504,20 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         case ROTATE:
         {
             if(is_pressed)
-                ApplySelectionRotate(); // stessa rotazione del pomello della transformation box
+                ApplySelectionRotate(); // same rotation as the transformation box knob
             break;
         }
         case(SCALE):
         {
             if(is_pressed)
-                ApplySelectionScale(); // stessa scala delle maniglie della transformation box
+                ApplySelectionScale(); // same scale as the transformation box handles
             break;
         }
         case(PANVIEW):
         {
             if(is_pressed){
-                // scorre delle barre del delta esatto in pixel (come ScrollHandDrag): rimappare
-                // un centro attraverso la trasformazione a ogni passo derivava per arrotondamento
+                // scroll the bars by the exact pixel delta (like ScrollHandDrag): remapping
+                // a centre through the transform at every step drifted through rounding
                 QPoint delta = event->pos() - view_drag_last;
                 view_drag_last = event->pos();
                 horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
@@ -4391,7 +4530,7 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
             if(is_pressed){
                 qreal target = view_rotate_offset + AngleAround(view_pivot_screen, event->pos());
                 if(event->modifiers() & Qt::ShiftModifier)
-                    target = qRound(target / 15.0) * 15.0; // scatti da 15° dell'angolo ASSOLUTO
+                    target = qRound(target / 15.0) * 15.0; // 15° steps of the ABSOLUTE angle
                 TurnAndZoomView(target - ViewAngle(), 1);
             }
             break;
@@ -4399,14 +4538,14 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         case(ZOOMVIEW):
         {
             if(is_pressed){
-                // destra/su = ingrandisci, sinistra/giù = riduci; 200 px di trascinamento = x2
+                // right/up = zoom in, left/down = zoom out; 200 px of dragging = x2
                 QPoint d = event->pos() - view_drag_last;
                 qreal target = view_zoom_start * pow(2.0, (d.x() - d.y()) / 200.0);
                 if(event->modifiers() & Qt::ShiftModifier)
-                    target = qRound(target * 10) / 10.0; // scatti del 10% del livello ASSOLUTO
-                target = qBound(0.1, target, 50.0); // ponytail: limiti arbitrari, solo per non degenerare
+                    target = qRound(target * 10) / 10.0; // 10% steps of the ABSOLUTE level
+                target = qBound(0.1, target, 50.0); // ponytail: arbitrary limits, only to avoid degenerating
                 TurnAndZoomView(0, target / ViewZoom());
-                zoom_lvl = target; // il middle-drag zoom e il reset leggono questo
+                zoom_lvl = target; // the middle-drag zoom and the reset read this
             }
             break;
         }
@@ -4428,37 +4567,37 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         case(ROTATESCENE):
         {
             if(is_pressed && !my_animation->current_frame->stick_figures.isEmpty()){
-                QPointF center(W/2,H/2); // centro del sistema
-                QLineF mouse_to_center_now(coord,center); // linea che connette il centro al mouse
-                QLineF mouse_to_center_start(starting_coord,center); // linea che connette il centro alla posizione del mouse precedente
-                float starting_angle = mouse_to_center_start.angle(); // angolo assoluto del mouse prima rispetto al centro
+                QPointF center(W/2,H/2); // centre of the system
+                QLineF mouse_to_center_now(coord,center); // line connecting the centre to the mouse
+                QLineF mouse_to_center_start(starting_coord,center); // line connecting the centre to the previous mouse position
+                float starting_angle = mouse_to_center_start.angle(); // absolute angle of the previous mouse position relative to the centre
 
-                float actual_angle = mouse_to_center_now.angle();// angolo assoluto del mouse ora rispetto al centro
-                float angle = actual_angle-starting_angle; // incremento in angolo rispetto a prima
-                // normalizza l'incremento: angle() torna un valore in [0,360), quindi attraversare lo
-                // 0/360 senza questo produce uno scatto di quasi un giro intero per un singolo frame
+                float actual_angle = mouse_to_center_now.angle();// absolute angle of the mouse now relative to the centre
+                float angle = actual_angle-starting_angle; // angle increment relative to before
+                // normalize the increment: angle() returns a value in [0,360), so crossing
+                // 0/360 without this produces a jump of almost a full turn in a single frame
                 if(angle>180) angle -= 360;
                 else if(angle<-180) angle += 360;
-                starting_coord = coord; // le coordinate attuali vengono memorizzate per la prossima iterazione
+                starting_coord = coord; // the current coordinates are stored for the next iteration
                 for(StickFigure*S:my_animation->current_frame->stick_figures){
                     //check it is not an empty layer
                     if( S->stick_list.count()>0 && S->master_stick){
-                        QLineF connect_center(center,S->master_stick->my_line.p1()); // linea che connette il master dello stick al centro
+                        QLineF connect_center(center,S->master_stick->my_line.p1()); // line connecting the stick's master to the centre
 
-                        connect_center.setAngle(connect_center.angle()+angle); // ruotiamola dell'angolo di incremento
-                        // ruota ogni singolo stick
+                        connect_center.setAngle(connect_center.angle()+angle); // rotate it by the increment angle
+                        // rotate every single stick
                         for(StickData *s:S->stick_list){
 
                             if(s->view){
                                 s->view->Rotate(angle);
-                                s->view->angle_buffer2+=angle; // aggiorna il buffer interno dell'angolo dello stick
+                                s->view->angle_buffer2+=angle; // update the stick's internal angle buffer
                             }
                         }
 
-                        QLineF delta(S->origin_pos_buffer,connect_center.p2()); // traslazione della punta della lineacentro-master ruotata
-                        //trasla lo stickfigure dell'ammontare
+                        QLineF delta(S->origin_pos_buffer,connect_center.p2()); // translation of the tip of the rotated centre-master line
+                        //translate the stickfigure by that amount
                         S->Traslate(delta.dx(),delta.dy());
-                        S->origin_pos_buffer = S->master_stick->my_line.p1(); // agiorna il buffer di posizione dello stickfigure
+                        S->origin_pos_buffer = S->master_stick->my_line.p1(); // update the stickfigure's position buffer
                     }
                     }
             }
@@ -4473,23 +4612,23 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                 float dist = 0;
                 QPointF center(W/2,H/2);
                 float start_dist = QLineF(starting_coord,center).length();
-                if(start_dist<1) // evita una divisione per zero (o quasi) se si preme esattamente sul centro
+                if(start_dist<1) // avoids a division by (almost) zero if pressed exactly on the centre
                     break;
                 dist = QLineF(coord,center).length();
                 scale_amount = dist/start_dist;
                 for(StickFigure * S:my_animation->current_frame->stick_figures){
                     //check it is not an empty layer
                         if( S->stick_list.count()>0 && S->master_stick){
-                        // per traslare lo stick verso il centro [W/2,H/2] proporzionalmente
-                        // serve calcolare la distanza del masterstick da essa
-                        // moltiplicare dx e dy per lo scale factor
-                        // usarli come traslazione
+                        // to translate the stick toward the centre [W/2,H/2] proportionally
+                        // compute the master stick's distance from it,
+                        // multiply dx and dy by the scale factor,
+                        // use them as the translation
                         float dx = 0;
                         float dy = 0;
-                        // il dx e dy deve essere una quantità tale da non far eccedere ad actual dist ilv alore  di originaldist
+                        // dx and dy must be such that actual dist doesn't exceed the value of original dist
                         QLineF actual_dist_from_center(S->master_stick->my_line.p1(),center);
                         QLineF original_dist_from_center(S->origin_pos_buffer,center);
-                        // quindi fai la differenza fra il valore di distaza originale (max) e la distanza attuale modificata dal fattore di scala per dx e dy
+                        // so take the difference between the original distance value (max) and the current distance modified by the scale factor, for dx and dy
                         dx = -original_dist_from_center.dx()*scale_amount+actual_dist_from_center.dx();
                         dy = -original_dist_from_center.dy()*scale_amount+actual_dist_from_center.dy();
                         S->Traslate(dx,dy);
@@ -4524,21 +4663,21 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         translate(travel.dx(),travel.dy());
     }else if(is_middle_pressed){
 
-        //calcola lo scostamento dal centro all'inizio della pressione e quella attuale
+        //compute the offset from the centre at the start of the press and the current one
         float dist_from_center0 = QLineF(prev_coord,QPointF(W/2,H/2)).length();
         float dist_from_center1 = QLineF(coord,QPointF(W/2,H/2)).length();
 
-        zoom_lvl_buf = zoom_lvl+(dist_from_center1-dist_from_center0)/(0.5*sqrtf(W*W+H*H)); // zoombuf è incrementato dal valore precedente di un valore sempre minore di 1
+        zoom_lvl_buf = zoom_lvl+(dist_from_center1-dist_from_center0)/(0.5*sqrtf(W*W+H*H)); // zoom_lvl_buf is incremented from the previous value by an amount always less than 1
 
-        scale(zoom_lvl_buf/zoom_lvl,zoom_lvl_buf/zoom_lvl); // la divisione serve a riportare allo zoom 0, lo zoom applicato è zombuf
+        scale(zoom_lvl_buf/zoom_lvl,zoom_lvl_buf/zoom_lvl); // the division brings it back to zoom 0, the applied zoom is zoom_lvl_buf
         zoom_lvl = zoom_lvl_buf;
     }
     prev_coord = coord;
-    if(is_pressed) // solo durante un trascinamento: un edit può muovere start/target IK
+    if(is_pressed) // only during a drag: an edit can move the IK start/target
         UpdateIkOverlay();
     QGraphicsView::mouseMoveEvent(event);
 }
-//funzione usata per riscalare interamente il frame quando si riscala l'animazione intera
+//function used to rescale the whole frame when the entire animation is rescaled
 /**
  * @details Scales one frame's figures about the centre of R: each figure is translated
  * so its master keeps its relative offset from the centre, then every stick is scaled
@@ -4591,23 +4730,23 @@ void MyView::DeleteFrame(Frame* frame){
     for(Frame *f: my_animation->frame_list){
         if(f->frame_number>frame_num){
             f->frame_number--;
-            f->UpdateLabel(); // il numero è cotto nell'anteprima, vedi Frame::UpdateLabel()
+            f->UpdateLabel(); // the number is baked into the preview, see Frame::UpdateLabel()
         }
     }
-    if(my_animation->current_frame != nullptr) // cancellato l'ultimo frame: niente da selezionare
+    if(my_animation->current_frame != nullptr) // last frame deleted: nothing to select
         my_animation->current_frame->linked_item->setSelected(true);
 }
 /**
- * @details Le righe della lista layer sono le uniche QListWidgetItem che una StickFigure
- * possa possedere (vedi PopulateLiveFrame()), e finora nessuno azzerava il linked_item di
- * chi le perdeva: ogni frame visitato e poi lasciato restava con puntatori PENDENTI, cosa
- * che non si notava solo perché Animation::DeleteFrame() li rilegge unicamente per
- * `frame == current_frame`, cioè — di norma — per il frame mostrato, le cui righe esistono
- * davvero. "Di norma" non è sempre: Animation::DeleteFrame() riassegna essa stessa
- * current_frame, quindi dentro un ciclo di cancellazioni (FrameBatchUndoCommand::Remove())
- * il current diventa un frame NON mostrato, e cancellarlo passava un QListWidgetItem già
- * distrutto a QListWidget::row() — segfault. Si azzera dove le righe muoiono, così il
- * puntatore non può mai sopravvivere all'oggetto.
+ * @details The layer list rows are the only QListWidgetItems a StickFigure
+ * can own (see PopulateLiveFrame()), and until now nobody reset the linked_item of
+ * those that lost them: every frame visited and then left kept DANGLING pointers, which
+ * went unnoticed only because Animation::DeleteFrame() re-reads them solely for
+ * `frame == current_frame`, i.e. — normally — for the displayed frame, whose rows really
+ * exist. "Normally" is not always: Animation::DeleteFrame() itself reassigns
+ * current_frame, so inside a deletion loop (FrameBatchUndoCommand::Remove())
+ * the current becomes a frame that is NOT displayed, and deleting it passed an already
+ * destroyed QListWidgetItem to QListWidget::row() — segfault. It is reset where the rows die, so the
+ * pointer can never outlive the object.
  */
 void MyView::ClearLayerRows()
 {
@@ -4617,7 +4756,7 @@ void MyView::ClearLayerRows()
     }
     my_stick_figure_widget_list->clear();
 }
-// routine per passare da un frame ad un altro, svuota la scena, svuota le widget list, ripopola entrambi, aggiorna onion skins e selezioni
+// routine to switch from one frame to another: empties the scene, empties the widget lists, repopulates both, updates onion skins and selections
 /**
  * @details The single frame-switch routine (frame list slot in widget.cpp, undo/redo
  * via RestoreFrameSnapshot(), file load in mymainwindow.cpp and playback all reach it).
@@ -4628,9 +4767,9 @@ void MyView::ClearLayerRows()
  * skins and the frame thumbnail.
  */
 void MyView::MoveToFrame(Frame* frame){
-    // qualunque cambio frame chiude prima la sessione di disegno: finalizza sul frame
-    // CORRENTE (draw_target vive lì) prima di passare a un altro, evitando dangling.
-    // No-op se non si è in draw mode; i chiamanti UI escono già prima di StoreUndo
+    // any frame change closes the drawing session first: finalize on the
+    // CURRENT frame (draw_target lives there) before switching to another, avoiding dangling pointers.
+    // No-op when not in draw mode; the UI callers already exit before StoreUndo
     if(draw_mode)
         ExitDrawMode();
     // a real frame change leaves vector mode and drops the anchor selection of the frame being
@@ -4639,19 +4778,19 @@ void MyView::MoveToFrame(Frame* frame){
         ExitVectorMode();
         ClearVectorSelections();
     }
-    // il cambio frame invalida la sessione poligono e la selezione vertici (stato UI
-    // del frame lasciato); i flag da soli non tengono puntatori, basta azzerarli
+    // a frame change invalidates the polygon session and the vertex selection (UI state
+    // of the frame being left); the flags alone hold no pointers, resetting them is enough
     poly_session_active = false;
     poly_session_extends = false;
     poly_drag_idx = -1;
     poly_vertex_drag = false;
-    ClearMultiSelection(); // la selezione multipla decade al cambio frame (spec)
-    // idem per un'eventuale creazione di catena IK a metà: niente CancelIkDrawing() qui
-    // (toccherebbe ik_role di uno stick del frame che si sta per lasciare), solo lo
-    // stato di sessione e gli item di anteprima (altrimenti orfani sulla scena)
+    ClearMultiSelection(); // the multi-selection lapses on frame change (spec)
+    // same for any half-done IK chain creation: no CancelIkDrawing() here
+    // (it would touch the ik_role of a stick of the frame about to be left), only the
+    // session state and the preview items (otherwise orphaned on the scene)
     ik_drawing = false;
     ClearIkPreviewItems();
-    // rimuovi tutti gli stick dalla scena
+    // remove all the sticks from the scene
     auto current_scene = scene();
     if(my_animation->frame_list.count()>=1){
         for(StickFigure *S:my_animation->current_frame->stick_figures){
@@ -4666,14 +4805,14 @@ void MyView::MoveToFrame(Frame* frame){
 
         }
     }
-    // rimuovigli elementi dalla lista widget (azzerando i linked_item che stanno per morire)
+    // remove the elements from the widget list (resetting the linked_items that are about to die)
     ClearLayerRows();
 
-    // assicura che ogni stick del nuovo frame abbia una view PRIMA di AddHandles() qui sotto:
-    // un frame appena caricato da file (attach_to_scene=false) non ne ha ancora una, un frame
-    // già visitato in precedenza sì, basta ri-attaccarla alla scena
-    // num_of_items viene serializzato come campo indipendente: su un file incoerente può
-    // eccedere la lista reale, e total_sticks[j] leggerebbe fuori dai limiti
+    // make sure every stick of the new frame has a view BEFORE AddHandles() below:
+    // a frame just loaded from file (attach_to_scene=false) doesn't have one yet, a frame
+    // visited before does, it only needs re-attaching to the scene
+    // num_of_items is serialized as an independent field: on an inconsistent file it may
+    // exceed the real list, and total_sticks[j] would read out of bounds
     int attachable = qMin(frame->num_of_items, (int)frame->total_sticks.count());
     for(int j = 0;j<attachable;j++)
     {
@@ -4684,7 +4823,7 @@ void MyView::MoveToFrame(Frame* frame){
             FramePresenter::AttachView(s, current_scene);
     }
 
-    // aggiungi tutta gli stickfigure del nuovo frame alla lista del widget
+    // add all the stickfigures of the new frame to the widget list
     for(StickFigure *S:frame->stick_figures)
     {
         QListWidgetItem * added_item = new QListWidgetItem(my_stick_figure_widget_list);
@@ -4694,7 +4833,7 @@ void MyView::MoveToFrame(Frame* frame){
         added_item->setIcon(*S->stick_figure_icon);
         S->linked_item = added_item;
         my_stick_figure_widget_list->addItem(S->linked_item);
-        // aggiungi alla scena
+        // add to the scene
         if(!play_back){
             S->UpdateBoundingRects();
             S->UpdateIcon();
@@ -4704,7 +4843,7 @@ void MyView::MoveToFrame(Frame* frame){
     current_scene->clearSelection();
     my_animation->current_frame = frame;
 
-    // aggiorna il current frame, se si parte d auna situazione di inizio forza il primo stickfigure
+    // update the current frame; if starting from an initial situation, force the first stickfigure
     if(frame->current_stick_figure !=nullptr){
         if(frame->current_stick_figure->current_stick!=nullptr){
             frame->SelectStick(frame->current_stick_figure,frame->current_stick_figure->current_stick);
@@ -4722,31 +4861,31 @@ void MyView::MoveToFrame(Frame* frame){
 
     if(!play_back)
     {
-        UpdateOnionSkins();//aggiorna gli onion skins
+        UpdateOnionSkins();//update the onion skins
     }
-    // se non siamo in modalità playback aggiorna le selezioni nelle widgetlists e delle iconee
+    // if we are not in playback mode, update the selections in the widget lists and the icons
     if(play_back == false){
-        // ClearAndSelect ESPLICITO: QListWidgetItem::setSelected() sgombra la selezione
-        // precedente solo in SingleSelection (Qt prende un ramo diverso per modalità —
-        // misurato), e da quando la lista è ContiguousSelection il frame lasciato restava
-        // selezionato accanto a quello nuovo — visibilissimo duplicando un frame. Un
-        // cambio frame definisce SEMPRE una selezione nuova di un solo elemento: la
-        // selezione multipla si estende con shift+clic, che non passa da qui
-        // (Widget::on_frameListWidget_itemClicked() esce prima)
+        // EXPLICIT ClearAndSelect: QListWidgetItem::setSelected() clears the previous
+        // selection only in SingleSelection (Qt takes a different branch per mode —
+        // measured), and since the list became ContiguousSelection the frame left stayed
+        // selected next to the new one — very visible when duplicating a frame. A
+        // frame change ALWAYS defines a new single-element selection: the
+        // multiple selection is extended with shift+click, which doesn't go through here
+        // (Widget::on_frameListWidget_itemClicked() exits earlier)
         my_frame_widget_list->setCurrentItem(my_animation->current_frame->linked_item,
                                             QItemSelectionModel::ClearAndSelect);
-        // niente guardia su stick_figures.isEmpty(): UpdateIcon() gestisce già correttamente un
-        // frame vuoto (lo riempie di bianco), senza di essa un frame appena creato restava senza
-        // anteprima invece di mostrare una tela bianca
+        // no guard on stick_figures.isEmpty(): UpdateIcon() already handles an empty
+        // frame correctly (fills it with white), without it a newly created frame was left without a
+        // preview instead of showing a white canvas
         if(!my_animation->frame_list.isEmpty()){
             my_animation->current_frame->UpdateIcon();
         }
-        UpdateSelectionDecorations(true); // maniglia + bounding box della figura corrente
+        UpdateSelectionDecorations(true); // handle + bounding box of the current figure
     }
     my_animation->CurrentFrame()->Refresh(0);
-    UpdateIkOverlay(); // il nuovo frame può avere le sue catene IK da marcare
+    UpdateIkOverlay(); // the new frame may have its own IK chains to mark
 }
-// routine per calcolare gli onion skins, prima cancellali, ridisegnali su un immagine, e aggiungi l'immagine alla scena
+// routine to compute the onion skins: first delete them, redraw them on an image, and add the image to the scene
 /**
  * @details Rebuilds the faded "ghosts" of the frames before the current one. Old onion
  * pixmaps are removed and freed, then the previous N frames (N = onion_skin_sb spinbox,
@@ -4758,7 +4897,7 @@ void MyView::MoveToFrame(Frame* frame){
  * special path for code that must behave differently while rendering.
  */
 void MyView::UpdateOnionSkins(){
-    // svuota i buffer di immagine vecchi (presneti nella scena) immagazzinati nel ciclo for precedente
+    // empty the old image buffers (present in the scene) stored in the previous for loop
     for(QGraphicsPixmapItem* P:onion_skins){
         scene()->removeItem(P);
         delete P;
@@ -4766,41 +4905,41 @@ void MyView::UpdateOnionSkins(){
     onion_skins.clear();
     if(onion_skin_sb->value()==0 || my_animation->current_frame->frame_number == 0)
         return;
-    // imposta la flag per routine speciali
+    // set the flag for special routines
     StickGraphicsItem::onion_render = true;
-    QGraphicsScene render_scene; // scena fittizia su cui renderizzare gli onionskins
+    QGraphicsScene render_scene; // dummy scene to render the onion skins on
     render_scene.setSceneRect(scene()->sceneRect());
-    // dallo spinbox trai il valore del numero di onionskins servono
+    // read from the spinbox the number of onion skins needed
     int skin_num = onion_skin_sb->value();
     float opacity_val = 0;
     if(my_animation->current_frame->frame_number<skin_num)
     {
         skin_num = my_animation->current_frame->frame_number;
     }
-    // disegna sulla scena fittizia gli stickfigures dei frame da onionskinnare che partono dal frame corrente- numero di skin calcolabili
+    // draw on the dummy scene the stickfigures of the frames to onion-skin, starting from the current frame minus the number of computable skins
     for(int i = my_animation->current_frame->frame_number-skin_num; i<my_animation->current_frame->frame_number; i++){
-        // todo anzichè copiare stickfigure per stickfigure, copiare l'intera scena
-        // questi stick sono VIVI (hanno già una view sul frame i): clonarne i dati prima di
-        // wrapparli evita che il costruttore di stick rubi il back-pointer data->view alla
-        // view reale (vedi StickFigure::UpdateIcon per lo stesso pattern)
-        // ...e con il genitore ricollegato, da cui arriva la trasformazione globale di un antenato
+        // todo instead of copying stickfigure by stickfigure, copy the whole scene
+        // these sticks are LIVE (they already have a view on frame i): cloning their data before
+        // wrapping them keeps the stick constructor from stealing the data->view back-pointer from the
+        // real view (see StickFigure::UpdateIcon for the same pattern)
+        // ...and with the parent relinked, which is where an ancestor's global transform comes from
         QList<StickData*> render_clones = CloneForRender(my_animation->frame_list[i]->total_sticks);
         for(StickData *clone : render_clones)
             render_scene.addItem(new StickGraphicsItem(clone));
-        // più è vecchio l'onion skin più è trasparente, più è vicino al frame corrente più è opaco
+        // the older the onion skin the more transparent, the closer to the current frame the more opaque
         opacity_val += 0.5/skin_num;
-        // solo l'ingombro delle figure, non tutta la scena: un fantasma costava 1.44x la tela
-        // (12 MB a 1080p) a ogni cambio frame, ora costa quanto le figure che mostra
+        // only the figures' footprint, not the whole scene: a ghost used to cost 1.44x the canvas
+        // (12 MB at 1080p) on every frame change, now it costs as much as the figures it shows
         QRect bounds = render_scene.itemsBoundingRect().intersected(render_scene.sceneRect()).toAlignedRect();
         if(!bounds.isEmpty()){
-            // premoltiplicato: è il formato in cui il raster engine dipinge, ARGB32 semplice
-            // passava ogni span da una conversione (e QPixmap::fromImage ne faceva un'altra)
+            // premultiplied: it is the format the raster engine paints in, plain ARGB32
+            // sent every span through a conversion (and QPixmap::fromImage did another one)
             QImage render_img(bounds.size(), QImage::Format_ARGB32_Premultiplied);
             render_img.fill(Qt::transparent);
             QPainter painter(&render_img);
             render_scene.render(&painter, QRectF(), bounds);
             painter.end();
-            // trasferisci la scena renderizzata
+            // transfer the rendered scene
             QGraphicsPixmapItem* item = new QGraphicsPixmapItem(QPixmap::fromImage(std::move(render_img)));
             item->setOffset(bounds.topLeft());
             item->setOpacity(opacity_val);
@@ -4808,7 +4947,7 @@ void MyView::UpdateOnionSkins(){
             onion_skins.append(item);
             scene()->addItem(item);
         }
-        render_scene.clear(); // distruggi le view di rendering PRIMA di liberare i dati clonati
+        render_scene.clear(); // destroy the rendering views BEFORE freeing the cloned data
         qDeleteAll(render_clones);
     }
 
@@ -4841,8 +4980,8 @@ public:
         : view_(view), command_tag_(command_tag)
     {
         before_ = ExtractFrameData(*view_->my_animation->current_frame);
-        // la selezione multipla viaggia con lo snapshot come indici di riga (i puntatori
-        // alle figure muoiono nel restore): undo/redo la ripristinano com'era
+        // the multi-selection travels with the snapshot as row indices (the pointers
+        // to the figures die in the restore): undo/redo restore it as it was
         selection_before_ = view_->MultiSelectionIndices();
     }
     ~FrameUndoCommand() override
@@ -4934,36 +5073,36 @@ private:
     {
         for(int i = 0; i < snapshots_.count(); i++){
             Frame *added = view_->SetUpFrame(first_index_ + i);
-            // PopulateLiveFrame() copia frame_number DAL dato sul frame vivo, sovrascrivendo
-            // quello che SetUpFrame() gli ha appena dato: allinea lo snapshot alla posizione
-            // in cui sta entrando (per un paste il numero salvato è quello di origine)
+            // PopulateLiveFrame() copies frame_number FROM the data onto the live frame, overwriting
+            // what SetUpFrame() has just given it: align the snapshot with the position
+            // it is entering (for a paste the saved number is the origin's)
             snapshots_[i]->frame_number = first_index_ + i;
-            // attach_to_scene = false di proposito: con true gli stick di TUTTI i frame
-            // del blocco finirebbero insieme sulla scena, e MoveToFrame() ne rimuove solo
-            // quelli di UN frame. Stesso schema del load da file: le view le crea
-            // MoveToFrame() (FramePresenter::AttachView) per il solo frame mostrato
+            // attach_to_scene = false on purpose: with true the sticks of ALL the frames
+            // of the block would end up on the scene together, and MoveToFrame() removes only
+            // those of ONE frame. Same scheme as the load from file: the views are created by
+            // MoveToFrame() (FramePresenter::AttachView) for the displayed frame only
             PopulateLiveFrame(added, *snapshots_[i], false, false);
-            added->UpdateIcon(); // l'anteprima invece serve subito: il frame non passa da MoveToFrame
+            added->UpdateIcon(); // the preview, instead, is needed right away: the frame doesn't go through MoveToFrame
         }
-        // mostra il primo frame del blocco, così l'effetto dell'operazione è visibile
+        // show the first frame of the block, so the effect of the operation is visible
         view_->MoveToFrame(view_->my_animation->frame_list[first_index_]);
     }
     /// Deletes the block again and shows the frame that preceded it (or the first surviving one).
     void Remove()
     {
-        // Animation::DeleteFrame() ripulisce le righe della lista layer per il solo
-        // current_frame, ma è essa stessa a riassegnare current_frame a ogni giro: dal
-        // secondo in poi il current NON è più il frame mostrato, e la sua figura non ha
-        // righe vere. Le righe si tolgono qui, tutte in una volta e finché i puntatori sono
-        // ancora coerenti (qui il current è per forza il frame mostrato), così nessun giro
-        // del ciclo può passarne una a QListWidget::row(); la MoveToFrame() in fondo le
-        // ricostruisce per il frame che resta
+        // Animation::DeleteFrame() cleans up the layer list rows for current_frame only,
+        // but it is itself what reassigns current_frame on every iteration: from the
+        // second one on the current is NO LONGER the displayed frame, and its figure has no
+        // real rows. The rows are removed here, all at once and while the pointers are
+        // still consistent (here the current is necessarily the displayed frame), so no iteration
+        // of the loop can pass one to QListWidget::row(); the MoveToFrame() at the end
+        // rebuilds them for the frame that remains
         view_->ClearLayerRows();
-        // dall'ultimo al primo: cancellare un frame più avanti non sposta gli indici di
-        // quelli prima, quindi first_index_+i resta valido a ogni giro
+        // from last to first: deleting a later frame doesn't shift the indices of
+        // the earlier ones, so first_index_+i stays valid on every iteration
         for(int i = snapshots_.count()-1; i >= 0; i--)
             view_->DeleteFrame(view_->my_animation->frame_list[first_index_ + i]);
-        // il frame prima del blocco, che esiste sempre tranne quando il blocco partiva da 0
+        // the frame before the block, which always exists except when the block started at 0
         int show = qBound(0, first_index_ - 1, (int)view_->my_animation->frame_list.count()-1);
         view_->MoveToFrame(view_->my_animation->frame_list[show]);
     }
@@ -5012,43 +5151,43 @@ bool MyView::DeleteFrames(int first_index, int count)
  */
 void MyView::RestoreFrameSnapshot(int command_tag, int mode, FrameData *snapshot)
 {
-    // un undo/redo ricostruisce gli stick del frame: qualunque sessione poligono o
-    // trascinamento in corso si riferiva a oggetti che stanno per sparire
+    // an undo/redo rebuilds the frame's sticks: any polygon session or
+    // drag in progress referred to objects that are about to disappear
     poly_session_active = false;
     poly_session_extends = false;
     poly_drag_idx = -1;
     poly_vertex_drag = false;
     vec_gesture = VG_NONE; // a vector drag in progress named anchors of the stick being rebuilt
-    ClearMultiSelection(); // le figure selezionate stanno per essere ricostruite
-    ik_drawing = false; // idem per una creazione di catena IK a metà: vedi MoveToFrame()
+    ClearMultiSelection(); // the selected figures are about to be rebuilt
+    ik_drawing = false; // same for a half-done IK chain creation: see MoveToFrame()
     ClearIkPreviewItems();
-    // se è un undo su un addframe, o un redo su un deleteframe ci sta da rimuovere un frame
+    // if it is an undo of an addframe, or a redo of a deleteframe, a frame must be removed
     if((command_tag == CMD_ADDFRAME && mode == MODE_UNDO)||
             (command_tag == CMD_DELETEFRAME && mode == MODE_REDO)){
-        // routine di cancellazione del frame
+        // frame deletion routine
         DeleteFrame(my_animation->current_frame);
-        // svuota il frame da popolare con il buffer e ripopolalo dallo snapshot,
-        // attaccando davvero gli stick alla scena (il target è il frame VERO)
+        // empty the frame to populate with the buffer and repopulate it from the snapshot,
+        // really attaching the sticks to the scene (the target is the REAL frame)
         my_animation->frame_list[snapshot->frame_number]->ClearFrame();
         PopulateLiveFrame(my_animation->frame_list[snapshot->frame_number],*snapshot,true,true);
-        // spostati verso tale frame
+        // move to that frame
         MoveToFrame(my_animation->frame_list[snapshot->frame_number]);
     }
-    // se è un undo su uno spostamento
+    // if it is an undo of a move
     else if(command_tag == CMD_MOVETOFRAME){
-        //svuota il frame di destinazione e popolalo con lo snapshot
+        //empty the destination frame and populate it with the snapshot
         my_animation->frame_list[snapshot->frame_number]->ClearFrame();
         PopulateLiveFrame(my_animation->frame_list[snapshot->frame_number],*snapshot,true,true);
-        // spostati sul frame di destinazione
+        // move to the destination frame
         MoveToFrame(my_animation->frame_list[snapshot->frame_number]);
     }
-    // se è un undo su un deleteframe o un redo su un adddframe bisogna aggiungere un frame
+    // if it is an undo of a deleteframe or a redo of an addframe, a frame must be added
     else if((command_tag == CMD_DELETEFRAME && mode == MODE_UNDO)||
             (command_tag == CMD_ADDFRAME && mode == MODE_REDO)){
-        // routine di aggiunta del frame
+        // frame addition routine
         Frame* added_frame = SetUpFrame(snapshot->frame_number);
         PopulateLiveFrame(added_frame,*snapshot,true,true);
-        // spostati sulla destinazione
+        // move to the destination
         MoveToFrame(added_frame);
     }
     else{
@@ -5087,10 +5226,10 @@ void MyView::StoreUndo(int command){
  */
 QString MyView::GenerateInbetweens(int start_index, int count)
 {
-    // PRIMA di validare: ExitDrawMode() finalizza (e può cancellare, se non si è dipinto
-    // niente) lo stick freehand del frame corrente, che è uno dei due keyframe. Chiuderla
-    // dopo i controlli li renderebbe stantii, e le due liste di stick verrebbero appaiate
-    // per indice dopo una rimozione a monte
+    // BEFORE validating: ExitDrawMode() finalizes (and may delete, if nothing was painted)
+    // the freehand stick of the current frame, which is one of the two keyframes. Closing it
+    // after the checks would make them stale, and the two stick lists would be paired
+    // by index after an upstream removal
     ExitDrawMode();
     QList<Frame*> &frames = my_animation->frame_list;
     if(count < 1)
@@ -5127,16 +5266,16 @@ QString MyView::GenerateInbetweens(int start_index, int count)
             }
         }
     }
-    UpdateFrameOrder(my_animation->CurrentFrame()); // l'ordine z del base deve essere una permutazione valida
-    // "una copia del frame corrente" (spec): dalla UI il corrente è sempre uno dei due
-    // estremi; il ripiego sul frame iniziale copre un chiamante che passasse altri indici,
-    // ed è comunque strutturalmente identico all'altro estremo per i controlli qui sopra
+    UpdateFrameOrder(my_animation->CurrentFrame()); // the base's z-order must be a valid permutation
+    // "a copy of the current frame" (spec): from the UI the current one is always one of the two
+    // ends; the fallback to the start frame covers a caller passing other indices,
+    // and it is in any case structurally identical to the other end per the checks above
     Frame *base_frame = (my_animation->CurrentFrame() == end_frame) ? end_frame : start_frame;
     FrameData *base = ExtractFrameData(*base_frame);
     QList<FrameData*> snapshots;
     for(int i = 1; i <= count; i++){
         FrameData *inbetween = base->Clone();
-        inbetween->name.clear(); // i frame generati nascono senza nome, non col nome del base
+        inbetween->name.clear(); // the generated frames are born without a name, not with the base's name
         float t = float(i)/float(count + 1);
         for(int f = 0; f < inbetween->stick_figures.count(); f++){
             for(int s = 0; s < inbetween->stick_figures[f]->stick_list.count(); s++){
@@ -5157,7 +5296,7 @@ QString MyView::GenerateInbetweens(int start_index, int count)
  * call-site compatibility but the routine always operates on the current frame.
  */
 void MyView::UpdateFrameOrder(Frame* f){
-    Q_UNUSED(f); // ritenuto per compatibilità con i call site; opera sempre sul frame corrente
+    Q_UNUSED(f); // retained for call-site compatibility; always operates on the current frame
     int j = 0;
     for(StickData*s:my_animation->CurrentFrame()->total_sticks)
     {
@@ -5202,7 +5341,7 @@ void MyView::RemoveHandles(StickFigure *S)
         scene()->removeItem(s->view->stick_handle[1]);
     }
 }
-// cancella la storia di undo/redo, da chiamare quando si carica un nuovo file
+// clears the undo/redo history, to be called when a new file is loaded
 /**
  * @details QUndoStack::clear() deletes every remaining FrameUndoCommand (each
  * frees its own before_/after_ FrameData in its destructor) — the old manual
@@ -5224,12 +5363,12 @@ static QIcon RenderLibraryIcon(const StickFigureData &figure_data){
     icon_scene.setSceneRect(my_rect->rect());
     icon_scene.setBackgroundBrush(QBrush(QColor(Qt::white)));
     for(StickData *stick_data : figure_data.stick_list){
-        // la libreria non è mai "viva": stick_data non ha e non avrà mai un'altra view,
-        // quindi wrapparlo direttamente (senza clonarlo) non ruba il back-pointer a nessuno
+        // the library is never "live": stick_data has no other view and never will,
+        // so wrapping it directly (without cloning it) steals the back-pointer from no one
         StickGraphicsItem *render_view = new StickGraphicsItem(stick_data);
         render_view->setZValue(stick_data->z);
         render_view->br = render_view->UpdateBr(0);
-        icon_scene.addItem(render_view); // la scena diventa proprietaria della view
+        icon_scene.addItem(render_view); // the scene becomes the view's owner
     }
     QPainter painter(&icon_pixmap);
     icon_scene.render(&painter);
@@ -5241,9 +5380,9 @@ static QIcon RenderLibraryIcon(const StickFigureData &figure_data){
  * has exactly one behavior.
  */
 void MyView::SaveLibrary(QString file_name){
-    // una libreria rifiutata perché troppo nuova NON ha il suo contenuto nel buffer (che è
-    // quello della libreria precedente): "Save current library" scrive sul file della riga
-    // selezionata, quindi senza questo controllo distruggerebbe l'unica copia
+    // a library refused for being too new does NOT have its content in the buffer (which is
+    // the previous library's): "Save current library" writes to the selected row's
+    // file, so without this check it would destroy the only copy
     if(refused_library_files.contains(QFileInfo(file_name).absoluteFilePath())){
         QMessageBox::warning(this, tr("Library not saved"),
                              tr("\"%1\" was saved by a newer version of SAM and could not be "
@@ -5356,7 +5495,7 @@ bool MyView::LoadLibrary(QString file_name, int mode){
     ReportMissingTextFonts();
     if(mode)
         return true;
-    // aggiungi tutti gli stickfigure della libreria alla lista del widget
+    // add all the library's stickfigures to the widget list
     for(StickFigureData *figure_data:stick_library_buffer->stick_figures){
         QListWidgetItem * added_item = new QListWidgetItem();
         added_item->setData(Qt::UserRole,QVariant::fromValue(figure_data));
@@ -5372,8 +5511,8 @@ bool MyView::LoadLibrary(QString file_name, int mode){
  * @return the live source figure, or nullptr if it has no sticks.
  */
 StickFigure* MyView::AddStickFigureToLibrary(const QString &name){
-    // con una selezione multipla ogni figura selezionata entra in libreria — l'unico
-    // export ammesso per una selezione multipla (spec); la selezione resta attiva
+    // with a multi-selection every selected figure goes into the library — the only
+    // export allowed for a multi-selection (spec); the selection stays active
     if(MultiSelectionActive()){
         StickFigure *last_added = nullptr;
         QList<StickFigure*> selection = multi_selection;
@@ -5391,7 +5530,7 @@ StickFigure* MyView::AddStickFigureToLibrary(const QString &name){
         }
         return last_added;
     }
-    if(my_animation->CurrentFrame()->CurrentStickFigure() == nullptr) // possibile dopo un ripristino undo/redo
+    if(my_animation->CurrentFrame()->CurrentStickFigure() == nullptr) // possible after an undo/redo restore
         return nullptr;
     if(my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.count()>0)
     {
@@ -5422,7 +5561,7 @@ StickFigure* MyView::AddStickFigureToLibrary(const QString &name){
 void MyView::RemoveFromLibrary(){
     // get selected item
     int idx = my_current_library_widget->currentRow();
-    if(idx<0 || idx>=my_current_library_widget->count()) // niente selezionato: senza questo, takeItem(-1) torna nullptr e va in crash sotto
+    if(idx<0 || idx>=my_current_library_widget->count()) // nothing selected: without this, takeItem(-1) returns nullptr and crashes below
         return;
     QListWidgetItem *item_to_remove = my_current_library_widget->takeItem(idx);
     StickFigureData* to_remove = qvariant_cast<StickFigureData*>(item_to_remove->data(Qt::UserRole));
@@ -5468,22 +5607,22 @@ static void CopyPenPaint(QPen *target, const QPen &source)
  * None entry, not something the Apply buttons preserve.
  */
 void MyView::SetGraphics(bool all, int attribute){
-    // guardie prima dello StoreUndo, così un click a vuoto (nessuna figura/stick corrente,
-    // possibile dopo un ripristino undo/redo) non lascia uno snapshot senza modifica sullo stack
+    // guards before StoreUndo, so an empty click (no current figure/stick,
+    // possible after an undo/redo restore) doesn't leave a snapshot with no change on the stack
     if(my_animation->CurrentFrame()->CurrentStickFigure() == nullptr)
         return;
     if(!all && my_animation->CurrentFrame()->CurrentStick() == nullptr)
         return;
     StoreUndo(CMD_SIMPLE);
-    // con una selezione multipla attiva le modifiche "globali" (all) si applicano a
-    // TUTTE le figure selezionate, senza rompere la selezione (spec)
+    // with a multi-selection active the "global" (all) changes apply to
+    // ALL the selected figures, without breaking the selection (spec)
     if(all && MultiSelectionActive()){
         for(StickFigure *S : multi_selection){
             for(StickData *s : S->stick_list)
                 ApplyStyleToStick(s, attribute, true);
             S->UpdateIcon();
         }
-        my_animation->current_frame->UpdateIcon();  // vedi le note in coda a questo metodo
+        my_animation->current_frame->UpdateIcon();  // see the notes at the end of this method
         my_animation->UpdateStyleControls();
         return;
     }
@@ -5495,15 +5634,15 @@ void MyView::SetGraphics(bool all, int attribute){
     }
 
     my_animation->CurrentFrame()->CurrentStickFigure()->UpdateIcon();
-    // ...e la miniatura del FRAME, che StickFigure::UpdateIcon() non tocca: senza questa la
-    // striscia dei frame continua a mostrare il riempimento PRECEDENTE finché non si trascina
-    // qualcosa sulla tela (mouseReleaseEvent la ridisegna). Vale per ogni Apply, non solo per i
-    // riempimenti: un cambio di colore o di spessore lasciava la stessa miniatura vecchia.
+    // ...and the FRAME's thumbnail, which StickFigure::UpdateIcon() doesn't touch: without this the
+    // frame strip keeps showing the PREVIOUS fill until something is dragged
+    // on the canvas (mouseReleaseEvent redraws it). It applies to every Apply, not just to
+    // fills: a colour or thickness change left the same old thumbnail.
     my_animation->current_frame->UpdateIcon();
-    // il tipo di riempimento/contorno dello stick può essere appena cambiato (una tinta unita
-    // diventata gradiente o texture) senza che la SELEZIONE sia cambiata, e UpdateSliders() gira
-    // solo sulla selezione: le caselle e gli slider che dipendono da cosa è dipinto lo stick
-    // vanno rivalutati qui, o restano come per il riempimento precedente
+    // the stick's fill/stroke type may have just changed (a solid colour
+    // turned into a gradient or texture) without the SELECTION having changed, and UpdateSliders() runs
+    // only on selection: the checkboxes and sliders that depend on what the stick is painted with
+    // must be re-evaluated here, or they stay as they were for the previous fill
     my_animation->UpdateStyleControls();
     emit VectorShapesChanged(); // a vector stick's layer thumbnails show the new paint
 }
@@ -5693,8 +5832,8 @@ void MyView::SizeChange(int option){
  * whole preview_list is freed together only when playback ends).
  */
 void MyView::DisplayPreview(int idx){
-    // rimuovi il pixmap del frame precedente: altrimenti si accumula uno per frame per tutta
-    // la riproduzione, invece di essere ripulito solo (tutto insieme) quando la riproduzione finisce
+    // remove the previous frame's pixmap: otherwise one per frame piles up for the whole
+    // playback, instead of being cleaned up only (all together) when playback ends
     if(idx>0)
         scene()->removeItem(preview_list[idx-1]);
     QGraphicsPixmapItem* render_img = preview_list[idx];
@@ -5735,6 +5874,12 @@ static void SelectShapeNodes(QSet<QPair<int,int>> &selection, int shape, int cou
     }
 }
 
+/**
+ * @brief The current stick if it is a finished VECTOR stick with a live view, else nullptr.
+ * @details The vector tools store no StickData*; every handler re-derives the stick here, so an
+ * undo, delete or frame switch mid-gesture yields nullptr instead of a dangling pointer. A stick
+ * still between its two DRAWVECTOR clicks (draw_count != 0) does not count.
+ */
 StickData *MyView::VectorStick() const
 {
     if(my_animation->current_frame == nullptr || my_animation->current_frame->stick_figures.isEmpty())
@@ -5767,11 +5912,21 @@ void MyView::SetVectorTool(int vector_tool_id)
         emit VectorToolChanged(vector_tool);
 }
 
+/**
+ * @brief Enters vector draw mode (the pen tool) on the current vector stick.
+ * @details Called by the panel's pen button and by the 2nd click of DRAWVECTOR; just
+ * SetVectorTool(VT_PEN), which falls back to VT_NONE when there is no vector stick.
+ */
 void MyView::EnterVectorMode()
 {
     SetVectorTool(VT_PEN);
 }
 
+/**
+ * @brief Leaves whatever vector tool is active; no-op when none is.
+ * @details Reached from Esc/Enter/double click, every tool switch (ChangeTool()) and
+ * ExitDrawMode(), so callers need not check vector_tool first.
+ */
 void MyView::ExitVectorMode()
 {
     if(vector_tool != VT_NONE)
@@ -5816,6 +5971,11 @@ void MyView::VectorEdited(StickData *stick)
     emit VectorShapesChanged();
 }
 
+/**
+ * @brief Clears the anchor selection of every vector stick in the current frame.
+ * @details The selection lives on each stick's view (selected_vector_nodes), not on the model,
+ * so it has to be dropped per stick whenever the selection context changes.
+ */
 void MyView::ClearVectorSelections()
 {
     if(my_animation->current_frame == nullptr || my_animation->current_frame->stick_figures.isEmpty())
@@ -5858,8 +6018,9 @@ bool MyView::VectorMousePress(QMouseEvent *event)
         viewport()->update(); // any press may change the selection the foreground box is drawn around
     if(ctrl){
         if(!VectorEditPress(s, event->modifiers())){
-            // Ctrl+click on no node: the node selection lapses (Shift keeps it)
-            if(!(event->modifiers() & Qt::ShiftModifier) && !s->view->selected_vector_nodes.isEmpty()){
+            // Ctrl+click on no node: the node selection lapses (Shift and Alt keep it)
+            if(!(event->modifiers() & (Qt::ShiftModifier | Qt::AltModifier))
+                    && !s->view->selected_vector_nodes.isEmpty()){
                 s->view->selected_vector_nodes.clear();
                 s->view->Refresh(0);
             }
@@ -5881,7 +6042,8 @@ bool MyView::VectorMousePress(QMouseEvent *event)
         break;
     case VT_FILL:
     case VT_STROKE:
-        BucketVectorShape(coord, vector_tool == VT_FILL);
+    case VT_FILL_STROKE:
+        BucketVectorShape(coord, vector_tool != VT_STROKE, vector_tool != VT_FILL);
         break;
     case VT_TRANSFORM:
         VectorTransformPress(s, event->modifiers());
@@ -6018,6 +6180,12 @@ QRectF MyView::VectorSelectionBox() const
     return anchors >= 2 ? box : QRectF();
 }
 
+/**
+ * @brief The Transform tool's nine box handles around VectorSelectionBox(), scene coordinates.
+ * @details Same order as SelectionHandles() (0-3 corners, 4-7 sides, 8 the rotation knob), so
+ * drawForeground() can draw it with DrawTransformHandles(). Returns false unless VT_TRANSFORM
+ * is active and the box exists.
+ */
 bool MyView::VectorTransformHandles(QPointF out[9]) const
 {
     if(vector_tool != VT_TRANSFORM)
@@ -6088,6 +6256,8 @@ void MyView::VectorPenPress(StickData *s)
     const QTransform to_scene = s->PolygonTransform();
     if(vec_drawing_shape >= s->vector_shapes.size())
         vec_drawing_shape = -1; // an undo took the shape away
+    if(vec_drawing_shape < 0 && VectorPenStartOnShape(s))
+        return;
     StoreUndo();
     VectorNode node;
     node.pos = to_scene.inverted().map(coord);
@@ -6128,6 +6298,124 @@ void MyView::VectorPenPress(StickData *s)
     vec_needs_undo = true;
     s->view->vector_active_shape = vec_drawing_shape;
     s->view->Refresh(0);
+}
+
+/// @details A point of the cubic p0..p3 at @p t (Bernstein form).
+static QPointF CubicAt(const QPointF &p0, const QPointF &p1, const QPointF &p2, const QPointF &p3, qreal t)
+{
+    const qreal u = 1 - t;
+    return u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3;
+}
+
+/**
+ * @details The first click of a pen shape (no shape being drawn) is checked against the shapes
+ * already there:
+ * - on an END anchor of a visible open shape: the pen draws on from there. A click on the first
+ *   anchor reverses the shape first (one undo step; the picture does not change), so the pen
+ *   always appends. A click on any other anchor starts a new shape, as before.
+ * - on the outline of a selected shape (the current layer, or one with selected anchors): a new
+ *   anchor is put on the curve there, one undo step, and becomes the selection. The segment is
+ *   split with de Casteljau, so the outline keeps its exact path; a straight segment stays straight.
+ * ponytail: the outline is hit by sampling each segment 32 times, so the new anchor lands within
+ * 1/32 of a segment of the click; project onto the cubic if that ever shows.
+ */
+bool MyView::VectorPenStartOnShape(StickData *s)
+{
+    const QTransform to_scene = s->PolygonTransform();
+    const float radius = PolyPickRadius();
+    QSet<QPair<int,int>> &selection = s->view->selected_vector_nodes;
+
+    int hit_shape = -1, hit_node = -1;
+    qreal best = radius;
+    for(int i = s->vector_shapes.size() - 1; i >= 0; i--){
+        const VectorShape &shape = s->vector_shapes[i];
+        if(!shape.visible)
+            continue;
+        for(int j = 0; j < shape.nodes.size(); j++){
+            const qreal d = QLineF(to_scene.map(shape.nodes[j].pos), coord).length();
+            if(d <= best){
+                best = d;
+                hit_shape = i;
+                hit_node = j;
+            }
+        }
+    }
+    if(hit_shape >= 0){
+        VectorShape &shape = s->vector_shapes[hit_shape];
+        const int n = shape.nodes.size();
+        if(shape.closed || (hit_node != 0 && hit_node != n - 1))
+            return false; // not an end: a new shape starts on this anchor
+        if(hit_node == 0 && n > 1){
+            StoreUndo();
+            std::reverse(shape.nodes.begin(), shape.nodes.end());
+            for(VectorNode &node : shape.nodes)
+                std::swap(node.in_handle, node.out_handle);
+            QSet<QPair<int,int>> kept;
+            for(const QPair<int,int> &key : selection)
+                kept.insert(key.first == hit_shape ? qMakePair(key.first, n - 1 - key.second) : key);
+            selection = kept;
+        }
+        vec_drawing_shape = hit_shape;
+        my_animation->vector_shape_row = hit_shape;
+        s->view->vector_active_shape = hit_shape;
+        VectorEdited(s);
+        return true;
+    }
+
+    const int current = my_animation->CurrentVectorShape(s);
+    const int samples = 32;
+    int seg_shape = -1, seg_node = -1;
+    qreal seg_t = 0;
+    best = radius;
+    for(int i = s->vector_shapes.size() - 1; i >= 0; i--){
+        const VectorShape &shape = s->vector_shapes[i];
+        bool selected = i == current;
+        for(const QPair<int,int> &key : selection)
+            selected = selected || key.first == i;
+        if(!shape.visible || !selected)
+            continue;
+        const int n = shape.nodes.size();
+        const int segments = shape.closed ? n : n - 1;
+        for(int j = 0; j < segments; j++){
+            const VectorNode &a = shape.nodes[j], &b = shape.nodes[(j + 1) % n];
+            for(int k = 1; k < samples; k++){
+                const qreal t = k / qreal(samples);
+                const QPointF p = to_scene.map(CubicAt(a.pos, a.pos + a.out_handle, b.pos + b.in_handle, b.pos, t));
+                const qreal d = QLineF(p, coord).length();
+                if(d < best){
+                    best = d;
+                    seg_shape = i;
+                    seg_node = j;
+                    seg_t = t;
+                }
+            }
+        }
+    }
+    if(seg_shape < 0)
+        return false;
+    StoreUndo();
+    VectorShape &shape = s->vector_shapes[seg_shape];
+    VectorNode &a = shape.nodes[seg_node];
+    VectorNode &b = shape.nodes[(seg_node + 1) % shape.nodes.size()];
+    const QPointF p0 = a.pos, p1 = a.pos + a.out_handle, p2 = b.pos + b.in_handle, p3 = b.pos;
+    VectorNode mid;
+    mid.pos = CubicAt(p0, p1, p2, p3, seg_t);
+    if(!a.out_handle.isNull() || !b.in_handle.isNull()){
+        const qreal t = seg_t;
+        const QPointF p01 = p0 + (p1 - p0) * t, p12 = p1 + (p2 - p1) * t, p23 = p2 + (p3 - p2) * t;
+        const QPointF p012 = p01 + (p12 - p01) * t, p123 = p12 + (p23 - p12) * t;
+        a.out_handle = p01 - p0;
+        b.in_handle = p23 - p3;
+        mid.in_handle = p012 - mid.pos;
+        mid.out_handle = p123 - mid.pos;
+        mid.smooth = true;
+    }
+    shape.nodes.insert(seg_node + 1, mid); // a's and b's references are not used past this line
+    selection.clear();
+    selection.insert(qMakePair(seg_shape, seg_node + 1));
+    my_animation->vector_shape_row = seg_shape;
+    VectorEdited(s);
+    return true;
 }
 
 /// @details Handles are tested first, since they are drawn above the anchors and only where they
@@ -6179,14 +6467,14 @@ bool MyView::VectorEditPress(StickData *s, Qt::KeyboardModifiers modifiers)
     if(best_shape < 0)
         return false;
     const QPair<int,int> key(best_shape, best_node);
-    if(modifiers & Qt::ShiftModifier){
-        if(selection.contains(key)){
-            selection.remove(key); // Shift on a selected anchor takes it out, and nothing moves
+    if(modifiers & Qt::AltModifier){
+        // Alt takes the anchor out, the rest stays selected, and nothing moves (as Alt on figures)
+        if(selection.remove(key))
             s->view->Refresh(0);
-            return true;
-        }
-        selection.insert(key);
+        return true;
     }
+    if(modifiers & Qt::ShiftModifier)
+        selection.insert(key); // Shift adds, keeping the rest: a selected anchor stays selected
     else if(!selection.contains(key)){
         selection.clear(); // a click on an unselected anchor: single selection
         selection.insert(key);
@@ -6202,6 +6490,12 @@ bool MyView::VectorEditPress(StickData *s, Qt::KeyboardModifiers modifiers)
     return true;
 }
 
+/**
+ * @brief The vector half of mouseMoveEvent(); true when it handled the move.
+ * @details With a left-button gesture running it applies the drag (anchor placement, move, handle,
+ * Transform box) after the drag threshold, taking the deferred StoreUndo() on the first real move.
+ * Otherwise, in pen mode, it only moves the preview of the next segment.
+ */
 bool MyView::VectorMouseMove(QMouseEvent *event)
 {
     StickData *s = VectorStick();
@@ -6279,6 +6573,11 @@ bool MyView::VectorMouseMove(QMouseEvent *event)
     return false;
 }
 
+/**
+ * @brief The vector half of mouseReleaseEvent(); true when it ended a vector gesture.
+ * @details Ends the gesture: a lasso selects its anchors, a closing click finishes the shape, and
+ * a press that never passed the drag threshold only picks (no undo step, no edit signal).
+ */
 bool MyView::VectorMouseRelease(QMouseEvent *event)
 {
     if(event->button() != Qt::LeftButton || vec_gesture == VG_NONE)
@@ -6343,6 +6642,11 @@ bool MyView::VectorKeyPress(QKeyEvent *event)
     }
 }
 
+/**
+ * @brief Selects the anchors of the visible shapes inside @p lasso (scene coordinates).
+ * @details Finishes the VG_LASSO gesture of the Lasso and Transform tools; @p add (Shift) keeps
+ * the existing selection. Hidden shapes are skipped so Delete cannot remove what nobody sees.
+ */
 void MyView::LassoSelectVectorNodes(const QPolygonF &lasso, bool add)
 {
     StickData *s = VectorStick();
@@ -6394,6 +6698,48 @@ bool MyView::DeleteSelectedVectorNodes()
     return true;
 }
 
+/// @details An anchor is curved when it has a handle. Curved handles are the Catmull-Rom tangent,
+/// (next - prev) / 6 on each side, in stick-local space (an affine map keeps it the same curve);
+/// an end of an open shape stands in for its missing neighbour and gets no handle on that side.
+bool MyView::ToggleVectorNodeCurves()
+{
+    StickData *s = VectorStick();
+    if(s == nullptr)
+        return false;
+    QList<QPair<int,int>> picked;
+    bool make_curved = false;
+    for(const QPair<int,int> &key : s->view->selected_vector_nodes){
+        if(key.first >= s->vector_shapes.size() || key.second >= s->vector_shapes[key.first].nodes.size())
+            continue;
+        const VectorNode &node = s->vector_shapes[key.first].nodes[key.second];
+        make_curved = make_curved || (node.in_handle.isNull() && node.out_handle.isNull());
+        picked << key;
+    }
+    if(picked.isEmpty())
+        return false;
+    StoreUndo();
+    // the handles are worked out from the anchors alone, so the order the nodes change in does not matter
+    for(const QPair<int,int> &key : picked){
+        VectorShape &shape = s->vector_shapes[key.first];
+        VectorNode &node = shape.nodes[key.second];
+        node.in_handle = node.out_handle = QPointF();
+        node.smooth = make_curved;
+        if(!make_curved)
+            continue;
+        const int n = shape.nodes.size();
+        const int prev = key.second > 0 ? key.second - 1 : (shape.closed ? n - 1 : -1);
+        const int next = key.second + 1 < n ? key.second + 1 : (shape.closed ? 0 : -1);
+        const QPointF tangent = ((next >= 0 ? shape.nodes[next].pos : node.pos)
+                                 - (prev >= 0 ? shape.nodes[prev].pos : node.pos)) / 6.0;
+        if(prev >= 0)
+            node.in_handle = -tangent;
+        if(next >= 0)
+            node.out_handle = tangent;
+    }
+    VectorEdited(s);
+    return true;
+}
+
 /// @details The current paint (the Style column's my_* state) onto one shape, by the same rules
 /// SetGraphics() applies to a stick: the whole brush, the whole pen paint through CopyPenPaint().
 void MyView::ApplyStyleToShape(VectorShape &shape, int attribute) const
@@ -6412,7 +6758,15 @@ void MyView::ApplyStyleToShape(VectorShape &shape, int attribute) const
     }
 }
 
-bool MyView::BucketVectorShape(const QPointF &scene_pos, bool fill)
+/**
+ * @brief Bucket click: gives the topmost visible shape under @p scene_pos the current fill
+ *        and/or border, as one undo step.
+ * @return false when no shape is there.
+ * @details Backs VT_FILL, VT_STROKE and VT_FILL_STROKE. The bucket copies the whole border (paint
+ * and width), unlike SetGraphics() which applies one attribute at a time. The clicked shape also
+ * becomes the current layer row.
+ */
+bool MyView::BucketVectorShape(const QPointF &scene_pos, bool fill, bool stroke)
 {
     StickData *s = VectorStick();
     if(s == nullptr)
@@ -6424,7 +6778,7 @@ bool MyView::BucketVectorShape(const QPointF &scene_pos, bool fill)
     VectorShape &shape = s->vector_shapes[idx];
     if(fill)
         ApplyStyleToShape(shape, ATTRIBUTE_BRUSHCOLOR);
-    else{
+    if(stroke){
         ApplyStyleToShape(shape, ATTRIBUTE_PENCOLOR);
         ApplyStyleToShape(shape, ATTRIBUTE_PENWIDTH); // the bucket gives the whole border
     }
@@ -6455,6 +6809,12 @@ bool MyView::MoveVectorShape(int index, int delta)
     return true;
 }
 
+/**
+ * @brief Deletes the shapes at @p indices, as one undo step.
+ * @return false when there is no vector stick or no index was given.
+ * @details Removes from the highest index down so earlier removals do not shift later ones, and
+ * finishes the shape the pen is drawing first. Backs the vector panel's delete button.
+ */
 bool MyView::DeleteVectorShapes(QList<int> indices)
 {
     StickData *s = VectorStick();
@@ -6475,6 +6835,11 @@ bool MyView::DeleteVectorShapes(QList<int> indices)
     return true;
 }
 
+/**
+ * @brief Shows or hides one shape, as one undo step.
+ * @details Hiding also drops the shape's anchors from the selection, so a later Delete cannot
+ * remove something the user cannot see. No-op when the state is unchanged.
+ */
 void MyView::SetVectorShapeVisible(int index, bool visible)
 {
     StickData *s = VectorStick();
@@ -6492,6 +6857,11 @@ void MyView::SetVectorShapeVisible(int index, bool visible)
     VectorEdited(s);
 }
 
+/**
+ * @brief Renames one shape, as one undo step.
+ * @details The name is only a layer-row label, so nothing is repainted: it just tells the panel
+ * to rebuild its rows. No-op when the name is unchanged.
+ */
 void MyView::RenameVectorShape(int index, const QString &name)
 {
     StickData *s = VectorStick();
@@ -6538,6 +6908,11 @@ void MyView::SetVectorShapeDepth(const QList<int> &indices, double depth)
     my_animation->CurrentFrame()->Refresh();
 }
 
+/**
+ * @brief Puts every shape back at the stick's own depth, as one undo step.
+ * @details Zeroes each shape's depth_offset so the layer order decides again. Returns without an
+ * undo step when no shape had an offset.
+ */
 void MyView::ResetVectorShapeDepths()
 {
     StickData *s = VectorStick();
@@ -6576,6 +6951,13 @@ int MyView::CopyVectorShapes(QList<int> indices)
     return copied.size();
 }
 
+/**
+ * @brief Pastes vector_clipboard on top of the current vector stick's shapes, where they were
+ *        drawn, as one undo step.
+ * @return an empty string on success, or why nothing was pasted.
+ * @details The clipboard is in scene space and is mapped into the receiving stick's local space,
+ * so it works across sticks and frames. It is left intact for repeated pastes.
+ */
 QString MyView::PasteVectorShapes()
 {
     StickData *s = VectorStick();

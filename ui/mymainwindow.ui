@@ -294,6 +294,16 @@ QProgressBar::chunk {
 
 QMenu::separator {
 	background: #353535;
+}
+
+QMenu::indicator {
+	width: 11px;
+	height: 11px;
+	border: 1px solid #5A5A5A;
+}
+
+QMenu::indicator:checked {
+	background: #3D7848;
 }</string>
   </property>
   <widget class="QWidget" name="centralwidget"/>

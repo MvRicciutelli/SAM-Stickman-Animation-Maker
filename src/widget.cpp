@@ -3669,7 +3669,7 @@ static QIcon VectorShapeIcon(const VectorShape &shape, const QTransform &to_scen
     return QIcon(pm);
 }
 
-/// @details The VECTOR panel: the five vector tools, the shape layers and their buttons. The rows
+/// @details The VECTOR panel: the six vector tools, the shape layers and their buttons. The rows
 /// list the top shape first, as a layer panel does, so row r is shape count-1-r. Every action is a
 /// MyView method (reachable from the tests, which do not link this file); the panel only maps rows
 /// to shape indices and is echoed back through refresh_vector_panel.
@@ -3687,6 +3687,9 @@ void Widget::BuildVectorPanel()
     static const char *const stroke_rows[10] = {
         "dddddddddd", "dddddddddd", "dd......dd", "dd......dd", "dd......dd",
         "dd......dd", "dd......dd", "dd......dd", "dddddddddd", "dddddddddd" };
+    static const char *const fill_stroke_rows[10] = {
+        "dddddddddd", "dddddddddd", "ddppppppdd", "ddppppppdd", "ddppppppdd",
+        "ddppppppdd", "ddppppppdd", "ddppppppdd", "dddddddddd", "dddddddddd" };
     // a transformation box: four corner squares on a light outline
     static const char *const transform_rows[10] = {
         "www....www", "wkwllllwkw", "www....www", ".l......l.", ".l......l.",
@@ -3699,7 +3702,9 @@ void Widget::BuildVectorPanel()
     tools->setExclusive(false); // "no tool" is a state too: clicking the active tool turns it off
     struct { const char *tip; int id; QIcon icon; } entries[] = {
         { QT_TR_NOOP("Pen: draw shapes. Click = sharp corner, click and drag = curve, click the first "
-                     "point = close, right click = end an open shape. Esc, Enter or a double click = done."),
+                     "point = close, right click = end an open shape. Esc, Enter or a double click = done.\n"
+                     "Starting on the end point of an open shape continues that shape; starting on the "
+                     "outline of the selected shape adds a point there."),
           MyView::VT_PEN, PixelIcon(pen_rows) },
         { QT_TR_NOOP("Lasso: drag around points to select them (Shift adds). Delete removes them."),
           MyView::VT_LASSO, DashedIcon(lasso_shape) },
@@ -3707,6 +3712,9 @@ void Widget::BuildVectorPanel()
           MyView::VT_FILL, PixelIcon(fill_rows) },
         { QT_TR_NOOP("Border bucket: click a shape to give it the current border, width included (Style column)."),
           MyView::VT_STROKE, PixelIcon(stroke_rows) },
+        { QT_TR_NOOP("Fill and border bucket: click a shape to give it both the current fill and the "
+                     "current border, width included (Style column)."),
+          MyView::VT_FILL_STROKE, PixelIcon(fill_stroke_rows) },
         { QT_TR_NOOP("Transform: click a shape to select it (Shift adds or removes one), click a point to "
                      "select it, drag on empty canvas to lasso points. Drag the selection to move it; the "
                      "box's squares scale it (Shift on a corner keeps the proportions) and the knob turns "
@@ -3739,6 +3747,12 @@ void Widget::BuildVectorPanel()
                                  "makes a sharp corner."), advanced_vector_tab);
     hint->setWordWrap(true);
     col->addWidget(hint);
+    QPushButton *curve_btn = new QPushButton(tr("Sharp / Curved"), advanced_vector_tab);
+    curve_btn->setToolTip(tr("Turn the selected points into curves, or back into sharp corners"));
+    col->addWidget(curve_btn);
+    connect(curve_btn, &QPushButton::clicked, this, [this]{
+        view->ToggleVectorNodeCurves();
+    });
 
     QListWidget *layers = new QListWidget(advanced_vector_tab);
     layers->setSelectionMode(QAbstractItemView::ExtendedSelection);

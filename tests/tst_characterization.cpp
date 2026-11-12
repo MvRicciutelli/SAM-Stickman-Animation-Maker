@@ -7208,6 +7208,81 @@ private slots:
         QCOMPARE(view->vector_tool, (int)MyView::VT_NONE);
     }
 
+    // The pen's first click on an existing shape: an end anchor of an open shape continues it (the
+    // first anchor by reversing the shape), the outline of the selected shape gets a new anchor
+    // (one undo step), and the outline of an unselected shape starts a new shape as before. The
+    // Sharp/Curved toggle gives the selected anchors symmetric handles and takes them away again.
+    void VectorPenContinuesAndSplitsShapes()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        auto at = [this](QPointF p) { return view->mapFromScene(p); };
+        auto click = [this, at](QPointF p, Qt::MouseButton button = Qt::LeftButton) {
+            QTest::mouseClick(view->viewport(), button, Qt::NoModifier, at(p));
+        };
+        view->SetTool(DRAWVECTOR);
+        click(QPointF(100, 100));
+        click(QPointF(100, 300));
+        StickData *v = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(v->stick_type, (qint32)StickData::VECTOR);
+        click(QPointF(200, 100));
+        click(QPointF(300, 100));
+        click(QPointF(300, 200));
+        click(QPointF(350, 250), Qt::RightButton);
+        QCOMPARE(v->vector_shapes[0].nodes.count(), 3);
+
+        click(QPointF(301, 201)); // the last anchor: drawing goes on from it
+        QCOMPARE(v->vector_shapes.count(), 1);
+        QCOMPARE(v->vector_shapes[0].nodes.count(), 3);
+        click(QPointF(400, 200));
+        QCOMPARE(v->vector_shapes.count(), 1);
+        QCOMPARE(v->vector_shapes[0].nodes.count(), 4);
+        click(QPointF(450, 250), Qt::RightButton);
+
+        click(QPointF(199, 101)); // the first anchor: reversed, then appended to
+        click(QPointF(200, 50));
+        QCOMPARE(v->vector_shapes.count(), 1);
+        const VectorShape &shape = v->vector_shapes[0];
+        QCOMPARE(shape.nodes.count(), 5);
+        const QTransform to_scene = v->PolygonTransform();
+        auto scene_of_node = [&](int j) { return to_scene.map(v->vector_shapes[0].nodes[j].pos); };
+        QVERIFY(QLineF(scene_of_node(0), view->mapToScene(at(QPointF(400, 200)))).length() < 0.01);
+        QVERIFY(QLineF(scene_of_node(3), view->mapToScene(at(QPointF(200, 100)))).length() < 0.01);
+        click(QPointF(250, 300), Qt::RightButton);
+
+        // the outline of the current shape, halfway along the straight segment from (300,100) to (200,100)
+        QSignalSpy pushes(&view->undo_stack, &QUndoStack::indexChanged);
+        click(QPointF(250, 100));
+        QCOMPARE(pushes.count(), 1);
+        v = CurrentStickFigure()->stick_list.last();
+        QCOMPARE(v->vector_shapes.count(), 1);
+        QCOMPARE(v->vector_shapes[0].nodes.count(), 6);
+        const VectorNode inserted = v->vector_shapes[0].nodes[3];
+        QVERIFY(QLineF(to_scene.map(inserted.pos), view->mapToScene(at(QPointF(250, 100)))).length() < 5);
+        QVERIFY(qAbs(to_scene.map(inserted.pos).y() - view->mapToScene(at(QPointF(250, 100))).y()) < 0.01); // on the line
+        QVERIFY(inserted.in_handle.isNull() && inserted.out_handle.isNull()); // a straight segment stays straight
+        QVERIFY(v->view->selected_vector_nodes.contains(qMakePair(0, 3)));
+
+        // Sharp/Curved on the inserted anchor: symmetric handles along its neighbours, then none
+        QVERIFY(view->ToggleVectorNodeCurves());
+        const VectorNode curved = v->vector_shapes[0].nodes[3];
+        QVERIFY(curved.smooth);
+        QVERIFY(!curved.out_handle.isNull());
+        QVERIFY(QLineF(curved.in_handle, -curved.out_handle).length() < 1e-9);
+        QVERIFY(view->ToggleVectorNodeCurves());
+        QVERIFY(v->vector_shapes[0].nodes[3].in_handle.isNull() && v->vector_shapes[0].nodes[3].out_handle.isNull());
+        QVERIFY(!v->vector_shapes[0].nodes[3].smooth);
+
+        // with no shape selected, the same outline is just where a new shape starts
+        view->my_animation->vector_shape_row = -1;
+        v->view->selected_vector_nodes.clear();
+        click(QPointF(350, 200));
+        QCOMPARE(v->vector_shapes.count(), 2);
+        QCOMPARE(v->vector_shapes[0].nodes.count(), 6);
+        QTest::keyClick(view, Qt::Key_Escape);
+        QCOMPARE(v->vector_shapes.count(), 1);
+    }
+
     // Each shape is painted with its own paint, in list order (the last on top), and hidden ones
     // not at all; the skeleton only shows while nothing is visible. Tiling is per shape: a
     // non-tiling texture on one shape is clipped to its single tile while the other one tiles.
@@ -7410,6 +7485,17 @@ private slots:
         QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::ControlModifier, at(QPointF(400, 100)));
         QCOMPARE(v->view->selected_vector_nodes, (QSet<QPair<int,int>>{ qMakePair(0, 1) }));
         QCOMPARE(pushes.count(), 0);
+        // Ctrl+Shift adds (300, 100) and keeps a selected anchor selected; Ctrl+Alt takes (400, 100)
+        // out and leaves the rest; a Ctrl+Alt miss keeps the selection
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::ControlModifier | Qt::ShiftModifier, at(QPointF(300, 100)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::ControlModifier | Qt::ShiftModifier, at(QPointF(400, 100)));
+        QCOMPARE(v->view->selected_vector_nodes, (QSet<QPair<int,int>>{ qMakePair(0, 0), qMakePair(0, 1) }));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::ControlModifier | Qt::AltModifier, at(QPointF(400, 100)));
+        QCOMPARE(v->view->selected_vector_nodes, (QSet<QPair<int,int>>{ qMakePair(0, 0) }));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::ControlModifier | Qt::AltModifier, at(QPointF(350, 150)));
+        QCOMPARE(v->view->selected_vector_nodes, (QSet<QPair<int,int>>{ qMakePair(0, 0) }));
+        QCOMPARE(pushes.count(), 0);
+        QCOMPARE(v->my_line, QLineF(300, 100, 300, 200));
         // ...and a Ctrl+drag moves it by the drag, as one step
         const QPointF start = node_scene(0, 1);
         QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::ControlModifier, at(QPointF(400, 100)));
@@ -7621,6 +7707,15 @@ private slots:
         QCOMPARE(a->vector_shapes[1].pen.style(), Qt::NoPen);
         QCOMPARE(pushes.count(), 3);
         QCOMPARE(view->my_animation->vector_shape_row, 0); // the shape painted becomes current
+        view->my_brush = QBrush(Qt::yellow);
+        view->my_pen = QPen(Qt::cyan, 3);
+        view->SetVectorTool(MyView::VT_FILL_STROKE); // both in one click, one step
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(215, 165)));
+        QCOMPARE(a->vector_shapes[1].brush.color(), QColor(Qt::yellow));
+        QCOMPARE(a->vector_shapes[1].pen.color(), QColor(Qt::cyan));
+        QCOMPARE(a->vector_shapes[1].pen.widthF(), 3.0);
+        QCOMPARE(a->vector_shapes[0].brush.color(), QColor(Qt::green));
+        QCOMPARE(pushes.count(), 4);
         view->SetVectorTool(MyView::VT_NONE);
 
         // copy the big square, paste it into a stick turned the other way: same scene anchors

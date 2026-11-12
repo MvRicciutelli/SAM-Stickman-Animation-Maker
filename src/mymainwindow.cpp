@@ -20,6 +20,7 @@
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
+#include <QActionGroup>
 #include "stkformat.h"
 #include "uiItems.h"
 #include "updatecheck.h"
@@ -591,13 +592,21 @@ void MyMainWindow::on_actionExport_as_image_sequence_triggered()
  */
 void MyMainWindow::DoConnections(){
         QObject::connect(view, &MyView::AutoSaveTrigger,this, &MyMainWindow::AutoSave);
-        // menu "Selection": scelta rettangolo/lazo per il rubber band di selezione figure.
-        // Costruito in codice (come i pannelli vertici/IK) invece che nel .ui; scrive
-        // direttamente MyView::stickfig_lasso.
+        // "Selection" menu, built in code (like the vertex/IK panels) instead of in the .ui:
+        // Deselect / Select inverse, then the figure rubber band's shape as an exclusive
+        // Rectangle/Lasso pair writing MyView::stickfig_lasso.
         QMenu *selection_menu = menuBar()->addMenu(tr("Selection"));
-        QAction *lasso_action = selection_menu->addAction(tr("Lasso select figures"));
-        lasso_action->setCheckable(true);
-        lasso_action->setChecked(view->stickfig_lasso);
+        selection_menu->addAction(tr("Deselect"), this, [this]{ view->ApplyBandSelection({}); });
+        selection_menu->addAction(tr("Select inverse"), this, [this]{ view->SelectInverse(); });
+        selection_menu->addSeparator();
+        QActionGroup *band_group = new QActionGroup(selection_menu);
+        QAction *rect_action = selection_menu->addAction(tr("Rectangle selection"));
+        QAction *lasso_action = selection_menu->addAction(tr("Lasso selection"));
+        for(QAction *a : { rect_action, lasso_action }){
+            a->setCheckable(true);
+            band_group->addAction(a);
+        }
+        (view->stickfig_lasso ? lasso_action : rect_action)->setChecked(true);
         QObject::connect(lasso_action, &QAction::toggled, this, [this](bool on){ view->stickfig_lasso = on; });
 }
 /**
