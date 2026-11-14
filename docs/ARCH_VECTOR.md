@@ -207,7 +207,9 @@ mask and the undo of that delete. No counterproof was done for it.
 ### Interaction (`myview.cpp`, end of file)
 
 `MyView::vector_tool` (`VectorTool`: `VT_NONE`, `VT_PEN`, `VT_LASSO`, `VT_FILL`,
-`VT_STROKE`, `VT_TRANSFORM`, `VT_FILL_STROKE` (both buckets in one click); `VT_PEN` is "vector draw mode") is modal like draw mode:
+`VT_STROKE`, `VT_TRANSFORM`, `VT_FILL_STROKE` (both buckets in one click), `VT_RECT`/`VT_ELLIPSE`
+(drag a box: `VG_SHAPE` adds a closed shape at the drag threshold, one undo step, with
+`NewVectorShape()`'s Style paint, and rebuilds its anchors from the box on every move); `VT_PEN` is "vector draw mode") is modal like draw mode:
 `VectorMousePress/Move/Release/KeyPress` run before the tool switch. **No
 `StickData*` is stored**: `VectorStick()` re-derives the current stick on every
 use (the `PolySessionStick()` rule), and gesture state is indices

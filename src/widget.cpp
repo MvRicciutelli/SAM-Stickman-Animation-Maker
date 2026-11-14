@@ -689,22 +689,33 @@ Widget::Widget(QWidget *parent)
     {
         QVBoxLayout *col = new QVBoxLayout(advanced_draw_tab);
 
-        // draw-mode tools (mutually exclusive): brush, eraser, the two pixel-selection tools
-        // (rectangle, lasso), the transform of the selected pixels and the paint bucket. The QButtonGroup keeps
-        // them exclusive; every click goes to MyView::SetDrawTool(), which drops the selection
-        // when switching to brush/eraser.
-        // 36x36 PNGs shown 1:1; the hover/pressed/checked look comes from ToolButtonStyle()
+        // draw-mode tools (mutually exclusive): brush, eraser, rectangle and ellipse (Style fill and border), the
+        // three pixel-selection tools (rectangle, lasso, polygon), the transform of the selected pixels and the
+        // paint bucket. The QButtonGroup keeps them exclusive; every click goes to
+        // MyView::SetDrawTool(), which drops the selection when switching to brush/eraser.
+        // 36x36 PNGs shown 1:1 in rows of four; the hover/pressed/checked look comes from ToolButtonStyle()
+        // (the "Edit drawing" button is inserted in front of the grid further down)
         QHBoxLayout *tool_row = new QHBoxLayout();
         tool_row->setSpacing(1);
+        QGridLayout *tool_grid = new QGridLayout();
+        tool_grid->setSpacing(1);
+        tool_row->addLayout(tool_grid);
         QButtonGroup *tool_group = new QButtonGroup(advanced_draw_tab);
         struct { const char *label; int id; QIcon icon; } draw_tools[] = {
             { "Brush",     MyView::DT_BRUSH,     QIcon(":/resources/36_brush_00001.png") },
             { "Eraser",    MyView::DT_ERASER,    QIcon(":/resources/36_eraser_00001.png") },
+            { "Rectangle: drag a box to paint a rectangle with the current fill and border (Style column)",
+              MyView::DT_RECT, QIcon(":/resources/36_rect_00001.png") },
+            { "Ellipse: drag a box to paint an ellipse with the current fill and border (Style column)",
+              MyView::DT_ELLIPSE, QIcon(":/resources/36_ellipse_00001.png") },
             { "Select",    MyView::DT_SEL_RECT,  QIcon(":/resources/36_rectangle_selection_00001.png") },
             { "Lasso",     MyView::DT_SEL_LASSO, QIcon(":/resources/36_select_00001.png") },
+            { "Polygon selection: click to add vertices; double click, Enter or a click on the first vertex closes it, Esc cancels",
+              MyView::DT_SEL_POLY, QIcon(":/resources/36_poly_selection_00001.png") },
             { "Transform selected pixels", MyView::DT_TRANSFORM, QIcon(":/resources/36_transform_00001.png") },
             { "Paint bucket: fill the selection or a closed area with the Style fill color",
               MyView::DT_FILL, QIcon(":/resources/36_fill_00001.png") } };
+        int tool_idx = 0;
         for(const auto &dt : draw_tools){
             QToolButton *b = new QToolButton(advanced_draw_tab);
             b->setIcon(dt.icon);
@@ -714,7 +725,8 @@ Widget::Widget(QWidget *parent)
             b->setStyleSheet(ToolButtonStyle());
             b->setCheckable(true);
             tool_group->addButton(b, dt.id);
-            tool_row->addWidget(b);
+            tool_grid->addWidget(b, tool_idx / 4, tool_idx % 4);
+            tool_idx++;
         }
         // the buttons show the view's sub-tool while in draw mode and none pressed outside it
         // (another toolbar tool left draw mode, even with the freehand still selected)
@@ -3685,8 +3697,8 @@ void Widget::BuildVectorPanel()
     advanced_vector_tab = new QWidget();
     QVBoxLayout *col = new QVBoxLayout(advanced_vector_tab);
 
-    // 36x36 PNGs shown 1:1; the hover/pressed/checked look comes from ToolButtonStyle()
-    QHBoxLayout *tool_row = new QHBoxLayout();
+    // 36x36 PNGs shown 1:1 in two rows of four; the hover/pressed/checked look comes from ToolButtonStyle()
+    QGridLayout *tool_row = new QGridLayout();
     tool_row->setSpacing(1);
     QButtonGroup *tools = new QButtonGroup(advanced_vector_tab);
     tools->setExclusive(false); // "no tool" is a state too: clicking the active tool turns it off
@@ -3696,6 +3708,10 @@ void Widget::BuildVectorPanel()
                      "Starting on the end point of an open shape continues that shape; starting on the "
                      "outline of the selected shape adds a point there."),
           MyView::VT_PEN, QIcon(":/resources/36_pen_00001.png") },
+        { QT_TR_NOOP("Rectangle: drag a box to add a rectangle shape with the current fill and border (Style column)."),
+          MyView::VT_RECT, QIcon(":/resources/36_rect_00001.png") },
+        { QT_TR_NOOP("Ellipse: drag a box to add an ellipse shape with the current fill and border (Style column)."),
+          MyView::VT_ELLIPSE, QIcon(":/resources/36_ellipse_00001.png") },
         { QT_TR_NOOP("Lasso: drag around points to select them (Shift adds). Delete removes them."),
           MyView::VT_LASSO, QIcon(":/resources/36_select_00001.png") }, // the lasso drawing (files' names are swapped)
         { QT_TR_NOOP("Fill bucket: click a shape to give it the current fill (Style column)."),
@@ -3710,6 +3726,7 @@ void Widget::BuildVectorPanel()
                      "box's squares scale it (Shift on a corner keeps the proportions) and the knob turns "
                      "it (Shift = 15 degree steps)."),
           MyView::VT_TRANSFORM, QIcon(":/resources/36_transform_00001.png") } }; // the four-arrow move drawing
+    int tool_idx = 0;
     for(const auto &entry : entries){
         QToolButton *b = new QToolButton(advanced_vector_tab);
         b->setIcon(entry.icon);
@@ -3719,9 +3736,10 @@ void Widget::BuildVectorPanel()
         b->setStyleSheet(ToolButtonStyle());
         b->setCheckable(true);
         tools->addButton(b, entry.id);
-        tool_row->addWidget(b);
+        tool_row->addWidget(b, tool_idx / 4, tool_idx % 4);
+        tool_idx++;
     }
-    tool_row->addStretch();
+    tool_row->setColumnStretch(4, 1); // the buttons stay packed on the left
     col->addLayout(tool_row);
     connect(tools, &QButtonGroup::idClicked, this, [this, tools](int id){
         view->SetVectorTool(tools->button(id)->isChecked() ? id : int(MyView::VT_NONE));

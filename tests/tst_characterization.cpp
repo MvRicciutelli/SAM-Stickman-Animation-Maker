@@ -6170,6 +6170,25 @@ private slots:
         QVERIFY2(view->draw_mode, "the rectangle drag left draw mode");
         QVERIFY2(!view->draw_selection.isEmpty(), "the rectangle selected nothing");
 
+        // polygon selection: clicks add vertices; a click on the first vertex closes it, Enter closes
+        // it too, Esc drops it and leaves the selection as it was
+        view->SetDrawTool(MyView::DT_SEL_POLY);
+        for (const QPointF &p : { QPointF(250, 200), QPointF(340, 210), QPointF(300, 320), QPointF(250, 200) })
+            click(p);
+        QVERIFY2(view->draw_mode, "the polygon clicks left draw mode");
+        QVERIFY2(view->draw_selection.rectCount() > 1, "the closed polygon selected no triangle");
+        const QRegion triangle = view->draw_selection;
+        click(QPointF(200, 150));
+        click(QPointF(260, 150));
+        QTest::keyClick(view, Qt::Key_Escape);
+        QVERIFY2(view->draw_mode, "Esc on an open polygon left draw mode");
+        QCOMPARE(view->draw_selection, triangle);
+        for (const QPointF &p : { QPointF(260, 210), QPointF(330, 220), QPointF(290, 300) })
+            click(p);
+        QTest::keyClick(view, Qt::Key_Return);
+        QVERIFY2(view->draw_mode, "Enter on an open polygon left draw mode");
+        QVERIFY2(view->draw_selection != triangle && !view->draw_selection.isEmpty(), "Enter did not close the polygon");
+
         // another toolbar tool leaves draw mode with the freehand still selected; a click on a
         // panel tool must then work at once. widget.cpp, draw panel tool_group idClicked, verbatim
         auto tool_clicked = [this](int id) {
@@ -7991,6 +8010,93 @@ private slots:
         QVERIFY(refused([](QList<VectorShape> &s) { s[0].nodes.removeLast(); }));
         QVERIFY(refused([](QList<VectorShape> &s) { s.removeLast(); }));
         QVERIFY(refused([](QList<VectorShape> &s) { s[1].closed = true; }));
+    }
+
+    // The rectangle and ellipse tools, dragged with the real mouse, both in the Style column's fill
+    // and border. On a vector stick a drag adds one closed shape filling the box, as one undo step,
+    // and a plain click adds nothing. In draw mode the shape is painted at release: fill inside,
+    // border on the box edge, nothing outside, and the ellipse misses the box's corners.
+    void RectangleAndEllipseToolsDrawShapesAndPixels()
+    {
+        struct Restore {
+            MyView *v; QPen pen; QBrush brush; BrushStroke stroke;
+            ~Restore(){ v->my_pen = pen; v->my_brush = brush; v->my_stroke_brush = stroke;
+                        v->SetVectorTool(MyView::VT_NONE); }
+        } restore{view, view->my_pen, view->my_brush, view->my_stroke_brush};
+        view->my_brush = QBrush(Qt::red);
+        view->my_pen = QPen(Qt::blue, 4);
+        view->my_stroke_brush = BrushStroke(); // a plain pen border
+        AddFrame();
+        view->resize(800, 600);
+        view->SetTool(NOTOOL);
+        auto at = [this](QPointF p) { return view->mapFromScene(p); };
+        auto drag = [&](QPointF from, QPointF to) {
+            QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(from));
+            QTest::mouseMove(view->viewport(), at((from + to) / 2));
+            QTest::mouseMove(view->viewport(), at(to));
+            QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(to));
+        };
+        StickData *v = AddVectorStick(QPointF(300, 100), QPointF(300, 200), {});
+        QSignalSpy pushes(&view->undo_stack, &QUndoStack::indexChanged);
+
+        view->SetVectorTool(MyView::VT_RECT);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(100, 100)));
+        QCOMPARE(v->vector_shapes.count(), 0);
+        QCOMPARE(pushes.count(), 0);
+        drag(QPointF(200, 160), QPointF(100, 100)); // any drag direction
+        QCOMPARE(v->vector_shapes.count(), 1);
+        QCOMPARE(pushes.count(), 1);
+        const QTransform to_scene = v->PolygonTransform();
+        const VectorShape &rect = v->vector_shapes[0];
+        QVERIFY(rect.closed);
+        QCOMPARE(rect.brush.color(), QColor(Qt::red));
+        QCOMPARE(rect.pen.color(), QColor(Qt::blue));
+        QCOMPARE(rect.pen.widthF(), 4.0);
+        QCOMPARE(rect.nodes.count(), 4);
+        QVERIFY(QLineF(to_scene.map(rect.nodes[0].pos), QPointF(100, 100)).length() < 1.5);
+        QVERIFY(QLineF(to_scene.map(rect.nodes[2].pos), QPointF(200, 160)).length() < 1.5);
+
+        view->SetVectorTool(MyView::VT_ELLIPSE);
+        drag(QPointF(400, 300), QPointF(500, 360));
+        QCOMPARE(v->vector_shapes.count(), 2);
+        QCOMPARE(pushes.count(), 2);
+        QCOMPARE(view->my_animation->vector_shape_row, 1);
+        const VectorShape &ellipse = v->vector_shapes[1];
+        QVERIFY(ellipse.closed && ellipse.nodes.count() == 4 && ellipse.nodes[0].smooth);
+        const QRectF bounds = VectorPath(ellipse, to_scene).boundingRect();
+        QVERIFY2(qAbs(bounds.left() - 400) < 1.5 && qAbs(bounds.right() - 500) < 1.5
+                 && qAbs(bounds.top() - 300) < 1.5 && qAbs(bounds.bottom() - 360) < 1.5,
+                 "the ellipse does not fill its box");
+        QVERIFY(!VectorPath(ellipse, to_scene).contains(QPointF(403, 303))); // the corner is outside
+        view->SetVectorTool(MyView::VT_NONE);
+
+        // pixels: same drags in draw mode (the canvas centre sits on the viewport centre)
+        StickData *stick = DrawStick(QPointF(100, 100), QPointF(200, 100));
+        view->EnterDrawMode(stick, false);
+        QImage &canvas = *view->draw_canvas;
+        const QPoint c(canvas.width()/2, canvas.height()/2);
+        const QPointF centre = view->mapToScene(view->viewport()->rect()).boundingRect().center();
+        auto looks = [&canvas](QPoint p, QColor want) { // antialiasing may blend an edge pixel a little
+            const QColor got = canvas.pixelColor(p);
+            return qAbs(got.red() - want.red()) < 40 && qAbs(got.green() - want.green()) < 40
+                && qAbs(got.blue() - want.blue()) < 40 && got.alpha() > 200;
+        };
+        view->SetDrawTool(MyView::DT_ELLIPSE);
+        drag(centre - QPointF(20, 20), centre + QPointF(20, 20));
+        QVERIFY(looks(c, Qt::red));                               // filled
+        QVERIFY(looks(c + QPoint(0, 20), Qt::blue));              // bordered
+        QCOMPARE(qAlpha(canvas.pixel(c + QPoint(18, 18))), 0);   // the ellipse misses the corner
+        // the canvas may be turned against the scene (draw_disp), so the checks stay symmetric about c
+        view->SetDrawTool(MyView::DT_RECT);
+        drag(centre - QPointF(60, 60), centre + QPointF(60, 60)); // over the ellipse
+        QVERIFY(looks(c + QPoint(18, 18), Qt::red));              // filled where the ellipse was not
+        QVERIFY(looks(c + QPoint(60, 0), Qt::blue));
+        QVERIFY(looks(c + QPoint(-60, 0), Qt::blue));
+        QVERIFY(looks(c + QPoint(59, 59), Qt::blue));             // the corner
+        QCOMPARE(qAlpha(canvas.pixel(c + QPoint(80, 0))), 0);    // nothing outside
+        QVERIFY(!view->draw_shaping);
+        view->ExitDrawMode();
+        view->SetTool(NOTOOL);
     }
 
     // The Style column acts on a vector stick's CURRENT SHAPE, which is what it paints: the Apply

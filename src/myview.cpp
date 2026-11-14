@@ -412,10 +412,14 @@ void MyView::mousePressEvent(QMouseEvent *event)
     // while drawing)
     if(draw_mode){
         if(event->button()==Qt::LeftButton){
-            if(draw_tool == DT_SEL_RECT || draw_tool == DT_SEL_LASSO || draw_tool == DT_TRANSFORM){
+            // rectangle/ellipse: the box is starting_coord..coord, stamped at release
+            draw_shaping = (draw_tool == DT_RECT || draw_tool == DT_ELLIPSE);
+            if(draw_tool == DT_SEL_RECT || draw_tool == DT_SEL_LASSO || draw_tool == DT_SEL_POLY || draw_tool == DT_TRANSFORM){
                 DrawSelPress(coord, event->modifiers());
             } else if(draw_tool == DT_FILL){
                 BucketFill(coord); // one click, no stroke: move/release have nothing to do
+            } else if(draw_shaping){
+                if(viewport()) viewport()->update(); // the preview is drawn in drawForeground()
             } else {
                 draw_stroking = true;
                 draw_last_pos = coord;
@@ -984,8 +988,12 @@ void MyView::keyPressEvent(QKeyEvent *event)
             DiscardPixelSelection(); // discard the pixel selection (spec)
             return;
         }
-        if(event->key()==Qt::Key_Escape || event->key()==Qt::Key_Return || event->key()==Qt::Key_Enter)
-            ExitDrawMode();
+        if(event->key()==Qt::Key_Escape || event->key()==Qt::Key_Return || event->key()==Qt::Key_Enter){
+            if(draw_sel_gesture == 6) // an open polygon selection: Enter closes it, Esc drops it
+                FinishPolySelection(event->key() != Qt::Key_Escape);
+            else
+                ExitDrawMode();
+        }
         return;
     }
     if(VectorKeyPress(event))
@@ -1196,6 +1204,11 @@ void MyView::mouseDoubleClickEvent(QMouseEvent *event)
     // vector draw mode: the first press of the pair placed the last anchor; the double click leaves
     if(event->button() == Qt::LeftButton && vector_tool == VT_PEN){
         ExitVectorMode();
+        return;
+    }
+    // draw mode polygon selection: the first press of the pair placed the last vertex
+    if(event->button() == Qt::LeftButton && draw_mode && draw_sel_gesture == 6){
+        FinishPolySelection(true);
         return;
     }
     MapMyCoords(coord, event->pos());
@@ -1588,6 +1601,44 @@ void MyView::PushDrawUndo()
     while(draw_undo.count() > MAXDRAWUNDO)
         draw_undo.removeFirst(); // when dropping from the head the current index shifts along with the list
     draw_undo_idx = draw_undo.count() - 1;
+}
+
+/// @details Painted like a stick would be, with the Style column's paint: the fill (my_brush) and
+/// the border (my_pen), or the brush border (my_stroke_brush) stamped along the outline when one is
+/// set. The fill and pen go through the scene -> canvas map (the same one PaintStrokeSegment() uses),
+/// so a gradient or a pen width keeps its scene meaning. A stamped border walks the outline already
+/// in canvas pixels, as StickGraphicsItem::StrokeWithBrush() does, so the dabs are not turned with
+/// the canvas. The box is upright in the scene.
+/// ponytail: a texture fill is painted 1:1 (not through TextureBrush()'s scaling).
+void MyView::StrokeDrawShape(const QRectF &box, bool ellipse)
+{
+    if(!draw_canvas || box.isEmpty())
+        return;
+    QPainterPath path;
+    if(ellipse)
+        path.addEllipse(box);
+    else
+        path.addRect(box);
+    const QPointF half(draw_canvas->width()/2.0, draw_canvas->height()/2.0);
+    const QTransform to_canvas = draw_disp_inv * QTransform::fromTranslate(half.x(), half.y());
+    QPainter p(draw_canvas);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setTransform(to_canvas);
+    p.fillPath(path, my_brush);
+    if(my_pen.style() != Qt::NoPen){
+        if(my_stroke_brush.stamp.isNull()){
+            p.strokePath(path, my_pen);
+        } else {
+            p.resetTransform();
+            StampAlongPath(&p, to_canvas.map(path), StrokeBrushFor(my_stroke_brush, my_pen));
+        }
+    }
+    p.end();
+    PushDrawUndo();
+    if(draw_target && draw_target->view){
+        draw_target->view->Refresh(0);
+        draw_target->view->update();
+    }
 }
 
 /**
@@ -2259,6 +2310,8 @@ void MyView::BucketFill(const QPointF &scene)
 /// draw_eraser stays in sync for the paint path.
 void MyView::SetDrawTool(int t)
 {
+    if(draw_sel_gesture == 6)
+        FinishPolySelection(false);
     if((t == DT_BRUSH || t == DT_ERASER) && draw_tool != t)
         DiscardPixelSelection();
     else if(draw_tool == DT_TRANSFORM && t != DT_TRANSFORM)
@@ -2266,7 +2319,8 @@ void MyView::SetDrawTool(int t)
     draw_tool = t;
     draw_eraser = (t == DT_ERASER);
     if(viewport()){
-        viewport()->setCursor((t == DT_SEL_RECT || t == DT_SEL_LASSO || t == DT_FILL) ? Qt::CrossCursor
+        viewport()->setCursor((t == DT_SEL_RECT || t == DT_SEL_LASSO || t == DT_SEL_POLY || t == DT_FILL
+                               || t == DT_RECT || t == DT_ELLIPSE) ? Qt::CrossCursor
                               : t == DT_TRANSFORM ? Qt::SizeAllCursor : Qt::ArrowCursor);
         viewport()->update(); // the gizmo shows only with the transform tool
     }
@@ -2317,10 +2371,25 @@ void MyView::DrawSelPress(const QPointF &scene, Qt::KeyboardModifiers mods)
         return;
     }
 
+    QPointF cp = SceneToCanvas(scene);
+    if(draw_sel_gesture == 6){                          // polygon in progress: add a vertex
+        // a click within 6 screen px of the first vertex closes it
+        QPoint first = mapFromScene(CanvasToScene(draw_lasso.first()));
+        if(draw_lasso.size() >= 3 && (mapFromScene(scene) - first).manhattanLength() <= 6)
+            FinishPolySelection(true);
+        else
+            draw_lasso << cp;
+        if(viewport()) viewport()->update();
+        return;
+    }
+
     // new selection (replace, or add/subtract with Shift/Alt)
     draw_sel_op = (mods & Qt::ShiftModifier) ? 1 : (mods & Qt::AltModifier) ? 2 : 0;
-    QPointF cp = SceneToCanvas(scene);
-    if(draw_tool == DT_SEL_LASSO){
+    if(draw_tool == DT_SEL_POLY){
+        draw_sel_gesture = 6;
+        draw_lasso.clear();
+        draw_lasso << cp;
+    } else if(draw_tool == DT_SEL_LASSO){
         draw_sel_gesture = 2;
         draw_lasso.clear();
         draw_lasso << cp;
@@ -2385,12 +2454,28 @@ void MyView::DrawSelMove(const QPointF &scene)
     }
 }
 
+/// @details Closes (or drops) the polygonal selection built by DT_SEL_POLY clicks. Reached from a
+/// click on the first vertex, a double click, Enter (commit) and Esc or a tool switch (drop).
+void MyView::FinishPolySelection(bool commit)
+{
+    if(commit && draw_lasso.size() >= 3)
+        SetPixelSelection(QRegion(draw_lasso.toPolygon()), draw_sel_op);
+    draw_lasso.clear();
+    draw_sel_gesture = 0;
+    if(draw_target && draw_target->view){
+        draw_target->view->update();
+        if(viewport()) viewport()->update();
+    }
+}
+
 /// @details Ends a gesture (mouseReleaseEvent). A rectangle (1) or lasso (2) is finalized into
 /// the selection via SetPixelSelection() with the pending op; the lasso needs >=3 points. A
 /// move/scale/rotate (3/4/5) needs nothing here — its gizmo state is already live and the
 /// lifted float stays active until it is committed (DiscardPixelSelection/CommitPixelFloat).
 void MyView::DrawSelRelease(const QPointF &scene)
 {
+    if(draw_sel_gesture == 6)                           // polygon: stays open across clicks
+        return;
     QPointF cp = SceneToCanvas(scene);
     if(draw_sel_gesture == 1){                          // rectangle
         // draw_sel_p0 is the first corner clicked, cp the corner under the cursor now. The
@@ -2823,9 +2908,22 @@ void MyView::drawForeground(QPainter *painter, const QRectF &rect)
     }
     painter->restore();
 
+    // --- draw mode's rectangle/ellipse being dragged (stamped with the brush at release) ---
+    if(draw_mode && draw_shaping){
+        painter->save();
+        QPen live(QColor(0, 120, 255), 1, Qt::DashLine); live.setCosmetic(true);
+        painter->setPen(live); painter->setBrush(Qt::NoBrush);
+        const QRectF box = QRectF(starting_coord, coord).normalized();
+        if(draw_tool == DT_ELLIPSE)
+            painter->drawEllipse(box);
+        else
+            painter->drawRect(box);
+        painter->restore();
+    }
+
     // --- draw mode's pixel selection: floating pixels + marquee + gizmo ---------------
     if(draw_mode && draw_canvas &&
-       (!draw_selection.isEmpty() || draw_sel_gesture == 1 || draw_sel_gesture == 2)){
+       (!draw_selection.isEmpty() || draw_sel_gesture == 1 || draw_sel_gesture == 2 || draw_sel_gesture == 6)){
         painter->save();
         QPointF half(draw_canvas->width()/2.0, draw_canvas->height()/2.0);
         // draw_canvas pixels are addressed from its top-left corner, but draw_disp (the same
@@ -2857,6 +2955,11 @@ void MyView::drawForeground(QPainter *painter, const QRectF &rect)
         } else if(draw_sel_gesture == 2 && draw_lasso.size() >= 2){
             QPolygonF poly;
             for(const QPointF &p : draw_lasso) poly << CanvasToScene(p);
+            painter->drawPolyline(poly);
+        } else if(draw_sel_gesture == 6 && !draw_lasso.isEmpty()){
+            QPolygonF poly;                             // committed vertices + live edge to the cursor
+            for(const QPointF &p : draw_lasso) poly << CanvasToScene(p);
+            poly << coord;
             painter->drawPolyline(poly);
         }
 
@@ -4318,9 +4421,13 @@ void MyView::mouseReleaseEvent(QMouseEvent *event)
 {
     // draw mode: ends the current stroke, none of the selection/tool logic below
     if(draw_mode){
-        if(event->button()==Qt::LeftButton && (draw_tool==DT_SEL_RECT || draw_tool==DT_SEL_LASSO || draw_tool==DT_TRANSFORM)){
+        if(event->button()==Qt::LeftButton && (draw_tool==DT_SEL_RECT || draw_tool==DT_SEL_LASSO || draw_tool==DT_SEL_POLY || draw_tool==DT_TRANSFORM)){
             if(draw_sel_gesture)
                 DrawSelRelease(coord);
+        } else if(event->button()==Qt::LeftButton && draw_shaping){
+            draw_shaping = false;
+            StrokeDrawShape(QRectF(starting_coord, coord).normalized(), draw_tool == DT_ELLIPSE);
+            if(viewport()) viewport()->update(); // the preview goes
         } else if(event->button()==Qt::LeftButton && draw_stroking){
             is_pressed = false;
             draw_stroking = false;
@@ -4427,9 +4534,13 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
     MapMyCoords(coord, event->pos());
     // draw mode: a drag with the left button held = a continuous (interpolated) stroke
     if(draw_mode){
-        if(draw_tool == DT_SEL_RECT || draw_tool == DT_SEL_LASSO || draw_tool == DT_TRANSFORM){
-            if(draw_sel_gesture && (event->buttons() & Qt::LeftButton))
+        if(draw_tool == DT_SEL_RECT || draw_tool == DT_SEL_LASSO || draw_tool == DT_SEL_POLY || draw_tool == DT_TRANSFORM){
+            if(draw_sel_gesture == 6){
+                if(viewport()) viewport()->update(); // the live edge follows coord
+            } else if(draw_sel_gesture && (event->buttons() & Qt::LeftButton))
                 DrawSelMove(coord);
+        } else if(draw_shaping && (event->buttons() & Qt::LeftButton)){
+            if(viewport()) viewport()->update(); // the preview follows coord
         } else if(draw_stroking && (event->buttons() & Qt::LeftButton)){
             PaintStrokeSegment(draw_last_pos, coord);
             draw_last_pos = coord;
@@ -6276,6 +6387,14 @@ bool MyView::VectorMousePress(QMouseEvent *event)
     case VT_TRANSFORM:
         VectorTransformPress(s, event->modifiers());
         break;
+    case VT_RECT:
+    case VT_ELLIPSE:
+        // the shape is made at the drag threshold (one undo step); a plain click makes nothing
+        vec_gesture = VG_SHAPE;
+        vec_press_scene = coord;
+        vec_edit_shape = -1;
+        vec_needs_undo = true;
+        break;
     }
     return true;
 }
@@ -6506,13 +6625,7 @@ void MyView::VectorPenPress(StickData *s)
         shape.nodes << node;
     }
     else{
-        VectorShape shape;
-        shape.name = tr("Shape %1").arg(s->vector_shapes.size() + 1);
-        shape.pen = my_pen;
-        shape.brush = my_brush;
-        shape.brush_follows_stick = my_brush_follows_stick;
-        shape.texture_tiled = my_texture_tiled;
-        shape.stroke_brush = my_stroke_brush;
+        VectorShape shape = NewVectorShape(s);
         shape.nodes << node;
         s->vector_shapes << shape; // a new shape goes on top
         vec_drawing_shape = s->vector_shapes.size() - 1;
@@ -6526,6 +6639,53 @@ void MyView::VectorPenPress(StickData *s)
     vec_needs_undo = true;
     s->view->vector_active_shape = vec_drawing_shape;
     s->view->Refresh(0);
+}
+
+/// @details The paint is the Style column's, as the bucket would give it, so a new shape looks
+/// like whatever the user has dialled in.
+VectorShape MyView::NewVectorShape(const StickData *s) const
+{
+    VectorShape shape;
+    shape.name = tr("Shape %1").arg(s->vector_shapes.size() + 1);
+    shape.pen = my_pen;
+    shape.brush = my_brush;
+    shape.brush_follows_stick = my_brush_follows_stick;
+    shape.texture_tiled = my_texture_tiled;
+    shape.stroke_brush = my_stroke_brush;
+    return shape;
+}
+
+/**
+ * @details The anchors of a closed rectangle (corners) or ellipse filling @p box, clockwise on
+ * screen from the top-left / the right end, mapped into the stick's frame through @p to_local.
+ * The ellipse is the usual four-arc bezier: an anchor at each end of both axes, smooth, with
+ * handles 0.5523 (4/3·(√2−1)) of the radius along the tangent.
+ */
+static QList<VectorNode> BoxShapeNodes(const QRectF &box, bool ellipse, const QTransform &to_local)
+{
+    QList<VectorNode> nodes;
+    if(!ellipse){
+        for(const QPointF &corner : { box.topLeft(), box.topRight(), box.bottomRight(), box.bottomLeft() }){
+            VectorNode node;
+            node.pos = corner;
+            nodes << MapNode(node, to_local);
+        }
+        return nodes;
+    }
+    const QPointF c = box.center();
+    const qreal kx = 0.5523 * box.width() / 2, ky = 0.5523 * box.height() / 2;
+    const QPointF ends[4] = { QPointF(box.right(), c.y()), QPointF(c.x(), box.bottom()),
+                              QPointF(box.left(), c.y()), QPointF(c.x(), box.top()) };
+    const QPointF outs[4] = { QPointF(0, ky), QPointF(-kx, 0), QPointF(0, -ky), QPointF(kx, 0) };
+    for(int i = 0; i < 4; i++){
+        VectorNode node;
+        node.pos = ends[i];
+        node.out_handle = outs[i];
+        node.in_handle = -outs[i];
+        node.smooth = true;
+        nodes << MapNode(node, to_local);
+    }
+    return nodes;
 }
 
 /// @details A point of the cubic p0..p3 at @p t (Bernstein form).
@@ -6745,6 +6905,14 @@ bool MyView::VectorMouseMove(QMouseEvent *event)
             if(vec_gesture != VG_PLACE)
                 StoreUndo(); // a placed anchor's press already took the step
             vec_needs_undo = false;
+            if(vec_gesture == VG_SHAPE){
+                VectorShape shape = NewVectorShape(s);
+                shape.closed = true;
+                s->vector_shapes << shape; // on top, like a pen shape
+                vec_edit_shape = s->vector_shapes.size() - 1;
+                my_animation->vector_shape_row = vec_edit_shape;
+                emit VectorShapesChanged(); // a new row for the panel
+            }
         }
         if(vec_edit_shape >= s->vector_shapes.size()){
             vec_gesture = VG_NONE;
@@ -6782,6 +6950,9 @@ bool MyView::VectorMouseMove(QMouseEvent *event)
         }
         else if(vec_gesture == VG_SCALE || vec_gesture == VG_ROTATE)
             ApplyVectorTransform(s, VectorGestureTransform(coord, event->modifiers() & Qt::ShiftModifier));
+        else if(vec_gesture == VG_SHAPE && vec_edit_shape >= 0)
+            s->vector_shapes[vec_edit_shape].nodes = BoxShapeNodes(QRectF(vec_press_scene, coord).normalized(),
+                                                                   vector_tool == VT_ELLIPSE, to_local);
         vec_last = coord;
         s->view->Refresh(1);
         if(vector_tool == VT_TRANSFORM && viewport())

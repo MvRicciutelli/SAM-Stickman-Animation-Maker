@@ -329,7 +329,7 @@ public:
     bool stickfig_lasso = false;            ///< figure-selection rubber band: false=rect, true=lasso (menu checkbox)
 
     // ---- Pixel selection & free-transform (draw-mode only) ---------------------------
-    // Two selection sub-tools (rectangle, lasso) mark a set of canvas pixels; the transform
+    // Three selection sub-tools (rectangle, lasso, polygon) mark a set of canvas pixels; the transform
     // sub-tool wraps that selection in a move/scale/rotate gizmo. Entirely separate from
     // stick/frame selection and alive only while draw_mode is: any exit, a switch to
     // brush/eraser, or Ctrl+D discards it. Shift adds to / Alt subtracts from the current selection.
@@ -341,9 +341,14 @@ public:
         DT_SEL_RECT,    ///< rectangle pixel-selection marquee (DrawSelPress/Move/Release)
         DT_SEL_LASSO,   ///< freehand (lasso) pixel-selection marquee
         DT_TRANSFORM,   ///< move/scale/rotate the selected pixels through the gizmo
-        DT_FILL         ///< paint bucket: a click fills the selection, or the closed area under it (BucketFill)
+        DT_FILL,        ///< paint bucket: a click fills the selection, or the closed area under it (BucketFill)
+        DT_RECT,        ///< drag a box: a rectangle in the Style fill and border is painted at release (StrokeDrawShape)
+        DT_ELLIPSE,     ///< drag a box: the ellipse inside it, in the Style fill and border, is painted at release
+        DT_SEL_POLY     ///< polygonal pixel-selection: each click adds a vertex, closed by a double click,
+                        ///< Enter or a click on the first vertex; Esc cancels
     };
     int draw_tool = DT_BRUSH;               ///< active draw-mode sub-tool (a DrawTool value)
+    bool draw_shaping = false;              ///< DT_RECT/DT_ELLIPSE drag in progress: its box runs from starting_coord to coord
     QRegion draw_selection;                 ///< selected pixels in canvas space (empty = no selection)
     QRect   draw_sel_bounds;                ///< bbox of draw_selection at (re)definition, canvas px
     QRectF  draw_sel_box;                   ///< bbox of draw_selection in the upright frame (SelFrame())
@@ -418,7 +423,9 @@ public:
         VT_STROKE,    ///< click a shape to give it the current border (my_pen, my_stroke_brush)
         VT_TRANSFORM, ///< click shapes (Shift adds/removes) or anchors, lasso on empty space; a drag moves the
                       ///< selected anchors and a transformation box scales and turns them
-        VT_FILL_STROKE ///< VT_FILL and VT_STROKE in one click
+        VT_FILL_STROKE, ///< VT_FILL and VT_STROKE in one click
+        VT_RECT,      ///< drag a box: a new closed rectangle shape with the current fill and border
+        VT_ELLIPSE    ///< drag a box: a new closed ellipse shape (four smooth anchors) inside it
     };
     int vector_tool = VT_NONE;          ///< active VectorTool
     QList<VectorShape> vector_clipboard; ///< copied shapes, in SCENE space; a value list, replaced whole by every copy
@@ -1074,8 +1081,8 @@ private:
 
     // ------- VECTOR gesture state: indices into the current vector stick's shapes, never ----
     // ------- a pointer (see VectorStick()); every use re-checks them against the stick -------
-    enum VectorGesture { VG_NONE = 0, VG_PLACE, VG_MOVE, VG_HANDLE, VG_LASSO, VG_SCALE, VG_ROTATE };
-    int vec_gesture = VG_NONE;        ///< the left-button gesture in progress: anchor placed by the pen (its drag sets the handles), anchors moved, a handle dragged, a lasso, the Transform box scaled or turned
+    enum VectorGesture { VG_NONE = 0, VG_PLACE, VG_MOVE, VG_HANDLE, VG_LASSO, VG_SCALE, VG_ROTATE, VG_SHAPE };
+    int vec_gesture = VG_NONE;        ///< the left-button gesture in progress: anchor placed by the pen (its drag sets the handles), anchors moved, a handle dragged, a lasso, the Transform box scaled or turned, a rectangle/ellipse dragged out
     int vec_drawing_shape = -1;       ///< the shape the pen is adding anchors to; -1 = the next click starts a new one
     int vec_edit_shape = -1;          ///< shape of the anchor/handle the gesture acts on
     int vec_edit_node = -1;           ///< its anchor
@@ -1088,13 +1095,18 @@ private:
     int vec_click_shape = -1;         ///< Transform tool, VG_MOVE pressed on a shape with only some anchors selected: a release without a drag selects that whole shape; -1 otherwise
     int vec_box_handle = -1;          ///< VG_SCALE: the box handle being dragged (0-7, VectorTransformHandles() order)
     QRectF vec_box0;                  ///< VG_SCALE/VG_ROTATE: the selection box at the press, scene
-    QPointF vec_press_scene;          ///< VG_SCALE/VG_ROTATE: scene position of the press
+    QPointF vec_press_scene;          ///< VG_SCALE/VG_ROTATE/VG_SHAPE: scene position of the press
     QList<VectorShape> vec_shapes0;   ///< VG_SCALE/VG_ROTATE: the shapes at the press; the WHOLE drag is re-applied to them each move, so nothing drifts
 
     /// @brief The vector half of mousePressEvent(); true when the press was the vector tool's.
     bool VectorMousePress(QMouseEvent *event);
     /// @brief A pen click: a new anchor (on a new shape if none is being drawn), or the close click.
     void VectorPenPress(StickData *stick);
+    /**
+     * @brief An empty shape layer for @p stick, named after its position and painted with the
+     *        Style column's current fill and border (the pen, rectangle and ellipse tools).
+     */
+    VectorShape NewVectorShape(const StickData *stick) const;
     /**
      * @brief The first click of a pen shape, on an existing one: an end anchor of an open shape
      *        continues that shape, the outline of a selected shape gets a new anchor there.
@@ -1585,13 +1597,20 @@ private:
     void PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_scene);
     /** @brief Truncates any redo tail and pushes a copy of the current canvas onto draw_undo. */
     void PushDrawUndo();
+    /**
+     * @brief Paints a rectangle, or the ellipse inside it, with the Style column's fill and border
+     *        (DT_RECT/DT_ELLIPSE release). One draw-local undo step; an empty box paints nothing.
+     * @param box the dragged box, scene coordinates.
+     * @param ellipse true for the ellipse, false for the rectangle.
+     */
+    void StrokeDrawShape(const QRectF &box, bool ellipse);
 
     // ---- Pixel-selection internals ---------------------------------------------------
-    int     draw_sel_gesture = 0; ///< 0 none, 1 new-rect, 2 new-lasso, 3 move, 4 scale, 5 rotate
+    int     draw_sel_gesture = 0; ///< 0 none, 1 new-rect, 2 new-lasso, 3 move, 4 scale, 5 rotate, 6 new-polygon (spans several clicks)
     int     draw_sel_handle = -1; ///< scale-handle index (0..7) during a scale gesture
     int     draw_sel_op = 0;      ///< pending new-selection op: 0 replace, 1 add, 2 subtract
     QPointF draw_sel_p0;          ///< gesture anchor, canvas px (rubber-band start / move-prev)
-    QPolygonF draw_lasso;         ///< lasso points, canvas px
+    QPolygonF draw_lasso;         ///< lasso points / committed polygon vertices, canvas px
     QPointF draw_sel_t0;          ///< gizmo translation at gesture start
     double  draw_sel_r0 = 0;      ///< gizmo rotation at gesture start
     double  draw_sel_sx0 = 1, draw_sel_sy0 = 1; ///< gizmo scale at gesture start
@@ -1618,6 +1637,9 @@ private:
     /** @brief Pixel-selection mouse-up: commits a freshly-drawn rect/lasso into the selection;
      *  a move/scale/rotate leaves its float active. Driven by mouseReleaseEvent. */
     void DrawSelRelease(const QPointF &scene);
+    /** @brief Ends a polygonal selection (gesture 6): with @p commit and >=3 vertices the polygon
+     *  becomes the selection with the pending op; otherwise it is dropped. */
+    void FinishPolySelection(bool commit);
     /** @brief Tight bounding rect of the non-transparent pixels of an image (empty if none). */
     static QRect OpaqueBounds(const QImage &img);
 

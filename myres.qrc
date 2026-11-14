@@ -332,5 +332,8 @@
         <file>resources/move_stick_00001.png</file>
         <file>resources/move_stick_00002.png</file>
         <file>resources/move_stick_00003.png</file>
+        <file>resources/36_ellipse_00001.png</file>
+        <file>resources/36_rect_00001.png</file>
+        <file>resources/36_poly_selection_00001.png</file>
     </qresource>
 </RCC>
