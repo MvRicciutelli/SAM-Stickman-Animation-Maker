@@ -84,6 +84,8 @@ public:
      */
     void UpdateStyleControls();
     void UpdateTab(int t);
+    /// @brief The stick type whose panels are shown (tab_type), -1 = none.
+    int TabType() const { return tab_type; }
     qint32 width = 0;
     qint32 height = 0;
 private:

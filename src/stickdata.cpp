@@ -1053,8 +1053,10 @@ static void ReadStrokeBrush(QDataStream &stream, BrushStroke &brush)
 /// @details A VECTOR stick's shapes: their own format version, the count, then each shape's
 /// layer fields, its nodes and its paint. Pen, brush and border tip go through the same
 /// image-table helpers as the stick's own, so a .sam writes a texture shared by many shapes once.
-/// Format 2 appends each shape's depth offset to the shape and the stick's per-shape-depth switch
-/// after the last one, so the head of the block (version, count, first shape) reads as in format 1.
+/// VECTOR_SHAPES_DEPTH appends each shape's depth offset to the shape and the stick's per-shape-depth
+/// switch after the last one, so the head of the block (version, count, first shape) reads as in
+/// VECTOR_SHAPES_BASE. VECTOR_SHAPES_MASK appends each shape's mask index and inversion after its
+/// depth offset.
 static void WriteVectorShapes(QDataStream &stream, const StickData &stick_data)
 {
     const QList<VectorShape> &shapes = stick_data.vector_shapes;
@@ -1070,6 +1072,7 @@ static void WriteVectorShapes(QDataStream &stream, const StickData &stick_data)
         stream << shape.brush_follows_stick << shape.texture_tiled;
         WriteStrokeBrush(stream, shape.stroke_brush);
         stream << (double)shape.depth_offset;
+        stream << shape.mask << shape.mask_inverted;
     }
     stream << stick_data.vector_depth_enabled;
 }
@@ -1103,14 +1106,23 @@ static void ReadVectorShapes(QDataStream &stream, StickData &stick_data)
         ReadRecordBrush(stream, shape.brush);
         stream >> shape.brush_follows_stick >> shape.texture_tiled;
         ReadStrokeBrush(stream, shape.stroke_brush);
-        if (format >= 2)
+        if (format >= StickData::VECTOR_SHAPES_DEPTH)
             stream >> shape.depth_offset;
+        if (format >= StickData::VECTOR_SHAPES_MASK)
+            stream >> shape.mask >> shape.mask_inverted;
         if (stream.status() != QDataStream::Ok)
             break; // truncated file: no shapes made up from data that is not there
         shapes.append(shape);
     }
-    if (format >= 2)
+    if (format >= StickData::VECTOR_SHAPES_DEPTH)
         stream >> stick_data.vector_depth_enabled;
+    // a mask must name another shape of this list and close no loop: anything else (a corrupt or
+    // truncated file) is no mask, so the painter's recursion over the chain always ends
+    for (int i = 0; i < shapes.size(); i++) {
+        VectorShape &shape = shapes[i];
+        if (shape.mask < 0 || shape.mask >= shapes.size() || MaskChainReaches(shapes, shape.mask, i))
+            shape.mask = VectorShape::NO_MASK;
+    }
 }
 
 QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)

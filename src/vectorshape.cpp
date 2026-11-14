@@ -59,6 +59,47 @@ bool VectorShapesCompatible(const QList<VectorShape> &a, const QList<VectorShape
     return true;
 }
 
+/// @details A mask is an index into the same list, so the one edit that can leave it naming the
+/// wrong shape, or none, is a change of the list's order or length: these two are those edits.
+void RemoveVectorShape(QList<VectorShape> &shapes, int index)
+{
+    shapes.removeAt(index);
+    for(VectorShape &shape : shapes){
+        if(shape.mask == index){
+            shape.mask = VectorShape::NO_MASK;
+            shape.mask_inverted = false;
+        }
+        else if(shape.mask > index)
+            shape.mask--;
+    }
+}
+
+/// @details QList::move() shifts the shapes between the two places by one towards @p from.
+void ReorderVectorShape(QList<VectorShape> &shapes, int from, int to)
+{
+    shapes.move(from, to);
+    for(VectorShape &shape : shapes){
+        if(shape.mask == from)
+            shape.mask = to;
+        else if(from < to && shape.mask > from && shape.mask <= to)
+            shape.mask--;
+        else if(from > to && shape.mask >= to && shape.mask < from)
+            shape.mask++;
+    }
+}
+
+/// @details The step bound only matters for a list that already holds a loop, which no edit makes
+/// and ReadVectorShapes() breaks on load.
+bool MaskChainReaches(const QList<VectorShape> &shapes, int from, int target)
+{
+    for(int steps = 0; from >= 0 && from < shapes.size() && steps <= shapes.size(); steps++){
+        if(from == target)
+            return true;
+        from = shapes[from].mask;
+    }
+    return false;
+}
+
 /// @details Top first, i.e. the order they are painted in, reversed: the layer order, re-sorted
 /// by depth (stable, so equal depths keep their layer order) when the stick uses per-shape depths.
 /// The outline test widens the path by the pick radius so a hairline stays clickable.

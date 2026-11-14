@@ -471,11 +471,32 @@ public:
     VectorShapeLayerItem *TopShapeLayer() const;
 
     /**
-     * @brief Paints the visible shapes that belong to @p layer, in layer order.
+     * @brief Paints the visible shapes that belong to @p layer, in layer order, each cut by its
+     *        mask (VectorShape::mask) when it has one.
      * @param painter the painter, in scene coordinates.
      * @param layer the layer being painted, or nullptr for the shapes this view paints itself.
      */
     void PaintVectorShapes(QPainter *painter, const VectorShapeLayerItem *layer);
+
+    /**
+     * @brief Paints shape @p index of the stick with its own fill and stroke, its mask ignored.
+     * @param painter the painter, in scene coordinates.
+     * @param index a valid index into StickData::vector_shapes.
+     */
+    void PaintShape(QPainter *painter, int index);
+
+    /**
+     * @brief Shape @p index painted alone into a transparent image, then cut by its mask chain.
+     * @param index a valid index into StickData::vector_shapes.
+     * @param to_image scene -> image logical coordinates.
+     * @param size the image's logical size.
+     * @param dpr the device pixel ratio of the target the image will be drawn on.
+     * @param hints the target painter's render hints.
+     * @param depth how many more masks the chain may follow.
+     * @return a premultiplied image of @p size logical pixels at @p dpr.
+     */
+    QImage MaskedShapeImage(int index, const QTransform &to_image, const QSize &size, qreal dpr,
+                            QPainter::RenderHints hints, int depth);
 
     /**
      * @brief Draws a VECTOR stick's editing overlay: node squares, the handles of the selected

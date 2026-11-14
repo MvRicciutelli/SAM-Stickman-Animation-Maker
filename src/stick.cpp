@@ -428,26 +428,74 @@ bool StickGraphicsItem::StrokeWithBrush(QPainter *painter, const QPainterPath &s
     return true;
 }
 
-/// @details One shape at a time, in list order (the last on top), each with its own paint:
-/// paint_shape makes AlignBrush()/FillAndStroke()/StrokeWithBrush() answer for it. Shared by
-/// paint() (layer == nullptr) and VectorShapeLayerItem::paint(), so a shape looks the same
-/// whichever item draws it.
+/// @details One shape at a time, in list order (the last on top). Shared by paint() (layer ==
+/// nullptr) and VectorShapeLayerItem::paint(), so a shape looks the same whichever item draws it.
+/// A masked shape needs pixels to cut, so it is composed offscreen (MaskedShapeImage()) at the
+/// painter's own device resolution, over the part of the device this stick can paint, and the
+/// result is drawn back 1:1. ponytail: one or more viewport-sized images per masked shape on every
+/// paint; cache them on the view if a crowded frame drags.
 void StickGraphicsItem::PaintVectorShapes(QPainter *painter, const VectorShapeLayerItem *layer)
 {
-    const QTransform to_scene = data->PolygonTransform();
-    for(const VectorShape &shape : data->vector_shapes){
+    for(int i = 0; i < data->vector_shapes.size(); i++){
+        const VectorShape &shape = data->vector_shapes[i];
         if(!shape.visible || shape.nodes.size() < 2 || ShapeLayer(shape) != layer)
             continue;
-        paint_shape = &shape;
-        QPen shape_pen(shape.pen);
-        if(onion_render)
-            shape_pen.setColor(Qt::gray); // like the stick's own pen: flat grey
-        else
-            shape_pen.setBrush(AlignBrush(shape.pen.brush()));
-        painter->setPen(shape_pen);
-        FillAndStroke(painter, shape.brush, VectorPath(shape, to_scene));
-        paint_shape = nullptr;
+        if(shape.mask < 0){
+            PaintShape(painter, i);
+            continue;
+        }
+        const QTransform to_device = painter->combinedTransform();
+        const QRect area = to_device.mapRect(boundingRect()).toAlignedRect() & painter->viewport();
+        if(area.isEmpty())
+            continue;
+        const QImage composed = MaskedShapeImage(i, to_device * QTransform::fromTranslate(-area.left(), -area.top()),
+                                                 area.size(), painter->device()->devicePixelRatio(),
+                                                 painter->renderHints(), data->vector_shapes.size());
+        painter->save();
+        painter->resetTransform(); // device coordinates; the clip is kept, it lives there
+        painter->drawImage(area.topLeft(), composed);
+        painter->restore();
     }
+}
+
+/// @details paint_shape makes AlignBrush()/FillAndStroke()/StrokeWithBrush() answer for the shape.
+void StickGraphicsItem::PaintShape(QPainter *painter, int index)
+{
+    const VectorShape &shape = data->vector_shapes[index];
+    paint_shape = &shape;
+    QPen shape_pen(shape.pen);
+    if(onion_render)
+        shape_pen.setColor(Qt::gray); // like the stick's own pen: flat grey
+    else
+        shape_pen.setBrush(AlignBrush(shape.pen.brush()));
+    painter->setPen(shape_pen);
+    FillAndStroke(painter, shape.brush, VectorPath(shape, data->PolygonTransform()));
+    paint_shape = nullptr;
+}
+
+/// @details The mask's image is cut by ITS mask before it cuts this one, which is how masks
+/// compound. DestinationOut scales this shape's alpha by (1 - mask alpha), DestinationIn
+/// (inverted) by the mask alpha, pixel by pixel. A hidden mask is painted here all the same: it
+/// is hidden, not switched off. @p depth bounds the recursion even over a loop no edit can make.
+QImage StickGraphicsItem::MaskedShapeImage(int index, const QTransform &to_image, const QSize &size,
+                                           qreal dpr, QPainter::RenderHints hints, int depth)
+{
+    QImage image(size * dpr, QImage::Format_ARGB32_Premultiplied);
+    image.setDevicePixelRatio(dpr);
+    image.fill(Qt::transparent);
+    QPainter p(&image);
+    p.setRenderHints(hints);
+    p.setTransform(to_image);
+    PaintShape(&p, index);
+    const VectorShape &shape = data->vector_shapes[index];
+    if(shape.mask >= 0 && shape.mask < data->vector_shapes.size() && depth > 0){
+        const QImage mask = MaskedShapeImage(shape.mask, to_image, size, dpr, hints, depth - 1);
+        p.resetTransform();
+        p.setCompositionMode(shape.mask_inverted ? QPainter::CompositionMode_DestinationIn
+                                                 : QPainter::CompositionMode_DestinationOut);
+        p.drawImage(0, 0, mask);
+    }
+    return image;
 }
 
 /// @details Matched on the stored offset itself, never on a computed depth: the two sides of the

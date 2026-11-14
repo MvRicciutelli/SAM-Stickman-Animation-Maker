@@ -306,8 +306,8 @@ public:
     int draw_brush_size = 20;               ///< stamp diameter in scene units
     int draw_brush_opacity = 100;           ///< 0..100
     int draw_brush_spacing = 25;            ///< dab pitch, % of the (pressured) stamp diameter; lower = smoother/slower stroke
-    QColor draw_brush_color = Qt::black;     ///< brush tint
-    QImage draw_brush_stamp;                ///< grayscale-alpha stamp mask (built-in soft round in Phase 1)
+    int draw_eraser_softness = 0;           ///< 0..100: eraser edge feather (0 = the tip as it is)
+    QImage draw_brush_stamp;               ///< grayscale-alpha stamp mask (built-in soft round in Phase 1)
     // built-in round tip, Photoshop-style: hardness/roundness are baked into the stamp by
     // MakeRoundBrush() (so the panel rebuilds it when they change), angle and both jitters
     // are applied per dab in StampBrush() and therefore work on imported .abr tips too.
@@ -329,34 +329,55 @@ public:
     bool stickfig_lasso = false;            ///< figure-selection rubber band: false=rect, true=lasso (menu checkbox)
 
     // ---- Pixel selection & free-transform (draw-mode only) ---------------------------
-    // Two selection sub-tools (rectangle, lasso) mark a set of canvas pixels; the selection
-    // is then wrapped in a move/scale/rotate gizmo. Entirely separate from stick/frame
-    // selection and alive only while draw_mode is: any exit, a switch to brush/eraser, or
-    // Ctrl+D discards it. Shift adds to / Alt subtracts from the current selection.
+    // Two selection sub-tools (rectangle, lasso) mark a set of canvas pixels; the transform
+    // sub-tool wraps that selection in a move/scale/rotate gizmo. Entirely separate from
+    // stick/frame selection and alive only while draw_mode is: any exit, a switch to
+    // brush/eraser, or Ctrl+D discards it. Shift adds to / Alt subtracts from the current selection.
     /// @brief Draw-mode sub-tools, selected by SetDrawTool() (draw-mode panel buttons,
-    /// widget.cpp). DT_SEL_* drive the pixel-selection gizmo; DT_BRUSH/DT_ERASER paint.
+    /// widget.cpp). DT_SEL_* select pixels, DT_TRANSFORM drives the gizmo; DT_BRUSH/DT_ERASER paint.
     enum DrawTool {
         DT_BRUSH = 0,   ///< paint dabs with the current brush (StampBrush)
         DT_ERASER,      ///< erase (brush composited DestinationOut)
         DT_SEL_RECT,    ///< rectangle pixel-selection marquee (DrawSelPress/Move/Release)
-        DT_SEL_LASSO    ///< freehand (lasso) pixel-selection marquee
+        DT_SEL_LASSO,   ///< freehand (lasso) pixel-selection marquee
+        DT_TRANSFORM,   ///< move/scale/rotate the selected pixels through the gizmo
+        DT_FILL         ///< paint bucket: a click fills the selection, or the closed area under it (BucketFill)
     };
     int draw_tool = DT_BRUSH;               ///< active draw-mode sub-tool (a DrawTool value)
     QRegion draw_selection;                 ///< selected pixels in canvas space (empty = no selection)
     QRect   draw_sel_bounds;                ///< bbox of draw_selection at (re)definition, canvas px
-    // gizmo: transform about draw_sel_bounds.center(), applied to the selected pixels
-    QPointF draw_sel_t;                     ///< gizmo translation (canvas px)
+    QRectF  draw_sel_box;                   ///< bbox of draw_selection in the upright frame (SelFrame())
+    // gizmo: transform about draw_sel_box.center(), in the upright frame, applied to the selected pixels
+    QPointF draw_sel_t;                     ///< gizmo translation (upright-frame px)
     double  draw_sel_r = 0;                 ///< gizmo rotation (degrees)
     double  draw_sel_sx = 1, draw_sel_sy = 1; ///< gizmo scale (about box centre)
     bool    draw_float_active = false;      ///< selected pixels lifted into draw_float and being transformed
     QImage  draw_float;                     ///< lifted pixels, origin = draw_sel_bounds.topLeft()
 
-    /** @brief Switch the active draw-mode sub-tool; leaving a selection tool for brush/eraser
-     *  discards (committing) any pixel selection. */
+    /** @brief Switch the active draw-mode sub-tool; switching to brush/eraser discards
+     *  (committing) any pixel selection, leaving the transform tool bakes the transform. */
     void SetDrawTool(int t);
     /** @brief Bake a floating (transformed) selection back into the canvas, then clear the
      *  selection and gizmo. Safe when nothing is selected. */
     void DiscardPixelSelection();
+    /** @brief Selects every canvas pixel that is not selected now (Selection menu, draw mode
+     *  only). No-op outside draw mode. */
+    void InvertPixelSelection();
+    /**
+     * @brief Selection menu "Smooth selection": rounds the pixel selection's corners and drops
+     *        its specks and slivers narrower than the width. No-op without a selection.
+     * @param width smoothing reach in canvas pixels (the menu asks for it).
+     */
+    void SmoothPixelSelection(int width);
+    /**
+     * @brief Paint-bucket click: fills the pixel selection when the click is inside it, otherwise
+     *        (no selection) the closed area of similar colour under the click, with the Style
+     *        column's fill colour. One draw-local undo step.
+     * @param scene click position in scene coordinates.
+     */
+    void BucketFill(const QPointF &scene);
+    /// @brief The Style column's fill (my_brush) as one colour: the draw-mode brush and bucket paint with it.
+    QColor FillColor() const;
 
     /**
      * @brief Enters draw mode on a FREEHAND stick: bakes its current transform into a
@@ -444,6 +465,15 @@ public:
     void SetVectorShapeVisible(int index, bool visible);
     /// @brief Renames one shape, as one undo step.
     void RenameVectorShape(int index, const QString &name);
+    /**
+     * @brief Masks shape @p index of the current vector stick with shape @p mask, as one undo step.
+     * @param index the shape to mask.
+     * @param mask the masking shape's index, or -1 for no mask.
+     * @param inverted true to show the shape only where the mask is (ignored without a mask).
+     * @return false when nothing changed: no vector stick, an index out of range, the settings it
+     *         already has, or a mask that would close a loop (MaskChainReaches()).
+     */
+    bool SetVectorShapeMask(int index, int mask, bool inverted);
     /// @brief Turns the current vector stick's per-shape depth on or off, as one undo step.
     void SetVectorDepthEnabled(bool enabled);
     /**
@@ -1569,12 +1599,16 @@ private:
 
     QPointF SceneToCanvas(const QPointF &scene) const; ///< scene coord -> raw canvas pixel
     QPointF CanvasToScene(const QPointF &canvas) const; ///< raw canvas pixel -> scene coord
-    QTransform PixelGizmo() const;         ///< current gizmo transform (about bounds centre)
+    /** @brief Upright frame -> canvas pixel: cancels the canvas's on-screen rotation (the stick's),
+     *  so a box axis-aligned in this frame shows upright on screen. */
+    QTransform SelFrame() const;
+    QTransform PixelGizmo() const;         ///< current gizmo transform, canvas px -> canvas px
     void GizmoHandles(QPointF out[9]) const; ///< 8 box handles + rotation handle, canvas px (post-gizmo)
     int  HitPixelHandle(const QPointF &scene) const; ///< handle idx under a scene point, 8=rotate, -1 none
     void LiftPixelFloat();                 ///< cut selected pixels out of the canvas into draw_float
     void CommitPixelFloat();               ///< stamp draw_float (transformed) back, push a draw-undo step
     void SetPixelSelection(const QRegion &r, int op); ///< replace/add/subtract, recompute bounds+reset gizmo
+    void BakePixelTransform();             ///< commit a float and move the selection to where its pixels went
     /** @brief Pixel-selection mouse-down: starts a new marquee (rect/lasso, Shift=add/Alt=subtract)
      *  or a move/scale/rotate gesture when a handle/box is grabbed. Driven by mousePressEvent. */
     void DrawSelPress(const QPointF &scene, Qt::KeyboardModifiers mods);

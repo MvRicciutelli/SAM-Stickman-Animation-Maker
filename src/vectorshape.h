@@ -38,6 +38,8 @@ struct VectorNode
  */
 struct VectorShape
 {
+    static constexpr qint32 NO_MASK = -1; ///< the value of @c mask for a shape nothing masks
+
     QString name;                    ///< the layer's name in the vector panel
     bool visible = true;             ///< hidden shapes are neither painted nor hit by buckets/lasso
     bool closed = false;             ///< a closing segment runs from the last node back to the first
@@ -50,6 +52,12 @@ struct VectorShape
     double depth_offset = 0;         ///< own depth, as a distance from the owning stick's z; read only
                                      ///< while StickData::vector_depth_enabled. 0 = in the stick's own
                                      ///< plane, where the layer order decides (see StickData::VectorShapeDepth())
+    qint32 mask = NO_MASK;           ///< index, in the same stick's list, of the shape masking this one, or
+                                     ///< NO_MASK. Never this shape nor a loop (MaskChainReaches()); every removal
+                                     ///< and reorder goes through RemoveVectorShape()/ReorderVectorShape() to
+                                     ///< keep it naming the same shape. A hidden mask still masks.
+    bool mask_inverted = false;      ///< false: transparent where the mask is (alpha x (1 - mask alpha));
+                                     ///< true: shown only where the mask is (alpha x mask alpha)
 };
 
 /**
@@ -80,6 +88,32 @@ VectorShape MapShape(const VectorShape &shape, const QTransform &xf);
  *        shape, the same node count and the same open/closed state.
  */
 bool VectorShapesCompatible(const QList<VectorShape> &a, const QList<VectorShape> &b);
+
+/**
+ * @brief Removes shape @p index, keeping every other shape's mask on the shape it named: a mask
+ *        on the removed shape is cleared (inversion included), a mask above it shifts down.
+ * @param shapes a VECTOR stick's shape list.
+ * @param index a valid index into @p shapes.
+ */
+void RemoveVectorShape(QList<VectorShape> &shapes, int index);
+
+/**
+ * @brief Moves shape @p from to position @p to, like QList::move(), with the masks following the
+ *        shapes they name.
+ * @param shapes a VECTOR stick's shape list.
+ * @param from valid index of the shape to move.
+ * @param to valid index it ends up at.
+ */
+void ReorderVectorShape(QList<VectorShape> &shapes, int from, int to);
+
+/**
+ * @brief True when following the masks from shape @p from (itself included) reaches shape
+ *        @p target, i.e. when giving @p target the mask @p from would close a loop.
+ * @param shapes a VECTOR stick's shape list.
+ * @param from the shape the walk starts at; out of range reaches nothing.
+ * @param target the shape looked for.
+ */
+bool MaskChainReaches(const QList<VectorShape> &shapes, int from, int target);
 
 /**
  * @brief Index of the topmost visible shape of @p stick under @p scene_pt, or -1. "Topmost" is

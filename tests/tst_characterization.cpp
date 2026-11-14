@@ -6062,6 +6062,223 @@ private slots:
         view->SetTool(NOTOOL);
     }
 
+    // The pixel selection ignores the stick's rotation: on a turned freehand stick (whose canvas
+    // is painted turned with it) an upright rectangle drag selects pixels that show as that same
+    // upright rectangle. It used to be built along the canvas axes, so it (and its transform box)
+    // came out turned with the stick, unlike its own rubber-band preview.
+    void PixelRectSelectionStaysUprightOnATurnedStick()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        StickData *stick = DrawStick(QPointF(100, 100), QPointF(200, 160)); // a turned stick
+        view->EnterDrawMode(stick, false);
+        view->SetDrawTool(MyView::DT_SEL_RECT);
+        const QRectF dragged(QPointF(250, 200), QPointF(350, 260));
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                          view->mapFromScene(dragged.topLeft()));
+        QTest::mouseMove(view->viewport(), view->mapFromScene(dragged.center()));
+        QTest::mouseMove(view->viewport(), view->mapFromScene(dragged.bottomRight()));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                            view->mapFromScene(dragged.bottomRight()));
+        // where a canvas pixel is shown, as in DrawModeUnderAnInheritedGlobalTransform
+        const QImage &canvas = *view->draw_canvas;
+        QTransform shown = QTransform::fromTranslate(-canvas.width() / 2.0, -canvas.height() / 2.0);
+        QTransform frame = stick->ShapeFrame();
+        frame.rotate(stick->img_angle_offset);
+        frame.translate(stick->img_offset.x(), stick->img_offset.y());
+        const qreal unit_per_px = stick->my_line.length() * stick->img_w_scale / canvas.width();
+        frame.scale(unit_per_px, unit_per_px);
+        shown *= frame;
+        QPainterPath outline;
+        outline.addRegion(view->draw_selection);
+        const QRectF on_screen = shown.map(outline).boundingRect();
+        QVERIFY2(!on_screen.isEmpty(), "the drag selected nothing");
+        const qreal tolerance = 3.0; // whole viewport pixels, plus the pixel staircase of the edges
+        QVERIFY2(qAbs(on_screen.left() - dragged.left()) < tolerance &&
+                 qAbs(on_screen.top() - dragged.top()) < tolerance &&
+                 qAbs(on_screen.right() - dragged.right()) < tolerance &&
+                 qAbs(on_screen.bottom() - dragged.bottom()) < tolerance,
+                 qPrintable(QStringLiteral("selection shown at (%1,%2 %3x%4), dragged (250,200 100x60)")
+                            .arg(on_screen.left()).arg(on_screen.top())
+                            .arg(on_screen.width()).arg(on_screen.height())));
+        view->ExitDrawMode();
+        view->SetTool(NOTOOL);
+    }
+
+    // The whole freehand flow with the Widget's "no freehand selected" hook wired in: creating a
+    // freehand with its tool, then a lasso pixel selection, then re-entering through the "Edit
+    // drawing" button must all stay in draw mode, and the lasso must select a lasso shape.
+    void FreehandFlowKeepsDrawModeForPixelSelection()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        // widget.cpp, draw panel: the scene selectionChanged hook, verbatim minus the panel buttons
+        QMetaObject::Connection hook = connect(scene, &QGraphicsScene::selectionChanged, view, [this]{
+            Animation *anim = view->my_animation;
+            if(anim->TabType() != StickData::FREEHAND || view->tool == DRAWFREEHAND
+                    || anim->current_frame == nullptr)
+                return;
+            auto current = [anim]()->StickData*{
+                Frame *frame = anim->CurrentFrame();
+                return frame->CurrentStickFigure() ? frame->CurrentStick() : nullptr;
+            };
+            StickData *cs = current();
+            if(cs != nullptr && cs->stick_type == StickData::FREEHAND)
+                return;
+            view->ExitDrawMode();
+            cs = current();
+            if(cs != nullptr && cs->stick_type == StickData::FREEHAND)
+                return;
+            anim->UpdateTab(cs != nullptr ? cs->stick_type : -1);
+        }, Qt::QueuedConnection);
+        struct Disconnect { QMetaObject::Connection c; ~Disconnect() { QObject::disconnect(c); } } guard{hook};
+        auto click = [this](QPointF at) {
+            QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(at));
+        };
+        auto drag = [this](const QList<QPointF> &path) {
+            QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(path.first()));
+            for (const QPointF &p : path)
+                QTest::mouseMove(view->viewport(), view->mapFromScene(p));
+            QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(path.last()));
+        };
+
+        view->SetTool(DRAWFREEHAND);
+        click(QPointF(100, 100));
+        click(QPointF(160, 200));
+        QCoreApplication::processEvents();               // run the queued hook
+        QVERIFY2(view->draw_mode, "creating a freehand left draw mode");
+        click(QPointF(300, 250));                        // paint one dab, so exiting keeps the stick
+
+        view->SetDrawTool(MyView::DT_SEL_LASSO);
+        drag({ QPointF(250, 200), QPointF(330, 210), QPointF(360, 300), QPointF(300, 330), QPointF(240, 280) });
+        QCoreApplication::processEvents();
+        QVERIFY2(view->draw_mode, "the lasso drag left draw mode");
+        QVERIFY2(!view->draw_selection.isEmpty(), "the lasso selected nothing");
+        QVERIFY2(view->draw_selection.rectCount() > 1, "the lasso selected a plain rectangle");
+
+        view->ExitDrawMode();
+        QCoreApplication::processEvents();
+        StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
+        QVERIFY(cs != nullptr);
+        QCOMPARE(cs->stick_type, (int)StickData::FREEHAND);
+        view->EnterDrawMode(cs, true);                   // the "Edit drawing" button
+        QCoreApplication::processEvents();
+        QVERIFY2(view->draw_mode, "Edit drawing left draw mode");
+        view->SetDrawTool(MyView::DT_SEL_RECT);
+        drag({ QPointF(250, 200), QPointF(300, 250), QPointF(350, 300) });
+        QCoreApplication::processEvents();
+        QVERIFY2(view->draw_mode, "the rectangle drag left draw mode");
+        QVERIFY2(!view->draw_selection.isEmpty(), "the rectangle selected nothing");
+
+        // another toolbar tool leaves draw mode with the freehand still selected; a click on a
+        // panel tool must then work at once. widget.cpp, draw panel tool_group idClicked, verbatim
+        auto tool_clicked = [this](int id) {
+            if(!view->draw_mode && view->my_animation->current_frame != nullptr
+                    && view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
+                StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
+                if(cs != nullptr && cs->stick_type == StickData::FREEHAND)
+                    view->EnterDrawMode(cs, true);
+            }
+            view->SetDrawTool(id);
+        };
+        view->SetTool(NOTOOL);
+        QCoreApplication::processEvents();
+        QVERIFY(!view->draw_mode);
+        tool_clicked(MyView::DT_SEL_LASSO);
+        QVERIFY2(view->draw_mode, "a panel tool click did not enter draw mode");
+        QCOMPARE(view->draw_tool, (int)MyView::DT_SEL_LASSO);
+        drag({ QPointF(250, 200), QPointF(330, 210), QPointF(360, 300), QPointF(300, 330), QPointF(240, 280) });
+        QCoreApplication::processEvents();
+        QVERIFY2(view->draw_selection.rectCount() > 1, "the lasso after re-entering selected no lasso shape");
+        view->SetTool(NOTOOL);
+    }
+
+    // The selection tools only select: a drag inside an existing selection makes a new one instead
+    // of moving pixels. Moving them is the transform tool's job, and leaving it bakes the move with
+    // the selection following the pixels. Select inverse pixels takes the rest of the canvas.
+    void PixelSelectionToolsSelectAndTheTransformToolMoves()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        StickData *stick = DrawStick(QPointF(100, 100), QPointF(200, 100));
+        view->EnterDrawMode(stick, false);
+        auto drag = [this](QPointF from, QPointF to) {
+            QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(from));
+            QTest::mouseMove(view->viewport(), view->mapFromScene((from + to) / 2));
+            QTest::mouseMove(view->viewport(), view->mapFromScene(to));
+            QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(to));
+        };
+        view->SetDrawTool(MyView::DT_SEL_RECT);
+        drag(QPointF(220, 180), QPointF(380, 280));
+        const QRegion first = view->draw_selection;
+        QVERIFY2(!first.isEmpty(), "the rectangle selected nothing");
+        drag(QPointF(260, 205), QPointF(340, 255));      // inside the first selection
+        QVERIFY2(!view->draw_float_active, "a selection tool lifted the pixels");
+        const QRegion second = view->draw_selection;
+        QVERIFY2(!second.isEmpty() && second != first, "a drag inside the selection did not select anew");
+
+        view->SetDrawTool(MyView::DT_TRANSFORM);
+        drag(QPointF(300, 230), QPointF(340, 230));      // from the box centre, clear of the handles
+        QVERIFY2(view->draw_float_active, "the transform tool did not lift the pixels");
+
+        view->SetDrawTool(MyView::DT_SEL_RECT);
+        QVERIFY2(!view->draw_float_active, "leaving the transform tool did not bake the pixels");
+        // canvas pixels need not run along the scene axes (the canvas turns with its stick), so
+        // check the distance moved, not the direction
+        const QRect was = second.boundingRect(), now = view->draw_selection.boundingRect();
+        QVERIFY2(QLineF(was.center(), now.center()).length() > 20 && qAbs(now.width() - was.width()) <= 2
+                 && qAbs(now.height() - was.height()) <= 2,
+                 qPrintable(QStringLiteral("selection at (%1,%2 %3x%4), was (%5,%6 %7x%8)")
+                            .arg(now.left()).arg(now.top()).arg(now.width()).arg(now.height())
+                            .arg(was.left()).arg(was.top()).arg(was.width()).arg(was.height())));
+
+        const QRegion moved = view->draw_selection;
+        view->InvertPixelSelection();
+        QVERIFY(!view->draw_selection.intersects(moved));
+        QCOMPARE(view->draw_selection.united(moved).boundingRect(), view->draw_canvas->rect());
+        view->ExitDrawMode();
+        view->SetTool(NOTOOL);
+    }
+
+    // The paint bucket fills the closed area under the click with the Style fill colour and stops
+    // at the stroke around it; with a pixel selection it fills the selection instead. Smooth
+    // selection rounds the selection's corners and drops a speck narrower than the width.
+    void BucketFillsClosedAreasAndSelectionsAndSmoothSelectionRounds()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        StickData *stick = DrawStick(QPointF(100, 100), QPointF(200, 100));
+        view->EnterDrawMode(stick, false);
+        struct Restore { MyView *v; QBrush brush; ~Restore(){ v->my_brush = brush; } } restore{view, view->my_brush};
+        QImage &canvas = *view->draw_canvas;
+        const QPoint c(canvas.width()/2, canvas.height()/2);
+        { QPainter p(&canvas); p.setPen(QPen(Qt::black, 3)); p.drawRect(QRect(c - QPoint(40, 40), QSize(80, 80))); }
+        // the canvas centre sits on the viewport centre (EnterDrawMode())
+        const QPointF centre = view->mapToScene(view->viewport()->rect()).boundingRect().center();
+        view->SetDrawTool(MyView::DT_FILL);
+
+        view->my_brush = QBrush(Qt::red);
+        view->BucketFill(centre);
+        QCOMPARE(canvas.pixelColor(c), QColor(Qt::red));
+        QCOMPARE(canvas.pixelColor(c + QPoint(30, 0)), QColor(Qt::red));
+        QCOMPARE(qAlpha(canvas.pixel(c + QPoint(60, 0))), 0); // outside the stroke: untouched
+
+        const QRect square(c - QPoint(10, 10), QSize(20, 20));
+        const QPoint speck = c + QPoint(100, 0);
+        view->draw_selection = QRegion(square).united(QRect(speck, QSize(2, 2)));
+        view->SmoothPixelSelection(4);
+        QVERIFY(view->draw_selection.contains(c));
+        QVERIFY2(!view->draw_selection.contains(square.topLeft()), "the corner was not rounded off");
+        QVERIFY2(!view->draw_selection.contains(speck), "the speck survived the smoothing");
+
+        view->my_brush = QBrush(Qt::blue);
+        view->BucketFill(centre);
+        QCOMPARE(canvas.pixelColor(c), QColor(Qt::blue));
+        QCOMPARE(canvas.pixelColor(c + QPoint(30, 0)), QColor(Qt::red)); // outside the selection
+        view->ExitDrawMode();
+        view->SetTool(NOTOOL);
+    }
+
     // The built-in tip's two shape knobs, which every draw-panel preset (pencils, aerograph,
     // ink pen) is just a parameter set over: hardness is the fully opaque core radius,
     // roundness squashes the tip vertically inside a mask that stays square (so StampBrush()'s
@@ -7805,6 +8022,140 @@ private slots:
         view->ConvertStick(v, StickData::POLYGON);
         QVERIFY(v->vector_shapes.isEmpty());
         QCOMPARE(view->my_animation->CurrentVectorShape(v), -1);
+    }
+
+    // A shape masked by another turns transparent where the mask is, in proportion to the mask's
+    // alpha (inverted: shown only there); a hidden mask still masks, and a masked mask cuts with
+    // what is left of it. Masks survive the stream and Clone(), a loop read from a file is broken,
+    // and on the live canvas the setter is one undo step that refuses loops, while reorder,
+    // copy/paste and delete keep every mask on the shape it named (a deleted mask is cleared).
+    void VectorShapeMasksCutCompoundAndFollowEdits()
+    {
+        StickData v;
+        v.stick_type = StickData::VECTOR;
+        v.my_line = QLineF(100, 50, 100, 150); // pointing down: local (x, y) -> (100 + 100x, 50 + 100y)
+        v.img_angle = 0;
+        v.vector_shapes << SquareShape(QPointF(-0.4, 0.1), 0.8, QBrush(Qt::red))     // scene 60..140
+                        << SquareShape(QPointF(-0.1, 0.4), 0.6, QBrush(Qt::blue))    // scene 90..150
+                        << SquareShape(QPointF(0.15, 0.35), 0.8, QBrush(Qt::green)); // 115..195 x 85..165
+        auto render = [](StickData *data) {
+            QGraphicsScene render_scene;
+            render_scene.setSceneRect(0, 0, 200, 200);
+            render_scene.addItem(new StickGraphicsItem(data)); // the scene owns the view
+            QImage img(200, 200, QImage::Format_ARGB32);
+            img.fill(Qt::white);
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 200, 200), QRectF(0, 0, 200, 200));
+            painter.end();
+            return img;
+        };
+        const QPoint only_red(70, 70), red_and_blue(100, 120), all_three(130, 120);
+        v.vector_shapes[1].visible = false; // the masks are hidden: only the red shape paints
+        v.vector_shapes[2].visible = false;
+
+        v.vector_shapes[0].mask = 1;
+        QImage img = render(&v);
+        QCOMPARE(img.pixelColor(only_red), QColor(Qt::red));
+        QCOMPARE(img.pixelColor(red_and_blue), QColor(Qt::white)); // cut where the (hidden) mask is
+        v.vector_shapes[0].mask_inverted = true;
+        img = render(&v);
+        QCOMPARE(img.pixelColor(only_red), QColor(Qt::white));     // shown only inside the mask
+        QCOMPARE(img.pixelColor(red_and_blue), QColor(Qt::red));
+        v.vector_shapes[0].mask_inverted = false;
+        v.vector_shapes[1].brush = QBrush(QColor(0, 0, 255, 128)); // a half-opaque mask: half the red
+        const QColor half = render(&v).pixelColor(red_and_blue);
+        QCOMPARE(half.red(), 255);
+        QVERIFY2(qAbs(half.green() - 128) <= 3, qPrintable(half.name()));
+        v.vector_shapes[1].brush = QBrush(Qt::blue);
+        v.vector_shapes[1].mask = 2; // the mask is masked: where green cuts blue, red is kept
+        img = render(&v);
+        QCOMPARE(img.pixelColor(red_and_blue), QColor(Qt::white));
+        QCOMPARE(img.pixelColor(all_three), QColor(Qt::red));
+        QVERIFY(MaskChainReaches(v.vector_shapes, 0, 2)); // 0 -> 1 -> 2: masking 2 with 0 would loop
+        QVERIFY(!MaskChainReaches(v.vector_shapes, 2, 0));
+
+        // pure index bookkeeping: moving the last shape to the back keeps both masks on their shapes
+        QList<VectorShape> list(4);
+        list[0].mask = 3;
+        list[3].mask = 1;
+        ReorderVectorShape(list, 3, 0); // now old 3, old 0, old 1, old 2
+        QCOMPARE(list[1].mask, 0);
+        QCOMPARE(list[0].mask, 2);
+
+        // the stream and Clone() keep the masks; a loop (only a corrupt file can hold one) is broken
+        // on load, and rendering it before that still ends
+        v.vector_shapes[1].mask_inverted = true;
+        StickData *clone = v.Clone();
+        auto stream_through = [](const StickData &source, StickData &loaded) {
+            QByteArray bytes;
+            {
+                QDataStream out(&bytes, QIODevice::WriteOnly);
+                out << source;
+            }
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+            QCOMPARE(in.status(), QDataStream::Ok);
+            QVERIFY(in.atEnd());
+        };
+        StickData loaded;
+        stream_through(v, loaded);
+        for (const StickData *copy : { static_cast<const StickData*>(&loaded), static_cast<const StickData*>(clone) }) {
+            QCOMPARE(copy->vector_shapes[0].mask, 1);
+            QCOMPARE(copy->vector_shapes[1].mask, 2);
+            QCOMPARE(copy->vector_shapes[2].mask, VectorShape::NO_MASK);
+            QVERIFY(copy->vector_shapes[1].mask_inverted);
+            QVERIFY(!copy->vector_shapes[0].mask_inverted);
+        }
+        delete clone;
+        v.vector_shapes[2].mask = 0;
+        render(&v);
+        StickData unlooped;
+        stream_through(v, unlooped);
+        for (int i = 0; i < unlooped.vector_shapes.size(); i++)
+            QVERIFY(!MaskChainReaches(unlooped.vector_shapes, unlooped.vector_shapes[i].mask, i));
+
+        // live canvas: MyView::SetVectorShapeMask() (the panel's mask selector and Invert box)
+        AddFrame();
+        StickData *a = AddVectorStick(QPointF(200, 100), QPointF(200, 200),
+                                      { SquareShape(QPointF(-0.5, 0), 1.0, QBrush(Qt::gray)),
+                                        SquareShape(QPointF(0, 0.5), 0.3, QBrush(Qt::darkGray)),
+                                        SquareShape(QPointF(-0.2, 0.2), 0.3, QBrush(Qt::black)) });
+        QSignalSpy steps(&view->undo_stack, &QUndoStack::indexChanged);
+        QVERIFY(view->SetVectorShapeMask(0, 1, false));
+        QVERIFY(view->SetVectorShapeMask(1, 2, true));
+        QCOMPARE(steps.count(), 2);
+        QVERIFY(!view->SetVectorShapeMask(2, 0, false)); // 2 -> 0 -> 1 -> 2
+        QVERIFY(!view->SetVectorShapeMask(0, 0, false)); // itself
+        QVERIFY(!view->SetVectorShapeMask(0, 1, false)); // what it already has
+        QCOMPARE(steps.count(), 2);
+        auto mask_colour = [&a](int i) { return a->vector_shapes[a->vector_shapes[i].mask].brush.color(); };
+
+        QVERIFY(view->MoveVectorShape(1, +1)); // dark grey to the front: the masks follow
+        QCOMPARE(a->vector_shapes[2].brush.color(), QColor(Qt::darkGray));
+        QCOMPARE(mask_colour(0), QColor(Qt::darkGray));
+        QCOMPARE(mask_colour(2), QColor(Qt::black));
+        QVERIFY(a->vector_shapes[2].mask_inverted);
+        QCOMPARE(a->vector_shapes[1].mask, VectorShape::NO_MASK);
+
+        // copy grey and dark grey (black stays behind): grey keeps its mask, dark grey loses it
+        QCOMPARE(view->CopyVectorShapes({ 0, 2 }), 2);
+        QCOMPARE(view->PasteVectorShapes(), QString());
+        QCOMPARE(a->vector_shapes.size(), 5);
+        QCOMPARE(a->vector_shapes[3].mask, 4);
+        QCOMPARE(a->vector_shapes[4].mask, VectorShape::NO_MASK);
+        QVERIFY(!a->vector_shapes[4].mask_inverted);
+
+        QVERIFY(view->DeleteVectorShapes({ 2 })); // the first dark grey: grey's mask goes with it
+        QCOMPARE(a->vector_shapes[0].mask, VectorShape::NO_MASK);
+        QVERIFY(!a->vector_shapes[0].mask_inverted);
+        QCOMPARE(a->vector_shapes[2].mask, 3); // the pasted pair moved down one place together
+        QCOMPARE(mask_colour(2), QColor(Qt::darkGray));
+
+        view->undo_stack.undo(); // the delete
+        a = view->VectorStick();
+        QVERIFY(a != nullptr);
+        QCOMPARE(a->vector_shapes.size(), 5);
+        QCOMPARE(mask_colour(0), QColor(Qt::darkGray));
     }
 };
 

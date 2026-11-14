@@ -388,14 +388,14 @@ QMenu::separator {
           </property>
           <item>
            <widget class="QFrame" name="frame_3">
-            <property name="styleSheet">
-             <string notr="true">QFrame { margin-top: 0px; }</string>
-            </property>
             <property name="sizePolicy">
              <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
               <horstretch>0</horstretch>
               <verstretch>0</verstretch>
              </sizepolicy>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">QFrame { margin-top: 0px; }</string>
             </property>
             <property name="frameShape">
              <enum>QFrame::StyledPanel</enum>
@@ -1423,17 +1423,17 @@ QPushButton:pressed{
        </item>
        <item>
         <widget class="QGroupBox" name="drawtools">
-         <property name="minimumSize">
-          <size>
-           <width>0</width>
-           <height>57</height>
-          </size>
-         </property>
          <property name="sizePolicy">
           <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
            <horstretch>0</horstretch>
            <verstretch>0</verstretch>
           </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>57</height>
+          </size>
          </property>
          <property name="maximumSize">
           <size>
@@ -1977,19 +1977,19 @@ QPushButton:pressed{
              <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    image: url(:/resources/addvector_00001.png);
+    image: url(:/resources/vector_stick_00001.png);
     width: 50px;
     height: 50px;
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    image: url(:/resources/addvector_00002.png);
+    image: url(:/resources/vector_stick_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    image: url(:/resources/addvector_00003.png);
+    image: url(:/resources/vector_stick_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2523,19 +2523,19 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    image: url(:/resources/displace_00001.png);
+    image: url(:/resources/move_stick_00001.png);
     width: 50px;
     height: 50px;
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    image: url(:/resources/displace_00002.png);
+    image: url(:/resources/move_stick_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    image: url(:/resources/displace_00003.png);
+    image: url(:/resources/move_stick_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -3349,7 +3349,7 @@ QPushButton:pressed{
                          <x>0</x>
                          <y>0</y>
                          <width>218</width>
-                         <height>716</height>
+                         <height>769</height>
                         </rect>
                        </property>
                        <layout class="QVBoxLayout" name="verticalLayout_14" stretch="0,1,0,1">

@@ -214,10 +214,16 @@ public:
     /// it (RejectNewerVersion()), because a newer record's extra fields would be read as the
     /// start of the next record and desync the whole stream.
     static constexpr qint32 CURRENT_VERSION = 11;
+    /// The formats of a VECTOR stick's shape list, each named after the fields it added: the read
+    /// and write gates compare against these, never against a bare number.
+    enum VectorShapesFormat : qint32 {
+        VECTOR_SHAPES_BASE = 1,  ///< name, visibility, closure, nodes, paint
+        VECTOR_SHAPES_DEPTH = 2, ///< + each shape's depth_offset and the stick's vector_depth_enabled
+        VECTOR_SHAPES_MASK = 3   ///< + each shape's mask and mask_inverted
+    };
     /// Format of a VECTOR stick's shape list, written at its head: the shapes have a version of
     /// their own so they can grow fields without raising every stick record's.
-    /// 2 adds each shape's depth_offset and the stick's vector_depth_enabled.
-    static constexpr qint32 VECTOR_SHAPES_VERSION = 2;
+    static constexpr qint32 VECTOR_SHAPES_VERSION = VECTOR_SHAPES_MASK;
     qint32 version = CURRENT_VERSION; ///< serialization format version of this record; 2 adds the
                                      ///< IK fields below, 3 adds TEXT's text_v_stretch, 4 adds
                                      ///< brush_follows_stick, 5 adds texture_tiled, 6 adds

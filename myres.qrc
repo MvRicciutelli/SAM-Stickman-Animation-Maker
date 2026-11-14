@@ -315,5 +315,22 @@
         <file>resources/interpolate_00001.png</file>
         <file>resources/interpolate_00002.png</file>
         <file>resources/interpolate_00003.png</file>
+        <file>resources/vector_stick_00001.png</file>
+        <file>resources/vector_stick_00002.png</file>
+        <file>resources/vector_stick_00003.png</file>
+        <file>resources/36_border_00001.png</file>
+        <file>resources/36_fill_00001.png</file>
+        <file>resources/36_fillandstroke_00001.png</file>
+        <file>resources/36_transform_00001.png</file>
+        <file>resources/36_pen_00001.png</file>
+        <file>resources/36_select_00001.png</file>
+        <file>resources/36_brush_00001.png</file>
+        <file>resources/36_eraser_00001.png</file>
+        <file>resources/36_rectangle_selection_00001.png</file>
+        <file>resources/36_edit_drawing_00001.png</file>
+        <file>resources/36_exit_drawing_00001.png</file>
+        <file>resources/move_stick_00001.png</file>
+        <file>resources/move_stick_00002.png</file>
+        <file>resources/move_stick_00003.png</file>
     </qresource>
 </RCC>

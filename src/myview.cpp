@@ -5,6 +5,7 @@
 #include <cmath>
 #include <QDebug>
 #include <QPainterPath>
+#include <QBitmap>
 #include <QRadialGradient>
 #include <QTransform>
 #include <QGraphicsRotation>
@@ -411,8 +412,10 @@ void MyView::mousePressEvent(QMouseEvent *event)
     // while drawing)
     if(draw_mode){
         if(event->button()==Qt::LeftButton){
-            if(draw_tool == DT_SEL_RECT || draw_tool == DT_SEL_LASSO){
+            if(draw_tool == DT_SEL_RECT || draw_tool == DT_SEL_LASSO || draw_tool == DT_TRANSFORM){
                 DrawSelPress(coord, event->modifiers());
+            } else if(draw_tool == DT_FILL){
+                BucketFill(coord); // one click, no stroke: move/release have nothing to do
             } else {
                 draw_stroking = true;
                 draw_last_pos = coord;
@@ -1481,7 +1484,7 @@ BrushStroke MyView::DrawBrush() const
 {
     BrushStroke brush;
     brush.stamp = draw_brush_stamp;
-    brush.color = draw_brush_color;
+    brush.color = FillColor(); // the Style column's fill colour, as the bucket uses
     brush.size = draw_brush_size;
     brush.opacity = qBound(0, draw_brush_opacity, 100)/100.0;
     brush.spacing = draw_brush_spacing;
@@ -1501,12 +1504,24 @@ void MyView::StampBrush(const QPointF &canvas_px)
     if(!draw_canvas)
         return;
     qreal dab_opacity = 1.0;
-    const QImage dab = BrushDab(DrawBrush(),
+    QImage dab = BrushDab(DrawBrush(),
                                 draw_pressure_size    ? PressureFactor() : 1.0,
                                 draw_pressure_opacity ? PressureFactor() : 1.0,
                                 &dab_opacity);
     if(dab.isNull())
         return;
+
+    // eraser softness: the dab's alpha times a round feather (hardness = 100 - softness) over
+    // the dab's square, so any tip, .abr ones included, erases with a soft rim.
+    // ponytail: the feather is fitted to the dab's bounding square, which a rotated tip enlarges,
+    // so a tilted tip feathers a little less; the 128 px mask is rebuilt per dab, cache it if a
+    // big eraser ever drags.
+    if(draw_eraser && draw_eraser_softness > 0){
+        QPainter sp(&dab);
+        sp.setRenderHint(QPainter::SmoothPixmapTransform);
+        sp.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+        sp.drawImage(dab.rect(), MakeRoundBrush(128, 100 - draw_eraser_softness, 100));
+    }
 
     QPainter p(draw_canvas);
     p.setOpacity(dab_opacity);
@@ -1864,11 +1879,12 @@ void MyView::ExitDrawMode()
 
 // ===== Pixel selection & free-transform (draw mode) ==================================
 // Draw mode's two marquee sub-tools — rectangle (DT_SEL_RECT) and lasso (DT_SEL_LASSO),
-// chosen with SetDrawTool() — select a set of canvas pixels into draw_selection, then wrap
-// them in a move/scale/rotate gizmo that LOOKS identical to the stickfigure transformation
-// box but is fully separate: it transforms PIXELS (not figures), exists only while draw_mode
-// is active, and is discarded on draw-mode exit, on a switch to brush/eraser, or on Ctrl+D
-// (all routed through DiscardPixelSelection()). Shift adds to / Alt subtracts from the set.
+// chosen with SetDrawTool() — select a set of canvas pixels into draw_selection; the transform
+// sub-tool (DT_TRANSFORM) wraps them in a move/scale/rotate gizmo that LOOKS identical to the
+// stickfigure transformation box but is fully separate: it transforms PIXELS (not figures),
+// exists only while draw_mode is active, and is discarded on draw-mode exit, on a switch to
+// brush/eraser, or on Ctrl+D (all routed through DiscardPixelSelection()). Shift adds to /
+// Alt subtracts from the set.
 //
 // Coordinates: SceneToCanvas()/CanvasToScene() convert between the viewport-rotated canvas
 //              pixels and the scene (draw_disp/draw_disp_inv, the same transform the paint
@@ -1881,7 +1897,7 @@ void MyView::ExitDrawMode()
 //              draw-local undo step (see the Freehand section's undo chain).
 // Rendering:   drawForeground() paints the floating pixels, the marching-ants marquee, and the
 //              gizmo — the gizmo via the SHARED DrawTransformHandles() with draw_outline=true.
-// Beneficiaries: the draw-mode panel's Select/Lasso buttons (widget.cpp advanced_draw_tab tool
+// Beneficiaries: the draw-mode panel's Select/Lasso/Transform buttons (widget.cpp advanced_draw_tab tool
 //              row). This subsystem is the pixel-space twin of the stickfigure transformation
 //              box below; the only shared code is DrawTransformHandles() (the renderer).
 
@@ -1904,31 +1920,47 @@ QPointF MyView::CanvasToScene(const QPointF &canvas) const
     return draw_disp.map(canvas - half);
 }
 
-/// @details The gizmo: translate+rotate+scale about the (base) selection-box centre, so
-/// the handles and the lifted pixels share one transform. Identity when t/r=0 and s=1.
+/// @details The canvas is painted rotated with the stick (draw_disp), but the selection box must
+/// stay upright on screen. This rotation undoes the canvas's on-screen angle (draw_disp's x axis),
+/// so the gizmo box, its handles and the rectangle tool work in this frame. draw_disp only changes
+/// in EnterDrawMode(), so the frame is fixed for a whole session.
+/// ponytail: rotation only; a flipped or non-uniformly scaled global transform (draw_branch) still
+/// shears the box on screen. Upgrade: build the frame from draw_disp's full linear part.
+QTransform MyView::SelFrame() const
+{
+    QTransform f;
+    f.rotate(-atan2(draw_disp.m12(), draw_disp.m11()) * 180.0 / M_PI);
+    return f;
+}
+
+/// @details The gizmo: translate+rotate+scale about the selection-box centre, built in the upright
+/// frame (SelFrame()) and returned conjugated into canvas pixels, so the handles and the lifted
+/// pixels share one transform. Identity when t/r=0 and s=1.
 QTransform MyView::PixelGizmo() const
 {
-    QPointF c = QRectF(draw_sel_bounds).center();
+    QPointF c = draw_sel_box.center();
     QTransform g;
     g.translate(c.x() + draw_sel_t.x(), c.y() + draw_sel_t.y());
     g.rotate(draw_sel_r);
     g.scale(draw_sel_sx, draw_sel_sy);
     g.translate(-c.x(), -c.y());
-    return g;
+    QTransform f = SelFrame();
+    return f.inverted() * g * f; // canvas -> upright frame -> gizmo -> canvas
 }
 
 /// @details Handle positions (canvas px, gizmo applied): 0..3 corners TL,TR,BR,BL;
-/// 4..7 edge mids top,right,bottom,left; 8 = rotation knob above the top edge.
+/// 4..7 edge mids top,right,bottom,left; 8 = rotation knob above the top edge. The box is
+/// draw_sel_box in the upright frame, so it shows upright whatever the stick's rotation.
 void MyView::GizmoHandles(QPointF out[9]) const
 {
-    QRectF r(draw_sel_bounds);
+    QRectF r = draw_sel_box;
     QPointF base[9] = {
         r.topLeft(), r.topRight(), r.bottomRight(), r.bottomLeft(),
         (r.topLeft()+r.topRight())/2.0, (r.topRight()+r.bottomRight())/2.0,
         (r.bottomRight()+r.bottomLeft())/2.0, (r.bottomLeft()+r.topLeft())/2.0,
-        QPointF(r.center().x(), r.top() - 24.0) // 24 canvas px above top-mid (scales with gizmo)
+        QPointF(r.center().x(), r.top() - 24.0) // 24 px above top-mid (scales with gizmo)
     };
-    QTransform g = PixelGizmo();
+    QTransform g = SelFrame() * PixelGizmo(); // upright frame -> canvas, then the gizmo
     for(int i = 0; i < 9; i++)
         out[i] = g.map(base[i]);
 }
@@ -2036,33 +2068,222 @@ void MyView::SetPixelSelection(const QRegion &r, int op)
     if(draw_canvas)
         draw_selection = draw_selection.intersected(draw_canvas->rect());
     draw_sel_bounds = draw_selection.boundingRect();
+    QPainterPath outline; outline.addRegion(draw_selection);
+    draw_sel_box = SelFrame().inverted().map(outline).boundingRect(); // the upright box around it
     draw_sel_t = QPointF(); draw_sel_r = 0; draw_sel_sx = draw_sel_sy = 1;
 }
 
+/// @details Leaving the transform tool with lifted pixels: they are stamped where the gizmo put
+/// them, and the selection moves there too, so the selection tools go on from what is shown.
+/// The selection outline is mapped through the gizmo and filled back into a region (XOR of the
+/// outline's polygons, so a hole cut with Alt stays a hole). No-op when nothing is floating.
+void MyView::BakePixelTransform()
+{
+    if(!draw_float_active)
+        return;
+    QPainterPath outline; outline.addRegion(draw_selection);
+    QRegion moved;
+    for(const QPolygonF &poly : PixelGizmo().map(outline.simplified()).toFillPolygons())
+        moved = moved.xored(QRegion(poly.toPolygon(), Qt::OddEvenFill));
+    SetPixelSelection(moved, 0); // commits the float with the live gizmo first, then resets it
+}
+
+/// @details Selection menu "Select inverse pixels": the canvas minus the current selection
+/// (all of it when nothing is selected). A transformed float is baked first, so the inverse is
+/// taken of what is shown.
+void MyView::InvertPixelSelection()
+{
+    if(!draw_mode || !draw_canvas)
+        return;
+    BakePixelTransform();
+    SetPixelSelection(QRegion(draw_canvas->rect()).subtracted(draw_selection), 0);
+    if(draw_target && draw_target->view)
+        draw_target->view->update();
+    viewport()->update();
+}
+
+/// @details One box-blur pass along x then y over a padded 0/255 coverage grid, with running sums so
+/// a pass costs the same at any radius. Pixels outside the grid count as unselected.
+static void BoxBlur(QVector<int> &grid, int w, int h, int r)
+{
+    QVector<int> line(qMax(w, h));
+    const int window = 2*r + 1;
+    for(int y = 0; y < h; y++){                     // rows
+        int sum = 0;
+        for(int x = -r; x <= r; x++)
+            sum += (x >= 0 && x < w) ? grid[y*w + x] : 0;
+        for(int x = 0; x < w; x++){
+            line[x] = sum / window;
+            const int in = x + r + 1, out = x - r;
+            sum += (in < w ? grid[y*w + in] : 0) - (out >= 0 ? grid[y*w + out] : 0);
+        }
+        for(int x = 0; x < w; x++)
+            grid[y*w + x] = line[x];
+    }
+    for(int x = 0; x < w; x++){                     // columns
+        int sum = 0;
+        for(int y = -r; y <= r; y++)
+            sum += (y >= 0 && y < h) ? grid[y*w + x] : 0;
+        for(int y = 0; y < h; y++){
+            line[y] = sum / window;
+            const int in = y + r + 1, out = y - r;
+            sum += (in < h ? grid[in*w + x] : 0) - (out >= 0 ? grid[out*w + x] : 0);
+        }
+        for(int y = 0; y < h; y++)
+            grid[y*w + x] = line[y];
+    }
+}
+
+/// @details Photoshop's "Smooth": the selection's coverage is blurred and cut back at 50%, which
+/// rounds corners and removes whatever is narrower than about the width, and keeps the
+/// selection hard-edged (a QRegion has no partial pixels, so a feather is not possible). Two box
+/// passes of half the width approximate a gaussian reaching about @p width pixels. A floating
+/// transform is baked first, as Select inverse does.
+void MyView::SmoothPixelSelection(int width)
+{
+    if(!draw_mode || !draw_canvas || width < 1)
+        return;
+    BakePixelTransform();
+    if(draw_selection.isEmpty())
+        return;
+    const int r = (width + 1) / 2;
+    const QRect area = draw_selection.boundingRect().adjusted(-2*r, -2*r, 2*r, 2*r);
+    const int w = area.width(), h = area.height();
+    QVector<int> grid(w * h, 0);
+    for(const QRect &rc : draw_selection.translated(-area.topLeft()))
+        for(int y = rc.top(); y <= rc.bottom(); y++)
+            for(int x = rc.left(); x <= rc.right(); x++)
+                grid[y*w + x] = 255;
+    BoxBlur(grid, w, h, r);
+    BoxBlur(grid, w, h, r);
+    // back to a region the native way: opaque pixels -> 1-bit mask -> QRegion(QBitmap)
+    QImage cut(w, h, QImage::Format_ARGB32);
+    for(int y = 0; y < h; y++){
+        QRgb *row = reinterpret_cast<QRgb*>(cut.scanLine(y));
+        for(int x = 0; x < w; x++)
+            row[x] = grid[y*w + x] >= 128 ? qRgba(0, 0, 0, 255) : qRgba(0, 0, 0, 0);
+    }
+    SetPixelSelection(QRegion(QBitmap::fromImage(cut.createAlphaMask())).translated(area.topLeft()), 0);
+    if(draw_target && draw_target->view)
+        draw_target->view->update();
+    viewport()->update();
+}
+
+/// @details A gradient tints with its first stop and a texture with its colour (which holds its
+/// opacity): the raster tools paint one colour.
+QColor MyView::FillColor() const
+{
+    if(const QGradient *g = my_brush.gradient())
+        return g->stops().isEmpty() ? QColor(Qt::black) : g->stops().first().second;
+    return my_brush.color();
+}
+
+/// @details With a selection the bucket fills it, and a click outside it does nothing (the
+/// selection is what the user marked to paint). Without one it flood-fills the 4-connected area
+/// whose colour is within a tolerance of the clicked pixel, the usual "closed area": strokes
+/// bound it, an open area runs to the canvas edge. The fill colour keeps its alpha, i.e. the
+/// Style column's fill opacity. "No fill" paints nothing.
+/// ponytail: fixed tolerance and no grow, so a soft-edged stroke keeps a thin unfilled halo
+/// against the fill; a tolerance control / a 1 px grow if that shows.
+void MyView::BucketFill(const QPointF &scene)
+{
+    if(!draw_canvas || my_brush.style() == Qt::NoBrush)
+        return;
+    const QPoint seed = SceneToCanvas(scene).toPoint();
+    if(!draw_canvas->rect().contains(seed))
+        return;
+    QVector<QRect> runs; // the pixels to fill, as non-overlapping rects
+    if(!draw_selection.isEmpty()){
+        if(!draw_selection.contains(seed))
+            return;
+        for(const QRect &rc : draw_selection)
+            runs.append(rc);
+    } else {
+        // scanline flood fill on the raw premultiplied pixels (a transparent pixel is 0 whatever
+        // its colour was); each horizontal run is one rect, and every span of fillable pixels in
+        // the rows above and below pushes one seed
+        const int w = draw_canvas->width(), h = draw_canvas->height();
+        auto raw = [this](int x, int y){ return reinterpret_cast<const QRgb*>(draw_canvas->constScanLine(y))[x]; };
+        const QRgb target = raw(seed.x(), seed.y());
+        const int tolerance = 32;
+        QVector<uchar> done(w * h, 0);
+        auto fillable = [&](int x, int y){
+            if(done[y*w + x])
+                return false;
+            const QRgb c = raw(x, y);
+            return qAbs(qRed(c) - qRed(target)) <= tolerance && qAbs(qGreen(c) - qGreen(target)) <= tolerance
+                && qAbs(qBlue(c) - qBlue(target)) <= tolerance && qAbs(qAlpha(c) - qAlpha(target)) <= tolerance;
+        };
+        QVector<QPoint> todo { seed };
+        while(!todo.isEmpty()){
+            const QPoint p = todo.takeLast();
+            const int y = p.y();
+            if(!fillable(p.x(), y))
+                continue;
+            int left = p.x(), right = p.x();
+            while(left > 0 && fillable(left - 1, y))
+                left--;
+            while(right < w - 1 && fillable(right + 1, y))
+                right++;
+            for(int x = left; x <= right; x++)
+                done[y*w + x] = 1;
+            runs.append(QRect(left, y, right - left + 1, 1));
+            for(int ny : { y - 1, y + 1 }){
+                if(ny < 0 || ny >= h)
+                    continue;
+                bool in_span = false;
+                for(int x = left; x <= right; x++){
+                    const bool f = fillable(x, ny);
+                    if(f && !in_span)
+                        todo.append(QPoint(x, ny));
+                    in_span = f;
+                }
+            }
+        }
+    }
+    QPainter p(draw_canvas);
+    for(const QRect &rc : runs)
+        p.fillRect(rc, FillColor());
+    p.end();
+    PushDrawUndo();
+    if(draw_target && draw_target->view){
+        draw_target->view->Refresh(0);
+        draw_target->view->update();
+    }
+}
+
 /// @details Switch draw sub-tool. Choosing a non-selection tool (brush/eraser) discards the
-/// pixel selection (spec); switching between the two selection tools keeps it so add/subtract
-/// can continue. draw_eraser stays in sync for the paint path.
+/// pixel selection (spec); switching between the selection tools and the transform tool keeps
+/// it, so add/subtract can continue, and leaving the transform tool bakes its transform
+/// (BakePixelTransform()). The bucket keeps the selection too: it is what it fills.
+/// draw_eraser stays in sync for the paint path.
 void MyView::SetDrawTool(int t)
 {
     if((t == DT_BRUSH || t == DT_ERASER) && draw_tool != t)
         DiscardPixelSelection();
+    else if(draw_tool == DT_TRANSFORM && t != DT_TRANSFORM)
+        BakePixelTransform();
     draw_tool = t;
     draw_eraser = (t == DT_ERASER);
-    if(viewport())
-        viewport()->setCursor((t == DT_SEL_RECT || t == DT_SEL_LASSO) ? Qt::CrossCursor
-                                                                      : Qt::ArrowCursor);
+    if(viewport()){
+        viewport()->setCursor((t == DT_SEL_RECT || t == DT_SEL_LASSO || t == DT_FILL) ? Qt::CrossCursor
+                              : t == DT_TRANSFORM ? Qt::SizeAllCursor : Qt::ArrowCursor);
+        viewport()->update(); // the gizmo shows only with the transform tool
+    }
+    if(draw_target && draw_target->view)
+        draw_target->view->update(); // a baked transform changed the canvas
 }
 
-/// @details Selection-tool mouse press. With Shift/Alt held, or with no existing selection,
-/// this starts a new region gesture (rect rubber-band or lasso). Otherwise a click on a
-/// handle starts scale/rotate and a click inside the box starts a move (both lift the pixels
-/// on first drag); a click outside starts a fresh replace-selection.
+/// @details Pixel-tool mouse press. The selection tools only select: a press starts a new
+/// region gesture (rect rubber-band or lasso), replacing the selection, or adding to it with
+/// Shift / subtracting with Alt. The transform tool only transforms the existing selection: a
+/// click on a handle starts scale/rotate and a click inside the box starts a move (both lift
+/// the pixels on first drag); a click outside the box, or with nothing selected, does nothing.
 void MyView::DrawSelPress(const QPointF &scene, Qt::KeyboardModifiers mods)
 {
-    draw_sel_op = (mods & Qt::ShiftModifier) ? 1 : (mods & Qt::AltModifier) ? 2 : 0;
-    bool forced_new = (draw_sel_op != 0);
-
-    if(!forced_new && !draw_selection.isEmpty()){
+    if(draw_tool == DT_TRANSFORM){
+        if(draw_selection.isEmpty())
+            return;
         int h = HitPixelHandle(scene);
         if(h == 8){                                     // rotation knob
             LiftPixelFloat();
@@ -2074,7 +2295,7 @@ void MyView::DrawSelPress(const QPointF &scene, Qt::KeyboardModifiers mods)
             // original position; CanvasToScene() then converts that canvas-pixel point into scene
             // coordinates, since `scene` (the mouse position) and QLineF::angle() below both work
             // in scene space.
-            QPointF c = CanvasToScene(PixelGizmo().map(QRectF(draw_sel_bounds).center()));
+            QPointF c = CanvasToScene((SelFrame() * PixelGizmo()).map(draw_sel_box.center()));
             draw_sel_ang0 = QLineF(c, scene).angle();     // pointer-to-pivot angle at gesture start
             return;
         }
@@ -2087,16 +2308,17 @@ void MyView::DrawSelPress(const QPointF &scene, Qt::KeyboardModifiers mods)
         }
         // inside the box (post-gizmo) = move
         QPointF cp = SceneToCanvas(scene);
-        if(PixelGizmo().map(QRectF(draw_sel_bounds)).containsPoint(cp, Qt::OddEvenFill)){
+        if((SelFrame() * PixelGizmo()).map(draw_sel_box).containsPoint(cp, Qt::OddEvenFill)){
             LiftPixelFloat();
             draw_sel_gesture = 3;
             draw_sel_t0 = draw_sel_t;
             draw_sel_p0 = cp;                           // anchor in canvas px
-            return;
         }
+        return;
     }
 
     // new selection (replace, or add/subtract with Shift/Alt)
+    draw_sel_op = (mods & Qt::ShiftModifier) ? 1 : (mods & Qt::AltModifier) ? 2 : 0;
     QPointF cp = SceneToCanvas(scene);
     if(draw_tool == DT_SEL_LASSO){
         draw_sel_gesture = 2;
@@ -2121,11 +2343,12 @@ void MyView::DrawSelMove(const QPointF &scene)
     switch(draw_sel_gesture){
     case 1: draw_lasso.clear(); draw_lasso << draw_sel_p0 << cp; break; // rectangle: 2 live vertices
     case 2: draw_lasso << cp; break;                                    // lasso: accumulates the points
-    case 3: // move
-        draw_sel_t = draw_sel_t0 + (cp - draw_sel_p0);
+    case 3: // move (draw_sel_t is in the upright frame; SelFrame() is a pure rotation, so the
+            // canvas-pixel drag vector maps straight into it)
+        draw_sel_t = draw_sel_t0 + SelFrame().inverted().map(cp - draw_sel_p0);
         break;
     case 4: { // scale about box centre (corners scale both axes; edge mids scale only one)
-        QPointF c = QRectF(draw_sel_bounds).center();
+        QPointF c = draw_sel_box.center();
         // Build the box's rotation+move (no scale) as its own QTransform, then invert it: mapping
         // the live cursor position (cp, still in canvas pixels) through that inverse undoes the
         // gizmo's current rotation/translation, landing the cursor back in the box's own rigid
@@ -2133,8 +2356,8 @@ void MyView::DrawSelMove(const QPointF &scene)
         // box's own top/side edges) no matter how far the box has already been rotated.
         QTransform rigid; rigid.translate(c.x()+draw_sel_t.x(), c.y()+draw_sel_t.y());
         rigid.rotate(draw_sel_r); rigid.translate(-c.x(), -c.y());
-        QPointF u = rigid.inverted().map(cp);           // u - c = scale * (base - c)
-        QRectF r(draw_sel_bounds);
+        QPointF u = rigid.inverted().map(SelFrame().inverted().map(cp)); // u - c = scale * (base - c)
+        QRectF r = draw_sel_box;
         QPointF base[8] = { r.topLeft(), r.topRight(), r.bottomRight(), r.bottomLeft(),
             (r.topLeft()+r.topRight())/2.0, (r.topRight()+r.bottomRight())/2.0,
             (r.bottomRight()+r.bottomLeft())/2.0, (r.bottomLeft()+r.topLeft())/2.0 };
@@ -2149,7 +2372,7 @@ void MyView::DrawSelMove(const QPointF &scene)
         // Same pivot as DrawSelPress: the box centre, mapped through the live PixelGizmo()
         // transform and converted from canvas pixels to scene coordinates, so it matches the
         // frame of `scene` (the current mouse position) that QLineF() below measures against.
-        QPointF c = CanvasToScene(PixelGizmo().map(QRectF(draw_sel_bounds).center()));
+        QPointF c = CanvasToScene((SelFrame() * PixelGizmo()).map(draw_sel_box.center()));
         double a = QLineF(c, scene).angle();
         draw_sel_r = draw_sel_r0 - (a - draw_sel_ang0); // QLineF::angle() increases counter-clockwise
         break;
@@ -2170,14 +2393,16 @@ void MyView::DrawSelRelease(const QPointF &scene)
 {
     QPointF cp = SceneToCanvas(scene);
     if(draw_sel_gesture == 1){                          // rectangle
-        // draw_sel_p0 is the first corner clicked, cp the corner under the cursor now; the user
-        // may have dragged in any direction, so QRectF(p0,cp) can have a negative width/height.
-        // .normalized() (Qt) swaps corners as needed so left<=right and top<=bottom; .toRect()
-        // rounds to whole pixels since the canvas is pixel-addressed; .intersected() (Qt) clips
-        // the result to the canvas bounds so the selection can never reach outside the image.
-        QRect rc = QRectF(draw_sel_p0, cp).normalized().toRect().intersected(draw_canvas->rect());
-        if(rc.width() > 0 && rc.height() > 0)
-            SetPixelSelection(QRegion(rc), draw_sel_op);
+        // draw_sel_p0 is the first corner clicked, cp the corner under the cursor now. The
+        // rectangle is upright on screen (as its rubber-band preview), so it is built in the
+        // upright frame (SelFrame()) and mapped back into canvas pixels, where it is a rotated
+        // polygon. .normalized() (Qt) orders the corners whatever the drag direction;
+        // .intersected() clips the region so the selection never reaches outside the image.
+        QTransform f = SelFrame();
+        QRectF box = QRectF(f.inverted().map(draw_sel_p0), f.inverted().map(cp)).normalized();
+        QRegion rc = QRegion(f.map(box).toPolygon()).intersected(draw_canvas->rect());
+        if(!rc.isEmpty())
+            SetPixelSelection(rc, draw_sel_op);
     } else if(draw_sel_gesture == 2){                   // lasso
         draw_lasso << cp;
         if(draw_lasso.size() >= 3)
@@ -2645,17 +2870,20 @@ void MyView::drawForeground(QPainter *painter, const QRectF &rect)
             // rectangle selection, which is already a single subpath).
             QPainterPath ants; ants.addRegion(draw_selection);
             ants = ants.simplified();
-            ants = pix_to_scene.map(ants);           // canvas-pixel path -> scene coordinates
+            // canvas-pixel path -> scene coordinates, through the gizmo so it follows the moved pixels
+            ants = (PixelGizmo() * pix_to_scene).map(ants);
             QPen white(Qt::white, 1); white.setCosmetic(true);
             painter->setPen(white); painter->drawPath(ants);
             QPen black(Qt::black, 1, Qt::DashLine); black.setCosmetic(true);
             painter->setPen(black); painter->drawPath(ants);
 
-            // 4) gizmo box + handles: the pixel box turns with the gizmo, so it draws its own
-            // outline too (draw_outline=true). Handles in scene coordinates.
-            QPointF h[9]; GizmoHandles(h);
-            QPointF hs[9]; for(int i = 0; i < 9; i++) hs[i] = CanvasToScene(h[i]);
-            DrawTransformHandles(painter, hs, true);
+            // 4) gizmo box + handles, only with the transform tool: the pixel box turns with the
+            // gizmo, so it draws its own outline too (draw_outline=true). Handles in scene coordinates.
+            if(draw_tool == DT_TRANSFORM){
+                QPointF h[9]; GizmoHandles(h);
+                QPointF hs[9]; for(int i = 0; i < 9; i++) hs[i] = CanvasToScene(h[i]);
+                DrawTransformHandles(painter, hs, true);
+            }
         }
         painter->restore();
     }
@@ -4090,7 +4318,7 @@ void MyView::mouseReleaseEvent(QMouseEvent *event)
 {
     // draw mode: ends the current stroke, none of the selection/tool logic below
     if(draw_mode){
-        if(event->button()==Qt::LeftButton && (draw_tool==DT_SEL_RECT || draw_tool==DT_SEL_LASSO)){
+        if(event->button()==Qt::LeftButton && (draw_tool==DT_SEL_RECT || draw_tool==DT_SEL_LASSO || draw_tool==DT_TRANSFORM)){
             if(draw_sel_gesture)
                 DrawSelRelease(coord);
         } else if(event->button()==Qt::LeftButton && draw_stroking){
@@ -4199,7 +4427,7 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
     MapMyCoords(coord, event->pos());
     // draw mode: a drag with the left button held = a continuous (interpolated) stroke
     if(draw_mode){
-        if(draw_tool == DT_SEL_RECT || draw_tool == DT_SEL_LASSO){
+        if(draw_tool == DT_SEL_RECT || draw_tool == DT_SEL_LASSO || draw_tool == DT_TRANSFORM){
             if(draw_sel_gesture && (event->buttons() & Qt::LeftButton))
                 DrawSelMove(coord);
         } else if(draw_stroking && (event->buttons() & Qt::LeftButton)){
@@ -5946,7 +6174,7 @@ void MyView::EndVectorShape()
     s->view->vector_active_shape = -1;
     s->view->vector_preview_active = false;
     if(idx >= 0 && idx < s->vector_shapes.size() && s->vector_shapes[idx].nodes.size() < 2){
-        s->vector_shapes.removeAt(idx);
+        RemoveVectorShape(s->vector_shapes, idx);
         DropShapeFromSelection(s->view->selected_vector_nodes, idx);
         if(my_animation->vector_shape_row >= s->vector_shapes.size())
             my_animation->vector_shape_row = s->vector_shapes.size() - 1;
@@ -6690,7 +6918,7 @@ bool MyView::DeleteSelectedVectorNodes()
         s->view->selected_vector_nodes.clear();
         for(int i = s->vector_shapes.size() - 1; i >= 0; i--)
             if(s->vector_shapes[i].nodes.size() < 2)
-                s->vector_shapes.removeAt(i);
+                RemoveVectorShape(s->vector_shapes, i);
         if(my_animation->vector_shape_row >= s->vector_shapes.size())
             my_animation->vector_shape_row = s->vector_shapes.size() - 1;
         VectorEdited(s);
@@ -6802,7 +7030,7 @@ bool MyView::MoveVectorShape(int index, int delta)
     if(target == index)
         return false;
     StoreUndo();
-    s->vector_shapes.move(index, target);
+    ReorderVectorShape(s->vector_shapes, index, target);
     s->view->selected_vector_nodes.clear();
     my_animation->vector_shape_row = target;
     VectorEdited(s);
@@ -6813,7 +7041,8 @@ bool MyView::MoveVectorShape(int index, int delta)
  * @brief Deletes the shapes at @p indices, as one undo step.
  * @return false when there is no vector stick or no index was given.
  * @details Removes from the highest index down so earlier removals do not shift later ones, and
- * finishes the shape the pen is drawing first. Backs the vector panel's delete button.
+ * finishes the shape the pen is drawing first. A shape that used a deleted one as its mask is
+ * left unmasked (RemoveVectorShape()). Backs the vector panel's delete button.
  */
 bool MyView::DeleteVectorShapes(QList<int> indices)
 {
@@ -6827,7 +7056,7 @@ bool MyView::DeleteVectorShapes(QList<int> indices)
     for(int idx : indices){
         if(idx < 0 || idx >= s->vector_shapes.size())
             continue;
-        s->vector_shapes.removeAt(idx);
+        RemoveVectorShape(s->vector_shapes, idx);
         DropShapeFromSelection(s->view->selected_vector_nodes, idx);
     }
     my_animation->vector_shape_row = qMin(my_animation->vector_shape_row, int(s->vector_shapes.size()) - 1);
@@ -6871,6 +7100,28 @@ void MyView::RenameVectorShape(int index, const QString &name)
     StoreUndo();
     s->vector_shapes[index].name = name;
     emit VectorShapesChanged();
+}
+
+/// @details The panel greys out the masks that would close a loop, but the check lives here, where
+/// every caller goes through it: a shape masked by itself, through any chain, would need its own
+/// pixels before it has them. No mask means no inversion either.
+bool MyView::SetVectorShapeMask(int index, int mask, bool inverted)
+{
+    StickData *s = VectorStick();
+    if(s == nullptr || index < 0 || index >= s->vector_shapes.size()
+            || mask < VectorShape::NO_MASK || mask >= s->vector_shapes.size())
+        return false;
+    if(mask == VectorShape::NO_MASK)
+        inverted = false;
+    const VectorShape &shape = s->vector_shapes.at(index);
+    if((shape.mask == mask && shape.mask_inverted == inverted)
+            || (mask >= 0 && MaskChainReaches(s->vector_shapes, mask, index)))
+        return false;
+    StoreUndo();
+    s->vector_shapes[index].mask = mask;
+    s->vector_shapes[index].mask_inverted = inverted;
+    VectorEdited(s);
+    return true;
 }
 
 /// @details The three depth edits end the same way: VectorEdited(), then Frame::Refresh() like
@@ -6932,7 +7183,8 @@ void MyView::ResetVectorShapeDepths()
 
 /// @details The buffer holds the shapes in SCENE space, so a paste can put them back where they
 /// were drawn whatever stick receives them. It is a plain value list: replaced whole by the next
-/// copy, freed with the view, and its textures shared copy-on-write with the source.
+/// copy, freed with the view, and its textures shared copy-on-write with the source. A mask is
+/// kept only when its shape is copied too, and then names that shape's place in the buffer.
 int MyView::CopyVectorShapes(QList<int> indices)
 {
     StickData *s = VectorStick();
@@ -6942,11 +7194,19 @@ int MyView::CopyVectorShapes(QList<int> indices)
     indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
     const QTransform to_scene = s->PolygonTransform();
     QList<VectorShape> copied;
+    QList<int> sources; // the stick index each copied shape came from
     for(int idx : indices)
-        if(idx >= 0 && idx < s->vector_shapes.size())
+        if(idx >= 0 && idx < s->vector_shapes.size()){
             copied << MapShape(s->vector_shapes[idx], to_scene);
+            sources << idx;
+        }
     if(copied.isEmpty())
         return 0; // nothing selected: the previous copy stays
+    for(VectorShape &shape : copied){
+        const int place = sources.indexOf(shape.mask);
+        shape.mask = place >= 0 ? place : VectorShape::NO_MASK; // its mask stayed behind
+        shape.mask_inverted = shape.mask_inverted && place >= 0;
+    }
     vector_clipboard = copied;
     return copied.size();
 }
@@ -6968,8 +7228,12 @@ QString MyView::PasteVectorShapes()
     EndVectorShape();
     StoreUndo();
     const QTransform to_local = s->PolygonTransform().inverted();
-    for(const VectorShape &shape : vector_clipboard)
+    const int first = s->vector_shapes.size();
+    for(const VectorShape &shape : vector_clipboard){
         s->vector_shapes << MapShape(shape, to_local); // on top, in their copied order
+        if(shape.mask >= 0)
+            s->vector_shapes.last().mask = first + shape.mask; // a buffer place, onto the pasted block
+    }
     my_animation->vector_shape_row = s->vector_shapes.size() - 1;
     VectorEdited(s);
     return QString();

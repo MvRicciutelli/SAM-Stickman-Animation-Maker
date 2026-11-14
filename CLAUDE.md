@@ -134,7 +134,11 @@ void Widget::on_someBtn_clicked(){
 - Inbetweens only between `VectorShapesCompatible()` shapes; the panel refresh connections stay queued.
 - A shape's depth is an OFFSET from the stick's `z` (`depth_offset`), read only through
   `StickData::VectorShapeDepth()` and only while `vector_depth_enabled`; the hand-written `CopyFrom()`
-  must copy the switch. `VECTOR_SHAPES_VERSION` is 2 (offsets trail each shape, the switch trails the list).
+  must copy the switch. `VECTOR_SHAPES_VERSION` is 3 (`VECTOR_SHAPES_MASK`; gates use the `VectorShapesFormat` names;
+  mask index + inversion trail each shape after the offset, the switch trails the list).
+- A shape's `mask` is an INDEX into the same list: every removal/reorder goes through
+  `RemoveVectorShape()`/`ReorderVectorShape()`, loops are refused via `MaskChainReaches()`, and a masked
+  shape is painted offscreen by `MaskedShapeImage()`.
 - Shapes at another depth are painted by `VectorShapeLayerItem` helper items: only
   `StickGraphicsItem::SyncShapeLayers()` may create, destroy or scene-add them, and shape painting goes
   through `PaintVectorShapes()`. Never assume one scene item per stick.
@@ -241,7 +245,8 @@ release/tst_characterization.exe
   The tinted dab is rebuilt every `paint()`; if a crowded frame drags, cache it on `StickGraphicsItem`.
 - Tiling is fill-only: a stroke texture always repeats.
 - VECTOR shapes have no texture arrow handle (v1 scope).
-- Vector layer thumbnails (`VectorShapeIcon`) ignore brush borders and texture placement.
+- Vector layer thumbnails (`VectorShapeIcon`) ignore brush borders, texture placement and masks.
+- `ShapeAt()` ignores masks (a masked-away area is still clickable).
 - VECTOR is not a "Convert to" target.
 - `.stk`/`.nodes` export a vector stick as a plain segment.
 

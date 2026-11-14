@@ -21,6 +21,7 @@
 #include <QMenu>
 #include <QAction>
 #include <QActionGroup>
+#include <QInputDialog>
 #include "stkformat.h"
 #include "uiItems.h"
 #include "updatecheck.h"
@@ -593,11 +594,30 @@ void MyMainWindow::on_actionExport_as_image_sequence_triggered()
 void MyMainWindow::DoConnections(){
         QObject::connect(view, &MyView::AutoSaveTrigger,this, &MyMainWindow::AutoSave);
         // "Selection" menu, built in code (like the vertex/IK panels) instead of in the .ui:
-        // Deselect / Select inverse, then the figure rubber band's shape as an exclusive
-        // Rectangle/Lasso pair writing MyView::stickfig_lasso.
+        // Deselect / Select inverse, their pixel twins (shown only in a freehand's draw mode),
+        // then the figure rubber band's shape as an exclusive Rectangle/Lasso pair writing
+        // MyView::stickfig_lasso.
         QMenu *selection_menu = menuBar()->addMenu(tr("Selection"));
         selection_menu->addAction(tr("Deselect"), this, [this]{ view->ApplyBandSelection({}); });
         selection_menu->addAction(tr("Select inverse"), this, [this]{ view->SelectInverse(); });
+        QAction *deselect_pixels = selection_menu->addAction(tr("Deselect pixels"), this,
+                                                             [this]{ view->DiscardPixelSelection(); });
+        QAction *invert_pixels = selection_menu->addAction(tr("Select inverse pixels"), this,
+                                                           [this]{ view->InvertPixelSelection(); });
+        // QInputDialog::getInt() is modal with OK/Cancel: nothing else can be clicked while it is open
+        QAction *smooth_pixels = selection_menu->addAction(tr("Smooth selection..."), this, [this]{
+            bool ok = false;
+            const int width = QInputDialog::getInt(this, tr("Smooth selection"),
+                                                   tr("Smoothing width (pixels):"), 2, 1, 200, 1, &ok);
+            if(ok)
+                view->SmoothPixelSelection(width);
+        });
+        QObject::connect(selection_menu, &QMenu::aboutToShow, this, [this, deselect_pixels, invert_pixels, smooth_pixels]{
+            deselect_pixels->setVisible(view->draw_mode);
+            invert_pixels->setVisible(view->draw_mode);
+            smooth_pixels->setVisible(view->draw_mode);
+            smooth_pixels->setEnabled(!view->draw_selection.isEmpty());
+        });
         selection_menu->addSeparator();
         QActionGroup *band_group = new QActionGroup(selection_menu);
         QAction *rect_action = selection_menu->addAction(tr("Rectangle selection"));

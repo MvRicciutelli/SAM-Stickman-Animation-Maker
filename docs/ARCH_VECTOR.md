@@ -14,7 +14,7 @@ visible. Everything after that is shapes, edited in a modal "vector draw mode".
 `StickData::vector_shapes` is a `QList<VectorShape>`; `VectorNode` (`pos`,
 `in_handle`, `out_handle`, `smooth`) and `VectorShape` (`name`, `visible`,
 `closed`, `nodes`, `pen`, `brush`, `brush_follows_stick`, `texture_tiled`,
-`stroke_brush`, `depth_offset`) are plain value types in `vectorshape.h`. The paint fields have
+`stroke_brush`, `depth_offset`, `mask`, `mask_inverted`) are plain value types in `vectorshape.h`. The paint fields have
 `StickData`'s names and meaning on purpose: that is what lets the whole
 fill/stroke machinery be reused per shape (see Rendering). **Handles are OFFSETS
 from `pos`**, not points, so moving an anchor needs no handle bookkeeping and a
@@ -32,20 +32,28 @@ done).
 Free functions in `vectorshape.cpp`: `VectorPath()` (a `cubicTo` where a segment
 has a handle, a `lineTo` when both inner handles are zero, plus the closing
 segment), `MapNode()`, `MapShape()`, `VectorShapesCompatible()`, `ShapeAt()` (topmost visible
-shape hit by area or by outline, the outline widened by the pick radius) and
-`StrokeBrushFor()` (shared with `StickData::StrokeBrush()`).
+shape hit by area or by outline, the outline widened by the pick radius) 
+`StrokeBrushFor()` (shared with `StickData::StrokeBrush()`), and the mask
+helpers `RemoveVectorShape()`, `ReorderVectorShape()` and `MaskChainReaches()`
+(see Masks).
 
 ### Serialization
 
 `StickData::CURRENT_VERSION` went 10 to 11. VECTOR sits in the type-gated `img_*`
 block (`PolygonTransform()` reads `img_offset`/`img_angle_offset`) and then
-`WriteVectorShapes()` follows with its OWN `qint32` `VECTOR_SHAPES_VERSION` (2;
-newer is refused through `RejectNewerVersion()`), a `qint32` count, and per shape
+`WriteVectorShapes()` follows with its OWN `qint32` `VECTOR_SHAPES_VERSION` (3, `= VECTOR_SHAPES_MASK`, from the enum
+`StickData::VectorShapesFormat`: `VECTOR_SHAPES_BASE` 1, `VECTOR_SHAPES_DEPTH` 2,
+`VECTOR_SHAPES_MASK` 3; the read gates compare against these names, never bare
+numbers; newer is refused through `RejectNewerVersion()`), a `qint32` count, and per shape
 name/visible/closed, the nodes, then pen, brush and stroke-brush tip. Format 2
 appends a `double` `depth_offset` at the END of each shape and the
 `vector_depth_enabled` bool AFTER the last shape, so the head of the block
-(version, count, first shape) is unchanged. Format 1 still loads (offsets 0,
-switch off). `WriteVectorShapes()`/`ReadVectorShapes()` take the `StickData`,
+(version, count, first shape) is unchanged. Format 3 appends a `qint32` `mask`
+and the `bool` `mask_inverted` after each shape's `depth_offset`; the trailing
+bool is unchanged. Formats 1 and 2 still load (offsets 0, switch off, no masks).
+`StickData::CURRENT_VERSION` stays 11. `ReadVectorShapes()` sanitizes after
+reading: a mask out of range, naming its own shape or closing a loop
+(`MaskChainReaches()`) becomes `NO_MASK`, so the paint recursion always ends. `WriteVectorShapes()`/`ReadVectorShapes()` take the `StickData`,
 not just the list, for that bool. Those go
 through the SAME file-static image-table helpers as the stick record
 (`WriteRecordPen`/`Brush`/`Image`), so a `.sam` v3 dedupes shape textures;
@@ -138,6 +146,63 @@ stick (raised, lowered, shared depth, switch off), one-shot scenes stacking by
 z, stream and `Clone()` round trip, `ShapeAt()` order, and on the live canvas
 the undo steps and the helper items' presence in the scene (also after an
 undo). No counterproof was done for it.
+
+### Masks
+
+`VectorShape::mask` (default `VectorShape::NO_MASK`, a `static constexpr qint32`
+of -1) is the INDEX, in the same stick's `vector_shapes`, of the shape that masks
+this one; `mask_inverted` (default false) flips the effect. Not inverted: the
+shape turns transparent where the mask is (its alpha times `1 - mask alpha`,
+pixel by pixel). Inverted: it shows only where the mask is (alpha times mask
+alpha). A HIDDEN mask still masks: visibility only decides whether the mask
+itself is painted. Masks compound: a mask that is itself masked cuts with what is
+left of it after its own mask.
+
+Invariant: a mask is never the shape itself nor part of a loop.
+`MaskChainReaches(shapes, from, target)` is the loop test (true when following
+masks from `from`, itself included, reaches `target`). Because a mask is an
+index, **every removal or reorder of `vector_shapes` must go through
+`RemoveVectorShape(shapes, index)` (clears the masks naming the removed shape,
+their inversion too, and shifts higher indices down) or
+`ReorderVectorShape(shapes, from, to)` (a `QList::move` with the masks following
+their shapes).** Current callers: `EndVectorShape()`, `DeleteSelectedVectorNodes()`,
+`DeleteVectorShapes()` (the panel Delete; a shape whose mask was deleted is left
+unmasked) and `MoveVectorShape()`.
+
+Rendering: `PaintVectorShapes()` loops by index. An unmasked shape is painted by
+`PaintShape(painter, index)` (the `paint_shape` seam plus `FillAndStroke()`). A
+masked one is composed OFFSCREEN by `MaskedShapeImage(index, to_image, size, dpr,
+hints, depth)`: the shape alone into a transparent `Format_ARGB32_Premultiplied`
+image at the target painter's device resolution (combined transform, device pixel
+ratio, render hints), then the mask's own `MaskedShapeImage()` (recursive, hence
+the compounding) drawn over it with `CompositionMode_DestinationOut` (normal) or
+`DestinationIn` (inverted). The area is `boundingRect()` mapped to the device and
+intersected with `painter->viewport()`; the result is drawn back 1:1 after
+`resetTransform()` (the clip is kept, it lives in device space). `depth`, starting
+at the shape count, bounds the recursion even over a loop. ponytail: one or more
+viewport-sized images per masked shape on every paint; cache on the view if a
+crowded frame drags.
+
+Every image/video export, icon and onion skin renders through
+`QGraphicsScene::render()` into `paint()`, so they show masks with no extra code.
+The foreign `.stk`/`.nodes` exporters still write a vector stick as a plain
+segment. `Clone()`/`CopyFrom()`, undo snapshots and the library carry masks by
+value.
+
+Interaction: `MyView::SetVectorShapeMask(index, mask, inverted)` is one undo step
+and ends with `VectorEdited()`. It returns false, with no step, for no vector
+stick, an index out of range, unchanged settings, or a mask that would close a
+loop; no mask forces `inverted` to false.
+
+v1 limits: the layer thumbnails (`VectorShapeIcon`) ignore masks, and `ShapeAt()`
+hit-tests geometry, so a fully masked-away area is still clickable by the buckets
+and the Transform tool. `VectorShapeMasksCutCompoundAndFollowEdits` pins the
+normal/inverted cut with a hidden mask, a half-opaque mask giving half alpha,
+compounding, `MaskChainReaches()`, `ReorderVectorShape()` bookkeeping, the stream
+and `Clone()` round trip, a loop broken on load (and rendering a loop still
+ending), and on the live canvas `SetVectorShapeMask()` (undo steps; loop, self and
+unchanged refused), `MoveVectorShape()`, copy/paste remapping, delete clearing the
+mask and the undo of that delete. No counterproof was done for it.
 
 ### Interaction (`myview.cpp`, end of file)
 
@@ -251,10 +316,22 @@ with a check box for visibility, an editable name, a 32px thumbnail
 `VectorShapesChanged` and on `undo_stack` `indexChanged`. **Both connections are
 QUEUED**: a rename or visibility edit fires from inside the list's own
 `itemChanged`, and rebuilding there deletes the item being reported.
-`PixelIcon`/`DashedIcon`/`ToolButtonStyle` were lifted out of the draw panel to
-file-level statics and are shared.
+Both tool rows (vector and freehand draw panel) use 36x36 `:/resources/36_*.png`
+icons shown 1:1 in 42x42 buttons; `ToolButtonStyle` (a shared file-level static)
+draws the hover/pressed/checked look, so each tool needs one image only.
 
-Below the layer buttons are the depth controls: the check box "Own depth per
+Below the layer buttons, before the depth controls, is the mask row: a "Mask" label,
+a `QComboBox` and an "Invert" check box. The combo lists "None" then the stick's
+other shapes, front first like the rows; shapes the current one already masks
+(directly or through a chain) are listed but disabled, since picking them would
+close a loop. It echoes the CURRENT shape (`Animation::CurrentVectorShape()`),
+refilled by `refresh_vector_panel` and on every `currentRowChanged` of the layer
+list. Invert is enabled only when a mask is set. Both controls call
+`SetVectorShapeMask()` with the pair, so each edit is one undo step. A masked
+row's tooltip says "Masked by <name>" or "Shown only inside <name>" (joined with
+the "Depth N" line when per-shape depth is on).
+
+Below that are the depth controls: the check box "Own depth per
 shape" (off by default; it enables the rest), a slider and spin box with the
 range and resolution of the stick Depth tab's `depthSlider`/`depthSpinbox`
 (0..99.99, two decimals, slider x100) that only hold a value, "Set depth"
@@ -267,13 +344,18 @@ each row's tooltip.
 through the source stick's `PolygonTransform()`). Paste maps through the target's
 inverse, appends on top, leaves the buffer (repeatable, survives frame changes)
 and keeps widths absolute. `depth_offset` is copied with the shape (value copy);
-a shape drawn with the pen starts at offset 0. There are no Ctrl+C/V shortcuts,
+a shape drawn with the pen starts at offset 0. A mask is kept by `CopyVectorShapes()`
+only when the mask shape is copied too, re-expressed as that shape's place in the
+buffer (otherwise `NO_MASK`, not inverted); `PasteVectorShapes()` offsets buffer
+masks by the index of the first pasted shape, so a pasted block keeps its internal
+masks. There are no Ctrl+C/V shortcuts,
 the app has none.
 
 `GenerateInbetweens()` refuses (no change, no undo step, an explanatory message)
 unless `VectorShapesCompatible()`: same shape count, and per shape the same anchor
 count and open/closed. `InterpolateStickData` blends anchors, both handles, pen
-width, `depth_offset` and solid colours only, and guards on compatibility too. Disabling the check
+width, `depth_offset` and solid colours only (masks are left alone: the generated
+frames take the base frame's), and guards on compatibility too. Disabling the check
 fails `VectorBucketCopyPasteAndInbetween` (counterproof done).
 
 `ConvertStick()` clears `vector_shapes` and the anchor selection; VECTOR is not a
