@@ -45,6 +45,21 @@ ImageExport::ImageExport(QObject *parent, QString path, int option,
         // con il genitore ricollegato: è da lì che la trasformazione globale di un antenato arriva
         frames.append(CloneForRender(f->total_sticks));
         frame_numbers.append(f->frame_number);
+        // the clones keep total_sticks' order (it breaks z ties), so a layer is a set of indices
+        QList<RenderLayer> layers;
+        for(StickFigure *S : f->stick_figures){
+            if(!S->layer_options.IsActive())
+                continue;
+            RenderLayer layer;
+            layer.options = S->layer_options;
+            for(StickData *s : S->stick_list){
+                const int index = f->total_sticks.indexOf(s);
+                if(index >= 0)
+                    layer.sticks.append(index);
+            }
+            layers.append(layer);
+        }
+        frame_layers.append(layers);
     }
 }
 
@@ -60,12 +75,28 @@ ImageExport::~ImageExport()
  * data (~StickGraphicsItem reads data->view). The scene rect maps onto the whole image, so
  * a smaller image_size (the PREVIEW scale) renders the same canvas at a lower resolution.
  */
-QImage ImageExport::RenderFrame(const QList<StickData*> &sticks) const
+QImage ImageExport::RenderFrame(const QList<StickData*> &sticks, const QList<RenderLayer> &layers) const
 {
     QGraphicsScene render_scene; //scena fittizia
     render_scene.setSceneRect(canvas_rect);
-    for(StickData* s : sticks)
-        render_scene.addItem(new StickGraphicsItem(s));
+    QList<StickGraphicsItem*> views;
+    for(StickData* s : sticks){
+        views.append(new StickGraphicsItem(s));
+        render_scene.addItem(views.last());
+    }
+    // same composition as the canvas (StickFigure::SyncLayerGroup()); the scene owns the groups
+    // and deletes the views with them.
+    // ponytail: QGraphicsEffect hands LayerEffect::draw() a QPixmap on this worker thread, safe
+    // where the platform reports ThreadedPixmaps (Windows, offscreen). If that ever fails,
+    // render each layer to a QImage and draw it through ApplyLayerEffects() directly.
+    for(const RenderLayer &layer : layers){
+        LayerGroupItem *group = new LayerGroupItem();
+        group->effect->SetOptions(layer.options);
+        render_scene.addItem(group);
+        for(int index : layer.sticks)
+            views[index]->setParentItem(group);
+        group->UpdateZ(); // before render(): a paint-time z is too late for a one-pass render
+    }
     // premoltiplicato: è il formato in cui il raster engine dipinge (su ARGB32 semplice ogni
     // span passava da una conversione). Il PNG salvato resta identico: è tutto opaco
     QImage render_img(image_size, QImage::Format_ARGB32_Premultiplied);
@@ -89,7 +120,7 @@ QImage ImageExport::RenderFrame(const QList<StickData*> &sticks) const
 void ImageExport::run()
 {
     for(int i = 0; i < frames.count(); i++){
-        QImage frame = RenderFrame(frames[i]);
+        QImage frame = RenderFrame(frames[i], frame_layers[i]);
         if(render_option == PREVIEW){
             preview_frames.append(frame);
             continue;

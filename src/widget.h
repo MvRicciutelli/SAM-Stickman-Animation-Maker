@@ -442,6 +442,13 @@ private:
     void BuildResizableSidebars();
 
     /**
+     * @brief Opens the Layer options dialog on @p figure (layer list context menu), previewing
+     *        every change live; OK stores it as one undo step, Cancel restores the old options.
+     * @param figure a figure of the current frame (the right-clicked layer row).
+     */
+    void ShowLayerOptions(StickFigure *figure);
+
+    /**
      * @brief Opens the chooser for one StyleKind and makes the result the current fill or
      *        stroke.
      * @param for_fill true → the fill (view->my_brush), false → the stroke (the brush

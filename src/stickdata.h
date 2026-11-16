@@ -708,6 +708,27 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data);
 void InterpolateStickData(StickData &target, const StickData &start, const StickData &end, float t);
 
 /**
+ * @brief Linear blend of two scalars.
+ * @param from value at t = 0. @param to value at t = 1. @param t blend factor.
+ * @return the blended value.
+ */
+inline qreal Mix(qreal from, qreal to, float t) { return from + (to - from) * t; }
+
+/**
+ * @brief Linear blend of two colours, RGBA channel by channel (alpha included, so a fade in/out
+ *        between two keyframes interpolates as well).
+ * @param from colour at t = 0. @param to colour at t = 1. @param t blend factor.
+ * @return the blended colour.
+ */
+inline QColor MixColor(const QColor &from, const QColor &to, float t)
+{
+    return QColor(qRound(Mix(from.red(), to.red(), t)),
+                  qRound(Mix(from.green(), to.green(), t)),
+                  qRound(Mix(from.blue(), to.blue(), t)),
+                  qRound(Mix(from.alpha(), to.alpha(), t)));
+}
+
+/**
  * @brief Clones @p sticks for a throwaway render (icons, onion skins, export) with each clone's
  *        parent re-linked to the clone of its parent, which is what lets an ancestor's global
  *        Stick Transform reach a descendant there. A parent outside the list stays null, and

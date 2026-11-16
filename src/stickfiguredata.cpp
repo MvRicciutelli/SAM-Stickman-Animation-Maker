@@ -29,6 +29,7 @@ StickFigureData *StickFigureData::Clone() const
     StickFigureData *copy = new StickFigureData();
     copy->version = version;
     copy->name = name;
+    copy->layer_options = layer_options;
     for (StickData *source_stick : stick_list)
         copy->stick_list.append(source_stick->Clone());
     for (int i = 0; i < stick_list.count(); i++) {
@@ -68,8 +69,8 @@ StickFigureData *StickFigureData::Clone() const
  * @details version, stick count, name, current_stick's index (-1 if none — added when
  * this was found to be silently dropped by every load/populate path; no longer
  * byte-compatible with the pre-refactor format, which never carried this field at all),
- * then each stick (parent_idx travels inside the stick record; -1 marks the master).
- * No flag guards — this operator writes data and nothing else.
+ * then each stick (parent_idx travels inside the stick record; -1 marks the master), then,
+ * from format v2, the LayerOptions trailer. No flag guards — this operator writes data and nothing else.
  */
 QDataStream &operator<<(QDataStream &stream, const StickFigureData &figure_data)
 {
@@ -90,6 +91,8 @@ QDataStream &operator<<(QDataStream &stream, const StickFigureData &figure_data)
                 ? (qint32)figure_data.stick_list.indexOf(stick_data->ik_start) : -1;
         stream << *stick_data;
     }
+    if (figure_data.version >= 2)
+        stream << figure_data.layer_options; // trailer: older records end with the sticks
     return stream;
 }
 
@@ -155,5 +158,10 @@ QDataStream &operator>>(QDataStream &stream, StickFigureData &figure_data)
         if (stick_data->ik_start_idx >= 0 && stick_data->ik_start_idx < figure_data.stick_list.count())
             stick_data->ik_start = figure_data.stick_list[stick_data->ik_start_idx];
     }
+    if (figure_data.version >= 2)
+        stream >> figure_data.layer_options;
+    else
+        figure_data.layer_options = LayerOptions(); // v1: no options, all off
+    figure_data.version = StickFigureData::CURRENT_VERSION; // raised: the next save writes the trailer
     return stream;
 }

@@ -24,6 +24,7 @@
 #include <QScrollBar>
 #include "uiItems.h"
 #include "framepresenter.h"
+#include "layeroptions.h" // BoxBlur(), InterpolateLayerOptions()
 
 
 bool    is_right_pressed = false;
@@ -2151,38 +2152,6 @@ void MyView::InvertPixelSelection()
     if(draw_target && draw_target->view)
         draw_target->view->update();
     viewport()->update();
-}
-
-/// @details One box-blur pass along x then y over a padded 0/255 coverage grid, with running sums so
-/// a pass costs the same at any radius. Pixels outside the grid count as unselected.
-static void BoxBlur(QVector<int> &grid, int w, int h, int r)
-{
-    QVector<int> line(qMax(w, h));
-    const int window = 2*r + 1;
-    for(int y = 0; y < h; y++){                     // rows
-        int sum = 0;
-        for(int x = -r; x <= r; x++)
-            sum += (x >= 0 && x < w) ? grid[y*w + x] : 0;
-        for(int x = 0; x < w; x++){
-            line[x] = sum / window;
-            const int in = x + r + 1, out = x - r;
-            sum += (in < w ? grid[y*w + in] : 0) - (out >= 0 ? grid[y*w + out] : 0);
-        }
-        for(int x = 0; x < w; x++)
-            grid[y*w + x] = line[x];
-    }
-    for(int x = 0; x < w; x++){                     // columns
-        int sum = 0;
-        for(int y = -r; y <= r; y++)
-            sum += (y >= 0 && y < h) ? grid[y*w + x] : 0;
-        for(int y = 0; y < h; y++){
-            line[y] = sum / window;
-            const int in = y + r + 1, out = y - r;
-            sum += (in < h ? grid[in*w + x] : 0) - (out >= 0 ? grid[out*w + x] : 0);
-        }
-        for(int y = 0; y < h; y++)
-            grid[y*w + x] = line[y];
-    }
 }
 
 /// @details Photoshop's "Smooth": the selection's coverage is blurred and cut back at 50%, which
@@ -4419,6 +4388,7 @@ void MyView::wheelEvent(QWheelEvent *event)
  */
 void MyView::mouseReleaseEvent(QMouseEvent *event)
 {
+    ResumeLayerEffects();
     // draw mode: ends the current stroke, none of the selection/tool logic below
     if(draw_mode){
         if(event->button()==Qt::LeftButton && (draw_tool==DT_SEL_RECT || draw_tool==DT_SEL_LASSO || draw_tool==DT_SEL_POLY || draw_tool==DT_TRANSFORM)){
@@ -4532,6 +4502,8 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
 {
     static QPointF prev_coord(0,0);
     MapMyCoords(coord, event->pos());
+    if(fast_move_effects && event->buttons() != Qt::NoButton)
+        layer_effects_paused = true; // "Fast move": layers paint plain until the release
     // draw mode: a drag with the left button held = a continuous (interpolated) stroke
     if(draw_mode){
         if(draw_tool == DT_SEL_RECT || draw_tool == DT_SEL_LASSO || draw_tool == DT_SEL_POLY || draw_tool == DT_TRANSFORM){
@@ -5134,6 +5106,9 @@ void MyView::MoveToFrame(Frame* frame){
     if(my_animation->frame_list.count()>=1){
         for(StickFigure *S:my_animation->current_frame->stick_figures){
             RemoveHandles(S);
+            // the layer group leaves with its frame (Frame::Refresh() below re-syncs the new one's)
+            if(S->layer_group != nullptr && S->layer_group->scene() == current_scene)
+                current_scene->removeItem(S->layer_group);
             for(StickData * s: S->stick_list){
                if(s->view && scene()->items().contains(s->view)){
                     current_scene->removeItem(s->view);
@@ -5223,6 +5198,39 @@ void MyView::MoveToFrame(Frame* frame){
     }
     my_animation->CurrentFrame()->Refresh(0);
     UpdateIkOverlay(); // the new frame may have its own IK chains to mark
+}
+/// @details Queued, so the views added by one gesture or refresh are grouped together, once.
+void MyView::QueueLayerSync()
+{
+    if(layer_sync_queued)
+        return;
+    layer_sync_queued = true;
+    QMetaObject::invokeMethod(this, [this](){
+        layer_sync_queued = false;
+        if(my_animation->current_frame != nullptr && !my_animation->frame_list.isEmpty())
+            my_animation->current_frame->SyncLayerEffects();
+    }, Qt::QueuedConnection);
+}
+/// @details The layers were painted plain during the drag (LayerEffect::draw()); updating each
+/// group makes the next repaint compose them again, once, with the drag's final state.
+void MyView::ResumeLayerEffects()
+{
+    if(!layer_effects_paused)
+        return;
+    layer_effects_paused = false;
+    if(my_animation->current_frame == nullptr || my_animation->frame_list.isEmpty())
+        return;
+    for(StickFigure *S : my_animation->current_frame->stick_figures)
+        if(S->layer_group != nullptr)
+            S->layer_group->update();
+}
+
+/// @details Records what this repaint exposes before the scene is painted: Qt skips the items
+/// outside it, which LayerEffect::draw() must know to tell a complete layer from a partial one.
+void MyView::paintEvent(QPaintEvent *event)
+{
+    exposed_region = event->region();
+    QGraphicsView::paintEvent(event);
 }
 // routine to compute the onion skins: first delete them, redraw them on an image, and add the image to the scene
 /**
@@ -5560,7 +5568,8 @@ void MyView::StoreUndo(int command){
  * what actually inserts the frames. Each snapshot starts as a Clone() of the base frame, so
  * everything that cannot be interpolated (stick types, images, IK roles, layer names,
  * z-order) comes from a real frame, and only the pose of each stick is rewritten by
- * InterpolateStickData() at t = i/(N+1) — t never reaches 0 or 1, so no generated frame
+ * InterpolateStickData() at t = i/(N+1), plus each layer's option values by
+ * InterpolateLayerOptions() (its on/off switches stay the base's) — t never reaches 0 or 1, so no generated frame
  * duplicates a keyframe.
  */
 QString MyView::GenerateInbetweens(int start_index, int count)
@@ -5622,6 +5631,10 @@ QString MyView::GenerateInbetweens(int start_index, int count)
                                      *start_frame->stick_figures[f]->stick_list[s],
                                      *end_frame->stick_figures[f]->stick_list[s], t);
             }
+            // numbers and colours only: the switches stay the base frame's (user spec)
+            InterpolateLayerOptions(inbetween->stick_figures[f]->layer_options,
+                                    start_frame->stick_figures[f]->layer_options,
+                                    end_frame->stick_figures[f]->layer_options, t);
         }
         snapshots.append(inbetween);
     }
@@ -6375,7 +6388,9 @@ bool MyView::VectorMousePress(QMouseEvent *event)
         VectorPenPress(s);
         break;
     case VT_LASSO:
+    case VT_RECT_SELECT: // the same gesture; the move turns the trace into the box
         vec_gesture = VG_LASSO;
+        vec_press_scene = coord;
         vec_lasso.clear();
         vec_lasso << coord;
         break;
@@ -6893,7 +6908,10 @@ bool MyView::VectorMouseMove(QMouseEvent *event)
             return true;
         }
         if(vec_gesture == VG_LASSO){
-            vec_lasso << coord;
+            if(vector_tool == VT_RECT_SELECT) // a closed 5-point polygon: the release and the trace need nothing else
+                vec_lasso = QPolygonF(QRectF(vec_press_scene, coord).normalized());
+            else
+                vec_lasso << coord;
             if(viewport())
                 viewport()->update();
             return true;
@@ -7231,6 +7249,39 @@ bool MyView::DeleteVectorShapes(QList<int> indices)
         DropShapeFromSelection(s->view->selected_vector_nodes, idx);
     }
     my_animation->vector_shape_row = qMin(my_animation->vector_shape_row, int(s->vector_shapes.size()) - 1);
+    VectorEdited(s);
+    return true;
+}
+
+/**
+ * @details The mirror is built in the scene, so "horizontal" is the screen's whatever the stick's
+ * angle, and conjugated through PolygonTransform() into the stick's frame (ApplyVectorTransform()'s
+ * rule). MapNode() mirrors the handles with their anchors. Backs the vector panel's flip buttons.
+ */
+bool MyView::FlipVectorShapes(const QList<int> &indices, bool horizontal)
+{
+    StickData *s = VectorStick();
+    if(s == nullptr)
+        return false;
+    EndVectorShape();
+    const QTransform to_scene = s->PolygonTransform();
+    QRectF box;
+    QList<int> valid;
+    for(int idx : indices)
+        if(idx >= 0 && idx < s->vector_shapes.size() && !valid.contains(idx)){
+            valid << idx;
+            box |= VectorPath(s->vector_shapes[idx], to_scene).boundingRect();
+        }
+    if(valid.isEmpty())
+        return false;
+    StoreUndo();
+    const QPointF c = box.center();
+    const QTransform mirror = QTransform::fromTranslate(-c.x(), -c.y())
+            * QTransform::fromScale(horizontal ? -1 : 1, horizontal ? 1 : -1)
+            * QTransform::fromTranslate(c.x(), c.y());
+    const QTransform local = to_scene * mirror * to_scene.inverted();
+    for(int idx : valid)
+        s->vector_shapes[idx] = MapShape(s->vector_shapes[idx], local);
     VectorEdited(s);
     return true;
 }

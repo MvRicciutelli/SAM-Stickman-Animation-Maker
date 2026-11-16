@@ -88,7 +88,7 @@ void Widget::on_someBtn_clicked(){
   `operator<<`/`>>` and `Clone()`. Live `StickFigure`/`Frame` delegate through bridge functions
   `Extract*Data()`/`PopulateLive*()`.
 - New serialized fields: use `qint32` and explicit `double`, never `int`/`qreal`.
-- Raising a format means raising its `CURRENT_VERSION` (`Animation` 3, `StickFigureData` 1,
+- Raising a format means raising its `CURRENT_VERSION` (`Animation` 3, `StickFigureData` 2,
   `StickData` 11). `operator<<` gates newer fields on the record's version; `operator>>` raises an
   older record to current at its end.
 - Newer-than-supported files are refused (`RejectNewerVersion()` + `file_load_error`, shown through
@@ -156,6 +156,16 @@ void Widget::on_someBtn_clicked(){
   `StrokeWithBrush()`; the onion render goes through it too. Colour, size and opacity come from the pen.
 - Icon buttons paint through the stylesheet `image:` property, never `background-image:`. Sidebar and
   shrink behaviour is set in `widget.ui` plus `BottomRowSplitter`; read the doc before changing sizes.
+
+**Layer options (opacity, shadows, glow, outline, colorize, blur, pixelate)** (`docs/ARCH_LAYER_OPTIONS.md`)
+- Options live per figure per frame in the `StickFigureData` v2 trailer; `StickFigure::version` must default to `CURRENT_VERSION` or a save drops them.
+- A figure with active options renders as ONE block at its top stick's z (`LayerGroupItem` + `LayerEffect`).
+- Only `StickFigure::SyncLayerGroup()` manages the live group (sync via `Frame::Refresh`/`MoveToFrame`/`MyView::QueueLayerSync`). Never connect `QGraphicsScene::changed`. `~StickFigure` deletes the group after the views.
+- `ImageExport` rebuilds the groups in its render scene; thumbnails and onion skins ignore options.
+- `LayerEffect::draw()` renders the source itself with `drawSource()` into a `QImage` covering only the part on the paint device plus `(Reach()+2) * zoom` px; never use `sourcePixmap()` (renders the whole layer at view zoom, even off-screen, and pads in device px, which cuts effects off when zoomed in). It reuses its result while the source pixels (`QImage::operator==`), transform (`SameTransform`), options and image size are unchanged; only a real difference recomposes.
+- A live effect (`LayerEffect::live`, set only by `SyncLayerGroup()`) only partly exposed (`MyView::paintEvent()` records `exposed_region`; Qt culls children outside it) reuses its cached image, or with none draws the layer plain once and requests a full repaint (`retried` stops a loop).
+- "Fast move" (`fastMoveCheckBox`, `MyView::fast_move_effects`, off, not persisted): while a button is down and the mouse moves, `layer_effects_paused` makes live effects paint plain; `MyView::ResumeLayerEffects()` at every mouse release composes once. Slider gestures are not covered.
+- Soft parts (shadow, glow, Blur) run at 1/2..1/4 size from 4 px of blur (`SoftFactor()`); outline and blurs under 4 px stay full resolution. Each effect part is built on its own thread (`std::async`, `BuildPart`), then drawn in order (`PaintPart`).
 
 **Release** (`docs/ARCH_RELEASE.md`): `VERSION` in `SAM.pro` is the single source; it reaches the code
 only through the generated `version.h` (`APP_VERSION`), never a `-D` define or a literal in a `.ui`.
@@ -249,6 +259,7 @@ release/tst_characterization.exe
 - `ShapeAt()` ignores masks (a masked-away area is still clickable).
 - VECTOR is not a "Convert to" target.
 - `.stk`/`.nodes` export a vector stick as a plain segment.
+- Layer/frame thumbnails and onion skins ignore layer options; a drag inside a layer with effects, and zoom, recompose the layer per change (idle repaints and scroll are cached), bounded by the viewport size; "Fast move" avoids it during drags. Zoomed in, a stick wholly outside the viewport is culled, so its shadow/glow does not reach into the viewport edge; scrolling over a layer larger than the viewport shows the new strip without effects for one repaint.
 
 ## Tooling
 

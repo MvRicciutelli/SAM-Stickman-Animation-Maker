@@ -74,6 +74,12 @@ public:
     void ClearFrame();
     void NormalizeDepth();
     void Refresh(int mode = 0);
+    /**
+     * @brief Runs StickFigure::SyncLayerGroup() on every figure, so the views of each figure
+     *        with active LayerOptions sit in its LayerGroupItem. Called at the end of Refresh()
+     *        and by MyView::QueueLayerSync().
+     */
+    void SyncLayerEffects();
     void StickfigureToBottom(StickFigure *S);
     void StickfigureToTop(StickFigure *S);
     float MinMaxZ(int option);

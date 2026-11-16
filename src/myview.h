@@ -425,7 +425,8 @@ public:
                       ///< selected anchors and a transformation box scales and turns them
         VT_FILL_STROKE, ///< VT_FILL and VT_STROKE in one click
         VT_RECT,      ///< drag a box: a new closed rectangle shape with the current fill and border
-        VT_ELLIPSE    ///< drag a box: a new closed ellipse shape (four smooth anchors) inside it
+        VT_ELLIPSE,   ///< drag a box: a new closed ellipse shape (four smooth anchors) inside it
+        VT_RECT_SELECT ///< drag a box to select anchors (Shift adds): VG_LASSO with a rectangular trace
     };
     int vector_tool = VT_NONE;          ///< active VectorTool
     QList<VectorShape> vector_clipboard; ///< copied shapes, in SCENE space; a value list, replaced whole by every copy
@@ -468,6 +469,13 @@ public:
     bool MoveVectorShape(int index, int delta);
     /// @brief Deletes the shapes at @p indices, as one undo step.
     bool DeleteVectorShapes(QList<int> indices);
+    /**
+     * @brief Mirrors the shapes at @p indices on screen, together about the centre of their joint
+     *        bounding box, as one undo step.
+     * @param horizontal true = left/right, false = top/bottom.
+     * @return false when there is no vector stick or no valid index.
+     */
+    bool FlipVectorShapes(const QList<int> &indices, bool horizontal);
     /// @brief Shows or hides one shape, as one undo step.
     void SetVectorShapeVisible(int index, bool visible);
     /// @brief Renames one shape, as one undo step.
@@ -537,6 +545,28 @@ public:
      * (a freshly loaded frame), via FramePresenter::AttachView().
      */
     void MoveToFrame(Frame *frame);
+
+    /**
+     * @brief Schedules one Frame::SyncLayerEffects() on the current frame for the next
+     *        event-loop pass; further calls before it runs are absorbed.
+     *
+     * Called by StickGraphicsItem::itemChange() when a view lands top-level in this view's scene,
+     * which is how a stick added by any path (draw, merge, split, paste) joins its figure's
+     * LayerGroupItem.
+     */
+    void QueueLayerSync();
+    bool layer_sync_queued = false; ///< a QueueLayerSync() pass is pending
+
+    /**
+     * @brief Ends the "Fast move" pause: layer effects are composed again on the next repaint.
+     *        Does nothing when they were not paused. Called at every mouse release.
+     */
+    void ResumeLayerEffects();
+    bool fast_move_effects = false;    ///< the Style panel's "Fast move" checkbox: hide layer effects while dragging
+    bool layer_effects_paused = false; ///< a drag is on with fast_move_effects set; LayerEffect::draw() paints plain
+    QRegion exposed_region;            ///< viewport region of the repaint in progress (paintEvent()), read by LayerEffect::draw()
+    /// @brief Records the exposed region, then paints as QGraphicsView does.
+    void paintEvent(QPaintEvent *event) override;
 
     /**
      * @brief Rebuilds the semi-transparent "ghosts" of the previous frames.

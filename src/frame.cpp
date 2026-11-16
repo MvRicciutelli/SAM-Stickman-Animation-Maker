@@ -129,6 +129,13 @@ void Frame::Refresh(int mode){
     for(StickFigure*S:stick_figures){
         S->Refresh(mode);
     }
+    SyncLayerEffects(); // the remove/re-add above took every view out of its layer group
+}
+
+void Frame::SyncLayerEffects()
+{
+    for(StickFigure *S : stick_figures)
+        S->SyncLayerGroup();
 }
 // Frame::SelectStick(QPointF) è stato eliminato nel safety sweep: nessun chiamante
 // (la selezione per punto passa da Animation::UpdateSelection(QPointF)) e conteneva

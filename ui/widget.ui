@@ -2111,7 +2111,7 @@ QPushButton:pressed{
                 <item>
                  <widget class="QTabWidget" name="toolsTabWidget">
                   <property name="currentIndex">
-                   <number>0</number>
+                   <number>1</number>
                   </property>
                   <widget class="QWidget" name="drawingTab">
                    <property name="toolTip">
@@ -6031,9 +6031,19 @@ QPushButton:pressed{
               </spacer>
              </item>
              <item>
-              <widget class="QLabel" name="label_2">
+              <widget class="QCheckBox" name="fastMoveCheckBox">
+               <property name="toolTip">
+                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Fast move&lt;/span&gt;&lt;/p&gt;&lt;p&gt;Hides the layer effects (shadows, glow, outline, blur...) while you drag on the canvas and shows them again when you release the mouse.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+               </property>
                <property name="text">
-                <string>SAM © 2021 M.V.R.</string>
+                <string>Fast move</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="copyright_label">
+               <property name="text">
+                <string>S.A.M. ©2021  M.V.R.</string>
                </property>
               </widget>
              </item>

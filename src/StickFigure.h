@@ -23,7 +23,7 @@ public:
     void SaveStickFigure(QString name);
     int draw_count = 0;
     int stick_num = 0;
-    int version = 1;
+    int version = StickFigureData::CURRENT_VERSION; ///< record format; Extract*Data() copies it, so new figures must start current
 
     /**
      * @brief Raised by MyView::mousePressEvent() at the start of a rotate gesture;
@@ -64,6 +64,18 @@ public:
      */
     QPointF pivot_offset = QPointF(0, 0);
     QString name;
+    LayerOptions layer_options;            ///< layer effects (opacity, shadows, glow, outline, colorize); per frame like everything else
+    LayerGroupItem *layer_group = nullptr; ///< scene container while layer_options.IsActive(); owned here, managed only by SyncLayerGroup()
+
+    /**
+     * @brief Brings layer_group in line with layer_options: while they are active, every stick
+     *        view of this figure that is on screen sits inside one LayerGroupItem carrying the
+     *        effect; otherwise the views are top-level and the group is gone.
+     *
+     * Only compares pointers when nothing changed, so it is cheap to call often
+     * (Frame::SyncLayerEffects()). A figure with no view on screen is left alone.
+     */
+    void SyncLayerGroup();
 
     void UpdateIcon();
     bool selecting_origin = false;

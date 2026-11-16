@@ -253,7 +253,10 @@ drag threshold, so a click leaves no empty step. A consumed press clears
 `is_pressed` so no tool drag starts, and a double click outside pen mode is
 treated as the press it replaces (re-grabbing an anchor quickly is a double
 click to Qt). The lasso (`VT_LASSO`, drawn in `drawForeground()`) ends in
-`LassoSelectVectorNodes()`. Delete runs `DeleteSelectedVectorNodes()` first (one
+`LassoSelectVectorNodes()`. Rectangle select (`VT_RECT_SELECT`, the freehand panel's
+`36_rectangle_selection` icon) is the same `VG_LASSO` gesture: each move replaces `vec_lasso`
+with the closed box from `vec_press_scene` to the cursor, so the trace, release and selection
+code are shared. `VectorRectSelectPicksAnchorsInTheBox` pins it. Delete runs `DeleteSelectedVectorNodes()` first (one
 undo step, shapes left with < 2 anchors go), then the old vertex/stick deletion.
 
 The panel's "Sharp / Curved" button runs `ToggleVectorNodeCurves()` on the selected
@@ -313,7 +316,11 @@ Shapes", inserted by `Animation::UpdateTab`): tool buttons in a NON-exclusive
 `QButtonGroup` (so "no tool" is possible, synced by `VectorToolChanged`), and a
 layer `QListWidget` listing the TOP shape first (row `r` = shape `count-1-r`)
 with a check box for visibility, an editable name, a 32px thumbnail
-(`VectorShapeIcon`, plain `QPainter`) and Up/Down/Delete/Copy/Paste.
+(`VectorShapeIcon`, plain `QPainter`) and Up/Down/Delete/Copy/Paste/Flip H/Flip V.
+The flips run `MyView::FlipVectorShapes(indices, horizontal)`: one undo step that mirrors the
+selected rows together on SCREEN (about their joint scene bounding-box centre, conjugated
+through `PolygonTransform()` like `ApplyVectorTransform()`), handles via `MapNode()`. Textures
+and masks are not mirrored. `FlipVectorShapesMirrorsOnScreen` pins it.
 `refresh_vector_panel` (`uiItems.h`, null in tests) is rebuilt on
 `VectorShapesChanged` and on `undo_stack` `indexChanged`. **Both connections are
 QUEUED**: a rename or visibility edit fires from inside the list's own

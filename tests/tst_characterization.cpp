@@ -31,6 +31,7 @@ extern QGraphicsScene *scene;
 extern QGraphicsRectItem *my_rect;
 extern QGraphicsRectItem *limit_rect;
 extern MyView *V;
+extern bool is_pressed; // myview.cpp: a left/press gesture in progress
 extern qint32 W;
 extern qint32 H;
 extern FrameData *stick_library_buffer;
@@ -7519,6 +7520,92 @@ private slots:
         QCOMPARE(v->vector_shapes.count(), 1);
     }
 
+    // The panel's Flip H / Flip V mirror the shapes on screen about their box centre, handles
+    // included, as one undo step each; flipping twice is the identity.
+    void FlipVectorShapesMirrorsOnScreen()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        auto click = [this](QPointF p, Qt::MouseButton button = Qt::LeftButton) {
+            QTest::mouseClick(view->viewport(), button, Qt::NoModifier, view->mapFromScene(p));
+        };
+        view->SetTool(DRAWVECTOR);
+        click(QPointF(100, 100));
+        click(QPointF(130, 260)); // a slanted stick: the flip is the screen's, not the stick's
+        StickData *v = CurrentStickFigure()->stick_list.last();
+        click(QPointF(200, 100));
+        click(QPointF(300, 100));
+        click(QPointF(300, 200));
+        click(QPointF(350, 250), Qt::RightButton);
+        QTest::keyClick(view, Qt::Key_Escape);
+        QCOMPARE(v->vector_shapes.count(), 1);
+        v->vector_shapes[0].nodes[1].out_handle = QPointF(0.1, 0.05); // a handle must mirror too
+        const QTransform to_scene = v->PolygonTransform();
+        const VectorShape before = v->vector_shapes[0];
+        const QRectF box = VectorPath(before, to_scene).boundingRect();
+
+        const int steps = view->undo_stack.count();
+        QVERIFY(view->FlipVectorShapes({0}, true));
+        QCOMPARE(view->undo_stack.count(), steps + 1);
+        for(int j = 0; j < before.nodes.count(); j++){
+            const VectorNode &a = before.nodes[j], &b = v->vector_shapes[0].nodes[j];
+            const QPointF pa = to_scene.map(a.pos), pb = to_scene.map(b.pos);
+            QVERIFY(qAbs(pb.x() - (2 * box.center().x() - pa.x())) < 1e-6);
+            QVERIFY(qAbs(pb.y() - pa.y()) < 1e-6);
+            const QPointF ha = to_scene.map(a.pos + a.out_handle) - pa, hb = to_scene.map(b.pos + b.out_handle) - pb;
+            QVERIFY(QLineF(hb, QPointF(-ha.x(), ha.y())).length() < 1e-6);
+        }
+        QVERIFY(view->FlipVectorShapes({0}, false));
+        QVERIFY(view->FlipVectorShapes({0}, false));
+        QVERIFY(view->FlipVectorShapes({0}, true));
+        for(int j = 0; j < before.nodes.count(); j++)
+            QVERIFY(QLineF(to_scene.map(v->vector_shapes[0].nodes[j].pos), to_scene.map(before.nodes[j].pos)).length() < 1e-6);
+        QVERIFY(!view->FlipVectorShapes({}, true));
+        QVERIFY(!view->FlipVectorShapes({5}, true));
+    }
+
+    // Rectangle select is the lasso with a box trace: a drag selects the anchors inside the box,
+    // Shift adds to the selection, and a plain click empties it.
+    void VectorRectSelectPicksAnchorsInTheBox()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        auto at = [this](QPointF p) { return view->mapFromScene(p); };
+        auto click = [this, at](QPointF p, Qt::MouseButton button = Qt::LeftButton) {
+            QTest::mouseClick(view->viewport(), button, Qt::NoModifier, at(p));
+        };
+        auto drag = [this, at](QPointF from, QPointF to, Qt::KeyboardModifiers mods = Qt::NoModifier) {
+            QTest::mousePress(view->viewport(), Qt::LeftButton, mods, at(from));
+            QMouseEvent move(QEvent::MouseMove, at(to), view->viewport()->mapToGlobal(at(to)),
+                             Qt::NoButton, Qt::LeftButton, mods);
+            QApplication::sendEvent(view->viewport(), &move);
+            QTest::mouseRelease(view->viewport(), Qt::LeftButton, mods, at(to));
+        };
+        view->SetTool(DRAWVECTOR);
+        click(QPointF(100, 100));
+        click(QPointF(100, 300));
+        StickData *v = CurrentStickFigure()->stick_list.last();
+        click(QPointF(200, 100));
+        click(QPointF(300, 100));
+        click(QPointF(300, 200));
+        click(QPointF(350, 250), Qt::RightButton);
+        QTest::keyClick(view, Qt::Key_Escape);
+        QCOMPARE(v->vector_shapes[0].nodes.count(), 3);
+
+        view->SetVectorTool(MyView::VT_RECT_SELECT);
+        QCOMPARE(view->vector_tool, (int)MyView::VT_RECT_SELECT);
+        QSet<QPair<int,int>> &selection = v->view->selected_vector_nodes;
+        drag(QPointF(180, 80), QPointF(320, 120)); // the two top anchors
+        QCOMPARE(selection, (QSet<QPair<int,int>>{ {0, 0}, {0, 1} }));
+        drag(QPointF(320, 220), QPointF(280, 180), Qt::ShiftModifier); // dragged backwards, Shift adds
+        QCOMPARE(selection.size(), 3);
+        drag(QPointF(320, 220), QPointF(280, 180)); // without Shift it replaces
+        QCOMPARE(selection, (QSet<QPair<int,int>>{ {0, 2} }));
+        click(QPointF(500, 500));
+        QVERIFY(selection.isEmpty());
+        view->SetVectorTool(MyView::VT_NONE);
+    }
+
     // Each shape is painted with its own paint, in list order (the last on top), and hidden ones
     // not at all; the skeleton only shows while nothing is visible. Tiling is per shape: a
     // non-tiling texture on one shape is clipped to its single tile while the other one tiles.
@@ -8262,6 +8349,343 @@ private slots:
         QVERIFY(a != nullptr);
         QCOMPARE(a->vector_shapes.size(), 5);
         QCOMPARE(mask_colour(0), QColor(Qt::darkGray));
+    }
+
+    // Layer options travel in the StickFigureData v2 trailer, a v1 record still loads (all off,
+    // raised to current), and an options change through the dialog's flow
+    // (Widget::ShowLayerOptions()) is one undo step
+    void LayerOptionsRoundTripThroughStreamAndUndo()
+    {
+        LayerOptions options;
+        options.opacity = 0.5;
+        options.outer_shadow.enabled = true;
+        options.outer_shadow.distance = 7.5;
+        options.outer_shadow.color = QColor(10, 20, 30, 40);
+        options.glow.enabled = true;
+        options.glow.inside = true;
+        options.colorize.opacity = 0.25;
+        options.blur.enabled = true;
+        options.blur.intensity = 3.5;
+        options.pixelate.size = 12;
+
+        StickFigureData written;
+        written.layer_options = options;
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << written;
+        }
+        StickFigureData read;
+        {
+            QDataStream in(bytes);
+            in >> read;
+        }
+        QVERIFY(read.layer_options == options);
+        QVERIFY(read.Clone()->layer_options == options); // leaks one empty record: fine in a test
+
+        StickFigureData old_record;
+        old_record.version = 1;
+        old_record.layer_options = options; // v1 has no trailer: must NOT be written
+        QByteArray old_bytes;
+        {
+            QDataStream out(&old_bytes, QIODevice::WriteOnly);
+            out << old_record;
+        }
+        StickFigureData old_read;
+        {
+            QDataStream in(old_bytes);
+            in >> old_read;
+            QCOMPARE(in.status(), QDataStream::Ok);
+            QVERIFY(in.atEnd());
+        }
+        QVERIFY(old_read.layer_options == LayerOptions());
+        QCOMPARE(old_read.version, StickFigureData::CURRENT_VERSION);
+
+        // replicates Widget::ShowLayerOptions() accepting `options`
+        AddFrame();
+        DrawStick(QPointF(100, 100), QPointF(100, 200));
+        StickFigure *figure = CurrentStickFigure();
+        QCOMPARE(figure->version, int(StickFigureData::CURRENT_VERSION));
+        view->StoreUndo();
+        figure->layer_options = options;
+        CurrentFrame()->SyncLayerEffects();
+        QVERIFY(ExtractStickFigureData(*figure)->layer_options == options); // leaks: fine in a test
+
+        view->undo_stack.undo();
+        QVERIFY(CurrentFrame()->stick_figures[0]->layer_options == LayerOptions());
+        QVERIFY(CurrentFrame()->stick_figures[0]->layer_group == nullptr);
+        view->undo_stack.redo();
+        QVERIFY(CurrentFrame()->stick_figures[0]->layer_options == options);
+        QVERIFY(CurrentFrame()->stick_figures[0]->layer_group != nullptr); // MoveToFrame() synced it
+    }
+
+    // inbetweens blend every number and colour; the switches and the glow type are the base
+    // frame's (the current one, here the end keyframe)
+    void LayerOptionsInterpolateExceptSwitches()
+    {
+        AddFrame();
+        DrawStick(QPointF(100, 100), QPointF(100, 200));
+        Frame *start_frame = CurrentFrame();
+        LayerOptions &start = CurrentStickFigure()->layer_options;
+        start.outer_shadow.distance = 2;
+        start.outer_shadow.color = QColor(0, 0, 0);
+        start.glow.inside = true;
+        start.opacity = 1;
+        AddFrame();
+        DrawStick(QPointF(200, 100), QPointF(200, 300));
+        LayerOptions &end = CurrentStickFigure()->layer_options;
+        end.outer_shadow.enabled = true;
+        end.outer_shadow.distance = 10;
+        end.outer_shadow.color = QColor(200, 0, 0);
+        end.glow.inside = false;
+        end.opacity = 0.5;
+        start.pixelate.size = 4;
+        end.pixelate.size = 12;
+        end.blur.enabled = true;
+        const int start_index = start_frame->frame_number;
+
+        QCOMPARE(view->GenerateInbetweens(start_index, 1), QString());
+        const LayerOptions &middle = view->my_animation->frame_list[start_index + 1]
+                ->stick_figures[0]->layer_options;
+        QCOMPARE(middle.outer_shadow.distance, 6.0);
+        QCOMPARE(middle.outer_shadow.color, QColor(100, 0, 0));
+        QCOMPARE(middle.opacity, 0.75);
+        QVERIFY(middle.outer_shadow.enabled); // base = end keyframe
+        QVERIFY(!middle.glow.inside);
+        QCOMPARE(middle.pixelate.size, 8.0);
+        QVERIFY(middle.blur.enabled);
+
+        view->undo_stack.undo();
+        view->MoveToFrame(view->my_animation->frame_list.last()); // later tests append frames
+    }
+
+    // while a figure's options are active its views (drawn later too) sit in one LayerGroupItem
+    // at its top stick's depth; a Refresh() keeps them there; turning the options off undoes it
+    void ActiveLayerOptionsGroupTheFigureViews()
+    {
+        AddFrame();
+        StickData *first = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        StickData *second = DrawStick(QPointF(100, 200), QPointF(150, 250));
+        StickFigure *figure = CurrentStickFigure();
+        figure->layer_options.outline.enabled = true;
+        CurrentFrame()->SyncLayerEffects();
+        QGraphicsItem *group = figure->layer_group;
+        QVERIFY(group != nullptr);
+        QCOMPARE(group->scene(), scene);
+        QCOMPARE(first->view->parentItem(), group);
+        QCOMPARE(second->view->parentItem(), group);
+        QCOMPARE(group->zValue(), qMax(first->z, second->z));
+        const QPointF on_first = first->my_line.center();
+        QVERIFY(scene->items(on_first).contains(first->view)); // picking still reaches it
+        QVERIFY(!scene->items(on_first).contains(group));
+
+        CurrentFrame()->Refresh(0);
+        QCOMPARE(first->view->parentItem(), group);
+
+        // a stick added by a path that never syncs joins through MyView::QueueLayerSync()
+        StickData *third = DrawStick(QPointF(150, 250), QPointF(200, 250));
+        QCoreApplication::processEvents();
+        QCOMPARE(third->view->parentItem(), group);
+
+        figure->layer_options = LayerOptions();
+        CurrentFrame()->SyncLayerEffects();
+        QVERIFY(figure->layer_group == nullptr);
+        for (StickData *s : { first, second, third }) {
+            QVERIFY(s->view->parentItem() == nullptr);
+            QCOMPARE(s->view->scene(), scene);
+        }
+    }
+
+    // LayerEffect reuses its composed image: repaints the layer took no part in (idle, hover, a
+    // viewport update) must not run ApplyLayerEffects() again; a change of one of its sticks must
+    void LayerEffectsRecomposeOnlyWhenTheLayerChanges()
+    {
+        AddFrame();
+        StickData *first = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        DrawStick(QPointF(100, 200), QPointF(150, 250));
+        CurrentStickFigure()->layer_options.glow.enabled = true;
+        CurrentFrame()->SyncLayerEffects();
+        struct Hide { MyView *shown; ~Hide() { shown->hide(); } } hide{ view }; // later slots run hidden
+        view->resize(800, 600);
+        view->show();
+        QVERIFY(QTest::qWaitForWindowExposed(view));
+        auto paint = [this]{ QCoreApplication::processEvents(); view->viewport()->repaint(); };
+        paint();
+        QVERIFY(layer_effects_runs.loadRelaxed() > 0); // the effect does paint
+
+        int before = layer_effects_runs.loadRelaxed();
+        paint();
+        paint();
+        const int idle = layer_effects_runs.loadRelaxed() - before;
+
+        // a press left over by an earlier slot would make these moves a drag of the current stick
+        // (a real change, rightly recomposed): hover means no button down
+        is_pressed = false;
+        before = layer_effects_runs.loadRelaxed();
+        for (int i = 0; i < 5; i++) {
+            QTest::mouseMove(view->viewport(), view->mapFromScene(QPointF(300 + 10*i, 300)));
+            paint();
+        }
+        const int hover = layer_effects_runs.loadRelaxed() - before;
+
+        before = layer_effects_runs.loadRelaxed();
+        view->viewport()->update();
+        paint();
+        const int viewport = layer_effects_runs.loadRelaxed() - before;
+
+        // update() on a stick that looks the same: Qt drops its cached source, the pixels match
+        before = layer_effects_runs.loadRelaxed();
+        first->view->update();
+        paint();
+        const int same_pixels = layer_effects_runs.loadRelaxed() - before;
+
+        before = layer_effects_runs.loadRelaxed();
+        first->my_line.translate(5, 0);
+        first->view->Refresh(0);
+        paint();
+        const int changed = layer_effects_runs.loadRelaxed() - before;
+        qDebug() << "recompositions: idle" << idle << "hover" << hover << "viewport" << viewport
+                 << "same pixels" << same_pixels << "stick moved" << changed;
+        QCOMPARE(idle, 0);
+        QCOMPARE(hover, 0);
+        QCOMPARE(viewport, 0);
+        QCOMPARE(same_pixels, 0);
+        QVERIFY(changed >= 1);
+
+        // "Fast move" (MyView::mouseMoveEvent sets the pause while a button is down): a change
+        // during the pause composes nothing, the release (ResumeLayerEffects()) composes it once
+        view->layer_effects_paused = true;
+        before = layer_effects_runs.loadRelaxed();
+        first->my_line.translate(5, 0);
+        first->view->Refresh(0);
+        paint();
+        QCOMPARE(layer_effects_runs.loadRelaxed() - before, 0);
+        view->ResumeLayerEffects();
+        paint();
+        QCOMPARE(layer_effects_runs.loadRelaxed() - before, 1);
+
+        // zoomed in far past the viewport: only the visible part of the layer is composed (the
+        // whole layer at x16 is several megapixels), and the glow still shows around the stick
+        struct Zoom { MyView *zoomed; QTransform old; ~Zoom() { zoomed->setTransform(old); } } zoom{ view, view->transform() };
+        view->scale(16, 16);
+        view->centerOn(first->my_line.center());
+        before = layer_effects_runs.loadRelaxed();
+        paint();
+        QVERIFY(layer_effects_runs.loadRelaxed() - before >= 1);
+        const int reach = int((CurrentStickFigure()->layer_options.Reach() + 2) * 16) + 1;
+        const QSize viewport_size = view->viewport()->size() * view->devicePixelRatioF();
+        QVERIFY2(layer_effects_pixels.loadRelaxed() <= (viewport_size.width() + 2*reach) * (viewport_size.height() + 2*reach),
+                 qPrintable(QString::number(layer_effects_pixels.loadRelaxed())));
+        before = layer_effects_runs.loadRelaxed();
+        paint();
+        QCOMPARE(layer_effects_runs.loadRelaxed() - before, 0); // and it is cached like any other
+    }
+
+    // the pixel routine on a 20 px white square in a 40 px transparent image, identity transform
+    void ApplyLayerEffectsShapesThePixels()
+    {
+        QImage square(40, 40, QImage::Format_ARGB32_Premultiplied);
+        square.fill(Qt::transparent);
+        {
+            QPainter p(&square);
+            p.fillRect(QRect(10, 10, 20, 20), Qt::white);
+        }
+        const QTransform identity;
+        QCOMPARE(ApplyLayerEffects(square, LayerOptions(), identity).pixel(20, 20), square.pixel(20, 20));
+
+        LayerOptions shadow;
+        shadow.outer_shadow.enabled = true;
+        shadow.outer_shadow.angle = 0; // to the right
+        shadow.outer_shadow.distance = 5;
+        shadow.outer_shadow.smoothness = 0;
+        shadow.outer_shadow.opacity = 1;
+        QImage out = ApplyLayerEffects(square, shadow, identity);
+        QCOMPARE(qAlpha(out.pixel(32, 20)), 255);
+        QCOMPARE(qRed(out.pixel(32, 20)), 0);
+        QCOMPARE(qAlpha(out.pixel(37, 20)), 0);
+        QCOMPARE(qAlpha(out.pixel(5, 20)), 0);
+        // twice the zoom: the same 5 scene units are 10 pixels
+        out = ApplyLayerEffects(square, shadow, QTransform::fromScale(2, 2));
+        QCOMPARE(qAlpha(out.pixel(37, 20)), 255);
+
+        LayerOptions colorize;
+        colorize.colorize.enabled = true;
+        colorize.colorize.color = Qt::red;
+        out = ApplyLayerEffects(square, colorize, identity);
+        QCOMPARE(QColor(out.pixel(20, 20)), QColor(Qt::red));
+        QCOMPARE(qAlpha(out.pixel(5, 5)), 0);
+
+        LayerOptions half;
+        half.opacity = 0.5;
+        out = ApplyLayerEffects(square, half, identity);
+        QVERIFY(qAbs(qAlpha(out.pixel(20, 20)) - 128) <= 1);
+
+        LayerOptions outline;
+        outline.outline.enabled = true;
+        outline.outline.size = 4;
+        outline.outline.color = Qt::blue;
+        out = ApplyLayerEffects(square, outline, identity);
+        QVERIFY(qAlpha(out.pixel(31, 20)) > 0);
+        QVERIFY(qBlue(out.pixel(31, 20)) > 0);
+        QCOMPARE(qAlpha(out.pixel(37, 20)), 0);
+        QCOMPARE(QColor(out.pixel(20, 20)), QColor(Qt::white));
+
+        LayerOptions inner;
+        inner.inner_shadow.enabled = true;
+        inner.inner_shadow.angle = 90; // down: the top edge darkens
+        inner.inner_shadow.distance = 3;
+        inner.inner_shadow.smoothness = 0;
+        inner.inner_shadow.opacity = 1;
+        out = ApplyLayerEffects(square, inner, identity);
+        QCOMPARE(qAlpha(out.pixel(20, 11)), 255);
+        QVERIFY(qRed(out.pixel(20, 11)) < 50);
+        QCOMPARE(QColor(out.pixel(20, 25)), QColor(Qt::white));
+        QCOMPARE(qAlpha(out.pixel(20, 8)), 0); // nothing outside the silhouette
+
+        LayerOptions blur;
+        blur.blur.enabled = true;
+        blur.blur.intensity = 4;
+        out = ApplyLayerEffects(square, blur, identity);
+        QCOMPARE(qAlpha(out.pixel(20, 20)), 255);           // the middle stays solid
+        QVERIFY(qAlpha(out.pixel(31, 20)) > 0);              // the edge spreads out...
+        QVERIFY(qAlpha(out.pixel(29, 20)) < 255);            // ...and softens inward
+        QCOMPARE(qAlpha(out.pixel(37, 20)), 0);
+
+        // 8 px blocks on a grid through the image origin: block 8..15 holds 6x6 of the square
+        LayerOptions pixelate;
+        pixelate.pixelate.enabled = true;
+        pixelate.pixelate.size = 8;
+        out = ApplyLayerEffects(square, pixelate, identity);
+        QCOMPARE(out.pixel(8, 8), out.pixel(15, 15));
+        QVERIFY(qAbs(qAlpha(out.pixel(8, 8)) - 255 * 36 / 64) <= 1);
+        QCOMPARE(qAlpha(out.pixel(20, 20)), 255);            // block 16..23 is all square
+        QCOMPARE(qAlpha(out.pixel(7, 7)), 0);
+        // the grid follows the scene origin: shifted by 4 px, block 12..19 is now all square
+        out = ApplyLayerEffects(square, pixelate, QTransform::fromTranslate(4, 4));
+        QCOMPARE(qAlpha(out.pixel(12, 12)), 255);
+        QVERIFY(qAlpha(out.pixel(11, 11)) < 255);
+
+        // a wide soft shadow runs at reduced resolution (SoftFactor()): it must still sit where
+        // the full-resolution one would. 80 px square at 40..119, shadow shifted 60 px right
+        // (100..179) and blurred 24 px: solid deep inside, partial just past its edge, gone beyond
+        QImage wide(240, 160, QImage::Format_ARGB32_Premultiplied);
+        wide.fill(Qt::transparent);
+        {
+            QPainter p(&wide);
+            p.fillRect(QRect(40, 40, 80, 80), Qt::white);
+        }
+        LayerOptions soft;
+        soft.outer_shadow.enabled = true;
+        soft.outer_shadow.angle = 0;
+        soft.outer_shadow.distance = 60;
+        soft.outer_shadow.smoothness = 24;
+        soft.outer_shadow.opacity = 1;
+        out = ApplyLayerEffects(wide, soft, identity);
+        QVERIFY(qAlpha(out.pixel(150, 80)) >= 245);
+        const int edge = qAlpha(out.pixel(184, 80));
+        QVERIFY2(edge > 30 && edge < 225, qPrintable(QString::number(edge)));
+        QCOMPARE(qAlpha(out.pixel(215, 80)), 0);
+        QCOMPARE(QColor(out.pixel(80, 80)), QColor(Qt::white)); // the layer itself untouched
     }
 };
 

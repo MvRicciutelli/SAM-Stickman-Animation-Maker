@@ -30,6 +30,7 @@ SOURCES += \
     ../src/mfvideo.cpp \
     ../src/imageexport.cpp \
     ../src/kritabundle.cpp \
+    ../src/layeroptions.cpp \
     ../src/framepresenter.cpp \
     ../src/myview.cpp \
     ../src/stick.cpp \
@@ -58,6 +59,7 @@ HEADERS += \
     ../src/mfvideo.h \
     ../src/imageexport.h \
     ../src/kritabundle.h \
+    ../src/layeroptions.h \
     ../src/stkformat.h \
     ../src/style.h \
     ../src/uiItems.h \

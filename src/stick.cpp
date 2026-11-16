@@ -4,13 +4,17 @@
 #include <QTextLayout>
 #include <QVector>
 #include <QListWidget>
+#include <QTimer>
+#include <QtMath>
 #include <StickFigure.h>
+#include <myview.h> // MyView::QueueLayerSync()
 bool StickGraphicsItem::onion_render = false;
 // `offscreen_render` era write-only da quando il marcatore IK si dipinge in
 // MyView::drawForeground() (mai nelle render scene): rimosso
 extern QGraphicsRectItem* my_rect;
 extern QListWidget* img_list_widget;
 extern int handle_size;
+extern MyView *V;
 // nota flag sweep: qui c'erano anche `extern QPixmap * image_draw_buffer` (mai usato in
 // questo file, e per giunta dichiarato QPixmap* mentre la definizione reale è QImage* —
 // una violazione ODR pronta a esplodere), `extern bool render_flag` e `extern bool
@@ -544,6 +548,15 @@ void StickGraphicsItem::SyncShapeLayers()
         shape_layers << new VectorShapeLayerItem(this, offset);
     for(VectorShapeLayerItem *layer : shape_layers){
         layer->setZValue(data->z + layer->depth_offset);
+        if(layer->scene() == scene() && layer->parentItem() == parentItem())
+            continue;
+        // inside a LayerGroupItem the layers are the view's siblings, so the effect paints them too
+        if(parentItem() != nullptr){
+            layer->setParentItem(parentItem());
+            continue;
+        }
+        if(layer->parentItem() != nullptr)
+            layer->setParentItem(nullptr); // left in the old group's scene, fixed just below
         if(layer->scene() == scene())
             continue;
         if(layer->scene() != nullptr)
@@ -553,10 +566,16 @@ void StickGraphicsItem::SyncShapeLayers()
     }
 }
 
+/// @details A view arriving top-level in the canvas scene may belong to a figure with active
+/// LayerOptions (a drawn, merged, split or pasted stick): MyView::QueueLayerSync() puts it in its
+/// LayerGroupItem on the next event-loop pass, without every attach path having to remember.
 QVariant StickGraphicsItem::itemChange(GraphicsItemChange change, const QVariant &value)
 {
-    if(change == ItemSceneHasChanged)
+    if(change == ItemSceneHasChanged || change == ItemParentHasChanged)
         SyncShapeLayers();
+    if(change == ItemSceneHasChanged && parentItem() == nullptr && scene() != nullptr
+            && V != nullptr && scene() == V->scene())
+        V->QueueLayerSync();
     return QGraphicsItem::itemChange(change, value);
 }
 
@@ -590,6 +609,142 @@ void VectorShapeLayerItem::paint(QPainter *painter, const QStyleOptionGraphicsIt
     owner->PaintVectorShapes(painter, this);
     if(owner->TopShapeLayer() == this)
         owner->PaintVectorOverlay(painter);
+}
+
+void LayerEffect::SetOptions(const LayerOptions &new_options)
+{
+    if(new_options == options)
+        return; // a sync that finds nothing new must not repaint
+    options = new_options;
+    updateBoundingRect();
+    update();
+}
+
+QRectF LayerEffect::boundingRectFor(const QRectF &rect) const
+{
+    const double reach = options.Reach() + 2; // +2: room for antialiasing and blur rounding
+    return rect.adjusted(-reach, -reach, reach, reach);
+}
+
+/// @brief Whether two transforms are equal within rounding: a scrolled view rebuilds the same
+/// transform from other numbers, and one stray last bit must not throw the cache away.
+static bool SameTransform(const QTransform &a, const QTransform &b)
+{
+    return qAbs(a.m11() - b.m11()) < 1e-6 && qAbs(a.m12() - b.m12()) < 1e-6
+            && qAbs(a.m21() - b.m21()) < 1e-6 && qAbs(a.m22() - b.m22()) < 1e-6
+            && qAbs(a.dx() - b.dx()) < 1e-6 && qAbs(a.dy() - b.dy()) < 1e-6;
+}
+
+/// @details The layer is rendered here, into an image covering only the part of it that is on
+/// the paint device (plus the effects' reach), and drawn back with an identity world transform.
+/// QGraphicsEffect::sourcePixmap() is deliberately not used: it renders the WHOLE layer at the
+/// view's zoom, visible or not (a layer zoomed x6 was 25 megapixels, 290 ms per change), and
+/// pads it by Reach() in device pixels, which cut the effects off when zoomed in.
+/// The transform handed to the effects maps scene to the image's own pixels: shifted by the
+/// image's corner (the pixelate grid stays anchored to the scene) and scaled by the
+/// devicePixelRatio, since the image's pixels are physical.
+/// The result is reused while the source PIXELS, the transform and the options are unchanged:
+/// many code paths call update() on a stick without changing how it looks (hover, selection
+/// bookkeeping), so the freshly rendered source is compared pixel by pixel (QImage::operator==,
+/// a memcmp per row, ~1 ms for a canvas-sized layer against several ms to recompose). Scrolling
+/// shifts the world transform and the image's corner alike, so effect_world, and the cache,
+/// survive it while the whole layer is in view.
+/// On the canvas Qt skips the children outside the exposed region (drawSource() passes it on),
+/// so a repaint that exposes only part of the layer cannot render a complete source. A change
+/// of the layer always exposes all of it (Qt marks an item with an effect for a full update),
+/// so such a repaint is someone else's and the cached image is still right; when there is none
+/// to reuse (the view scrolled over a layer larger than the viewport) the layer is drawn plain
+/// once and a full repaint is requested.
+void LayerEffect::draw(QPainter *painter)
+{
+    if(live && V != nullptr && V->layer_effects_paused){
+        drawSource(painter); // "Fast move": no effects until the drag ends
+        return;
+    }
+    const QTransform world = painter->worldTransform();
+    const double zoom = qSqrt(qAbs(world.determinant()));
+    const int pad = qCeil((options.Reach() + 2) * zoom);
+    const QRect device(0, 0, painter->device()->width(), painter->device()->height());
+    const QRect rect = world.mapRect(boundingRect()).toAlignedRect() & device.adjusted(-pad, -pad, pad, pad);
+    if(rect.isEmpty())
+        return;
+    const qreal dpr = painter->device()->devicePixelRatioF();
+    const QSize pixels = (QSizeF(rect.size()) * dpr).toSize();
+    const QTransform to_image = world * QTransform::fromTranslate(-rect.x(), -rect.y());
+    const QTransform effect_world = to_image * QTransform::fromScale(dpr, dpr);
+    const bool same_setup = cached_image.size() == pixels && SameTransform(effect_world, cached_world)
+            && options == cached_options;
+    const bool exposed = !live || V == nullptr
+            || QRegion(rect & device).subtracted(V->exposed_region).isEmpty();
+    if(!exposed && !same_setup && !retried){
+        retried = true; // once: a second partial repaint in a row composes what it can
+        drawSource(painter);
+        QTimer::singleShot(0, this, [this]{ update(); });
+        return;
+    }
+    if(exposed || !same_setup){
+        retried = false;
+        QImage source(pixels, QImage::Format_ARGB32_Premultiplied);
+        source.setDevicePixelRatio(dpr);
+        source.fill(Qt::transparent);
+        {
+            QPainter source_painter(&source);
+            source_painter.setRenderHints(painter->renderHints());
+            source_painter.setWorldTransform(to_image);
+            drawSource(&source_painter);
+        }
+        if(!same_setup || source != cached_source_image){
+            cached_image = ApplyLayerEffects(source, options, effect_world);
+            cached_source_image = source;
+            cached_world = effect_world;
+            cached_options = options;
+        }
+    }
+    painter->setWorldTransform(QTransform());
+    painter->drawImage(rect.topLeft(), cached_image);
+    painter->setWorldTransform(world);
+}
+
+LayerGroupItem::LayerGroupItem()
+{
+    setAcceptedMouseButtons(Qt::NoButton);
+    effect = new LayerEffect();
+    setGraphicsEffect(effect);
+}
+
+QRectF LayerGroupItem::boundingRect() const
+{
+    return childrenBoundingRect();
+}
+
+QPainterPath LayerGroupItem::shape() const
+{
+    return QPainterPath();
+}
+
+void LayerGroupItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)
+{
+    Q_UNUSED(painter);
+    Q_UNUSED(option);
+    Q_UNUSED(widget);
+    UpdateZ(); // a depth edit that reached a stick without a sync still moves the block
+}
+
+/// @details Only the stick views count: a shape layer sits at its stick's z plus an offset, which
+/// would let a shape's depth move the whole layer.
+void LayerGroupItem::UpdateZ()
+{
+    bool found = false;
+    double top = 0;
+    for(QGraphicsItem *child : childItems()){
+        if(child->type() != STKTYPE)
+            continue;
+        const double z = static_cast<StickGraphicsItem*>(child)->data->z;
+        top = found ? qMax(top, z) : z;
+        found = true;
+    }
+    if(found && zValue() != top)
+        setZValue(top);
 }
 
 void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget)

@@ -113,8 +113,48 @@ StickFigure::~StickFigure()
         }
         delete s;
     }
+    delete layer_group; // after the views: a QGraphicsItem deletes the children it still has
     delete icon_img;
     delete stick_figure_icon;
+}
+
+/// @details The views leave the group with setParentItem(nullptr), which keeps them in the
+/// group's scene as top-level items; only then is the (now childless) group deleted. The
+/// group's z follows the figure's top stick (LayerGroupItem::UpdateZ()).
+void StickFigure::SyncLayerGroup()
+{
+    if(!layer_options.IsActive()){
+        if(layer_group == nullptr)
+            return;
+        for(QGraphicsItem *child : layer_group->childItems())
+            child->setParentItem(nullptr);
+        delete layer_group;
+        layer_group = nullptr;
+        return;
+    }
+    QGraphicsScene *target = nullptr;
+    for(StickData *s : stick_list){
+        if(s->view && s->view->scene()){
+            target = s->view->scene();
+            break;
+        }
+    }
+    if(target == nullptr)
+        return; // not on screen: MoveToFrame()/Refresh() sync it when it is
+    if(layer_group == nullptr){
+        layer_group = new LayerGroupItem();
+        layer_group->effect->live = true;
+    }
+    layer_group->effect->SetOptions(layer_options);
+    if(layer_group->scene() != target){
+        if(layer_group->scene() != nullptr)
+            layer_group->scene()->removeItem(layer_group);
+        target->addItem(layer_group);
+    }
+    for(StickData *s : stick_list)
+        if(s->view && s->view->scene() == target && s->view->parentItem() != layer_group)
+            s->view->setParentItem(layer_group);
+    layer_group->UpdateZ();
 }
 // questa funzione aggiorna l'iconea del livello: da Phase 2b è chiamata solo su figure
 // vive (le figure di libreria sono StickFigureData e hanno il loro render in myview.cpp)
@@ -137,6 +177,8 @@ void StickFigure::UpdateIcon()
     // (addItem rende la scena proprietaria dei cloni: non vanno cancellati a mano,
     // altrimenti verrebbero distrutti due volte quando icoScene esce di scope)
     // con il genitore ricollegato: è da lì che la trasformazione globale di un antenato arriva
+    // ponytail: the thumbnail ignores layer_options (as do frame icons and onion skins);
+    // wrap the clones in a LayerGroupItem like ImageExport::RenderFrame() if it should show them
     QList<StickData*> renderClones = CloneForRender(stick_list);
     for(StickData* clone: renderClones)
         icoScene.addItem(new StickGraphicsItem(clone));
@@ -475,6 +517,7 @@ StickFigureData *ExtractStickFigureData(const StickFigure &source_figure)
     StickFigureData *data = new StickFigureData();
     data->version = source_figure.version;
     data->name = source_figure.name;
+    data->layer_options = source_figure.layer_options;
     for (StickData *live_stick : source_figure.stick_list)
         data->stick_list.append(live_stick->Clone());
     for (int i = 0; i < source_figure.stick_list.count(); i++) {
@@ -531,6 +574,7 @@ void PopulateLiveStickFigure(StickFigure *target_figure, const StickFigureData &
     target_figure->current_stick = nullptr;
     target_figure->version = source_data.version;
     target_figure->name = source_data.name;
+    target_figure->layer_options = source_data.layer_options;
     for (StickData *source_stick : source_data.stick_list) {
         StickData *live_stick = source_stick->Clone();
         target_figure->stick_list.append(live_stick);

@@ -727,23 +727,10 @@ StickData *StickData::Clone() const
 }
 
 namespace {
-/// @brief Linear blend of two scalars.
-inline qreal Mix(qreal from, qreal to, float t) { return from + (to - from) * t; }
-
 /// @brief Linear blend of two points, component by component.
 inline QPointF MixPoint(const QPointF &from, const QPointF &to, float t)
 {
     return QPointF(Mix(from.x(), to.x(), t), Mix(from.y(), to.y(), t));
-}
-
-/// @brief Linear blend of two colours, RGBA channel by channel (alpha included, so a
-/// fade in/out between two keyframes interpolates as well).
-inline QColor MixColor(const QColor &from, const QColor &to, float t)
-{
-    return QColor(qRound(Mix(from.red(), to.red(), t)),
-                  qRound(Mix(from.green(), to.green(), t)),
-                  qRound(Mix(from.blue(), to.blue(), t)),
-                  qRound(Mix(from.alpha(), to.alpha(), t)));
 }
 
 /// @brief Element-wise blend of a per-vertex float list (vertex_widths /

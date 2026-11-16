@@ -57,6 +57,8 @@ SOURCES += \
     src/gradientdialog.cpp \
     src/imageexport.cpp \
     src/kritabundle.cpp \
+    src/layeroptions.cpp \
+    src/layeroptionsdialog.cpp \
     src/main.cpp \
     src/mfvideo.cpp \
     src/mymainwindow.cpp \
@@ -89,6 +91,8 @@ HEADERS += \
     src/gradientdialog.h \
     src/imageexport.h \
     src/kritabundle.h \
+    src/layeroptions.h \
+    src/layeroptionsdialog.h \
     src/mfvideo.h \
     src/mymainwindow.h \
     src/myview.h \

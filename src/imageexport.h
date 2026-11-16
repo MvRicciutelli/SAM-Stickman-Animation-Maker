@@ -78,15 +78,23 @@ private:
     int render_option = NONE;             ///< render mode
     QList<QList<StickData*>> frames;      ///< per frame, Clone()s of its total_sticks (z order)
     QList<int> frame_numbers;             ///< frame_number of each entry of `frames`
+
+    /// @brief One figure of a snapshotted frame that renders through its LayerOptions.
+    struct RenderLayer {
+        QList<int> sticks;      ///< indices of its sticks in the frame's entry of `frames`
+        LayerOptions options;   ///< the figure's options at snapshot time
+    };
+    QList<QList<RenderLayer>> frame_layers; ///< per frame, its figures with active options
     QRectF canvas_rect;                   ///< my_rect at construction: the area rendered
     QSize image_size;                     ///< pixel size of each rendered image
 
     /**
      * @brief Flattens one snapshotted frame onto a white image of image_size.
      * @param sticks the frame's cloned sticks, in z order.
+     * @param layers the figures among them that render as one LayerGroupItem.
      * @return the rendered frame.
      */
-    QImage RenderFrame(const QList<StickData*> &sticks) const;
+    QImage RenderFrame(const QList<StickData*> &sticks, const QList<RenderLayer> &layers) const;
 };
 
 #endif // IMAGEEXPORT_H

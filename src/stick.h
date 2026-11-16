@@ -8,6 +8,8 @@
 #include <QLabel>
 #include <QSet>
 #include <stickdata.h>
+#include <layeroptions.h>
+#include <QGraphicsEffect>
 
 #define STEPCHILD -1    ///< legacy marker for "attached to the parent's origin" (kept for old call sites)
 #define STKTYPE 90000   ///< QGraphicsItem::type() id, lets scene code recognize stick items (see SceneRemover)
@@ -623,6 +625,69 @@ public:
 
     StickGraphicsItem *owner = nullptr; ///< non-owning; set to nullptr by the owner before it deletes this
     double depth_offset = 0;            ///< the VectorShape::depth_offset this layer paints
+};
+
+/**
+ * @brief The QGraphicsEffect that paints a layer's LayerOptions.
+ *
+ * Qt renders the effect's item and all its children (a LayerGroupItem holding one figure's stick
+ * views) off-screen and hands the pixels to draw(), which runs them through ApplyLayerEffects().
+ * See docs/ARCH_LAYER_OPTIONS.md.
+ */
+class LayerEffect : public QGraphicsEffect
+{
+public:
+    /**
+     * @brief Replaces the options, repainting and re-padding only when they differ.
+     * @param new_options the layer's options.
+     */
+    void SetOptions(const LayerOptions &new_options);
+
+    LayerOptions options; ///< what draw() paints; written only through SetOptions()
+    bool live = false;    ///< on the canvas (set by StickFigure::SyncLayerGroup()): obeys MyView's "Fast move" pause and exposed region; false in a render scene
+protected:
+    /// @return @p rect padded by LayerOptions::Reach(), the room the shadows and glows need.
+    QRectF boundingRectFor(const QRectF &rect) const override;
+    /// @brief Renders the visible part of the layer, paints it through ApplyLayerEffects() in
+    ///        device pixels, and reuses the last result while the source pixels, the transform
+    ///        and the options are unchanged.
+    void draw(QPainter *painter) override;
+private:
+    bool retried = false;           ///< a partial repaint already asked for a full one (draw())
+    QTransform cached_world;        ///< transform cached_image was built with
+    LayerOptions cached_options;    ///< options cached_image was built with
+    QImage cached_image;            ///< last ApplyLayerEffects() result; null until the first draw()
+    QImage cached_source_image;     ///< the source pixels cached_image was built from (compared on every full repaint)
+};
+
+/**
+ * @brief Invisible container of one figure's stick views (and their shape layers) while the
+ *        figure has active LayerOptions, so a LayerEffect can composite them as one layer.
+ *
+ * Paints nothing, has an empty shape and takes no mouse input, so picking still reaches the
+ * stick views. Its z is the highest z of its sticks: the whole layer renders as one block there.
+ * Live, StickFigure::SyncLayerGroup() is the only code that creates, fills or destroys one;
+ * ImageExport::RenderFrame() builds its own in the render scene.
+ */
+class LayerGroupItem : public QGraphicsItem
+{
+public:
+    /// @brief Creates the group with its own LayerEffect.
+    LayerGroupItem();
+
+    /// @return the children's bounding rect: the area the effect source covers.
+    QRectF boundingRect() const override;
+    /// @return an empty path, so scene picking never returns the group.
+    QPainterPath shape() const override;
+    /// @brief Paints nothing; refreshes the z (UpdateZ()) like StickGraphicsItem::paint() does.
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
+
+    /**
+     * @brief Sets the group's z to the highest z among its stick views' records.
+     */
+    void UpdateZ();
+
+    LayerEffect *effect = nullptr; ///< owned by the item through setGraphicsEffect()
 };
 
 /**

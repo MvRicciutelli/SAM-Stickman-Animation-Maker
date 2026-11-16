@@ -5,6 +5,7 @@
 #include <QMetaType>
 #include <QString>
 #include "stickdata.h"
+#include "layeroptions.h"
 
 /**
  * @brief Pure-data half of a stickfigure: the stick tree plus name and selection memory,
@@ -35,12 +36,13 @@ public:
      */
     StickFigureData *Clone() const;
 
-    static constexpr qint32 CURRENT_VERSION = 1; ///< newest figure record format this build reads (operator>> refuses newer)
+    static constexpr qint32 CURRENT_VERSION = 2; ///< newest figure record format this build reads (operator>> refuses newer); 2 = layer_options trailer
     qint32 version = CURRENT_VERSION;    ///< serialization format version of this record
     QString name;                       ///< user-visible layer name
     QList<StickData*> stick_list;        ///< owned sticks forming the figure
     StickData *master_stick = nullptr;   ///< tree root; points into stick_list
     StickData *current_stick = nullptr;  ///< remembered selection; points into stick_list
+    LayerOptions layer_options;          ///< layer effects (format v2+), see layeroptions.h
 };
 Q_DECLARE_METATYPE(StickFigureData*)
 

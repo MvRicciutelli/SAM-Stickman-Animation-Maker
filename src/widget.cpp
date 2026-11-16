@@ -38,6 +38,8 @@
 #include <QComboBox>
 #include <QStandardItemModel>
 #include <QFontComboBox>
+#include <QMenu>
+#include "layeroptionsdialog.h"
 #include <QTextEdit>
 #include <QSplitter>
 #include <QScrollArea>
@@ -1035,6 +1037,22 @@ Widget::Widget(QWidget *parent)
         else if(view->MultiSelectionActive()){
             view->ClearMultiSelection(); // tornati a una riga sola: la multi decade
         }
+    });
+    // right click on a layer row: the layer options of THAT row's figure
+    ui->stickLayerView->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(ui->stickLayerView, &QListWidget::customContextMenuRequested, this, [this](const QPoint &pos){
+        QListWidgetItem *row = ui->stickLayerView->itemAt(pos);
+        if(row == nullptr)
+            return; // empty area: no layer to configure
+        StickFigure *figure = qvariant_cast<StickFigure*>(row->data(Qt::UserRole));
+        QMenu menu(this);
+        QAction *options_action = menu.addAction(tr("Layer options..."));
+        if(menu.exec(ui->stickLayerView->viewport()->mapToGlobal(pos)) == options_action)
+            ShowLayerOptions(figure);
+    });
+    // "Fast move": layer effects are hidden while the mouse drags and come back on release
+    connect(ui->fastMoveCheckBox, &QCheckBox::toggled, this, [this](bool on){
+        view->fast_move_effects = on;
     });
     //json read
     if(!QFile::exists(lib_folder.path()+"/defaultLib.samlib")){
@@ -3276,6 +3294,33 @@ void Widget::on_moveStickFigureToCenterBtn_clicked()
 }
 
 /**
+ * @details The live preview writes straight into the figure, so before StoreUndo() the old
+ * options are put back: the undo snapshot must hold the pre-change state (CLAUDE.md "Command
+ * flow and undo"). StoreUndo() is called only when something actually changed.
+ */
+void Widget::ShowLayerOptions(StickFigure *figure)
+{
+    Frame *frame = view->my_animation->CurrentFrame();
+    if(figure == nullptr || frame == nullptr || !frame->stick_figures.contains(figure))
+        return;
+    const LayerOptions before = figure->layer_options;
+    LayerOptionsDialog dialog(this);
+    dialog.Seed(before);
+    connect(&dialog, &LayerOptionsDialog::Changed, this, [&dialog, figure, frame]{
+        figure->layer_options = dialog.Options();
+        frame->SyncLayerEffects();
+    });
+    const bool accepted = dialog.exec() == QDialog::Accepted;
+    const LayerOptions after = dialog.Options();
+    figure->layer_options = before;
+    if(accepted && after != before){
+        view->StoreUndo();
+        figure->layer_options = after;
+    }
+    frame->SyncLayerEffects();
+}
+
+/**
  * @details Moves the current stick to the end of `total_sticks` (frontmost draw order)
  * and raises its Z to just above the current maximum across every stick in the frame
  * (clamped to MAXDEPTH), so it's guaranteed to render in front of everything else, not
@@ -3714,6 +3759,8 @@ void Widget::BuildVectorPanel()
           MyView::VT_ELLIPSE, QIcon(":/resources/36_ellipse_00001.png") },
         { QT_TR_NOOP("Lasso: drag around points to select them (Shift adds). Delete removes them."),
           MyView::VT_LASSO, QIcon(":/resources/36_select_00001.png") }, // the lasso drawing (files' names are swapped)
+        { QT_TR_NOOP("Rectangle select: drag a box around points to select them (Shift adds). Delete removes them."),
+          MyView::VT_RECT_SELECT, QIcon(":/resources/36_rectangle_selection_00001.png") }, // the freehand panel's Select icon
         { QT_TR_NOOP("Fill bucket: click a shape to give it the current fill (Style column)."),
           MyView::VT_FILL, QIcon(":/resources/36_fill_00001.png") },
         { QT_TR_NOOP("Border bucket: click a shape to give it the current border, width included (Style column)."),
@@ -3777,11 +3824,17 @@ void Widget::BuildVectorPanel()
     down_btn->setToolTip(tr("Move the shape one step towards the back"));
     copy_btn->setToolTip(tr("Copy the selected shapes, to paste them into any vector stick"));
     paste_btn->setToolTip(tr("Paste the copied shapes on top of this stick's, where they were drawn"));
+    QPushButton *flip_h_btn = new QPushButton(tr("Flip H"), advanced_vector_tab);
+    QPushButton *flip_v_btn = new QPushButton(tr("Flip V"), advanced_vector_tab);
+    flip_h_btn->setToolTip(tr("Flip the selected shapes horizontally (left to right), together"));
+    flip_v_btn->setToolTip(tr("Flip the selected shapes vertically (top to bottom), together"));
     layer_buttons->addWidget(up_btn, 0, 0);
     layer_buttons->addWidget(down_btn, 0, 1);
     layer_buttons->addWidget(delete_btn, 0, 2);
     layer_buttons->addWidget(copy_btn, 1, 0);
     layer_buttons->addWidget(paste_btn, 1, 1);
+    layer_buttons->addWidget(flip_h_btn, 2, 0);
+    layer_buttons->addWidget(flip_v_btn, 2, 1);
     col->addLayout(layer_buttons);
 
     // the current shape's mask: another shape of this stick, front first like the rows
@@ -3967,6 +4020,12 @@ void Widget::BuildVectorPanel()
     });
     connect(copy_btn, &QPushButton::clicked, this, [this, selected_shapes]{
         view->CopyVectorShapes(selected_shapes());
+    });
+    connect(flip_h_btn, &QPushButton::clicked, this, [this, selected_shapes]{
+        view->FlipVectorShapes(selected_shapes(), true);
+    });
+    connect(flip_v_btn, &QPushButton::clicked, this, [this, selected_shapes]{
+        view->FlipVectorShapes(selected_shapes(), false);
     });
     connect(paste_btn, &QPushButton::clicked, this, [this]{
         const QString why = view->PasteVectorShapes();
