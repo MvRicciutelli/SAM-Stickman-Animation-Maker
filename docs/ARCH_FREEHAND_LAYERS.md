@@ -205,6 +205,28 @@ any of them.
   with the other layers at their own size.
 - Draw undo: the active layer's painted box per entry.
 
+**Benchmark.** Slots `MemBenchFreehand` and `MemBenchVector` in `tests/tst_characterization.cpp`. Rerun
+`tst_characterization.exe MemBenchFreehand MemBenchVector` on two commits and compare. QtTest prints the
+`BENCH ...` lines as warnings; use `-o file,txt`, as stdout prints nothing on Windows. Process memory is
+Windows-only (0 elsewhere); layer, composite and cache bytes are portable. The slots assert nothing about
+absolute sizes.
+
+Baseline, before = `919e577`, after = `08d4619`, 3 identical runs each. The test view is not shown, so the
+canvas is about 2.5 MB, far below the ~19 MB of a real 1080p window: only the ratios carry over.
+
+| Case | Before | After |
+|------|--------|-------|
+| Freehand (5 layers, 3 dabs of size 30 per layer, 12 extra strokes): session layer+composite pixels | 14.9 MB | 5.4 MB |
+| Same, session process growth incl. the draw-undo chain | +59.9 MB | +13.7 MB |
+| Same, pixels after exit | 4.2 MB | 1.7 MB |
+| Same, process after exit | +4.7 MB | +2.1 MB |
+| Same, serialized stick | 72 KB | 49 KB |
+| Vector (8 shapes, 4 masked, 1920x1080 render): mask cache | 9.0 MB, 4 entries | 9.0 MB, 4 entries |
+| Same, after unmasking every shape | 9.0 MB | 0 KB (stale entries are dropped) |
+
+Caveats: the dabs are small, so layers with big painted areas shrink less in the steady state. Process
+memory is only good to about +-1 MB.
+
 ### Limits
 
 - Layer thumbnails ignore masks.

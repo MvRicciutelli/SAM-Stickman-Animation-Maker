@@ -27,6 +27,13 @@
 #include <QListWidget>
 extern int handle_size; // tests/test_globals.cpp
 #include <QtCore/private/qzipwriter_p.h>
+#ifdef Q_OS_WIN
+// the memory benchmarks' process counter, declared by hand: windows.h macros (LoadLibrary, near/far) clash with this file
+extern "C" {
+struct BenchPMC { unsigned long cb; unsigned long PageFaultCount; size_t Peak1, Work, Q1, Q2, Q3, Q4, Pagefile, PeakPagefile, PrivateUsage; };
+__declspec(dllimport) int __stdcall K32GetProcessMemoryInfo(void *process, BenchPMC *counters, unsigned long size);
+}
+#endif
 
 extern QGraphicsScene *scene;
 extern QGraphicsRectItem *my_rect;
@@ -9752,6 +9759,129 @@ private slots:
         paint();
         QVERIFY(vector_item->masked_cache.isEmpty());
         render_scene.clear(); // the views go before the records they read
+    }
+
+    // ---- Memory benchmarks (print BENCH lines, assert nothing about absolute sizes: they depend on
+    // the viewport). Run on two commits and compare: tst_characterization MemBenchFreehand MemBenchVector.
+    // Process memory is Windows-only (0 elsewhere); the data and cache byte counts are portable.
+    static qint64 BenchPrivateBytes()
+    {
+#ifdef Q_OS_WIN
+        BenchPMC pmc{};
+        pmc.cb = sizeof(pmc);
+        K32GetProcessMemoryInfo(reinterpret_cast<void *>(-1), &pmc, sizeof(pmc)); // -1: the current process
+        return qint64(pmc.PrivateUsage);
+#else
+        return 0;
+#endif
+    }
+
+    static qint64 BenchDistinctBytes(const QList<const QImage *> &images)
+    {
+        QSet<qint64> seen;
+        qint64 total = 0;
+        for (const QImage *image : images)
+            if (!image->isNull() && !seen.contains(image->cacheKey())) {
+                seen.insert(image->cacheKey());
+                total += image->sizeInBytes();
+            }
+        return total;
+    }
+
+    void MemBenchFreehand()
+    {
+        AddFrame();
+        view->resize(1920, 1080);
+        StickData *stick = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        stick->stick_type = StickData::FREEHAND;
+        qint64 base = BenchPrivateBytes(), peak = base;
+        auto sample = [&]{ peak = qMax(peak, BenchPrivateBytes()); };
+        view->EnterDrawMode(stick, false);
+        sample();
+        view->draw_brush_size = 30;
+        view->draw_brush_hardness = 100;
+        auto dab = [this](const QPointF &at){
+            QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(at));
+            QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(at));
+        };
+        const int layers = 5;
+        for (int l = 0; l < layers; l++) {
+            if (l > 0) {
+                view->AddFreehandLayer();
+                sample();
+            }
+            for (int k = 0; k < 3; k++) {
+                dab(QPointF(150 + l * 120 + k * 40, 250 + k * 60));
+                sample();
+            }
+        }
+        for (int k = 0; k < 12; k++) { // a stroke history for the draw-local undo
+            dab(QPointF(200 + k * 30, 600));
+            sample();
+        }
+        auto data_bytes = [stick]{
+            QList<const QImage *> all;
+            for (const FreehandLayer &layer : stick->freehand_layers)
+                all << &layer.image;
+            if (stick->stick_img)
+                all << stick->stick_img;
+            return BenchDistinctBytes(all);
+        };
+        auto file_bytes = [stick]{
+            QByteArray bytes;
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << *stick;
+            return qint64(bytes.size());
+        };
+        const qint64 session_data = data_bytes(), session_proc = BenchPrivateBytes(), session_file = file_bytes();
+        view->ExitDrawMode();
+        sample();
+        const qint64 after_data = data_bytes(), after_proc = BenchPrivateBytes(), after_file = file_bytes();
+        const qint64 kb = 1024;
+        QWARN(qPrintable(QString("BENCH freehand %1 layers: SESSION data=%2 KB proc=+%3 KB peak=+%4 KB file=%5 KB | AFTER EXIT data=%6 KB proc=+%7 KB file=%8 KB")
+                         .arg(layers).arg(session_data / kb).arg((session_proc - base) / kb).arg((peak - base) / kb)
+                         .arg(session_file / kb).arg(after_data / kb).arg((after_proc - base) / kb).arg(after_file / kb)));
+        view->SetTool(NOTOOL);
+    }
+
+    void MemBenchVector()
+    {
+        StickData v;
+        v.stick_type = StickData::VECTOR;
+        v.my_line = QLineF(960, 150, 960, 900);
+        v.img_angle = 0;
+        for (int i = 0; i < 8; i++) {
+            v.vector_shapes << SquareShape(QPointF(-0.5 + i * 0.03, 0.03 * i), 0.7, QBrush(QColor(30 * i, 200 - 20 * i, 90)));
+            if (i % 2 == 1)
+                v.vector_shapes[i].mask = i - 1;
+        }
+        QGraphicsScene render_scene;
+        render_scene.setSceneRect(0, 0, 1920, 1080);
+        StickGraphicsItem *item = new StickGraphicsItem(&v);
+        render_scene.addItem(item);
+        auto paint = [&render_scene]{
+            QImage img(1920, 1080, QImage::Format_ARGB32);
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 1920, 1080), QRectF(0, 0, 1920, 1080));
+        };
+        auto cache_bytes = [item]{
+            qint64 total = 0;
+            for (auto it = item->masked_cache.cbegin(); it != item->masked_cache.cend(); ++it)
+                total += it->image.sizeInBytes();
+            return total;
+        };
+        paint();
+        const qint64 masked = cache_bytes();
+        const int masked_entries = item->masked_cache.size();
+        for (VectorShape &shape : v.vector_shapes)
+            shape.mask = VectorShape::NO_MASK;
+        paint();
+        const qint64 unmasked = cache_bytes();
+        const int unmasked_entries = item->masked_cache.size();
+        const qint64 kb = 1024;
+        QWARN(qPrintable(QString("BENCH vector 8 shapes (4 masked): mask cache %1 KB in %2 entries | after unmasking all: %3 KB in %4 entries")
+                         .arg(masked / kb).arg(masked_entries).arg(unmasked / kb).arg(unmasked_entries)));
+        render_scene.clear();
     }
 };
 
