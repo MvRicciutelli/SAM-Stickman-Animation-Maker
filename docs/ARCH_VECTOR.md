@@ -181,7 +181,16 @@ intersected with `painter->viewport()`; the result is drawn back 1:1 after
 `resetTransform()` (the clip is kept, it lives in device space). `depth`, starting
 at the shape count, bounds the recursion even over a loop. ponytail: one or more
 viewport-sized images per masked shape on every paint; cache on the view if a
-crowded frame drags.
+crowded frame drags. (Done: see "Masked shape cache" below.)
+
+*Masked shape cache*: `StickGraphicsItem::CachedMaskedShape()` keeps each masked shape's composed
+image per view (`masked_cache`). The key is compared by VALUE: the whole `vector_shapes` list
+(through `VectorShape::operator==`, `VectorNode::operator==`, `BrushStroke::operator==`), the
+`PolygonTransform()`, the stick's local frame, the device transform, area, dpr, hints,
+`onion_render` and the scene rect. Only images <= 4 Mpx are kept. **A field added to
+`VectorShape`, `VectorNode` or `BrushStroke` must be added to its `operator==`, or a masked shape
+keeps a stale image.** The cache is freed in `itemChange()` when the view leaves its scene. 3 masked
+sticks: 4.04 -> 0.19 ms. Pinned by `MaskedVectorShapeCacheFollowsShapesAndZoom`.
 
 Every image/video export, icon and onion skin renders through
 `QGraphicsScene::render()` into `paint()`, so they show masks with no extra code.

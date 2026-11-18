@@ -36,6 +36,15 @@ A font missing on load is replaced with Arial by
 by every load path) turns into one prompt. The foreign `.stk`/`.nodes`
 exporters have no text: a TEXT stick leaves as a plain segment.
 
+**Layout cache.** `StickGraphicsItem::CachedTextLayout()` serves `paint()` and `ConstructBr()`.
+First a per-view key (the `text_layout_*` members), then an app-wide content-keyed `QCache`
+(16 MiB; key = text, font, align, wrap, wrap width = line length, line spacing), shared by every
+view showing the same text (onion ghosts and thumbnails draw clones with the same text). GUI thread
+only: the `ImageExport` worker lays out its own, because a `QTextLayout` shapes lazily while
+drawing. A new input of the layout goes in both keys. 10 x 300-word sticks: `paint()` 23.5 -> 5.5 ms,
+`UpdateBr()` ~18 ms -> ~0. The per-view layout is freed in `itemChange()` when the view leaves its
+scene. Pinned by `TextLayoutCacheFollowsTextFontSpacingAndWidth` (skips without fonts, i.e. offscreen).
+
 ### The MULTILINE outline
 
 A MULTILINE is not stroked by the pen: per-vertex widths (`vertex_widths`) are something
@@ -48,6 +57,12 @@ the outer side with the inner side running through the vertex; and `Qt::WindingF
 fills the inner overlap that rule produces (odd-even left a hole). A miter merely *clamped*
 to the limit is wrong: it bends both edges toward the tip and thins both segments.
 `MultilineSharpTurnKeepsAFullWidthBand` pins it by rendering.
+
+`paint()` reuses the built outline (`multiline_spine`, `multiline_bands`) while the `multiline_*`
+keys match: the chain including the preview, parents, caps, widths, curvatures, pen width and the
+preview flag. A new input of the outline must be added to the keys or it goes stale. 0.74 -> 0.37 ms.
+The paths are freed in `itemChange()` when the view leaves its scene. Pinned by
+`MultilineOutlineCacheFollowsVerticesAndWidths`.
 
 ### MULTILINE branches
 

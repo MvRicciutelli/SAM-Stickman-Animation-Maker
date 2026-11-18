@@ -4,6 +4,8 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QRandomGenerator>
+#include <QCache>
+#include <QMutex>
 #include <math.h>
 
 /**
@@ -573,6 +575,51 @@ static QImage Rotated(const QImage &dab, double angle)
     return dab.transformed(QTransform().rotate(angle), Qt::SmoothTransformation);
 }
 
+namespace {
+/// Everything TintedStamp() + Rotated() read: the tip pixels (QImage::cacheKey(), shared by a
+/// copied BrushStroke and raised by any edit), the colour (its alpha is forced to 255 inside, so
+/// rgb() is all of it), the diameter, and the angle when the dab is rotated.
+struct DabKey {
+    qint64 stamp;
+    QRgb color;
+    int diameter;
+    bool rotated;
+    double angle;
+    bool operator==(const DabKey &other) const
+    {
+        return stamp == other.stamp && color == other.color && diameter == other.diameter
+                && rotated == other.rotated && angle == other.angle;
+    }
+};
+size_t qHash(const DabKey &key, size_t seed = 0)
+{
+    return qHashMulti(seed, key.stamp, key.color, key.diameter, key.rotated, key.angle);
+}
+}
+
+/// @details StampAlongPath() runs inside paint(), so without this every repaint of every
+/// brush-bordered stick (canvas, onion skins, icons, exports) smooth-scaled the tip again.
+/// The key is complete, so a hit is the same image the two calls would build. The mutex is for
+/// the ImageExport worker, which paints on its own thread.
+/// ponytail: 16 MiB LRU, app-wide; a dab is brush-sized, so that is hundreds of distinct borders.
+static QImage CachedDab(const QImage &stamp, const QColor &color, int diameter, bool rotated, double angle)
+{
+    static QMutex mutex;
+    static QCache<DabKey, QImage> cache(16 * 1024); // cost in KiB
+    const DabKey key{stamp.cacheKey(), color.rgb(), diameter, rotated, rotated ? angle : 0.0};
+    {
+        QMutexLocker lock(&mutex);
+        if(const QImage *hit = cache.object(key))
+            return *hit;
+    }
+    QImage dab = TintedStamp(stamp, color, diameter);
+    if(rotated)
+        dab = Rotated(dab, angle);
+    QMutexLocker lock(&mutex);
+    cache.insert(key, new QImage(dab), qMax<qsizetype>(1, dab.sizeInBytes() / 1024));
+    return dab;
+}
+
 /// The tip angle plus this dab's share of the rotation jitter.
 static double JitteredAngle(const BrushStroke &brush)
 {
@@ -628,18 +675,17 @@ QImage BrushDab(const BrushStroke &brush, double size_factor, double opacity_fac
 ///   the whole path. The path is flattened ONCE now (toSubpathPolygons()) and walked segment by
 ///   segment, carrying the leftover pitch across segments and subpaths so the rhythm is measured
 ///   along the whole outline and a corner neither restarts it nor re-stamps on itself.
-///
-/// ponytail: the tinted dab is rebuilt per paint() call, not cached across them. That is one
-/// scale per stick per repaint, which is fast enough; if a crowded frame ever drags, the cache
-/// belongs on StickGraphicsItem keyed by (tip, colour, diameter).
+/// - the tinted (and, without jitter, rotated) dab comes from CachedDab(), so a repaint that
+///   changes nothing about the border does no image work before the drawImage calls.
 void StampAlongPath(QPainter *painter, const QPainterPath &path, const BrushStroke &brush)
 {
     if(brush.stamp.isNull() || brush.size <= 0 || path.isEmpty())
         return;
     const double pitch = qMax(1.0, brush.size * qMax(1, int(brush.spacing)) / 100.0);
     const bool varies = brush.size_jitter > 0 || brush.angle_jitter > 0;
-    const QImage base = TintedStamp(brush.stamp, brush.color, qMax(1, int(brush.size + 0.5)));
-    const QImage fixed = varies ? QImage() : Rotated(base, brush.angle);
+    const int diameter = qMax(1, int(brush.size + 0.5));
+    const QImage base = varies ? CachedDab(brush.stamp, brush.color, diameter, false, 0) : QImage();
+    const QImage fixed = varies ? QImage() : CachedDab(brush.stamp, brush.color, diameter, true, brush.angle);
 
     painter->save();
     if(brush.opacity_jitter <= 0)

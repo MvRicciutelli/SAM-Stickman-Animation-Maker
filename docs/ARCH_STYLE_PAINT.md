@@ -696,5 +696,31 @@ changes).
 
 `StickGraphicsItem::taper_path`/`taper_key` cache the `QPainterPath::simplified()` result of the
 TAPER outline in `paint()`; the key is the geometry inputs, so a new input of the shape must be
-added to it or the outline goes stale. The brush border's dab is still rebuilt every `paint()`.
+added to it or the outline goes stale.
+
+### Item cache and the brush-border dab cache
+
+**`CachedDab()`** (`abrbrush.cpp`, used by `StampAlongPath()`) keeps the tinted, scaled (and, when
+rotated, turned) dab in an app-wide `QCache` (16 MiB) behind a mutex (the `ImageExport` worker stamps
+too). Key = tip `cacheKey()`, colour `rgb()`, diameter, rotated flag, angle: the dab was rebuilt on
+every `paint()` before. 20 bordered sticks: 5.8 -> 0.43 ms. A new input of the dab goes in the key.
+Pinned by `BrushBorderDabCacheFollowsColourAndSize`.
+
+**Qt item cache on the canvas.** `StickGraphicsItem::SyncCacheMode()` (run by `Refresh()` and on
+scene/parent change) sets `DeviceCoordinateCache` on TEXT, MULTILINE, VECTOR and brush-bordered
+sticks that are top-level on the canvas scene (not inside a `LayerGroupItem`), not being edited
+(selected, picked vertices/nodes, drawing previews), and while the view is not rotated (a turned
+view rasterized cached edges a few px differently). `QPixmapCache` limit is 64 MiB (`MyView`'s
+constructor). Qt only re-renders on `update()`, and some call sites change an input of `paint()`
+without one, so `StickGraphicsItem::CheckCachedViews()`, at the top of `MyView::paintEvent()`,
+compares each cached view's `PaintState` (editing state, rotated view, root, z, `handle_size`, scene
+rect, `ShapeFrame()`, pen, brush, `stroke_brush`, text, font, vertices, widths, shapes) and purges the
+cache when it differs. **A new input of `paint()` that a call site changes without `update()` or
+`Refresh()` must be added to `PaintState`.** Full repaint of a crowded frame 15.5 -> 3.1 ms;
+dragging a stick across them 10.6 -> 0.25 ms per step. Side effect: a jittered brush border no longer
+re-randomizes on every repaint of a cached stick, only when it is re-rendered. Pinned by
+`ItemCacheCanvasMatchesTheUncachedOne`.
+
+Rejected after measuring: premultiplied copies of ARGB32 texture tiles (within noise);
+`QGraphicsScene::NoIndex` on the throwaway render scenes (6.6%, under the 10% bar).
 

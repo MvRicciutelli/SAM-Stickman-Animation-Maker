@@ -25,6 +25,13 @@ struct VectorNode
     QPointF in_handle;               ///< control point of the segment arriving here, as an offset from pos
     QPointF out_handle;              ///< control point of the segment leaving here, as an offset from pos
     bool smooth = false;             ///< dragging one handle keeps the other collinear (Alt+drag breaks it)
+
+    /// @brief Field by field. A new field must be compared here too (see VectorShape::operator==).
+    bool operator==(const VectorNode &other) const
+    {
+        return pos == other.pos && in_handle == other.in_handle && out_handle == other.out_handle
+                && smooth == other.smooth;
+    }
 };
 
 /**
@@ -58,6 +65,23 @@ struct VectorShape
                                      ///< keep it naming the same shape. A hidden mask still masks.
     bool mask_inverted = false;      ///< false: transparent where the mask is (alpha x (1 - mask alpha));
                                      ///< true: shown only where the mask is (alpha x mask alpha)
+
+    /**
+     * @brief Field by field, every field.
+     *
+     * StickGraphicsItem::CachedMaskedShape() reuses a composed image while its stick's shapes
+     * compare equal: a field added to this struct and not compared here would leave a stale
+     * masked image on screen after it changes.
+     */
+    bool operator==(const VectorShape &other) const
+    {
+        return name == other.name && visible == other.visible && closed == other.closed
+                && nodes == other.nodes && pen == other.pen && brush == other.brush
+                && brush_follows_stick == other.brush_follows_stick
+                && texture_tiled == other.texture_tiled && stroke_brush == other.stroke_brush
+                && depth_offset == other.depth_offset && mask == other.mask
+                && mask_inverted == other.mask_inverted;
+    }
 };
 
 /**

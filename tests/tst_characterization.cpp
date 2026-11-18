@@ -25,6 +25,7 @@
 #include "kritabundle.h"
 #include <QComboBox>
 #include <QListWidget>
+extern int handle_size; // tests/test_globals.cpp
 #include <QtCore/private/qzipwriter_p.h>
 
 extern QGraphicsScene *scene;
@@ -7121,6 +7122,361 @@ private slots:
         QVERIFY2(ghost_frame->onion_pixmap.width() > 150, "the ghost misses the stick drawn later");
     }
 
+    // A frame left or entered with nothing changed keeps its onion ghost and its thumbnails
+    // (MyView::edit_serial, Frame::content_version); an edit through the undo stack, an edit that
+    // only refreshes the stick, and an undo that rebuilds the frame each render them again.
+    void UneditedFrameKeepsItsGhostAndThumbnails()
+    {
+        // back to the last frame: the later slots' AddFrame() must append
+        struct Restore {
+            MyView *v;
+            ~Restore(){ onion_skin_sb->setValue(0); v->MoveToFrame(v->my_animation->frame_list.last()); }
+        } restore{view};
+        AddFrame();
+        Frame *first = CurrentFrame();
+        StickData *stick = DrawStick(QPointF(300, 150), QPointF(300, 250));
+        AddFrame();
+        Frame *second = CurrentFrame();
+        DrawStick(QPointF(500, 150), QPointF(500, 250));
+        onion_skin_sb->setValue(1);
+        auto go = [&](Frame *f){ view->MoveToFrame(f); QCoreApplication::processEvents(); };
+        auto icon_keys = [&]{
+            QList<qint64> keys{ first->frame_icon->cacheKey() };
+            for(StickFigure *S : first->stick_figures)
+                keys << S->stick_figure_icon->cacheKey();
+            return keys;
+        };
+        go(first);
+        go(second);
+        const qint64 ghost = first->onion_pixmap.cacheKey();
+        go(first);
+        const QList<qint64> icons = icon_keys();
+        go(second);
+        QCOMPARE(first->onion_pixmap.cacheKey(), ghost); // left unedited: not rendered again
+        go(first);
+        QCOMPARE(icon_keys(), icons);                     // entered unedited: thumbnails kept
+
+        view->StoreUndo();                                // an edit, as a handler makes it
+        stick->my_line.translate(40, 0);
+        stick->view->Refresh(0);
+        go(second);
+        QVERIFY2(first->onion_pixmap.cacheKey() != ghost, "the edited frame kept its old ghost");
+        go(first);
+        QVERIFY2(icon_keys() != icons, "the edited frame kept its old thumbnails");
+
+        const qint64 edited_ghost = first->onion_pixmap.cacheKey();
+        stick->my_line.translate(40, 0);                  // an edit that skips the undo stack
+        stick->view->Refresh(0);
+        go(second);
+        QVERIFY2(first->onion_pixmap.cacheKey() != edited_ghost, "a refresh-only edit kept the old ghost");
+
+        go(first);
+        const QList<qint64> before_undo = icon_keys();
+        view->undo_stack.undo();                          // rebuilds the current frame
+        QCoreApplication::processEvents();
+        QVERIFY2(icon_keys() != before_undo, "the undo kept the old thumbnails");
+    }
+
+    // A FREEHAND canvas is mostly transparent: its onion ghost must keep that alpha. The grey
+    // conversion went through Format_Grayscale8, which has no alpha channel, so every transparent
+    // canvas pixel came out as an opaque black square on the ghost.
+    void OnionSkinOfAFreehandCanvasKeepsItsTransparency()
+    {
+        struct Restore { ~Restore(){ onion_skin_sb->setValue(0); } } restore;
+        AddFrame();
+        Frame *ghost_frame = view->my_animation->current_frame;
+        StickData *stick = DrawStick(QPointF(300, 150), QPointF(300, 250));
+        QImage *canvas = new QImage(40, 40, QImage::Format_ARGB32_Premultiplied);
+        canvas->fill(Qt::transparent);
+        QPainter(canvas).fillRect(15, 15, 10, 10, QColor(200, 30, 30)); // one painted blob
+        stick->stick_type = StickData::FREEHAND;
+        stick->stick_img_list << canvas; // owned by the stick
+        stick->stick_img = canvas;
+        AddFrame();
+        onion_skin_sb->setValue(1);
+        view->UpdateOnionSkins();
+        const QImage ghost = ghost_frame->onion_pixmap.toImage();
+        QVERIFY(!ghost.isNull());
+        int painted = 0;
+        for(int y = 0; y < ghost.height(); y++)
+            for(int x = 0; x < ghost.width(); x++)
+                if(qAlpha(ghost.pixel(x, y)) != 0)
+                    painted++;
+        // the canvas is drawn len x len (img scale 1) and the blob is 1/16 of it; an opaque canvas
+        // would paint all of it. The ghost itself is cropped to the bounding rect, which is larger.
+        const qreal canvas_area = stick->my_line.length() * stick->my_line.length();
+        QVERIFY2(painted > 0, "the ghost lost the painted blob");
+        QVERIFY2(painted * 4 < canvas_area,
+                 qPrintable(QStringLiteral("transparent canvas pixels painted on the ghost: %1 px, canvas %2 px")
+                            .arg(painted).arg(canvas_area)));
+
+        // the grey copy is cached (StickGraphicsItem::OnionGreyImg()): an edit to the canvas must
+        // reach the next ghost, not the cached grey of the old pixels
+        canvas->fill(QColor(200, 30, 30));
+        ghost_frame->onion_dirty = true;
+        view->UpdateOnionSkins();
+        const QImage edited = ghost_frame->onion_pixmap.toImage();
+        int edited_painted = 0;
+        for(int y = 0; y < edited.height(); y++)
+            for(int x = 0; x < edited.width(); x++)
+                if(qAlpha(edited.pixel(x, y)) != 0)
+                    edited_painted++;
+        QVERIFY2(edited_painted > canvas_area * 0.9,
+                 qPrintable(QStringLiteral("the ghost kept the cached grey of the old canvas: %1 px, canvas %2 px")
+                            .arg(edited_painted).arg(canvas_area)));
+    }
+
+    // The render caches (StampAlongPath()'s tinted dab, the TEXT layout, the MULTILINE outline, the
+    // composed masked VECTOR shape) are reused while their inputs are unchanged. Each check below
+    // renders a stick, changes ONE input a cache keys on, renders the SAME view again and expects
+    // the change on screen: a cache that ignored that input would show the old picture.
+private:
+    static QImage RenderPersistentScene(QGraphicsScene &render_scene, qreal zoom = 1.0)
+    {
+        QImage img(qRound(400 * zoom), qRound(400 * zoom), QImage::Format_ARGB32);
+        img.fill(Qt::white);
+        QPainter painter(&img);
+        render_scene.render(&painter, QRectF(QPointF(0, 0), QSizeF(img.size())), QRectF(0, 0, 400, 400));
+        return img;
+    }
+    static int CountPixels(const QImage &img, bool (*match)(QRgb))
+    {
+        int count = 0;
+        for(int y = 0; y < img.height(); y++)
+            for(int x = 0; x < img.width(); x++)
+                if(match(img.pixel(x, y)))
+                    count++;
+        return count;
+    }
+    static bool Reddish(QRgb c) { return qRed(c) > 150 && qGreen(c) < 100 && qBlue(c) < 100; }
+    static bool Bluish(QRgb c) { return qBlue(c) > 150 && qRed(c) < 100 && qGreen(c) < 100; }
+private slots:
+
+    // Heavy sticks at rest paint through Qt's item cache (StickGraphicsItem::SyncCacheMode()).
+    // paint() also reads state many call sites change WITHOUT update() (the selection flag, the
+    // depth, the handle size, the pen): the canvas must still look exactly as it does with the
+    // cache off. Each step grabs the canvas twice with the cache (the first pass may restack),
+    // then once with every stick's cache off, and compares.
+    void ItemCacheCanvasMatchesTheUncachedOne()
+    {
+        struct Restore {
+            MyView *v; int handles;
+            ~Restore(){ handle_size = handles; v->resetTransform(); }
+        } restore{view, handle_size};
+        AddFrame();
+        view->resize(800, 600);
+        QList<StickData*> heavy;
+        StickData *border = DrawStick(QPointF(100, 100), QPointF(300, 300));
+        border->pen = QPen(QColor(200, 20, 20), 24);
+        border->stroke_brush.stamp = MyView::MakeRoundBrush(64, 100, 100);
+        heavy << border;
+        StickData *multi = DrawStick(QPointF(200, 80), QPointF(200, 400));
+        multi->stick_type = StickData::MULTILINE;
+        multi->img_angle = -atan2(multi->my_line.dx(), multi->my_line.dy()) * 180 / M_PI;
+        multi->polygon_points << QPointF(0.3, 0.5);
+        multi->vertex_widths << 6 << 20 << 6;
+        multi->pen = QPen(QColor(20, 20, 200), 6);
+        heavy << multi;
+        VectorShape mask = SquareShape(QPointF(-0.3, 0.2), 0.5, QBrush(Qt::black));
+        VectorShape masked = SquareShape(QPointF(-0.5, 0.0), 1.0, QBrush(Qt::green));
+        masked.mask = 0;
+        heavy << AddVectorStick(QPointF(250, 150), QPointF(250, 350), { mask, masked });
+        for(StickData *s : heavy){
+            s->view->selected = false;
+            s->view->Refresh(0);
+            QCOMPARE(s->view->cacheMode(), QGraphicsItem::DeviceCoordinateCache);
+        }
+        auto compare = [&](const char *step){
+            view->grab();
+            const QImage cached = view->grab().toImage();
+            for(StickData *s : heavy)
+                s->view->setCacheMode(QGraphicsItem::NoCache);
+            const QImage plain = view->grab().toImage();
+            for(StickData *s : heavy)
+                s->view->SyncCacheMode();
+            QCOMPARE(cached.size(), plain.size());
+            int different = 0;
+            for(int y = 0; y < plain.height(); y++)
+                for(int x = 0; x < plain.width(); x++){
+                    const QRgb a = cached.pixel(x, y), b = plain.pixel(x, y);
+                    if(qAbs(qRed(a) - qRed(b)) > 8 || qAbs(qGreen(a) - qGreen(b)) > 8 || qAbs(qBlue(a) - qBlue(b)) > 8)
+                        different++;
+                }
+            QVERIFY2(different == 0, qPrintable(QStringLiteral("%1: %2 px differ from the uncached canvas")
+                                                .arg(step).arg(different)));
+            view->grab(); // refill the caches: the next edit must meet a cached picture of this state
+        };
+        view->grab();
+        compare("at rest");
+        border->view->selected = true;           // no update(), as the selection code does
+        compare("selected without update");
+        border->view->selected = false;
+        compare("deselected without update");
+        multi->z = border->z + 1;                // no Refresh(): paint() applies the depth
+        compare("depth without update");
+        handle_size = handle_size + 6;
+        compare("handle size");
+        border->pen.setColor(QColor(20, 160, 20)); // no Refresh()
+        compare("pen colour without update");
+        multi->vertex_widths[1] = 40;
+        multi->view->Refresh(0);
+        compare("vertex width with Refresh");
+        heavy.last()->vector_shapes[1].brush = QBrush(Qt::magenta);
+        compare("shape colour without update");
+        view->scale(1.5, 1.5);
+        compare("zoomed");
+        view->rotate(20);
+        compare("rotated");
+        for(StickData *s : heavy)
+            QCOMPARE(s->view->cacheMode(), QGraphicsItem::NoCache); // a turned view paints them plain
+    }
+
+    void BrushBorderDabCacheFollowsColourAndSize()
+    {
+        StickData d;
+        d.stick_type = StickData::LINE;
+        d.my_line = QLineF(200, 50, 200, 350);
+        d.pen = QPen(QColor(220, 20, 20), 24);
+        d.stroke_brush.stamp = MyView::MakeRoundBrush(64, 100, 100);
+        QGraphicsScene render_scene; // declared after d: destroyed first, views before their data
+        render_scene.setSceneRect(0, 0, 400, 400);
+        StickGraphicsItem *item = new StickGraphicsItem(&d);
+        render_scene.addItem(item);
+        QVERIFY(CountPixels(RenderPersistentScene(render_scene), Reddish) > 100);
+
+        d.pen = QPen(QColor(20, 20, 220), 24);
+        const QImage blue = RenderPersistentScene(render_scene);
+        QVERIFY2(CountPixels(blue, Bluish) > 100, "the border lost its new colour");
+        QCOMPARE(CountPixels(blue, Reddish), 0); // not the cached red dab
+
+        const int thin = CountPixels(blue, Bluish);
+        d.pen.setWidthF(48);
+        item->UpdateBr(0);
+        QVERIFY2(CountPixels(RenderPersistentScene(render_scene), Bluish) > thin * 3 / 2,
+                 "the border kept the cached small dab");
+    }
+
+    void TextLayoutCacheFollowsTextFontSpacingAndWidth()
+    {
+        if(QFontDatabase::families().isEmpty())
+            QSKIP("no font installed: nothing to lay out");
+        StickData d;
+        d.stick_type = StickData::TEXT;
+        d.my_line = QLineF(100, 50, 100, 350);
+        d.img_angle = -atan2(d.my_line.dx(), d.my_line.dy()) * 180 / M_PI;
+        d.text = "short";
+        const QStringList families = QFontDatabase::families();
+        d.text_font = QFont(families.contains("Arial") ? QStringLiteral("Arial") : families.first(), 10);
+        QGraphicsScene render_scene;
+        render_scene.setSceneRect(0, 0, 400, 400);
+        StickGraphicsItem *item = new StickGraphicsItem(&d); // keeps its layout across the edits
+        render_scene.addItem(item);
+        // the reference: a brand-new view of a copy, which has nothing cached
+        auto fresh_rect = [&d]{
+            StickData copy;
+            copy.CopyFrom(d);
+            StickGraphicsItem fresh(&copy);
+            return fresh.UpdateBr(0);
+        };
+        auto rect_text = [](const QRectF &r){
+            return QStringLiteral("(%1,%2 %3x%4)").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height());
+        };
+        QRectF previous = fresh_rect();
+        QCOMPARE(item->UpdateBr(0), previous);
+        auto check = [&](const char *what){
+            const QRectF expected = fresh_rect();
+            const QRectF cached = item->UpdateBr(0);
+            QVERIFY2(expected != previous, qPrintable(QStringLiteral("%1 does not move the text block, "
+                     "so it proves nothing: %2").arg(what, rect_text(expected))));
+            QVERIFY2(cached == expected, qPrintable(QStringLiteral("%1 kept the cached layout: %2, expected %3")
+                     .arg(what, rect_text(cached), rect_text(expected))));
+            previous = expected;
+        };
+
+        QString paragraph;
+        for(int w = 0; w < 60; w++)
+            paragraph += QStringLiteral("word%1 ").arg(w);
+        d.text = paragraph;
+        check("the text change");
+        d.text_font.setPointSize(20);
+        check("the font change");
+        d.text_line_spacing = 3.0f;
+        check("the spacing change");
+        d.text_word_wrap = false;
+        check("the wrap switch");
+        d.text_word_wrap = true;
+        check("the wrap switch back");
+        // the layouts are also shared app-wide by content, so the fresh view above is no independent
+        // reference for a change that moves the line rect anyway: a third of the wrap width must
+        // at least double the extent across the lines (the line rect itself only shrinks)
+        const QRectF wide = previous;
+        d.my_line = QLineF(100, 50, 100, 150); // a third of the wrap width
+        d.img_angle = -atan2(d.my_line.dx(), d.my_line.dy()) * 180 / M_PI;
+        check("the wrap width change");
+        QVERIFY2(qMax(previous.width(), previous.height()) > 2 * qMax(wide.width(), wide.height()),
+                 qPrintable(QStringLiteral("the wrap width change kept the shared layout: %1 after %2")
+                            .arg(rect_text(previous), rect_text(wide))));
+    }
+
+    void MultilineOutlineCacheFollowsVerticesAndWidths()
+    {
+        StickData d;
+        d.stick_type = StickData::MULTILINE;
+        d.my_line = QLineF(200, 50, 200, 350);
+        d.img_angle = -atan2(d.my_line.dx(), d.my_line.dy()) * 180 / M_PI;
+        d.pen = QPen(QColor(220, 20, 20), 4);
+        d.polygon_points << QPointF(0.2, 0.5);
+        d.vertex_widths << 4 << 4 << 4;
+        QGraphicsScene render_scene;
+        render_scene.setSceneRect(0, 0, 400, 400);
+        StickGraphicsItem *item = new StickGraphicsItem(&d);
+        render_scene.addItem(item);
+        const QImage thin = RenderPersistentScene(render_scene);
+        QVERIFY(CountPixels(thin, Reddish) > 100);
+
+        d.vertex_widths[1] = 40;
+        item->UpdateBr(0);
+        const QImage wide = RenderPersistentScene(render_scene);
+        QVERIFY2(CountPixels(wide, Reddish) > CountPixels(thin, Reddish) * 2,
+                 "the width change kept the cached outline");
+
+        d.polygon_points[0] = QPointF(-0.2, 0.5);
+        item->UpdateBr(0);
+        QVERIFY2(RenderPersistentScene(render_scene) != wide, "the vertex move kept the cached outline");
+    }
+
+    void MaskedVectorShapeCacheFollowsShapesAndZoom()
+    {
+        StickData v;
+        v.stick_type = StickData::VECTOR;
+        v.my_line = QLineF(100, 50, 100, 150); // pointing down: local (x, y) -> (100 + 100x, 50 + 100y)
+        v.img_angle = 0;
+        VectorShape mask = SquareShape(QPointF(-0.4, 0.1), 0.6, QBrush(Qt::black)); // scene 60..120
+        VectorShape masked = SquareShape(QPointF(-0.5, 0.0), 1.0, QBrush(Qt::red)); // scene 50..150
+        masked.mask = 0;
+        v.vector_shapes << mask << masked;
+        QGraphicsScene render_scene;
+        render_scene.setSceneRect(0, 0, 400, 400);
+        render_scene.addItem(new StickGraphicsItem(&v));
+        const QPoint outside_mask(55, 55), inside_mask(90, 90);
+        QImage img = RenderPersistentScene(render_scene);
+        QCOMPARE(img.pixelColor(outside_mask), QColor(Qt::red));
+        QCOMPARE(img.pixelColor(inside_mask), QColor(Qt::black)); // the hole shows the mask shape
+
+        v.vector_shapes[1].brush = QBrush(Qt::green);
+        img = RenderPersistentScene(render_scene);
+        QVERIFY2(img.pixelColor(outside_mask) == QColor(Qt::green), "the colour change kept the cached image");
+
+        v.vector_shapes[0].visible = false; // a hidden mask still masks: only the black fill goes
+        img = RenderPersistentScene(render_scene);
+        QCOMPARE(img.pixelColor(inside_mask), QColor(Qt::white));
+
+        img = RenderPersistentScene(render_scene, 2.0); // another device transform
+        QVERIFY2(img.pixelColor(outside_mask * 2) == QColor(Qt::green), "the zoom reused the 1x image");
+        QCOMPARE(img.pixelColor(inside_mask * 2), QColor(Qt::white));
+        QCOMPARE(img.pixelColor(QPoint(160, 260)), QColor(Qt::green)); // scene (80, 130): below the mask
+    }
+
     // The view-only navigation tools (ROTATEVIEW/PANVIEW) and ResetView(), driven by real mouse
     // events: they move the VIEW and nothing else — the stick, the undo stack and the scene's own
     // rect (what icons and exports render) stay as they were. The pan runs zoomed out, where the
@@ -7569,6 +7925,9 @@ private slots:
         const VectorShape before = v->vector_shapes[0];
         const QRectF box = VectorPath(before, to_scene).boundingRect();
 
+        // the slots share one undo stack: at MAXUNDO a push drops the oldest entry and the count
+        // stays, so measure "one undo step" on an empty history
+        view->undo_stack.clear();
         const int steps = view->undo_stack.count();
         QVERIFY(view->FlipVectorShapes({0}, true));
         QCOMPARE(view->undo_stack.count(), steps + 1);
@@ -8711,6 +9070,31 @@ private slots:
         QVERIFY2(edge > 30 && edge < 225, qPrintable(QString::number(edge)));
         QCOMPARE(qAlpha(out.pixel(215, 80)), 0);
         QCOMPARE(QColor(out.pixel(80, 80)), QColor(Qt::white)); // the layer itself untouched
+
+        // a part split into row bands on several threads (BuildPart()) equals the one-piece
+        // result exactly: hard-edged glows run at full resolution, so they band the most
+        QImage tall(240, 400, QImage::Format_ARGB32_Premultiplied);
+        tall.fill(Qt::transparent);
+        {
+            QPainter p(&tall);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setPen(QPen(Qt::black, 3));
+            for(int i = 0; i < 8; i++)
+                p.drawLine(QPointF(120, 200), QPointF(120 + 100 * qCos(i * 0.8), 200 + 180 * qSin(i * 0.8)));
+            p.fillRect(QRect(60, 60, 50, 50), Qt::white);
+        }
+        struct RestoreBands { ~RestoreBands() { layer_effects_max_bands = 8; } } restore_bands;
+        for(bool inside : { false, true }){
+            LayerOptions glow;
+            glow.glow.enabled = true;
+            glow.glow.inside = inside;
+            glow.glow.smoothness = 2;
+            glow.outer_shadow.enabled = true;
+            layer_effects_max_bands = 1;
+            const QImage one_piece = ApplyLayerEffects(tall, glow, identity);
+            layer_effects_max_bands = 8;
+            QCOMPARE(ApplyLayerEffects(tall, glow, identity), one_piece);
+        }
     }
 };
 

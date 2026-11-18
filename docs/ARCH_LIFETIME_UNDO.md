@@ -282,11 +282,31 @@ Frames outside the shown range drop their pixmap, so the cache is bounded by the
 animation length. `RenderOnionSkin()` still clones through `CloneForRender()` and clears its scene
 before `qDeleteAll()`.
 
-*Invalidation rule*: every edit happens on the CURRENT frame, so `MyView::MoveToFrame()` sets
-`onion_dirty` on the frame it leaves (the current one on entry, which is also the frame an
-undo/redo restore passes through). Code that edits a frame that is NOT current must set
-`onion_dirty = true` itself; the REPOSCALE/REPO loops of `MyView::SizeChange()` do. Forget it and
-the ghost shows the old drawing. Pinned by `OnionSkinGhostIsCachedUntilItsFrameIsLeft`.
+*Invalidation rule*: every edit happens on the CURRENT frame, so `MyView::MoveToFrame()` marks
+the frame it leaves, but ONLY if it was edited (see "Edit tracking" below). Code that edits a
+frame that is NOT current must call `MyView::MarkFrameEdited(frame)` itself; the REPOSCALE/REPO
+loops of `MyView::SizeChange()` do. Forget it and the ghost shows the old drawing. Pinned by
+`OnionSkinGhostIsCachedUntilItsFrameIsLeft` and `UneditedFrameKeepsItsGhostAndThumbnails`.
+
+*Edit tracking*: marking every frame left made a plain frame step re-render a ghost and all
+thumbnails for nothing. Now `MyView::edit_serial` is a counter raised by every `undo_stack`
+`indexChanged` and every `Refresh()` of a canvas stick, and `MyView::entered_serial` is recorded
+at the end of `MoveToFrame()`. On leaving, `MoveToFrame()` calls `MyView::MarkFrameEdited(frame)` (raises
+`Frame::content_version`, sets `onion_dirty`) only if `edit_serial != entered_serial`.
+`QueueFrameIcons()` skips the thumbnails when `Frame::icons_version == content_version`, the scene
+rect is unchanged, `edit_serial` did not move and no icon is null. Over-counting is safe (it only
+costs a re-render); under-counting shows a stale ghost, which is why BOTH sources bump
+(`indexChanged` and `Refresh()`). Undo/redo rebuilds call `MoveToFrame()` INSIDE `undo()`, and
+`indexChanged` fires after it returns, so the bump lands after the restore's `MoveToFrame()` has
+recorded `entered_serial` and the next departure from that frame sees it as edited.
+`UpdateOnionSkins()` also keeps the CURRENT frame's ghost (it is the one shown next when stepping
+forward). Measured, text-heavy frame step: 13.9 -> 5.8 ms.
+
+*Image ghosts keep alpha*: `StickGraphicsItem::OnionGreyImg()` greys the IMAGE/FREEHAND image at
+its painted size and keeps the alpha channel. The old `Format_Grayscale8` conversion had no alpha,
+so transparent canvas pixels showed as opaque black. The result sits in an app-wide `QCache` (64 MiB,
+key = `stick_img->cacheKey()` + painted size, mutex because the `ImageExport` worker renders too).
+4 freehand 700x700 ghosts: 5.2 -> 1.0 ms. Pinned by `OnionSkinOfAFreehandCanvasKeepsItsTransparency`.
 
 **`MoveToFrame()` no longer calls `Frame::Refresh(0)`**: that remove/re-add of every view
 duplicated the attach loop just above it. It calls `StickFigure::Refresh(0)` per figure, then

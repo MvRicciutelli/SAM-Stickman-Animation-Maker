@@ -3,6 +3,7 @@
 #include <QPainter>
 #include <QtMath>
 #include <future>
+#include <thread>
 
 bool LayerShadow::operator==(const LayerShadow &o) const
 {
@@ -397,8 +398,13 @@ QVector<int> Downscale(const QVector<int> &grid, int w, int h, int f, int *small
     for(int y = 0; y < h; y++){
         int *dest = d + (y / f) * sw;
         const int *src = g + y*w;
-        for(int x = 0; x < w; x++)
-            dest[x / f] += src[x];
+        for(int x0 = 0; x0 < w; x0 += f){ // one cell per f pixels: no division per pixel
+            const int x1 = qMin(x0 + f, w);
+            int sum = 0;
+            for(int x = x0; x < x1; x++)
+                sum += src[x];
+            *dest++ += sum;
+        }
     }
     const int n = f * f;
     for(int i = 0; i < sw * sh; i++)
@@ -419,16 +425,47 @@ struct EffectPart
 /// @brief Builds one part of an effect: @p coverage (inverted first when @p invert) grown by
 /// @p grow pixels, blurred by @p soften pixels and tinted, to be drawn with its top-left at @p at
 /// (image pixels). The work runs at 1/@p f resolution and is drawn back up with smooth scaling.
-/// Reads only its arguments, so the parts of one layer are built on separate threads.
+/// Reads only its arguments, so the parts of one layer are built on separate threads. The
+/// dilate and blur also run split into up to @p bands row bands, one thread each: a glow does
+/// four box passes, and with a hard edge (blur under 4 px) at full resolution, so one thread
+/// per part left it the slowest part by far. Each band carries `halo` extra rows of real data
+/// on both sides, as many as the four column passes read, so the rows it keeps equal the
+/// one-piece result exactly (the grid's own border reads zeros either way).
 EffectPart BuildPart(const QVector<int> &coverage, bool invert, int w, int h, int f, double grow,
-                     double soften, const QColor &color, double opacity, QPointF at, qreal dpr)
+                     double soften, const QColor &color, double opacity, QPointF at, qreal dpr,
+                     int bands)
 {
     int sw = w, sh = h;
     QVector<int> g = invert ? Inverted(coverage) : coverage;
     if(f > 1)
         g = Downscale(g, w, h, f, &sw, &sh);
-    Dilate(g, sw, sh, grow / f);
-    Blur(g, sw, sh, soften / f);
+    const int dilate_r = grow / f < 0.5 ? 0 : qRound(qMax(2.0, grow / f) / 2); // as in Dilate()
+    const int halo = 2 * (dilate_r + qMax(0, qRound(soften / f / 2)));         // and Blur()
+    bands = qBound(1, bands, sh / qMax(32, 2 * halo)); // thin bands would be mostly halo
+    if(bands == 1){
+        Dilate(g, sw, sh, grow / f);
+        Blur(g, sw, sh, soften / f);
+    }
+    else{
+        QVector<int> result(sw * sh);
+        const int band = (sh + bands - 1) / bands;
+        auto run = [&g, &result, sw, sh, band, halo, f, grow, soften](int y0){
+            const int y1 = qMin(y0 + band, sh);
+            const int a = qMax(0, y0 - halo), b = qMin(sh, y1 + halo);
+            QVector<int> part(g.constData() + a * sw, g.constData() + b * sw);
+            Dilate(part, sw, b - a, grow / f);
+            Blur(part, sw, b - a, soften / f);
+            std::copy(part.constData() + (y0 - a) * sw, part.constData() + (y1 - a) * sw,
+                      result.data() + y0 * sw);
+        };
+        std::vector<std::future<void>> jobs;
+        for(int y0 = band; y0 < sh; y0 += band)
+            jobs.push_back(std::async(std::launch::async, run, y0));
+        run(0);
+        for(std::future<void> &job : jobs)
+            job.get();
+        g.swap(result);
+    }
     if(f == 1)
         return { Tint(g, sw, sh, color, opacity, dpr), QRectF(at / dpr, QSizeF()) };
     return { Tint(g, sw, sh, color, opacity, 1), QRectF(at / dpr, QSizeF(sw * f / dpr, sh * f / dpr)) };
@@ -461,6 +498,7 @@ QPointF ShadowOffset(const LayerShadow &s, const QTransform &world)
 /// devicePixelRatio because QPainter positions in logical pixels; the grids are physical.
 QAtomicInt layer_effects_runs = 0;
 QAtomicInt layer_effects_pixels = 0;
+int layer_effects_max_bands = 8; // measured: more threads cost more to start than they save
 
 QImage ApplyLayerEffects(const QImage &source, const LayerOptions &o, const QTransform &world)
 {
@@ -482,13 +520,17 @@ QImage ApplyLayerEffects(const QImage &source, const LayerOptions &o, const QTra
     const QVector<int> mask = AlphaGrid(layer);
 
     // every enabled part is built on its own thread (they only read the mask), then drawn in
-    // order below. ponytail: a thread per part per recompose; a pool if thread start-up shows
-    auto start = [&mask, w, h, dpr](bool enabled, bool invert, int f, double grow, double soften,
+    // order below. ponytail: a thread per part (and band) per recompose; a pool if start-up shows
+    const int parts = int(o.outer_shadow.enabled) + int(o.glow.enabled) + int(o.outline.enabled)
+            + int(o.inner_shadow.enabled);
+    const int bands = qBound(1, int(std::thread::hardware_concurrency()) / qMax(1, parts),
+                             layer_effects_max_bands);
+    auto start = [&mask, w, h, dpr, bands](bool enabled, bool invert, int f, double grow, double soften,
                                     QColor color, double opacity, QPointF at){
         if(!enabled)
             return std::future<EffectPart>();
         return std::async(std::launch::async, [=, &mask]{
-            return BuildPart(mask, invert, w, h, f, grow, soften, color, opacity, at, dpr);
+            return BuildPart(mask, invert, w, h, f, grow, soften, color, opacity, at, dpr, bands);
         });
     };
     const double glow_soft = o.glow.smoothness * s;

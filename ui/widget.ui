@@ -2111,7 +2111,7 @@ QPushButton:pressed{
                 <item>
                  <widget class="QTabWidget" name="toolsTabWidget">
                   <property name="currentIndex">
-                   <number>1</number>
+                   <number>0</number>
                   </property>
                   <widget class="QWidget" name="drawingTab">
                    <property name="toolTip">
@@ -2636,19 +2636,19 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    image: url(:/resources/copystickfigure_00001.png);
+    image: url(:/resources/stick_copy_00001.png);
     width: 50px;
     height: 50px;
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    image: url(:/resources/copystickfigure_00002.png);
+    image: url(:/resources/stick_copy_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    image: url(:/resources/copystickfigure_00003.png);
+    image: url(:/resources/stick_copy_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2679,19 +2679,19 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    image: url(:/resources/pastestickfigure_00001.png);
+    image: url(:/resources/stick_paste_00001.png);
     width: 50px;
     height: 50px;
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    image: url(:/resources/pastestickfigure_00002.png);
+    image: url(:/resources/stick_paste_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    image: url(:/resources/pastestickfigure_00003.png);
+    image: url(:/resources/stick_paste_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -2722,19 +2722,19 @@ QPushButton:pressed{
                                 <string notr="true">QPushButton {
     qproperty-icon: url(&quot; &quot;); /* empty image */
     qproperty-iconSize: 16px 16px; /* space for the background image */
-    image: url(:/resources/pasteFrame_00001.png);
+    image: url(:/resources/stick_paste_o_00001.png);
     width: 50px;
     height: 50px;
     background-repeat: no-repeat;
 	border: 0px solid #5A5A5A;
 }
 QPushButton:hover{
-    image: url(:/resources/pasteFrame_00002.png);
+    image: url(:/resources/stick_paste_o_00002.png);
     background-repeat: no-repeat;
 	background-color: rgb(25, 25, 25)
 }
 QPushButton:pressed{
-    image: url(:/resources/pasteFrame_00003.png);
+    image: url(:/resources/stick_paste_o_00003.png);
     background-repeat: no-repeat;
 }
 </string>
@@ -3349,7 +3349,7 @@ QPushButton:pressed{
                          <x>0</x>
                          <y>0</y>
                          <width>218</width>
-                         <height>769</height>
+                         <height>783</height>
                         </rect>
                        </property>
                        <layout class="QVBoxLayout" name="verticalLayout_14" stretch="0,1,0,1">

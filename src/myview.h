@@ -563,6 +563,16 @@ public:
      */
     void QueueFrameIcons();
     bool frame_icons_queued = false; ///< a QueueFrameIcons() pass is pending
+    /// @brief Raised by every undo-stack change (push, undo, redo) and every Refresh() of a canvas
+    ///        stick: something on the current frame may have changed. Over-counting only re-renders.
+    quint64 edit_serial = 0;
+    quint64 entered_serial = 0; ///< edit_serial when MoveToFrame() finished entering the current frame
+    /**
+     * @brief Records that @p frame changed: its onion ghost renders again, and its thumbnails the
+     *        next time it is entered.
+     * @param frame the edited frame.
+     */
+    void MarkFrameEdited(Frame *frame);
 
     /**
      * @brief Ends the "Fast move" pause: layer effects are composed again on the next repaint.

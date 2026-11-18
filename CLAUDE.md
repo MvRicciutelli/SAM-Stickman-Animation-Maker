@@ -167,8 +167,13 @@ void Widget::on_someBtn_clicked(){
 - "Fast move" (`fastMoveCheckBox`, `MyView::fast_move_effects`, off, not persisted): while a button is down and the mouse moves, `layer_effects_paused` makes live effects paint plain; `MyView::ResumeLayerEffects()` at every mouse release composes once. Slider gestures are not covered.
 - Soft parts (shadow, glow, Blur) run at 1/2..1/4 size from 4 px of blur (`SoftFactor()`); outline and blurs under 4 px stay full resolution. Each effect part is built on its own thread (`std::async`, `BuildPart`), then drawn in order (`PaintPart`).
 
-**Render caches and overlays** (onion: `docs/ARCH_LIFETIME_UNDO.md`; freehand, TAPER: `docs/ARCH_STYLE_PAINT.md`)
-- Onion ghosts are cached on `Frame` (`onion_pixmap`, `onion_dirty`) and re-rendered only when dirty. `MoveToFrame()` dirties the frame it leaves; code that edits a frame that is NOT current must set `onion_dirty = true` itself (see `SizeChange()`), or the ghost goes stale.
+**Render caches and overlays** (onion: `docs/ARCH_LIFETIME_UNDO.md`; freehand, TAPER, brush border, item cache: `docs/ARCH_STYLE_PAINT.md`; text/multiline: `docs/ARCH_TEXT_MULTILINE.md`; masked vector: `docs/ARCH_VECTOR.md`)
+- Onion ghosts are cached on `Frame` (`onion_pixmap`, `onion_dirty`) and re-rendered only when dirty. `MoveToFrame()` calls `MyView::MarkFrameEdited(frame)` (raises `Frame::content_version`, sets `onion_dirty`) on the frame it leaves ONLY if `MyView::edit_serial` moved since `entered_serial` (undo `indexChanged` and every canvas-stick `Refresh()` raise it). Code that edits a frame that is NOT current must call `MarkFrameEdited(frame)` itself (see `SizeChange()`), or the ghost goes stale. `QueueFrameIcons()` skips thumbnails while `icons_version == content_version`; `UpdateOnionSkins()` keeps the CURRENT frame's ghost too.
+- `OnionGreyImg()` greys IMAGE/FREEHAND ghosts keeping alpha (never `Format_Grayscale8`: transparent pixels turn black). Caches are app-wide `QCache`s behind a mutex (`ImageExport` worker): onion grey image (64 MiB, key `cacheKey()` + painted size) and `CachedDab()` for brush borders (16 MiB, key tip `cacheKey()`, `rgb()`, diameter, rotated flag, angle). A key must list every input of the cached result.
+- `CachedTextLayout()` serves `paint()`/`ConstructBr()` (per-view `text_layout_*` key, then a content-keyed app-wide `QCache`, 16 MiB). GUI thread only: the `ImageExport` worker lays out its own. MULTILINE `paint()` reuses `multiline_spine`/`multiline_bands` while the `multiline_*` keys match: a new input of the outline goes in the key.
+- `CachedMaskedShape()` (`masked_cache`) compares the whole `vector_shapes` list BY VALUE through `VectorShape`/`VectorNode`/`BrushStroke::operator==`: a field added to any of them must be added to its `operator==`, or a masked shape keeps a stale image.
+- `SyncCacheMode()` sets `DeviceCoordinateCache` on TEXT/MULTILINE/VECTOR/brush-bordered sticks that are top-level on the canvas and not being edited or in a rotated view. `CheckCachedViews()` (top of `MyView::paintEvent()`) purges a cache whose `PaintState` changed without `update()`: a new input of `paint()` that a call site changes without `update()`/`Refresh()` must be added to `PaintState`.
+- Per-view caches (masked images, text layout, multiline paths) are freed in `itemChange()` when the view leaves its scene: views of visited frames stay alive off-scene.
 - Per-mouse-move repaints of the foreground go through `UpdateOverlay()`, never `viewport()->update()` (a full repaint re-renders every `LayerEffect`). A new `drawForeground()` overlay must add its geometry to `OverlayBounds()`.
 - `MoveToFrame()` does not call `Frame::Refresh(0)`; thumbnails come from the queued `QueueFrameIcons()`. `PaintStrokeSegment()` repaints only the dabs' dirty rect and never calls `Refresh()`. `taper_key` must list every input of the TAPER outline.
 
@@ -257,7 +262,6 @@ release/tst_characterization.exe
 - The texture arrow's anchor jumps to the mirror side when a tip drag crosses the stick's direction
   (deliberate; a fixed side has an ungrabbable tip at one scale).
 - A brush border is stamped at scene scale, so a dab is resampled when zoomed in or exported larger.
-  The tinted dab is rebuilt every `paint()`; if a crowded frame drags, cache it on `StickGraphicsItem`.
 - Tiling is fill-only: a stroke texture always repeats.
 - VECTOR shapes have no texture arrow handle (v1 scope).
 - Vector layer thumbnails (`VectorShapeIcon`) ignore brush borders, texture placement and masks.
@@ -267,7 +271,8 @@ release/tst_characterization.exe
 - Layer/frame thumbnails and onion skins ignore layer options; a drag inside a layer with effects, and zoom, recompose the layer per change (idle repaints and scroll are cached), bounded by the viewport size; "Fast move" avoids it during drags. Zoomed in, a stick wholly outside the viewport is culled, so its shadow/glow does not reach into the viewport edge; scrolling over a layer larger than the viewport shows the new strip without effects for one repaint.
 
 - `StickGraphicsItem::onion_render` is a static shared with the `ImageExport` worker thread: an export running while onion skins render can paint a frame grey. `static thread_local` segfaulted the MinGW 11.2 test build; fix = a per-view flag on the onion render views.
-- Measured perf follow-ups not done: `UpdateBr()` mode 1 unions old+new rect so a bounding rect grows during a drag (and vector pen hover); NoIndex on throwaway render scenes / the canvas scene; parallel PREVIEW render in `ImageExport`; MULTILINE/TEXT/masked-vector paint caches.
+- Measured perf follow-ups not done: `UpdateBr()` mode 1 unions old+new rect so a bounding rect grows during a drag (and vector pen hover); parallel PREVIEW render in `ImageExport`. `QGraphicsScene::NoIndex` on the throwaway render scenes was measured at 6.6% and not applied.
+- A jittered brush border on a cached stick (`SyncCacheMode()`) re-randomizes only when re-rendered, not on every repaint.
 
 ## Tooling
 

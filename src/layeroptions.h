@@ -177,6 +177,12 @@ extern QAtomicInt layer_effects_runs;
 extern QAtomicInt layer_effects_pixels;
 
 /**
+ * @brief Upper bound on the row bands one effect part is split into (one thread each). The
+ *        tests set it to 1 to pin that the banded result equals the one-piece one.
+ */
+extern int layer_effects_max_bands;
+
+/**
  * @brief One box-blur pass along x then y over a w×h grid of 0..255 values.
  * @param grid values, row-major, rewritten in place.
  * @param w grid width. @param h grid height.

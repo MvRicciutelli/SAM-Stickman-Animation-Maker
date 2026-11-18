@@ -335,5 +335,14 @@
         <file>resources/36_ellipse_00001.png</file>
         <file>resources/36_rect_00001.png</file>
         <file>resources/36_poly_selection_00001.png</file>
+        <file>resources/stick_copy_00001.png</file>
+        <file>resources/stick_copy_00002.png</file>
+        <file>resources/stick_copy_00003.png</file>
+        <file>resources/stick_paste_00001.png</file>
+        <file>resources/stick_paste_00002.png</file>
+        <file>resources/stick_paste_00003.png</file>
+        <file>resources/stick_paste_o_00001.png</file>
+        <file>resources/stick_paste_o_00002.png</file>
+        <file>resources/stick_paste_o_00003.png</file>
     </qresource>
 </RCC>

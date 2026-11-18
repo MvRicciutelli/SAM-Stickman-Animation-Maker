@@ -10,6 +10,9 @@
 #include <stickdata.h>
 #include <layeroptions.h>
 #include <QGraphicsEffect>
+#include <QHash>
+#include <QTextLayout>
+#include <memory>
 
 #define STEPCHILD -1    ///< legacy marker for "attached to the parent's origin" (kept for old call sites)
 #define STKTYPE 90000   ///< QGraphicsItem::type() id, lets scene code recognize stick items (see SceneRemover)
@@ -96,6 +99,12 @@ public:
      * @return the painted size in scene units; empty when there is no usable image.
      */
     QSizeF CalcImgSize() const;
+
+    /**
+     * @brief CalcImg() in grey with its alpha kept, as an onion render paints it; cached app-wide.
+     * @return the grey image at the painted size; null when there is no usable image.
+     */
+    QImage OnionGreyImg();
 
     /**
      * @brief Paints the stick according to its StickData (type, pen, brush, image).
@@ -450,6 +459,109 @@ public:
     /// @brief The inputs taper_path was built from: img_w_scale, img_h_scale, line length,
     ///        hard_bottom, hard_top (bools as 0/1). Empty = nothing cached.
     QVector<double> taper_key;
+
+    /**
+     * @brief The TEXT layout LayoutText() builds, reused while every input it reads is unchanged.
+     * @param local_rect if not null, receives the layout's bounding rect in the text frame.
+     * @return the laid-out paragraph, ready to draw in TextFrame().
+     */
+    const QTextLayout &CachedTextLayout(QRectF *local_rect);
+    std::shared_ptr<QTextLayout> text_layout; ///< CachedTextLayout()'s layout (shared app-wide); null until first needed
+    QRectF text_layout_rect;                  ///< its bounding rect in the text frame
+    QString text_layout_text;                 ///< key: StickData::text it was laid out from
+    QFont text_layout_font;                   ///< key: StickData::text_font
+    qint32 text_layout_align = 0;             ///< key: StickData::text_align
+    bool text_layout_wrap = false;            ///< key: StickData::text_word_wrap
+    double text_layout_width = -1;            ///< key: the line length (the wrap width); -1 = nothing cached
+    float text_layout_spacing = 0;            ///< key: StickData::text_line_spacing
+
+    /// @brief MULTILINE outline cache for paint(): the spine and the filled bands, valid while
+    ///        multiline_valid and the multiline_* keys below match the inputs.
+    QPainterPath multiline_spine;
+    QPainterPath multiline_bands;
+    bool multiline_valid = false;
+    QPolygonF multiline_chain;              ///< key: ScenePolygon(), the preview vertex included
+    QList<qint32> multiline_parents;        ///< key: the vertex tree, preview included
+    QList<qint32> multiline_caps;           ///< key: the joints, preview included
+    QList<float> multiline_widths;          ///< key: StickData::vertex_widths
+    QList<float> multiline_curvatures;      ///< key: StickData::vertex_curvatures
+    double multiline_pen_width = 0;         ///< key: the width of a vertex with no width of its own
+    bool multiline_preview = false;         ///< key: poly_preview_active
+
+    /// @brief One masked VECTOR shape as MaskedShapeImage() composed it, with every input it read.
+    struct MaskedShapeCache {
+        QImage image;
+        QList<VectorShape> shapes;          ///< the whole list: a mask is another shape of it
+        QTransform to_device;
+        QTransform polygon_xf;              ///< StickData::PolygonTransform()
+        QTransform local_frame;             ///< StickLocalFrame(): texture and gradient anchoring
+        QRect area;
+        qreal dpr = 1;
+        QPainter::RenderHints hints;
+        bool onion = false;
+        QRectF scene_rect;                  ///< AlignBrush() anchors scene-fixed gradients to it
+    };
+    QHash<int, MaskedShapeCache> masked_cache; ///< per shape index; freed when the view leaves its scene
+
+    /**
+     * @brief MaskedShapeImage() for shape @p index over @p area, reused while nothing it reads changed.
+     * @param index a valid index into StickData::vector_shapes.
+     * @param to_device the painter's combined transform.
+     * @param area the device rectangle to compose.
+     * @param dpr the device pixel ratio.
+     * @param hints the painter's render hints.
+     * @return the composed image, drawn 1:1 at @p area's corner.
+     */
+    QImage CachedMaskedShape(int index, const QTransform &to_device, const QRect &area, qreal dpr,
+                             QPainter::RenderHints hints);
+
+    /**
+     * @brief What paint() reads that can change without anybody calling update(): the editing
+     *        state, the depth, the handle size, the scene rect, and the main paint inputs.
+     */
+    struct PaintState {
+        bool editing = false;
+        bool rotated_view = false;  ///< the canvas view is turned (ROTATEVIEW): cached edges differ by a few px
+        bool root = false;
+        double z = 0;
+        int handle = 0;
+        QRectF scene_rect;
+        QTransform frame;
+        QPen pen;
+        QBrush brush;
+        BrushStroke border;
+        QString text;
+        QFont font;
+        QList<QPointF> points;
+        QList<float> widths;
+        QList<VectorShape> shapes;
+        bool operator==(const PaintState &other) const
+        {
+            return editing == other.editing && rotated_view == other.rotated_view
+                    && root == other.root && z == other.z
+                    && handle == other.handle && scene_rect == other.scene_rect
+                    && frame == other.frame && pen == other.pen && brush == other.brush
+                    && border == other.border && text == other.text && font == other.font
+                    && points == other.points && widths == other.widths && shapes == other.shapes;
+        }
+    };
+    /// @brief The current PaintState of this view.
+    PaintState CurrentPaintState() const;
+    PaintState cached_paint_state; ///< the PaintState the item cache was last synced with
+
+    /**
+     * @brief Turns Qt's item cache (DeviceCoordinateCache) on for a heavy stick at rest on the
+     *        canvas, off otherwise. Runs on every Refresh() and scene/parent change.
+     */
+    void SyncCacheMode();
+
+    /**
+     * @brief Called by MyView::paintEvent() before painting: purges the item cache of every cached
+     *        view whose PaintState changed without an update(), so a cached picture never outlives
+     *        what it shows.
+     */
+    static void CheckCachedViews();
+    static QSet<StickGraphicsItem*> cached_views; ///< canvas views that paint through the item cache
 
     /**
      * @brief The extra scene items that paint this VECTOR stick's shapes having a depth of their

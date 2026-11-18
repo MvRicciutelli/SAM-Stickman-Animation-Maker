@@ -136,6 +136,24 @@ fallback for other platforms is described in the `ponytail:` comment in the code
 - Threads: each enabled part (outer shadow, outer glow, outline, inner glow, inner shadow) is built on
   its own thread with `std::async` (`BuildPart`), then drawn in order (`PaintPart`). `BlurImage` blurs
   its 4 channels on 4 threads.
+- Inside a part, the dilate and blur also run in row bands, one thread each. Bands = hardware threads /
+  enabled parts, capped by `layer_effects_max_bands` (8, measured: more threads cost more to start than
+  they save) and by a minimum band height of max(32, 2 × halo) rows. Each band carries `halo` extra rows
+  (the summed radii of the four column box passes) on both sides, so the result is bit-identical to the
+  one-piece run. The test `ApplyLayerEffectsShapesThePixels` pins that by setting
+  `layer_effects_max_bands` to 1 and comparing.
+- Why glow is the slow part: a glow is a shadow plus `Dilate()` (two more box passes and a ×8 clamp
+  pass), and its resolution factor comes from its smoothness alone, so a hard-edged glow (smoothness ×
+  zoom under 4 px) runs all four passes at full resolution. Measured on a 900×650 layer, -O2, 28
+  hardware threads: glow size 5 / smoothness 2 went 7.3 ms -> 4.0 ms per recompose, size 10 /
+  smoothness 1 7.1 -> 4.2 ms, default glow (5/4) 3.6 -> 2.3-2.5 ms. Default outer shadow alone is
+  ~3.1 ms; the fixed cost without any part is ~1.6 ms.
+- Two faster glow variants were tried and rejected because they change the look: one blur of size +
+  smoothness with a gain folded into `Tint()` (thin strokes lose most of their glow), and running the
+  glow on a coarser grid chosen from size + smoothness, with or without fractional box radii (the ×8
+  clamp is nonlinear, so thin strokes average away; mean alpha error vs a full-resolution render rose
+  from 8-16 to 23-30).
+- `Downscale()` sums f pixels per cell instead of dividing every pixel index by f.
 - The pixel routines are tuned: `BoxBlur`'s column pass slides per-column running sums row by row
   (cache-friendly, identical results) and divides by the window with an exact multiply-shift (radius
   clamped to 2000 cells). Hot loops use raw pointers, since `QVector::operator[]` costs a detach check

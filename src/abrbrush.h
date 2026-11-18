@@ -101,6 +101,15 @@ struct BrushStroke {
     qint32 size_jitter = 0;     ///< % of random per-dab size REDUCTION (0 = every dab full size)
     qint32 angle_jitter = 0;    ///< % of random per-dab rotation (100 = anywhere in the circle)
     qint32 opacity_jitter = 0;  ///< % of random per-dab opacity REDUCTION
+
+    /// @brief Field by field, every field (VectorShape::operator== relies on it).
+    bool operator==(const BrushStroke &other) const
+    {
+        return stamp == other.stamp && color == other.color && size == other.size
+                && opacity == other.opacity && spacing == other.spacing && angle == other.angle
+                && size_jitter == other.size_jitter && angle_jitter == other.angle_jitter
+                && opacity_jitter == other.opacity_jitter;
+    }
 };
 
 /**

@@ -71,13 +71,20 @@ public:
     QList <StickData*> total_sticks;
     /// @name Onion-skin ghost cache (MyView::UpdateOnionSkins())
     /// The ghost depends only on this frame's content and the scene rect. Every edit happens on
-    /// the current frame, so MyView::MoveToFrame() marks the frame it leaves dirty; a path that
-    /// edits a frame that is NOT current must set onion_dirty itself.
+    /// the current frame, so MyView::MoveToFrame() marks the frame it leaves dirty when anything
+    /// happened since it was entered (MyView::edit_serial); a path that edits a frame that is NOT
+    /// current must call MyView::MarkFrameEdited() itself.
     ///@{
     QPixmap onion_pixmap;    ///< the grey ghost, cropped to the figures' footprint; null = nothing to show
     QPoint onion_offset;     ///< scene position of onion_pixmap's top-left corner
     QRectF onion_scene_rect; ///< scene rect the ghost was rendered for
     bool onion_dirty = true; ///< true = render again before the next use
+    ///@}
+    /// @name Edit tracking (MyView::MarkFrameEdited(), MyView::QueueFrameIcons())
+    ///@{
+    quint64 content_version = 0;   ///< raised by MyView::MarkFrameEdited() for every edit this frame gets
+    quint64 icons_version = ~0ull; ///< content_version the thumbnails were rendered from; ~0 = never
+    QRectF icons_scene_rect;       ///< scene rect the thumbnails were rendered for
     ///@}
     StickFigure *AddStickFigure( QListWidget *my_list_widget, QString name = "");
     void UpdateRender();

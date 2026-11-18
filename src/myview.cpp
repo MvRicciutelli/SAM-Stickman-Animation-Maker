@@ -22,6 +22,7 @@
 #include <QRandomGenerator>
 #include <QApplication>
 #include <QScrollBar>
+#include <QPixmapCache>
 #include "uiItems.h"
 #include "framepresenter.h"
 #include "layeroptions.h" // BoxBlur(), InterpolateLayerOptions()
@@ -92,6 +93,8 @@ MyView::MyView(QWidget *parent) : QGraphicsView(parent)
     // autosave triggering moved here from StoreUndo() (Phase 4): indexChanged fires
     // on every push/undo/redo, which is a more correct autosave trigger than the old
     // "only on a fresh edit" behavior (undo/redo are edits too, worth autosaving)
+    // an edit, undo or redo: the current frame has changed (MarkFrameEdited() at frame leave)
+    connect(&undo_stack, &QUndoStack::indexChanged, this, [this](int){ edit_serial++; });
     connect(&undo_stack, &QUndoStack::indexChanged, this, [this](int){
         op_count++;
         if(QFile::exists(animation_path) && op_count % auto_save_interval == 0){
@@ -106,6 +109,9 @@ MyView::MyView(QWidget *parent) : QGraphicsView(parent)
     connect(new QShortcut(QKeySequence::Undo, this), &QShortcut::activated, this, [this]{ Undo(); });
     connect(new QShortcut(QKeySequence::Redo, this), &QShortcut::activated, this, [this]{ Redo(); });
     draw_brush_stamp = MakeRoundBrush(128, draw_brush_hardness, draw_brush_roundness); // built-in round tip
+    // the item cache of heavy sticks (StickGraphicsItem::SyncCacheMode()) lives in QPixmapCache,
+    // whose 10 MiB default holds about one canvas-sized stick
+    QPixmapCache::setCacheLimit(qMax(QPixmapCache::cacheLimit(), 64 * 1024));
 }
 
 /**
@@ -1550,7 +1556,12 @@ QRect MyView::StampBrush(QPainter &canvas_painter, const QPointF &canvas_px)
     canvas_painter.setOpacity(dab_opacity);
     // the rotated dab is larger than s: centre it on its actual dimensions, not on s
     const QPointF top_left(canvas_px.x() - dab.width()/2.0, canvas_px.y() - dab.height()/2.0);
-    canvas_painter.drawImage(top_left, dab);
+    canvas_painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    // ponytail: a translate-only drawImage snaps to whole pixels (even with SmoothPixmapTransform),
+    // which made soft strokes grainy; a 1e-3 px stretch forces Qt's bilinear path so the dab keeps
+    // its sub-pixel position. Costs ~1.3-3x per dab (measured: 40 px dab 0.75 -> 2.4 us).
+    canvas_painter.drawImage(QRectF(top_left, QSizeF(dab.width() + 1e-3, dab.height())),
+                             dab, QRectF(dab.rect()));
     return QRectF(top_left, QSizeF(dab.size())).toAlignedRect();
 }
 
@@ -5183,8 +5194,10 @@ void MyView::MoveToFrame(Frame* frame){
     auto current_scene = scene();
     if(my_animation->frame_list.count()>=1){
         // every edit happens on the current frame, so the frame being left (or restored, on an
-        // undo/redo) is the one whose cached onion ghost may be stale
-        my_animation->current_frame->onion_dirty = true;
+        // undo/redo) is the one whose cached onion ghost may be stale — if anything happened
+        // to it since it was entered (edit_serial)
+        if(edit_serial != entered_serial)
+            MarkFrameEdited(my_animation->current_frame);
         for(StickFigure *S:my_animation->current_frame->stick_figures){
             RemoveHandles(S);
             // the layer group leaves with its frame (Frame::Refresh() below re-syncs the new one's)
@@ -5281,6 +5294,15 @@ void MyView::MoveToFrame(Frame* frame){
         S->Refresh(0);
     frame->SyncLayerEffects();
     UpdateIkOverlay(); // the new frame may have its own IK chains to mark
+    entered_serial = edit_serial; // the refreshes above are no edit
+}
+
+/// @details Called where a frame changes: at frame leave when edit_serial moved since it was
+/// entered, and by the paths that edit frames that are not current (SizeChange()).
+void MyView::MarkFrameEdited(Frame *frame)
+{
+    frame->content_version++;
+    frame->onion_dirty = true;
 }
 /// @details Queued like QueueLayerSync(): scrubbing through frames (a held arrow key, a drag
 /// along the frame list) renders the thumbnails of the frame it stops on, not of every frame it
@@ -5295,9 +5317,21 @@ void MyView::QueueFrameIcons()
         Frame *frame = my_animation->current_frame;
         if(frame == nullptr || my_animation->frame_list.isEmpty() || play_back)
             return;
+        // the thumbnails depend on the frame's content and the scene rect only: a frame entered
+        // again with neither changed keeps them. An undo that rebuilt this frame moved edit_serial
+        // after MoveToFrame() (indexChanged fires once undo() returns); a rebuilt figure has no icon
+        bool stale = frame->icons_version != frame->content_version
+                || frame->icons_scene_rect != scene()->sceneRect() || edit_serial != entered_serial
+                || frame->frame_icon == nullptr || frame->frame_icon->isNull();
+        for(StickFigure *S : frame->stick_figures)
+            stale = stale || S->stick_figure_icon == nullptr || S->stick_figure_icon->isNull();
+        if(!stale)
+            return;
         for(StickFigure *S : frame->stick_figures)
             S->UpdateIcon();
         frame->UpdateIcon();
+        frame->icons_version = frame->content_version;
+        frame->icons_scene_rect = scene()->sceneRect();
     }, Qt::QueuedConnection);
 }
 /// @details Queued, so the views added by one gesture or refresh are grouped together, once.
@@ -5331,6 +5365,7 @@ void MyView::ResumeLayerEffects()
 void MyView::paintEvent(QPaintEvent *event)
 {
     exposed_region = event->region();
+    StickGraphicsItem::CheckCachedViews(); // no cached stick may outlive what it shows
     QGraphicsView::paintEvent(event);
 }
 // routine to compute the onion skins: first delete them, redraw them on an image, and add the image to the scene
@@ -5362,10 +5397,11 @@ void MyView::UpdateOnionSkins(){
     const int first = my_animation->current_frame->frame_number-skin_num;
     const int last = my_animation->current_frame->frame_number; // exclusive
     // only the frames on show keep a ghost: a cache on every visited frame would grow with the
-    // animation (up to a canvas-sized pixmap per frame)
+    // animation (up to a canvas-sized pixmap per frame). The current frame keeps its own too
+    // (i == last): stepping forward shows it next, and if it was not edited it is still right
     for(int i = 0; i < my_animation->frame_list.count(); i++){
         Frame *f = my_animation->frame_list[i];
-        if((i < first || i >= last) && !f->onion_pixmap.isNull()){
+        if((i < first || i > last) && !f->onion_pixmap.isNull()){
             f->onion_pixmap = QPixmap();
             f->onion_dirty = true;
         }
@@ -6278,7 +6314,7 @@ void MyView::SizeChange(int option){
         case REPOSCALE:
         {
             for(Frame*F:my_animation->frame_list){
-                F->onion_dirty = true; // edits frames that are not current
+                MarkFrameEdited(F); // edits frames that are not current
                 ScaleFrame(F,amount,old_rect);
                 for(StickFigure* S: F->stick_figures){
                     S->Traslate(dx,dy);
@@ -6290,7 +6326,7 @@ void MyView::SizeChange(int option){
         case REPO:
         {
             for(Frame*F:my_animation->frame_list){
-                F->onion_dirty = true; // edits frames that are not current
+                MarkFrameEdited(F); // edits frames that are not current
                 for(StickFigure* S: F->stick_figures){
                     S->Traslate(dx,dy);
                 }

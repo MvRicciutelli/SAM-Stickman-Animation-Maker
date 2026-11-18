@@ -3,6 +3,10 @@
 #include <QPainterPath>
 #include <QTextLayout>
 #include <QVector>
+#include <QCache>
+#include <QCoreApplication>
+#include <QMutex>
+#include <QThread>
 #include <QListWidget>
 #include <QTimer>
 #include <QtMath>
@@ -53,6 +57,8 @@ StickGraphicsItem::~StickGraphicsItem(){
         layer->owner = nullptr;
         delete layer;
     }
+    if(cacheMode() != NoCache)
+        cached_views.remove(this);
     if(data && data->view == this)
         data->view = nullptr;
     delete stick_handle[0] ;
@@ -452,9 +458,8 @@ void StickGraphicsItem::PaintVectorShapes(QPainter *painter, const VectorShapeLa
         const QRect area = to_device.mapRect(boundingRect()).toAlignedRect() & painter->viewport();
         if(area.isEmpty())
             continue;
-        const QImage composed = MaskedShapeImage(i, to_device * QTransform::fromTranslate(-area.left(), -area.top()),
-                                                 area.size(), painter->device()->devicePixelRatio(),
-                                                 painter->renderHints(), data->vector_shapes.size());
+        const QImage composed = CachedMaskedShape(i, to_device, area, painter->device()->devicePixelRatio(),
+                                                  painter->renderHints());
         painter->save();
         painter->resetTransform(); // device coordinates; the clip is kept, it lives there
         painter->drawImage(area.topLeft(), composed);
@@ -571,8 +576,17 @@ void StickGraphicsItem::SyncShapeLayers()
 /// LayerGroupItem on the next event-loop pass, without every attach path having to remember.
 QVariant StickGraphicsItem::itemChange(GraphicsItemChange change, const QVariant &value)
 {
-    if(change == ItemSceneHasChanged || change == ItemParentHasChanged)
+    if(change == ItemSceneHasChanged || change == ItemParentHasChanged){
         SyncShapeLayers();
+        SyncCacheMode();
+    }
+    if(change == ItemSceneHasChanged && scene() == nullptr){
+        // off the canvas (a frame left): views of visited frames live on, their caches need not
+        masked_cache.clear();
+        text_layout.reset();
+        multiline_valid = false;
+        multiline_spine = multiline_bands = QPainterPath();
+    }
     if(change == ItemSceneHasChanged && parentItem() == nullptr && scene() != nullptr
             && V != nullptr && scene() == V->scene())
         V->QueueLayerSync();
@@ -779,10 +793,8 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
             painter->setTransform(StickLocalFrame(data), true); // spina + Stick Transform
             painter->rotate(data->img_angle_offset);            // + il posizionamento interno
             painter->translate(data->img_offset);
-            // in caso di onion rendering converti l'immagine in grayscale: DOPO averla scalata,
-            // così la conversione costa quanto l'immagine dipinta e non quanto la sorgente
             if(onion_render)
-                painter->drawImage(target, CalcImg().convertToFormat(QImage::Format_Grayscale8));
+                painter->drawImage(target, OnionGreyImg());
             else
                 painter->drawImage(target, *data->stick_img);
             painter->restore();
@@ -910,191 +922,211 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
             QList<qint32> caps = data->MultilineCaps();
             if(poly_preview_active)
                 caps << poly_preview_cap;
-            QList<QList<int>> kids(n);
-            for(int i = 1; i < n; i++)
-                kids[parent[i]] << i;
-            // l'albero si disegna a polilinee: next[v] è il figlio che prosegue quella di v —
-            // sulla linea principale (gli antenati di P2) quello verso P2, altrove il primo.
-            // Ogni altro figlio apre un ramo che comincia dal vertice da cui pende
-            QVector<int> next(n, -1);
-            for(int v = 0; v < n; v++)
-                if(!kids[v].isEmpty())
-                    next[v] = kids[v].first();
-            for(int v = p2; v > 0; v = parent[v])
-                next[parent[v]] = v;
-            QList<QList<int>> lines;
-            QList<int> starts{0}, junctions{-1};
-            for(int k = 0; k < starts.size(); k++){
-                QList<int> line;
-                if(junctions[k] >= 0)
-                    line << junctions[k];
-                for(int v = starts[k]; v >= 0; v = next[v]){
-                    line << v;
-                    for(int c : kids[v]){
-                        if(c != next[v]){
-                            starts << c;
-                            junctions << v;
+            // the outline below is rebuilt only when one of its inputs changed (multiline_* keys)
+            const bool cached = multiline_valid && multiline_preview == poly_preview_active
+                    && multiline_pen_width == data->pen.widthF() && multiline_chain == chain
+                    && multiline_parents == parent && multiline_caps == caps
+                    && multiline_widths == data->vertex_widths
+                    && multiline_curvatures == data->vertex_curvatures;
+            if(!cached){
+                QList<QList<int>> kids(n);
+                for(int i = 1; i < n; i++)
+                    kids[parent[i]] << i;
+                // l'albero si disegna a polilinee: next[v] è il figlio che prosegue quella di v —
+                // sulla linea principale (gli antenati di P2) quello verso P2, altrove il primo.
+                // Ogni altro figlio apre un ramo che comincia dal vertice da cui pende
+                QVector<int> next(n, -1);
+                for(int v = 0; v < n; v++)
+                    if(!kids[v].isEmpty())
+                        next[v] = kids[v].first();
+                for(int v = p2; v > 0; v = parent[v])
+                    next[parent[v]] = v;
+                QList<QList<int>> lines;
+                QList<int> starts{0}, junctions{-1};
+                for(int k = 0; k < starts.size(); k++){
+                    QList<int> line;
+                    if(junctions[k] >= 0)
+                        line << junctions[k];
+                    for(int v = starts[k]; v >= 0; v = next[v]){
+                        line << v;
+                        for(int c : kids[v]){
+                            if(c != next[v]){
+                                starts << c;
+                                junctions << v;
+                            }
                         }
                     }
+                    lines << line;
                 }
-                lines << line;
+                // 1) densifica la linea centrale di una polilinea (campiona una quadratica agli
+                //    angoli con curvatura > 0), portandosi dietro larghezza e giunto per punto (i
+                //    campioni di uno smusso sono già curvi: spigolo vivo)
+                auto densify = [&](const QList<int> &line, QList<QPointF> &center, QList<float> &widths,
+                                   QList<qint32> &joins){
+                    QList<QPointF> pts;
+                    QList<float> w, curv;
+                    for(int v : line){
+                        pts << chain[v];
+                        w << width_at(v);
+                        curv << curvature_at(v);
+                    }
+                    center.append(pts[0]);
+                    widths.append(w[0]);
+                    joins.append(caps[line.first()]);
+                    for(int i = 1; i < pts.size() - 1; i++){
+                        float c = curv[i];
+                        QLineF in(pts[i-1], pts[i]);
+                        QLineF out(pts[i], pts[i+1]);
+                        float r = c * 0.5f * qMin(in.length(), out.length());
+                        if(c <= 0.001f || r < 0.5f){
+                            center.append(pts[i]);
+                            widths.append(w[i]);
+                            joins.append(caps[line[i]]);
+                            continue;
+                        }
+                        // smusso: entra a distanza r prima del vertice, esce r dopo; quadratica
+                        // con il vertice come punto di controllo
+                        QPointF a = in.pointAt(1.0 - r / in.length());
+                        QPointF b = out.pointAt(r / out.length());
+                        for(int s = 0; s <= 6; s++){
+                            qreal u = s / 6.0;
+                            QPointF q = (1-u)*(1-u)*a + 2*(1-u)*u*pts[i] + u*u*b;
+                            center.append(q);
+                            widths.append(w[i]);
+                            joins.append(StickData::CAP_SHARP);
+                        }
+                    }
+                    center.append(pts.last());
+                    widths.append(w.last());
+                    joins.append(caps[line.last()]);
+                };
+                // 2) contorno: per ogni punto densificato sposta a destra/sinistra lungo la
+                //    bisettrice dell'angolo, poi riempi. La bisettrice viene dai versori dei due
+                //    segmenti: la corda prev->next (usata un tempo) è pesata dalle lunghezze, e a
+                //    una svolta oltre 90° con il segmento successivo più lungo punta all'INDIETRO —
+                //    la normale si ribaltava e la banda si attorcigliava su sé stessa.
+                auto unit = [](QPointF from, QPointF to) -> QPointF {
+                    qreal len = QLineF(from, to).length();
+                    return len < 1e-6 ? QPointF(0,0) : (to - from) / len;
+                };
+                auto perp = [](QPointF u) { return QPointF(-u.y(), u.x()); }; // normale sinistra
+                auto band = [&unit, &perp](const QList<QPointF> &center, const QList<float> &widths,
+                                           const QList<qint32> &joins) -> QPolygonF {
+                    QPolygonF left, right;
+                    for(int k = 0; k < center.size(); k++){
+                        QPointF c = center[k];
+                        qreal h = widths[k]/2.0;
+                        QPointF u_in  = k > 0 ? unit(center[k-1], c) : QPointF(0,0);
+                        QPointF u_out = k < center.size()-1 ? unit(c, center[k+1]) : QPointF(0,0);
+                        QPointF t = u_in + u_out;
+                        qreal t_len = QLineF(QPointF(0,0), t).length();
+                        if(t_len < 1e-6) // inversione secca a 180° (o punti coincidenti)
+                            t = !u_in.isNull() ? u_in : (!u_out.isNull() ? u_out : QPointF(1,0));
+                        else
+                            t /= t_len;
+                        QPointF n = perp(t);
+                        // coseno di metà svolta: 1 agli estremi e sui tratti dritti
+                        qreal cos_half = u_in.isNull() ? 1.0 : QPointF::dotProduct(n, perp(u_in));
+                        // giunto tondo o smussato: lo spigolo è sempre il bevel qui sotto (il tondo
+                        // ci aggiunge un disco); agli estremi (cos_half = 1) non c'è spigolo
+                        bool interior = !u_in.isNull() && !u_out.isNull();
+                        bool sharp = joins[k] == StickData::CAP_SHARP || !interior;
+                        if(sharp && cos_half >= 0.25){
+                            // spigolo vivo (miter): per restare a metà larghezza da ENTRAMBI i segmenti
+                            // il punto va a h / cos(metà svolta), non a h, che strozzava gli angoli
+                            left  << c + n * (h / cos_half);
+                            right << c - n * (h / cos_half);
+                            continue;
+                        }
+                        // svolta più stretta del miterLimit di default di QPen (2 larghezze): come fa
+                        // QPainterPathStroker, smusso (bevel) sul lato esterno e lato interno che passa
+                        // per il vertice — la sovrapposizione che ne nasce la riempie il WindingFill.
+                        // Un miter accorciato a un punto solo, invece, piegava entrambi i bordi verso
+                        // la punta e assottigliava i due segmenti
+                        QPointF n_in = perp(u_in), n_out = perp(u_out);
+                        qreal s = QPointF::dotProduct(n, u_out - u_in) > 0 ? 1.0 : -1.0; // lato interno
+                        QPolygonF &inner = s > 0 ? left : right;
+                        QPolygonF &outer = s > 0 ? right : left;
+                        inner << c + s*n_in*h << c << c + s*n_out*h;
+                        outer << c - s*n_in*h << c - s*n_out*h;
+                    }
+                    QPolygonF outline = left;
+                    for(int k = right.size()-1; k >= 0; k--)
+                        outline << right[k];
+                    return outline;
+                };
+                // il contorno di una spezzata È il suo riempimento: prendi tutto il brush della
+                // penna, non solo il colore, così una penna a pattern/gradiente si vede anche
+                // qui. Resta ingrigito durante l'onion render, perché QPen::setColor() (sopra)
+                // sostituisce il brush con uno tinta unita grigia.
+                // il contorno a pennello timbra la LINEA CENTRALE: la larghezza per vertice non
+                // sopravvive (un dab ha una taglia sola), il che è esattamente ciò che scegliere un
+                // pennello al posto della penna significa
+                QList<QList<QPointF>> centers;
+                QList<QList<float>> center_widths;
+                QList<QList<qint32>> center_joins;
+                QPainterPath spine;
+                for(const QList<int> &line : lines){
+                    QList<QPointF> center;
+                    QList<float> widths;
+                    QList<qint32> joins;
+                    densify(line, center, widths, joins);
+                    spine.moveTo(center.first());
+                    for(int i = 1; i < center.size(); i++)
+                        spine.lineTo(center[i]);
+                    centers << center;
+                    center_widths << widths;
+                    center_joins << joins;
+                }
+                {
+                    // tutte le bande in UN path riempito una volta sola: hanno tutte lo stesso verso
+                    // (lato sinistro all'andata, destro al ritorno), quindi con il WindingFill le
+                    // sovrapposizioni si sommano invece di annullarsi e una linea semitrasparente
+                    // non si scurisce agli attacchi dei rami. WindingFill anche perché negli angoli
+                    // stretti il lato interno si sovrappone a sé stesso, e con l'OddEvenFill la
+                    // sovrapposizione restava un buco
+                    QPainterPath bands;
+                    bands.setFillRule(Qt::WindingFill);
+                    for(int k = 0; k < lines.size(); k++){
+                        const QList<QPointF> &center = centers[k];
+                        const QList<float> &widths = center_widths[k];
+                        const QList<qint32> &joins = center_joins[k];
+                        bands.addPolygon(band(center, widths, joins));
+                        bands.closeSubpath();
+                        // ogni vertice CAP_ROUND — angolo, estremità o attacco di un ramo — è un disco
+                        // della sua larghezza. Un ramo parte piatto DAL vertice, e il disco (di
+                        // default ce l'ha ogni vertice di un ramo) ne è il giunto: raccordarlo a
+                        // spigolo vivo con il lato entrante allungava quel lato oltre il vertice, e
+                        // dove la linea madre non prosegue dritta sporgeva una spina. I dischi vanno
+                        // nello stesso path con lo stesso verso delle bande: addEllipse() gira in
+                        // senso orario, le bande al contrario, e nel WindingFill i due si
+                        // annullerebbero in un buco. Nello stesso path non raddoppiano nemmeno
+                        // l'alpha dove coprono la banda, come facevano i cap disegnati a parte
+                        for(int i = 0; i < center.size(); i++){
+                            if(joins[i] != StickData::CAP_ROUND)
+                                continue;
+                            QPainterPath disc;
+                            disc.addEllipse(center[i], widths[i]/2.0, widths[i]/2.0);
+                            bands.addPath(disc.toReversed());
+                        }
+                    }
+                    multiline_bands = bands;
+                }
+                multiline_spine = spine;
+                multiline_chain = chain;
+                multiline_parents = parent;
+                multiline_caps = caps;
+                multiline_widths = data->vertex_widths;
+                multiline_curvatures = data->vertex_curvatures;
+                multiline_pen_width = data->pen.widthF();
+                multiline_preview = poly_preview_active;
+                multiline_valid = true;
             }
-            // 1) densifica la linea centrale di una polilinea (campiona una quadratica agli
-            //    angoli con curvatura > 0), portandosi dietro larghezza e giunto per punto (i
-            //    campioni di uno smusso sono già curvi: spigolo vivo)
-            auto densify = [&](const QList<int> &line, QList<QPointF> &center, QList<float> &widths,
-                               QList<qint32> &joins){
-                QList<QPointF> pts;
-                QList<float> w, curv;
-                for(int v : line){
-                    pts << chain[v];
-                    w << width_at(v);
-                    curv << curvature_at(v);
-                }
-                center.append(pts[0]);
-                widths.append(w[0]);
-                joins.append(caps[line.first()]);
-                for(int i = 1; i < pts.size() - 1; i++){
-                    float c = curv[i];
-                    QLineF in(pts[i-1], pts[i]);
-                    QLineF out(pts[i], pts[i+1]);
-                    float r = c * 0.5f * qMin(in.length(), out.length());
-                    if(c <= 0.001f || r < 0.5f){
-                        center.append(pts[i]);
-                        widths.append(w[i]);
-                        joins.append(caps[line[i]]);
-                        continue;
-                    }
-                    // smusso: entra a distanza r prima del vertice, esce r dopo; quadratica
-                    // con il vertice come punto di controllo
-                    QPointF a = in.pointAt(1.0 - r / in.length());
-                    QPointF b = out.pointAt(r / out.length());
-                    for(int s = 0; s <= 6; s++){
-                        qreal u = s / 6.0;
-                        QPointF q = (1-u)*(1-u)*a + 2*(1-u)*u*pts[i] + u*u*b;
-                        center.append(q);
-                        widths.append(w[i]);
-                        joins.append(StickData::CAP_SHARP);
-                    }
-                }
-                center.append(pts.last());
-                widths.append(w.last());
-                joins.append(caps[line.last()]);
-            };
-            // 2) contorno: per ogni punto densificato sposta a destra/sinistra lungo la
-            //    bisettrice dell'angolo, poi riempi. La bisettrice viene dai versori dei due
-            //    segmenti: la corda prev->next (usata un tempo) è pesata dalle lunghezze, e a
-            //    una svolta oltre 90° con il segmento successivo più lungo punta all'INDIETRO —
-            //    la normale si ribaltava e la banda si attorcigliava su sé stessa.
-            auto unit = [](QPointF from, QPointF to) -> QPointF {
-                qreal len = QLineF(from, to).length();
-                return len < 1e-6 ? QPointF(0,0) : (to - from) / len;
-            };
-            auto perp = [](QPointF u) { return QPointF(-u.y(), u.x()); }; // normale sinistra
-            auto band = [&unit, &perp](const QList<QPointF> &center, const QList<float> &widths,
-                                       const QList<qint32> &joins) -> QPolygonF {
-                QPolygonF left, right;
-                for(int k = 0; k < center.size(); k++){
-                    QPointF c = center[k];
-                    qreal h = widths[k]/2.0;
-                    QPointF u_in  = k > 0 ? unit(center[k-1], c) : QPointF(0,0);
-                    QPointF u_out = k < center.size()-1 ? unit(c, center[k+1]) : QPointF(0,0);
-                    QPointF t = u_in + u_out;
-                    qreal t_len = QLineF(QPointF(0,0), t).length();
-                    if(t_len < 1e-6) // inversione secca a 180° (o punti coincidenti)
-                        t = !u_in.isNull() ? u_in : (!u_out.isNull() ? u_out : QPointF(1,0));
-                    else
-                        t /= t_len;
-                    QPointF n = perp(t);
-                    // coseno di metà svolta: 1 agli estremi e sui tratti dritti
-                    qreal cos_half = u_in.isNull() ? 1.0 : QPointF::dotProduct(n, perp(u_in));
-                    // giunto tondo o smussato: lo spigolo è sempre il bevel qui sotto (il tondo
-                    // ci aggiunge un disco); agli estremi (cos_half = 1) non c'è spigolo
-                    bool interior = !u_in.isNull() && !u_out.isNull();
-                    bool sharp = joins[k] == StickData::CAP_SHARP || !interior;
-                    if(sharp && cos_half >= 0.25){
-                        // spigolo vivo (miter): per restare a metà larghezza da ENTRAMBI i segmenti
-                        // il punto va a h / cos(metà svolta), non a h, che strozzava gli angoli
-                        left  << c + n * (h / cos_half);
-                        right << c - n * (h / cos_half);
-                        continue;
-                    }
-                    // svolta più stretta del miterLimit di default di QPen (2 larghezze): come fa
-                    // QPainterPathStroker, smusso (bevel) sul lato esterno e lato interno che passa
-                    // per il vertice — la sovrapposizione che ne nasce la riempie il WindingFill.
-                    // Un miter accorciato a un punto solo, invece, piegava entrambi i bordi verso
-                    // la punta e assottigliava i due segmenti
-                    QPointF n_in = perp(u_in), n_out = perp(u_out);
-                    qreal s = QPointF::dotProduct(n, u_out - u_in) > 0 ? 1.0 : -1.0; // lato interno
-                    QPolygonF &inner = s > 0 ? left : right;
-                    QPolygonF &outer = s > 0 ? right : left;
-                    inner << c + s*n_in*h << c << c + s*n_out*h;
-                    outer << c - s*n_in*h << c - s*n_out*h;
-                }
-                QPolygonF outline = left;
-                for(int k = right.size()-1; k >= 0; k--)
-                    outline << right[k];
-                return outline;
-            };
-            // il contorno di una spezzata È il suo riempimento: prendi tutto il brush della
-            // penna, non solo il colore, così una penna a pattern/gradiente si vede anche
-            // qui. Resta ingrigito durante l'onion render, perché QPen::setColor() (sopra)
-            // sostituisce il brush con uno tinta unita grigia.
-            // il contorno a pennello timbra la LINEA CENTRALE: la larghezza per vertice non
-            // sopravvive (un dab ha una taglia sola), il che è esattamente ciò che scegliere un
-            // pennello al posto della penna significa
-            QList<QList<QPointF>> centers;
-            QList<QList<float>> center_widths;
-            QList<QList<qint32>> center_joins;
-            QPainterPath spine;
-            for(const QList<int> &line : lines){
-                QList<QPointF> center;
-                QList<float> widths;
-                QList<qint32> joins;
-                densify(line, center, widths, joins);
-                spine.moveTo(center.first());
-                for(int i = 1; i < center.size(); i++)
-                    spine.lineTo(center[i]);
-                centers << center;
-                center_widths << widths;
-                center_joins << joins;
-            }
-            if(!StrokeWithBrush(painter, spine)){
+            if(!StrokeWithBrush(painter, multiline_spine)){
                 QBrush stroke = painter->pen().brush();
                 painter->setPen(Qt::NoPen);
                 painter->setBrush(stroke);
-                // tutte le bande in UN path riempito una volta sola: hanno tutte lo stesso verso
-                // (lato sinistro all'andata, destro al ritorno), quindi con il WindingFill le
-                // sovrapposizioni si sommano invece di annullarsi e una linea semitrasparente
-                // non si scurisce agli attacchi dei rami. WindingFill anche perché negli angoli
-                // stretti il lato interno si sovrappone a sé stesso, e con l'OddEvenFill la
-                // sovrapposizione restava un buco
-                QPainterPath bands;
-                bands.setFillRule(Qt::WindingFill);
-                for(int k = 0; k < lines.size(); k++){
-                    const QList<QPointF> &center = centers[k];
-                    const QList<float> &widths = center_widths[k];
-                    const QList<qint32> &joins = center_joins[k];
-                    bands.addPolygon(band(center, widths, joins));
-                    bands.closeSubpath();
-                    // ogni vertice CAP_ROUND — angolo, estremità o attacco di un ramo — è un disco
-                    // della sua larghezza. Un ramo parte piatto DAL vertice, e il disco (di
-                    // default ce l'ha ogni vertice di un ramo) ne è il giunto: raccordarlo a
-                    // spigolo vivo con il lato entrante allungava quel lato oltre il vertice, e
-                    // dove la linea madre non prosegue dritta sporgeva una spina. I dischi vanno
-                    // nello stesso path con lo stesso verso delle bande: addEllipse() gira in
-                    // senso orario, le bande al contrario, e nel WindingFill i due si
-                    // annullerebbero in un buco. Nello stesso path non raddoppiano nemmeno
-                    // l'alpha dove coprono la banda, come facevano i cap disegnati a parte
-                    for(int i = 0; i < center.size(); i++){
-                        if(joins[i] != StickData::CAP_ROUND)
-                            continue;
-                        QPainterPath disc;
-                        disc.addEllipse(center[i], widths[i]/2.0, widths[i]/2.0);
-                        bands.addPath(disc.toReversed());
-                    }
-                }
-                painter->drawPath(bands);
+                painter->drawPath(multiline_bands);
             }
             painter->setPen(data->pen);
             painter->setBrush(Qt::NoBrush);
@@ -1108,8 +1140,7 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
             painter->drawLine(data->my_line.x1(),data->my_line.y1(),data->my_line.x2(),data->my_line.y2());
         }
         else{
-            QTextLayout layout;
-            LayoutText(data, layout);
+            const QTextLayout &layout = CachedTextLayout(nullptr);
             painter->save();
             painter->setTransform(TextFrame(data), true);
             // il colore del testo È il colore dello stick; penna solida esplicita perché
@@ -1273,6 +1304,229 @@ QImage StickGraphicsItem::CalcImg(){
     return  data->stick_img->scaled(offsetted.width(),offsetted.height());
 }
 
+namespace {
+/// The source pixels (QImage::cacheKey(), shared by a Clone()'s copy-on-write image and raised
+/// by every edit) and the painted size: together, everything OnionGreyImg() reads.
+struct OnionGreyKey {
+    qint64 image;
+    QSize size;
+    bool operator==(const OnionGreyKey &other) const { return image == other.image && size == other.size; }
+};
+size_t qHash(const OnionGreyKey &key, size_t seed = 0)
+{
+    return qHashMulti(seed, key.image, key.size.width(), key.size.height());
+}
+}
+
+/// @details Grey AFTER scaling, so the pass costs the painted size, not the source. Not
+/// Format_Grayscale8: it has no alpha, so a FREEHAND canvas's transparent pixels came out opaque
+/// black. On premultiplied pixels qGray() of the channels already is the premultiplied grey, so
+/// one in-place pass keeps the alpha with no unpremultiply.
+///
+/// Cached because RenderOnionSkin() draws throwaway clones (no view outlives one render) and
+/// MoveToFrame() re-renders every frame it leaves, edited or not, so an unchanged canvas was
+/// scaled and greyed again on every frame step. The key never matches an edited image, so a
+/// stale entry is only memory until QCache evicts it. The mutex is for the ImageExport worker,
+/// which can paint with onion_render set (see the static onion_render).
+/// ponytail: 64 MiB LRU, app-wide; size it from the onion skin count if ghosts thrash.
+QImage StickGraphicsItem::OnionGreyImg()
+{
+    static QMutex mutex;
+    static QCache<OnionGreyKey, QImage> cache(64 * 1024); // cost in KiB
+    const QSizeF painted = CalcImgSize();
+    if(painted.isEmpty())
+        return QImage();
+    const OnionGreyKey key{data->stick_img->cacheKey(), QSize(int(painted.width()), int(painted.height()))};
+    {
+        QMutexLocker lock(&mutex);
+        if(const QImage *hit = cache.object(key))
+            return *hit;
+    }
+    QImage grey = CalcImg().convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    for(int y = 0; y < grey.height(); y++){
+        QRgb *line = reinterpret_cast<QRgb*>(grey.scanLine(y));
+        for(int x = 0; x < grey.width(); x++){
+            const int g = qGray(line[x]);
+            line[x] = qRgba(g, g, g, qAlpha(line[x]));
+        }
+    }
+    QMutexLocker lock(&mutex);
+    cache.insert(key, new QImage(grey), qMax<qsizetype>(1, grey.sizeInBytes() / 1024));
+    return grey;
+}
+
+namespace {
+/// Every field LayoutText() reads, the wrap width included.
+struct TextLayoutKey {
+    QString text;
+    QFont font;
+    qint32 align;
+    bool wrap;
+    double width;
+    float spacing;
+    bool operator==(const TextLayoutKey &other) const
+    {
+        return text == other.text && font == other.font && align == other.align && wrap == other.wrap
+                && width == other.width && spacing == other.spacing;
+    }
+};
+size_t qHash(const TextLayoutKey &key, size_t seed = 0)
+{
+    return qHashMulti(seed, key.text, key.font, key.align, key.wrap, key.width, key.spacing);
+}
+/// A laid-out paragraph and its bounding rect, shared by every view showing the same text.
+struct SharedTextLayout {
+    std::shared_ptr<QTextLayout> layout;
+    QRectF rect;
+};
+}
+
+/// @details Shaping a paragraph is the slow part of a TEXT stick, and it ran on every paint() and
+/// on every ConstructBr(), i.e. on every mouse move of a drag, and again for the onion ghost and
+/// both thumbnails, whose throwaway views draw clones with the very same text. So the layout is
+/// looked up by content, app-wide, after the view's own key: a hit is the same layout LayoutText()
+/// would build. The frame the text is drawn in (TextFrame()) is applied by the callers, so moving
+/// or turning the stick keeps it. A QTextLayout shapes lazily while drawing, so it is shared only on
+/// the GUI thread; the ImageExport worker lays out its own.
+/// ponytail: 16 MiB LRU (estimated 40 bytes a character), app-wide.
+const QTextLayout &StickGraphicsItem::CachedTextLayout(QRectF *local_rect)
+{
+    const double width = data->my_line.length();
+    if(!text_layout || text_layout_width != width || text_layout_text != data->text
+            || text_layout_font != data->text_font || text_layout_align != data->text_align
+            || text_layout_wrap != data->text_word_wrap || text_layout_spacing != data->text_line_spacing){
+        static QCache<TextLayoutKey, SharedTextLayout> shared(16 * 1024); // cost in KiB
+        const bool gui_thread = QThread::currentThread() == QCoreApplication::instance()->thread();
+        const TextLayoutKey key{ data->text, data->text_font, data->text_align, data->text_word_wrap,
+                                 width, data->text_line_spacing };
+        const SharedTextLayout *hit = gui_thread ? shared.object(key) : nullptr;
+        if(hit != nullptr){
+            text_layout = hit->layout;
+            text_layout_rect = hit->rect;
+        }
+        else{
+            text_layout = std::make_shared<QTextLayout>();
+            text_layout_rect = LayoutText(data, *text_layout);
+            if(gui_thread)
+                shared.insert(key, new SharedTextLayout{ text_layout, text_layout_rect },
+                              qMax<qsizetype>(1, data->text.size() * 40 / 1024));
+        }
+        text_layout_width = width;
+        text_layout_text = data->text;
+        text_layout_font = data->text_font;
+        text_layout_align = data->text_align;
+        text_layout_wrap = data->text_word_wrap;
+        text_layout_spacing = data->text_line_spacing;
+    }
+    if(local_rect != nullptr)
+        *local_rect = text_layout_rect;
+    return *text_layout;
+}
+
+/// @details The composed image depends on the shapes, the stick's frames, the device transform and
+/// area, and the scene rect (scene-anchored gradients): all compared, the shapes by value, so no edit
+/// path can leave a stale image behind. Only images up to 4 Mpx are kept (16 MiB a shape), and
+/// itemChange() drops them all when the view leaves its scene, since views of visited frames live on.
+QImage StickGraphicsItem::CachedMaskedShape(int index, const QTransform &to_device, const QRect &area,
+                                            qreal dpr, QPainter::RenderHints hints)
+{
+    const QTransform polygon_xf = data->PolygonTransform();
+    const QTransform local_frame = StickLocalFrame(data);
+    const QRectF scene_rect = scene() != nullptr ? scene()->sceneRect() : QRectF();
+    const auto found = masked_cache.constFind(index);
+    if(found != masked_cache.cend()){
+        const MaskedShapeCache &cached = *found;
+        if(cached.area == area && cached.dpr == dpr && cached.hints == hints && cached.onion == onion_render
+                && cached.to_device == to_device && cached.polygon_xf == polygon_xf
+                && cached.local_frame == local_frame && cached.scene_rect == scene_rect
+                && cached.shapes == data->vector_shapes)
+            return cached.image;
+    }
+    const QImage image = MaskedShapeImage(index, to_device * QTransform::fromTranslate(-area.left(), -area.top()),
+                                          area.size(), dpr, hints, data->vector_shapes.size());
+    if(qint64(area.width()) * area.height() * dpr * dpr <= 4 * 1024 * 1024)
+        masked_cache.insert(index, { image, data->vector_shapes, to_device, polygon_xf, local_frame,
+                                     area, dpr, hints, onion_render, scene_rect });
+    else
+        masked_cache.remove(index);
+    return image;
+}
+
+QSet<StickGraphicsItem*> StickGraphicsItem::cached_views;
+
+StickGraphicsItem::PaintState StickGraphicsItem::CurrentPaintState() const
+{
+    PaintState state;
+    state.editing = selected || !selected_vertices.isEmpty() || !selected_vector_nodes.isEmpty()
+            || poly_preview_active || vector_preview_active || vector_active_shape >= 0;
+    state.rotated_view = V != nullptr && (V->transform().m12() != 0 || V->transform().m21() != 0);
+    state.root = data->parent == nullptr;
+    state.z = data->z;
+    state.handle = handle_size;
+    state.scene_rect = scene() != nullptr ? scene()->sceneRect() : QRectF();
+    state.frame = data->ShapeFrame();
+    state.pen = data->pen;
+    state.brush = data->brush;
+    state.border = data->stroke_brush;
+    state.text = data->text;
+    state.font = data->text_font;
+    state.points = data->polygon_points;
+    state.widths = data->vertex_widths;
+    state.shapes = data->vector_shapes;
+    return state;
+}
+
+/// @details Measured on a crowded canvas: a full repaint went from 15.5 to 3.1 ms and a stick
+/// dragged across the others from 10.6 to 0.25 ms per step, because a cached stick is blitted
+/// instead of painted. Device coordinates (not ItemCoordinateCache, which rescales a pixmap): any
+/// zoom or rotation of the view renders the item again, sharp. Only the types whose paint() is
+/// expensive (text, multiline, vector, brush border), and only while the stick is not being
+/// edited: an edited stick changes on every move and its overlays (vertex squares, handles,
+/// previews) are drawn by paint(). A view inside a LayerGroupItem is left alone, its LayerEffect
+/// caches the whole layer, and the throwaway render scenes (onion, icons, export) never qualify.
+/// Qt keeps the pixmaps in QPixmapCache (limit raised in MyView's constructor), which evicts the
+/// least recently used.
+void StickGraphicsItem::SyncCacheMode()
+{
+    const bool on_canvas = V != nullptr && scene() != nullptr && scene() == V->scene()
+            && parentItem() == nullptr;
+    const bool heavy = data->stick_type == StickData::TEXT || data->stick_type == StickData::MULTILINE
+            || data->stick_type == StickData::VECTOR || !data->stroke_brush.stamp.isNull();
+    const PaintState state = on_canvas && heavy ? CurrentPaintState() : PaintState();
+    // a turned view rasterizes a cached edge a few pixels differently: no cache while it is turned
+    const bool wanted = on_canvas && heavy && !state.editing && !state.rotated_view;
+    if(!wanted){
+        if(cacheMode() != NoCache){
+            setCacheMode(NoCache);
+            cached_views.remove(this);
+        }
+        return;
+    }
+    if(cacheMode() != DeviceCoordinateCache){
+        setCacheMode(DeviceCoordinateCache);
+        cached_views.insert(this);
+    }
+    cached_paint_state = state;
+}
+
+/// @details The item cache is only invalidated by update(), but paint() also reads state that
+/// many call sites change without one (the selection flag, the depth, the handle size): before,
+/// such a change showed on the next repaint of that area; a cached item would keep its old
+/// picture. Comparing the PaintState first restores that. Turning the cache off and on drops the
+/// pixmap at once, so this very paint draws the item afresh.
+void StickGraphicsItem::CheckCachedViews()
+{
+    const QSet<StickGraphicsItem*> views = cached_views; // SyncCacheMode() may edit the set
+    for(StickGraphicsItem *view : views){
+        if(view->CurrentPaintState() == view->cached_paint_state)
+            continue;
+        view->setCacheMode(NoCache);
+        cached_views.remove(view);
+        view->SyncCacheMode();
+        view->update();
+    }
+}
+
 /**
  * @brief StickGraphicsItem::ConstructBr builds the boudning rect (without taking into account scaling factors)
  * @return
@@ -1283,8 +1537,8 @@ QRectF StickGraphicsItem::ConstructBr()
         // il blocco di testo può uscire ampiamente dal cerchio della linea base (righe
         // lunghe, offset, corpo grande): unisci l'ingombro reale del testo, mappato nel
         // frame in cui è dipinto, con quello della spina
-        QTextLayout layout;
-        QRectF local = LayoutText(data, layout);
+        QRectF local;
+        CachedTextLayout(&local);
         QRectF r = QRectF(data->my_line.p1(), data->my_line.p2()).normalized()
                  | TextFrame(data).mapRect(local);
         float m = data->pen.widthF() + handle_size;
@@ -1455,6 +1709,11 @@ void StickGraphicsItem::Refresh(int mode)
         layer->OwnerGeometryChanging();
     br = UpdateBr(mode);
     CalcAngle();
+    SyncCacheMode();
+    // a canvas stick refreshed: the current frame may have changed, even through a path that
+    // skipped the undo stack (MyView::MoveToFrame() then re-renders its ghost and thumbnails)
+    if(V != nullptr && scene() != nullptr && scene() == V->scene())
+        V->edit_serial++;
     update();
     for(VectorShapeLayerItem *layer : shape_layers)
         layer->update();
