@@ -407,15 +407,22 @@ std::function<void(StickData *)> BuildLayerSection(QWidget *tab, QVBoxLayout *co
     return refresh;
 }
 
-/// @brief A FREEHAND layer's 32 px row thumbnail: the layer's pixels scaled to fit, centred.
-QIcon FreehandLayerIcon(const QImage &image)
+/// @brief A FREEHAND layer's 32 px row thumbnail: the stick's grid scaled to fit and centred, the
+///        layer's pixels in their place on it (a layer covers only its own rectangle of the grid).
+QIcon FreehandLayerIcon(const StickData *stick, int index)
 {
     QPixmap pm(32, 32);
     pm.fill(Qt::transparent);
-    if(!image.isNull()){
-        const QImage fitted = image.scaled(32, 32, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    const FreehandLayer &layer = stick->freehand_layers.at(index);
+    const QSize grid = stick->FreehandGrid();
+    if(!layer.image.isNull() && !grid.isEmpty()){
+        const double s = qMin(32.0 / grid.width(), 32.0 / grid.height());
+        const QPointF corner((32 - grid.width() * s) / 2, (32 - grid.height() * s) / 2);
+        const QRectF rect(corner + QPointF(layer.origin) * s, QSizeF(layer.image.size()) * s);
+        const QSize fitted_size(qMax(1, qRound(rect.width())), qMax(1, qRound(rect.height())));
+        const QImage fitted = layer.image.scaled(fitted_size, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
         QPainter p(&pm);
-        p.drawImage((32 - fitted.width()) / 2, (32 - fitted.height()) / 2, fitted);
+        p.drawImage(rect.topLeft(), fitted);
     }
     return QIcon(pm);
 }
@@ -1049,7 +1056,7 @@ Widget::Widget(QWidget *parent)
             return cs->stick_type == StickData::FREEHAND ? &cs->freehand_layers : nullptr;
         };
         ops.depth = [](const StickData *cs, int i){ return cs->FreehandLayerDepth(i); };
-        ops.icon = [](const StickData *cs, int i){ return FreehandLayerIcon(cs->freehand_layers[i].image); };
+        ops.icon = [](const StickData *cs, int i){ return FreehandLayerIcon(cs, i); };
         ops.current = [this](StickData *cs){
             return view->draw_mode && view->draw_target == cs ? view->draw_layer : int(cs->freehand_layers.size()) - 1;
         };

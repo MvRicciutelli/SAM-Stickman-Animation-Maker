@@ -94,6 +94,7 @@ void MyMainWindow::on_actionsave_triggered()
                        &selected_filter);
     if(file_name.length()<=1 || !view->my_animation->CurrentFrame()->CurrentStickFigure())
         return;
+    view->FlushDrawSession(); // a drawing being edited is saved as it is on screen; the session stays
     if(selected_filter.contains("SAM Library")){
         if(!file_name.endsWith(".samlib", Qt::CaseInsensitive))
             file_name += ".samlib";
@@ -218,6 +219,7 @@ void MyMainWindow::on_actionsave_animation_triggered()
     // vuoto e non deve invalidare il path del file gia' aperto (rompe autosave e "Save")
     if(file_name.length()>1){
         animation_path = file_name;
+        view->FlushDrawSession(); // a drawing being edited is saved as it is on screen; the session stays
         view->my_animation->SaveAnimation(file_name);
         op_count = 0;
     }
@@ -353,6 +355,7 @@ void MyMainWindow::ExportImageSequence(QString path, int option, QString video_f
 void MyMainWindow::on_actionsave_animation_current_triggered()
 {
     if(QFile::exists(animation_path)){
+        view->FlushDrawSession(); // a drawing being edited is saved as it is on screen; the session stays
         view->my_animation->SaveAnimation(animation_path);
         op_count = 0;
     }
@@ -517,9 +520,12 @@ void MyMainWindow::on_actionExport_as_mp4_triggered()
 /**
  * @details Bound to view->AutoSaveTrigger (see DoConnections()): saves to the current
  * animation path via the "Save current" slot. Only actually writes if a path exists.
+ * Skipped during a draw session: op_count keeps counting, so the first trigger after it saves.
  */
 void MyMainWindow::AutoSave()
 {
+    if(view->draw_mode)
+        return;
     on_actionsave_animation_current_triggered();
 }
 

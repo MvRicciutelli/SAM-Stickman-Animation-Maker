@@ -89,7 +89,7 @@ void Widget::on_someBtn_clicked(){
   `Extract*Data()`/`PopulateLive*()`.
 - New serialized fields: use `qint32` and explicit `double`, never `int`/`qreal`.
 - Raising a format means raising its `CURRENT_VERSION` (`Animation` 3, `StickFigureData` 2,
-  `StickData` 12). `operator<<` gates newer fields on the record's version; `operator>>` raises an
+  `StickData` 13). `operator<<` gates newer fields on the record's version; `operator>>` raises an
   older record to current at its end.
 - Newer-than-supported files are refused (`RejectNewerVersion()` + `file_load_error`, shown through
   `MyView::ReportRejectedFile()`). A refused load must change nothing: parse into pure data first, and
@@ -146,7 +146,10 @@ void Widget::on_someBtn_clicked(){
 **Freehand layers** (`docs/ARCH_FREEHAND_LAYERS.md`)
 - `MyView::draw_canvas` points at the MyView-owned `draw_layer_canvas`, NEVER into `freehand_layers` (shared with undo snapshots and render clones: leaks or dangles). `SyncDrawCanvas()`/`LoadDrawCanvas()` move pixels in and out.
 - `stick_img` of a FREEHAND stick is a DERIVED composite: change a layer, then `RebuildFreehandComposite()`; never edit it directly.
-- All layers of a stick share ONE pixel grid (masks are pixel-wise); resize them together.
+- One grid per stick (`freehand_grid`), each layer its own rectangle on it (`FreehandLayer::origin` + image size); masks are pixel-wise on the grid, offset by the two origins. An empty layer is a NULL image.
+- A draw session keeps ONE full canvas (the active layer); `LoadDrawCanvas()` enforces it. Never allocate a canvas per layer.
+- `CropFreehandLayers()`/`CroppedFreehand()` is the only crop rule (exit draw mode, file writer, library add). `OpaqueBounds()` is a free function in `stickdata.h`.
+- A save or library add during a session goes through `MyView::FlushDrawSession()` first (autosave skips draw mode). v13 writes a FREEHAND record cropped and without its composite; the reader rebuilds it.
 - Mask removal/reorder/copy/load go through the shared templates in `vectorshape.h` (`RemoveVectorShape`, `ReorderVectorShape`, `MaskChainReaches`, `MaskChangeAllowed`, `KeepCopiedMasks`, `BreakBadMasks`), same as VECTOR.
 - Layer edits need draw mode and are `BeginLayerEdit()` -> mutate -> `EndLayerEdit()`; the panel is `BuildLayerSection<Layer>()`, shared with the vector panel.
 
@@ -180,6 +183,7 @@ void Widget::on_someBtn_clicked(){
 - `CachedTextLayout()` serves `paint()`/`ConstructBr()` (per-view `text_layout_*` key, then a content-keyed app-wide `QCache`, 16 MiB). GUI thread only: the `ImageExport` worker lays out its own. MULTILINE `paint()` reuses `multiline_spine`/`multiline_bands` while the `multiline_*` keys match: a new input of the outline goes in the key.
 - `CachedMaskedShape()` (`masked_cache`) compares the whole `vector_shapes` list BY VALUE through `VectorShape`/`VectorNode`/`BrushStroke::operator==`: a field added to any of them must be added to its `operator==`, or a masked shape keeps a stale image.
 - `SyncCacheMode()` sets `DeviceCoordinateCache` on TEXT/MULTILINE/VECTOR/brush-bordered sticks that are top-level on the canvas and not being edited or in a rotated view. `CheckCachedViews()` (top of `MyView::paintEvent()`) purges a cache whose `PaintState` changed without `update()`: a new input of `paint()` that a call site changes without `update()`/`Refresh()` must be added to `PaintState`.
+- The mask caches (`masked_layer_cache`, vector `masked_cache`) drop entries whose index is past the list end or whose shape/layer is no longer masked (`DropCacheEntriesFrom()`).
 - Per-view caches (masked images, text layout, multiline paths) are freed in `itemChange()` when the view leaves its scene: views of visited frames stay alive off-scene.
 - Per-mouse-move repaints of the foreground go through `UpdateOverlay()`, never `viewport()->update()` (a full repaint re-renders every `LayerEffect`). A new `drawForeground()` overlay must add its geometry to `OverlayBounds()`.
 - `MoveToFrame()` does not call `Frame::Refresh(0)`; thumbnails come from the queued `QueueFrameIcons()`. `PaintStrokeSegment()` repaints only the dabs' dirty rect and never calls `Refresh()`. `taper_key` must list every input of the TAPER outline.

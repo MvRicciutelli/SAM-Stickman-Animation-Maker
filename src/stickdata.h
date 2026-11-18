@@ -21,15 +21,18 @@ class StickGraphicsItem; // defined in stick.h; forward-declared to avoid a head
  * @brief One raster layer of a FREEHAND stick.
  *
  * Pure value type, like VectorShape: the image is copy-on-write, so the layer list, an undo
- * snapshot and the layer clipboard copy it with no ownership rule. Every layer of one stick has
- * the same size and the same pixel grid (one canvas each, cropped together by
- * MyView::ExitDrawMode()), so a mask is a pixel-by-pixel operation.
+ * snapshot and the layer clipboard copy it with no ownership rule. Every layer of one stick lives
+ * on ONE pixel grid (StickData::freehand_grid, the composite's size), but covers only its own
+ * rectangle of it: @c origin plus the image's size, cut to its own painted pixels by
+ * StickData::CropFreehandLayer(). A mask is pixel by pixel on that grid, offset by the two
+ * origins. A layer with no pixels has a null image and costs nothing.
  */
 struct FreehandLayer
 {
     static constexpr qint32 NO_MASK = -1; ///< the value of @c mask for a layer nothing masks
 
-    QImage image;                    ///< the layer's pixels, Format_ARGB32_Premultiplied
+    QImage image;                    ///< the layer's pixels, Format_ARGB32_Premultiplied; null = nothing painted
+    QPoint origin;                   ///< where image's top-left pixel sits on the stick's grid
     QString name;                    ///< the layer's name in the draw-mode panel
     bool visible = true;             ///< hidden layers are not painted (a hidden mask still masks)
     double depth_offset = 0;         ///< own depth, as a distance from the stick's z; read only while
@@ -42,11 +45,17 @@ struct FreehandLayer
     /// @brief Field by field, every field (a new field must be compared here too).
     bool operator==(const FreehandLayer &other) const
     {
-        return image == other.image && name == other.name && visible == other.visible
-                && depth_offset == other.depth_offset && mask == other.mask
-                && mask_inverted == other.mask_inverted;
+        return image == other.image && origin == other.origin && name == other.name
+                && visible == other.visible && depth_offset == other.depth_offset
+                && mask == other.mask && mask_inverted == other.mask_inverted;
     }
 };
+
+/**
+ * @brief Tight bounding rect of the pixels of @p image whose alpha is not 0.
+ * @return an empty rect for a null or fully transparent image.
+ */
+QRect OpaqueBounds(const QImage &image);
 
 /**
  * @brief One set of "Stick Transform" parameters, in a stick's own frame (origin P1, +y along
@@ -244,7 +253,7 @@ public:
     /// The newest record format this build reads AND writes; operator>> refuses anything above
     /// it (RejectNewerVersion()), because a newer record's extra fields would be read as the
     /// start of the next record and desync the whole stream.
-    static constexpr qint32 CURRENT_VERSION = 12;
+    static constexpr qint32 CURRENT_VERSION = 13;
     /// The formats of a VECTOR stick's shape list, each named after the fields it added: the read
     /// and write gates compare against these, never against a bare number.
     enum VectorShapesFormat : qint32 {
@@ -258,17 +267,20 @@ public:
     /// The formats of a FREEHAND stick's layer list (record version 12 on), named like
     /// VectorShapesFormat: the gates compare against these names.
     enum FreehandLayersFormat : qint32 {
-        FREEHAND_LAYERS_BASE = 1 ///< image, name, visibility, depth offset, mask, inversion; then the depth switch
+        FREEHAND_LAYERS_BASE = 1,  ///< image, name, visibility, depth offset, mask, inversion; then the depth switch
+        FREEHAND_LAYERS_ORIGIN = 2 ///< + each layer's origin on the grid (qint32 x, y) after its inversion
     };
     /// Format of a FREEHAND stick's layer list, written at its head.
-    static constexpr qint32 FREEHAND_LAYERS_VERSION = FREEHAND_LAYERS_BASE;
+    static constexpr qint32 FREEHAND_LAYERS_VERSION = FREEHAND_LAYERS_ORIGIN;
     qint32 version = CURRENT_VERSION; ///< serialization format version of this record; 2 adds the
                                      ///< IK fields below, 3 adds TEXT's text_v_stretch, 4 adds
                                      ///< brush_follows_stick, 5 adds texture_tiled, 6 adds
                                      ///< stroke_brush, 7 adds MULTILINE's vertex_parents, 8 its
                                      ///< vertex_caps, 9 local_xf's offset/angle/scale, 10 its flips and
                                      ///< global_xf, 11 the VECTOR type (vector_shapes), 12 a FREEHAND's
-                                     ///< freehand_layers — all gated in operator<</operator>> so files saved before
+                                     ///< freehand_layers, 13 a FREEHAND written cropped and without its
+                                     ///< composite (rebuilt on load; the image block's size is the
+                                     ///< grid) — all gated in operator<</operator>> so files saved before
                                      ///< those fields existed still load (and operator>> then
                                      ///< raises the record to CURRENT_VERSION)
     qint32 stick_type = StickType::LINE;///< StickType value; drives painting and serialization
@@ -478,25 +490,74 @@ public:
     QList<FreehandLayer> freehand_layers;
 
     /**
-     * @brief Makes freehand_layers one layer holding stick_img when it is empty.
+     * @brief FREEHAND only: the pixel grid the layers live on, which is also the composite's size
+     *        and so what CalcImgSize() scales. Each layer covers its own rectangle of it.
+     *
+     * Set by EnsureFreehandLayers(), MyView::EnterDrawMode() (the session canvas),
+     * CropFreehandLayers() and the loader. Deleting or emptying a layer leaves it alone, so the
+     * other layers never rescale. Empty = not set yet: FreehandGrid() derives it.
+     */
+    QSize freehand_grid;
+
+    /**
+     * @brief freehand_grid, or while it is unset the composite's size, else the layers' joint
+     *        extent from (0,0). Empty when there is nothing at all.
+     */
+    QSize FreehandGrid() const;
+
+    /**
+     * @brief Makes freehand_layers one layer holding stick_img when it is empty, and the grid
+     *        the image's size.
      * @details Called on load (FREEHAND records only) and when draw mode starts (on whatever
      * stick it starts), so the rest of the code can assume a FREEHAND has at least one layer.
      */
     void EnsureFreehandLayers();
 
     /**
-     * @brief FREEHAND only: layer @p index with its mask chain applied (pixel by pixel; the
-     *        layers share one pixel grid). The image itself when the layer has no mask.
+     * @brief FREEHAND only: layer @p index with its mask chain applied (pixel by pixel on the
+     *        grid, the mask offset by the two origins), in the layer's own rectangle. The image
+     *        itself when the layer has no mask; null when the layer is empty.
      * @param depth bounds the recursion over the chain, even over a loop no edit can make.
      */
     QImage FreehandLayerImage(int index, int depth = 64) const;
 
     /**
-     * @brief Rebuilds stick_img as the composite of the visible freehand_layers (masks
-     *        applied, per-layer depths ignored). A lone visible unmasked layer is shared
-     *        (copy-on-write), so it costs nothing and a .sam stores its pixels once.
+     * @brief Rebuilds stick_img as the grid-sized composite of the visible freehand_layers (masks
+     *        applied, per-layer depths ignored). A lone visible unmasked layer covering the whole
+     *        grid is shared (copy-on-write), so it costs nothing.
      */
     void RebuildFreehandComposite();
+
+    /**
+     * @brief Cuts one layer down to its own painted pixels: the image shrinks to its
+     *        OpaqueBounds() and the origin moves by as much, so no pixel moves on the grid. An
+     *        empty layer becomes a null image. A layer already tight (an opaque pixel on each of
+     *        its borders) is left alone without a full scan.
+     */
+    static void CropFreehandLayer(FreehandLayer &layer);
+
+    /// @brief What CropFreehandLayers() would make of this stick, computed without changing it.
+    struct FreehandCrop {
+        QList<FreehandLayer> layers;  ///< each cut to its own pixels, origins on the new grid
+        QSize grid;                   ///< the new freehand_grid: the layers' joint painted box
+        QPointF img_offset;           ///< the placement that keeps every pixel where it was drawn
+        float img_w_scale = 1;        ///< likewise
+        float img_h_scale = 1;        ///< likewise
+    };
+
+    /**
+     * @brief Every layer cut to its own pixels and the grid shrunk to their joint box, with the
+     *        placement re-solved so the drawing stays exactly where it is on screen.
+     * @return the result; the stick itself is untouched (operator<< writes it, CropFreehandLayers()
+     *         applies it). Nothing painted at all: a 1x1 grid at the old centre, every layer null.
+     */
+    FreehandCrop CroppedFreehand() const;
+
+    /**
+     * @brief Applies CroppedFreehand() and rebuilds the composite. The one crop rule shared by
+     *        MyView::ExitDrawMode(), the file writer and the library.
+     */
+    void CropFreehandLayers();
 
     /**
      * @brief The frame-wide depth FREEHAND layer @p layer_index is drawn at: z while

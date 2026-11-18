@@ -438,6 +438,22 @@ bool StickGraphicsItem::StrokeWithBrush(QPainter *painter, const QPainterPath &s
     return true;
 }
 
+/// Drops the entries of a per-index image cache (masked_cache, masked_layer_cache) whose index is
+/// @p count or more: their shape or layer was deleted, and nothing else would ever free them while
+/// the view stays in its scene.
+template <typename Cache>
+static void DropCacheEntriesFrom(Cache &cache, int count)
+{
+    if(cache.isEmpty())
+        return;
+    for(auto it = cache.begin(); it != cache.end();){
+        if(it.key() >= count)
+            it = cache.erase(it);
+        else
+            ++it;
+    }
+}
+
 /// @details One shape at a time, in list order (the last on top). Shared by paint() (layer ==
 /// nullptr) and VectorShapeLayerItem::paint(), so a shape looks the same whichever item draws it.
 /// A masked shape needs pixels to cut, so it is composed offscreen (MaskedShapeImage()) at the
@@ -446,11 +462,13 @@ bool StickGraphicsItem::StrokeWithBrush(QPainter *painter, const QPainterPath &s
 /// paint; cache them on the view if a crowded frame drags.
 void StickGraphicsItem::PaintVectorShapes(QPainter *painter, const VectorShapeLayerItem *layer)
 {
+    DropCacheEntriesFrom(masked_cache, data->vector_shapes.size());
     for(int i = 0; i < data->vector_shapes.size(); i++){
         const VectorShape &shape = data->vector_shapes[i];
         if(!shape.visible || shape.nodes.size() < 2 || ShapeLayer(shape) != layer)
             continue;
         if(shape.mask < 0){
+            masked_cache.remove(i); // no longer masked: its composed image is not needed any more
             PaintShape(painter, i);
             continue;
         }
@@ -523,57 +541,75 @@ VectorShapeLayerItem *StickGraphicsItem::LayerAtOffset(double offset) const
 }
 
 /// @details The transform is the one the image branch of paint() uses (spine + Stick Transform,
-/// then the canvas's internal placement); every layer has the composite's size, so all of them
-/// land in the same target rect. Shared by paint() (layer == nullptr) and VectorShapeLayerItem.
+/// then the canvas's internal placement). The target rect is the whole grid (the composite's size,
+/// which CalcImgSize() scales); each layer lands in its own part of it, its origin and size scaled
+/// by the same factor. Shared by paint() (layer == nullptr) and VectorShapeLayerItem.
 void StickGraphicsItem::PaintFreehandLayers(QPainter *painter, const VectorShapeLayerItem *layer)
 {
     const QSizeF size = CalcImgSize();
-    if(size.isEmpty())
+    const QSize grid = data->FreehandGrid();
+    if(size.isEmpty() || grid.isEmpty())
         return;
+    const QList<FreehandLayer> &layers = data->freehand_layers; // const: no detach from undo snapshots
+    DropCacheEntriesFrom(masked_layer_cache, layers.size());
     const QRectF target(QPointF(-size.width()/2, -size.height()/2), size);
+    const double sx = size.width() / grid.width(), sy = size.height() / grid.height();
     painter->save();
     painter->setTransform(StickLocalFrame(data), true);
     painter->rotate(data->img_angle_offset);
     painter->translate(data->img_offset);
     // while this stick is being painted, its active layer lives in the view's working canvas
-    // (MyView::draw_layer_canvas), which the layer list only receives at each undo step
-    const bool drawing = V != nullptr && V->draw_mode && V->draw_target == data && V->draw_canvas != nullptr;
-    for(int i = 0; i < data->freehand_layers.size(); i++){
-        const FreehandLayer &fl = data->freehand_layers[i];
-        if(!fl.visible || fl.image.isNull() || LayerAtOffset(fl.depth_offset) != layer)
+    // (MyView::draw_layer_canvas, the whole grid), which the layer list only receives at each undo
+    // step. Only the GUI thread asks: the ImageExport worker paints clones, never the draw target,
+    // and must not read draw state the GUI thread is writing
+    const bool drawing = V != nullptr && QThread::currentThread() == V->thread() && V->draw_mode
+            && V->draw_target == data && V->draw_canvas != nullptr;
+    for(int i = 0; i < layers.size(); i++){
+        const FreehandLayer &fl = layers[i];
+        if(!fl.visible || LayerAtOffset(fl.depth_offset) != layer)
             continue;
-        if(drawing && i == V->draw_layer)
+        if(drawing && i == V->draw_layer){
             painter->drawImage(target, LiveFreehandLayer(i));
-        else
-            painter->drawImage(target, CachedFreehandLayer(i));
+            continue;
+        }
+        if(fl.image.isNull())
+            continue;
+        const QRectF rect(target.left() + fl.origin.x() * sx, target.top() + fl.origin.y() * sy,
+                          fl.image.width() * sx, fl.image.height() * sy);
+        painter->drawImage(rect, CachedFreehandLayer(i));
     }
     painter->restore();
 }
 
-/// @details The live canvas, cut by the mask chain when the layer has one. ponytail: a masked
-/// active layer is recomposed on every repaint of a stroke, and a layer masked BY the active one
-/// shows the mask as of the last undo step until the stroke ends.
+/// @details The live canvas (the whole grid, origin 0), cut by the mask chain when the layer has
+/// one. ponytail: a masked active layer is recomposed on every repaint of a stroke, and a layer
+/// masked BY the active one shows the mask as of the last undo step until the stroke ends.
 QImage StickGraphicsItem::LiveFreehandLayer(int index)
 {
-    const FreehandLayer &fl = data->freehand_layers[index];
-    if(fl.mask < 0 || fl.mask >= data->freehand_layers.size())
+    const QList<FreehandLayer> &layers = data->freehand_layers;
+    const FreehandLayer &fl = layers[index];
+    if(fl.mask < 0 || fl.mask >= layers.size())
         return *V->draw_canvas;
     QImage image = V->draw_canvas->convertToFormat(QImage::Format_ARGB32_Premultiplied);
-    CutByMask(image, CachedFreehandLayer(fl.mask), fl.mask_inverted);
+    CutByMask(image, CachedFreehandLayer(fl.mask), fl.mask_inverted, layers[fl.mask].origin);
     return image;
 }
 
 /// @details The key walks the chain the way FreehandLayerImage() does, so any edit of a layer it
-/// reads (pixels: cacheKey(); inversion; which layer masks it) misses. ponytail: one canvas-sized
-/// image per masked layer per view; a stroke on a masked layer recomposes it on every repaint.
+/// reads (pixels: cacheKey(); its place on the grid; inversion; which layer masks it) misses. An
+/// unmasked or empty layer is returned as it is and drops its entry. ponytail: one image per masked
+/// layer per view, the layer's own size; a stroke on a masked layer recomposes it on every repaint.
 QImage StickGraphicsItem::CachedFreehandLayer(int index)
 {
     const QList<FreehandLayer> &layers = data->freehand_layers;
-    if(layers[index].mask < 0)
+    if(layers[index].mask < 0 || layers[index].image.isNull()){
+        masked_layer_cache.remove(index);
         return layers[index].image;
+    }
     QList<qint64> key;
     for(int i = index, steps = 0; i >= 0 && i < layers.size() && steps <= layers.size(); i = layers[i].mask, steps++)
-        key << i << layers[i].image.cacheKey() << (layers[i].mask_inverted ? 1 : 0);
+        key << i << layers[i].image.cacheKey() << (layers[i].mask_inverted ? 1 : 0)
+            << layers[i].origin.x() << layers[i].origin.y();
     const auto found = masked_layer_cache.constFind(index);
     if(found != masked_layer_cache.cend() && found->key == key)
         return found->image;

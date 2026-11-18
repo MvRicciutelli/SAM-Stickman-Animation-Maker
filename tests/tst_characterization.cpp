@@ -9181,11 +9181,59 @@ private slots:
             in >> loaded;
         }
         QCOMPARE(loaded.freehand_layers.size(), 3);
-        QVERIFY(loaded.freehand_layers == source.freehand_layers);
+        // written cut to their own pixels (v13): the mask keeps its left half only; the grid stays,
+        // since the other layers fill it
+        QVERIFY(loaded.freehand_layers == source.CroppedFreehand().layers);
+        QCOMPARE(loaded.freehand_layers[2].image.size(), QSize(5, 10));
+        QCOMPARE(loaded.freehand_grid, QSize(10, 10));
         QVERIFY(loaded.vector_depth_enabled);
+        // no composite in the file: the reader rebuilds the same one from the layers
+        QCOMPARE(loaded.stick_img_list.size(), 1);
+        QCOMPARE(*loaded.stick_img, *source.stick_img);
         StickData *copy = source.Clone();
         QVERIFY(copy->freehand_layers == source.freehand_layers);
+        QCOMPARE(copy->freehand_grid, source.freehand_grid);
         delete copy;
+
+        // a v12 record still stores its composite and its layers as they are, and loads them so
+        StickData v12;
+        v12.CopyFrom(source);
+        v12.version = 12;
+        QByteArray v12_bytes;
+        {
+            QDataStream out(&v12_bytes, QIODevice::WriteOnly);
+            out << v12;
+        }
+        StickData v12_loaded;
+        {
+            QDataStream in(&v12_bytes, QIODevice::ReadOnly);
+            in >> v12_loaded;
+            QCOMPARE(in.status(), QDataStream::Ok);
+            QVERIFY(in.atEnd());
+        }
+        QVERIFY(v12_loaded.freehand_layers == source.freehand_layers);
+        QCOMPARE(v12_loaded.stick_img_list.size(), 1);
+        // a stored image reads back as ARGB32; the pixels (all fully opaque or clear) are the same
+        QCOMPARE(v12_loaded.stick_img->convertToFormat(source.stick_img->format()), *source.stick_img);
+        QCOMPARE(v12_loaded.freehand_grid, QSize(10, 10));
+
+        // load-time repair: a layer partly off the grid keeps the part inside, one wholly off is
+        // emptied (only a corrupt or hand-made file holds either; v12 is written uncropped)
+        v12.freehand_layers[1].origin = QPoint(6, 0);
+        v12.freehand_layers[2].origin = QPoint(20, 20);
+        QByteArray off_bytes;
+        {
+            QDataStream out(&off_bytes, QIODevice::WriteOnly);
+            out << v12;
+        }
+        StickData off_loaded;
+        {
+            QDataStream in(&off_bytes, QIODevice::ReadOnly);
+            in >> off_loaded;
+        }
+        QCOMPARE(off_loaded.freehand_layers[1].origin, QPoint(6, 0));
+        QCOMPARE(off_loaded.freehand_layers[1].image.size(), QSize(4, 10));
+        QVERIFY(off_loaded.freehand_layers[2].image.isNull());
 
         // a v11 record has no layer list: its image becomes "Layer 1"
         StickData old;
@@ -9253,9 +9301,12 @@ private slots:
             QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(at));
             QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(at));
         };
-        // a layer's alpha under a scene point, while its stick is the one in draw mode
+        // a layer's alpha under a scene point, while its stick is the one in draw mode; a layer
+        // covers only its own rectangle of the canvas (FreehandLayer::origin), 0 outside it
         auto alpha_at = [this](StickData *s, int layer, const QPointF &scene){
-            return qAlpha(s->freehand_layers[layer].image.pixel(view->SceneToCanvas(scene).toPoint()));
+            const FreehandLayer &l = s->freehand_layers[layer];
+            const QPoint px = view->SceneToCanvas(scene).toPoint() - l.origin;
+            return l.image.valid(px) ? qAlpha(l.image.pixel(px)) : 0;
         };
         const QPointF left(300, 300), right(400, 300);
         dab(left);
@@ -9268,6 +9319,17 @@ private slots:
         QCOMPARE(alpha_at(stick, 0, right), 0);
         QVERIFY(alpha_at(stick, 1, right) > 0);
         QCOMPARE(alpha_at(stick, 1, left), 0);
+        // one whole canvas per session, the active layer's; the other keeps only its own pixels
+        const QSize canvas_size = view->draw_canvas->size();
+        QCOMPARE(stick->freehand_layers[1].image.size(), canvas_size);
+        QVERIFY(stick->freehand_layers[0].image.width() < canvas_size.width() / 4);
+        // the draw-local undo keeps the active layer cut down, and gives the same pixels back
+        const QImage painted = *view->draw_canvas;
+        view->Undo();                                    // the right dab goes
+        QCOMPARE(alpha_at(stick, 1, right), 0);
+        view->Redo();
+        QCOMPARE(*view->draw_canvas, painted);           // re-expanded pixel for pixel
+        QVERIFY(alpha_at(stick, 0, left) > 0);
 
         view->SetFreehandLayerVisible(0, false);
         QVERIFY(!stick->freehand_layers[0].visible);
@@ -9299,9 +9361,12 @@ private slots:
 
         view->ExitDrawMode();
         QCOMPARE(stick->freehand_layers.size(), 2);
-        QCOMPARE(stick->freehand_layers[0].image.size(), stick->freehand_layers[1].image.size());
-        QCOMPARE(stick->stick_img->size(), stick->freehand_layers[0].image.size());
-        QVERIFY(stick->freehand_layers[0].image.width() < 200); // cropped to the dabs, not the viewport
+        // each layer cut to its own pixels, inside the grid; the composite is the grid
+        const QRect grid(QPoint(0, 0), stick->freehand_grid);
+        for (const FreehandLayer &layer : stick->freehand_layers)
+            QVERIFY(layer.image.isNull() || grid.contains(QRect(layer.origin, layer.image.size())));
+        QCOMPARE(stick->stick_img->size(), stick->freehand_grid);
+        QVERIFY(stick->freehand_grid.width() < 200); // cropped to the dabs, not the viewport
         QCOMPARE(top_step(), session);                   // the layer edits took no global step
 
         AddFrame();
@@ -9351,7 +9416,9 @@ private slots:
         QVERIFY(!view->SetFreehandLayerMask(1, 1, false)); // itself
         view->SetFreehandLayerVisible(1, false);           // a hidden mask still masks
         auto layer_alpha = [this, stick](int layer, const QPointF &scene){
-            return qAlpha(stick->FreehandLayerImage(layer).pixel(view->SceneToCanvas(scene).toPoint()));
+            const QImage image = stick->FreehandLayerImage(layer); // in the layer's own rectangle
+            const QPoint px = view->SceneToCanvas(scene).toPoint() - stick->freehand_layers[layer].origin;
+            return image.valid(px) ? qAlpha(image.pixel(px)) : 0;
         };
         QCOMPARE(layer_alpha(0, centre), 0);
         QVERIFY(layer_alpha(0, ring) > 0);
@@ -9384,6 +9451,307 @@ private slots:
         QVERIFY(qAlpha(shot.pixel(centre.toPoint())) > 0);
         QCOMPARE(qAlpha(shot.pixel(ring.toPoint())), 0);
         view->SetTool(NOTOOL);
+    }
+
+    // A FREEHAND stick on its own in a throwaway 200x200 scene, white background. The scene (and
+    // with it the view) goes before the caller frees the record.
+    static QImage RenderFreehand(StickData *stick)
+    {
+        QGraphicsScene render_scene;
+        render_scene.setSceneRect(0, 0, 200, 200);
+        render_scene.addItem(new StickGraphicsItem(stick));
+        QImage img(200, 200, QImage::Format_ARGB32);
+        img.fill(Qt::white);
+        QPainter painter(&img);
+        render_scene.render(&painter, QRectF(0, 0, 200, 200), QRectF(0, 0, 200, 200));
+        painter.end();
+        return img;
+    }
+
+    // How many pixels of two renders differ by more than a rounding step in some channel.
+    static int DifferingPixels(const QImage &a, const QImage &b)
+    {
+        int count = 0;
+        for (int y = 0; y < a.height(); y++)
+            for (int x = 0; x < a.width(); x++) {
+                const QRgb p = a.pixel(x, y), q = b.pixel(x, y);
+                if (qAbs(qRed(p) - qRed(q)) > 8 || qAbs(qGreen(p) - qGreen(q)) > 8
+                        || qAbs(qBlue(p) - qBlue(q)) > 8 || qAbs(qAlpha(p) - qAlpha(q)) > 8)
+                    count++;
+            }
+        return count;
+    }
+
+    // A freehand layer covers only its own rectangle of the stick's grid (FreehandLayer::origin):
+    // small layers at their origins composite and render like the same drawing as full-grid layers,
+    // a mask included, normal and inverted, with the mask smaller than the layer it masks (inverted,
+    // what the mask does not cover is cleared). The file keeps the origins and is written cut to the
+    // painted pixels, with the placement re-solved so the render does not move.
+    void FreehandLayerOriginsRenderInPlace()
+    {
+        auto square = [](QSize size, QRect painted, const QColor &colour){
+            QImage image(size, QImage::Format_ARGB32_Premultiplied);
+            image.fill(Qt::transparent);
+            QPainter p(&image);
+            p.fillRect(painted, colour);
+            return image;
+        };
+        // a 40x40 grid: a 20x20 red square at (5,5), masked by a hidden 10x10 black square at (10,10)
+        auto make = [square](bool cropped, bool inverted){
+            StickData *stick = new StickData();
+            stick->stick_type = StickData::FREEHAND;
+            stick->my_line = QLineF(100, 60, 100, 140); // length 80: two scene units per grid pixel
+            FreehandLayer layer;
+            layer.name = "Square";
+            layer.mask = 1;
+            layer.mask_inverted = inverted;
+            FreehandLayer mask;
+            mask.name = "Mask";
+            mask.visible = false;
+            if (cropped) {
+                layer.image = square(QSize(20, 20), QRect(0, 0, 20, 20), Qt::red);
+                layer.origin = QPoint(5, 5);
+                mask.image = square(QSize(10, 10), QRect(0, 0, 10, 10), Qt::black);
+                mask.origin = QPoint(10, 10);
+            } else {
+                layer.image = square(QSize(40, 40), QRect(5, 5, 20, 20), Qt::red);
+                mask.image = square(QSize(40, 40), QRect(10, 10, 10, 10), Qt::black);
+            }
+            stick->freehand_layers = { layer, mask };
+            stick->freehand_grid = QSize(40, 40);
+            stick->RebuildFreehandComposite();
+            return stick;
+        };
+        for (bool inverted : { false, true }) {
+            StickData *full = make(false, inverted);
+            StickData *cropped = make(true, inverted);
+            QCOMPARE(*cropped->stick_img, *full->stick_img);
+            const QImage &composite = *cropped->stick_img;
+            QCOMPARE(qAlpha(composite.pixel(15, 15)) > 0, inverted);  // under the mask
+            QCOMPARE(qAlpha(composite.pixel(7, 7)) > 0, !inverted);   // outside the mask's square
+            const QImage render_full = RenderFreehand(full);
+            QVERIFY(DifferingPixels(RenderFreehand(cropped), render_full) <= 160);
+
+            QByteArray bytes;
+            {
+                QDataStream out(&bytes, QIODevice::WriteOnly);
+                out << *cropped;
+            }
+            StickData loaded;
+            {
+                QDataStream in(&bytes, QIODevice::ReadOnly);
+                in >> loaded;
+                QCOMPARE(in.status(), QDataStream::Ok);
+                QVERIFY(in.atEnd());
+            }
+            // the grid shrinks to the painted box (5..24): the square at 0,0, the mask at 5,5
+            QCOMPARE(loaded.freehand_grid, QSize(20, 20));
+            QCOMPARE(loaded.freehand_layers[0].origin, QPoint(0, 0));
+            QCOMPARE(loaded.freehand_layers[1].origin, QPoint(5, 5));
+            QVERIFY(DifferingPixels(RenderFreehand(&loaded), render_full) <= 160);
+            StickData *clone = cropped->Clone();
+            QCOMPARE(clone->freehand_grid, cropped->freehand_grid);
+            QVERIFY(clone->freehand_layers == cropped->freehand_layers);
+            delete clone;
+            delete full;
+            delete cropped;
+        }
+    }
+
+    // StickData::CropFreehandLayers() cuts every layer to its own pixels: two layers far apart no
+    // longer pay for the box around both, an empty layer becomes null, the grid becomes the painted
+    // box and the drawing does not move on screen.
+    void FreehandCropKeepsPixelsInPlace()
+    {
+        auto layer_with = [](QRect painted, const QColor &colour){
+            FreehandLayer layer;
+            layer.image = QImage(100, 100, QImage::Format_ARGB32_Premultiplied);
+            layer.image.fill(Qt::transparent);
+            if (!painted.isEmpty()) {
+                QPainter p(&layer.image);
+                p.fillRect(painted, colour);
+            }
+            return layer;
+        };
+        StickData stick;
+        stick.stick_type = StickData::FREEHAND;
+        stick.my_line = QLineF(100, 50, 100, 150);
+        stick.freehand_layers = { layer_with(QRect(20, 20, 10, 10), Qt::red),
+                                  layer_with(QRect(60, 60, 10, 10), Qt::blue),
+                                  layer_with(QRect(), Qt::black) };
+        stick.freehand_grid = QSize(100, 100);
+        stick.RebuildFreehandComposite();
+        const QImage before = RenderFreehand(&stick);
+        QImage blank(before.size(), before.format());
+        blank.fill(Qt::white);
+        QVERIFY(DifferingPixels(before, blank) > 0); // something is drawn
+
+        stick.CropFreehandLayers();
+        QCOMPARE(stick.freehand_grid, QSize(50, 50));
+        QCOMPARE(stick.freehand_layers[0].image.size(), QSize(10, 10));
+        QCOMPARE(stick.freehand_layers[0].origin, QPoint(0, 0));
+        QCOMPARE(stick.freehand_layers[1].image.size(), QSize(10, 10));
+        QCOMPARE(stick.freehand_layers[1].origin, QPoint(40, 40));
+        QVERIFY(stick.freehand_layers[2].image.isNull());
+        QCOMPARE(stick.stick_img->size(), QSize(50, 50));
+        QVERIFY(DifferingPixels(RenderFreehand(&stick), before) <= 80);
+
+        // a second crop finds every layer tight and changes nothing
+        const QList<FreehandLayer> tight = stick.freehand_layers;
+        const QPointF offset = stick.img_offset;
+        stick.CropFreehandLayers();
+        QVERIFY(stick.freehand_layers == tight);
+        QCOMPARE(stick.img_offset, offset);
+    }
+
+    // A save or a library add during a draw session reads the record: FlushDrawSession() makes it
+    // match the screen, composite included, and the session goes on. With a lifted pixel float the
+    // layer keeps the pixels the canvas lost. Copy commits the float first, so the copy has them,
+    // and keeps only the copied layer's own pixels.
+    void FlushDrawSessionKeepsCompositeCurrent()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        StickData *stick = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        stick->stick_type = StickData::FREEHAND;
+        view->EnterDrawMode(stick, false);
+        view->draw_brush_size = 10;
+        view->draw_brush_hardness = 100;
+        auto dab = [this](const QPointF &at){
+            QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(at));
+            QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(at));
+        };
+        auto alpha_at = [this](const FreehandLayer &layer, const QPointF &scene){
+            const QPoint px = view->SceneToCanvas(scene).toPoint() - layer.origin;
+            return layer.image.valid(px) ? qAlpha(layer.image.pixel(px)) : 0;
+        };
+        const QPointF left(300, 300), right(400, 300);
+        dab(left);
+        QVERIFY(view->AddFreehandLayer());
+        dab(right);
+        view->FlushDrawSession();
+        QVERIFY(view->draw_mode);
+        StickData *expected = stick->Clone();
+        expected->RebuildFreehandComposite();
+        QCOMPARE(*stick->stick_img, *expected->stick_img);
+        delete expected;
+        QVERIFY(qAlpha(stick->stick_img->pixel(view->SceneToCanvas(left).toPoint())) > 0);
+        QVERIFY(qAlpha(stick->stick_img->pixel(view->SceneToCanvas(right).toPoint())) > 0);
+
+        // lift the active layer's pixels and move them away: the canvas has a hole where they were
+        view->SetDrawTool(MyView::DT_TRANSFORM);
+        const QPointF far = right + QPointF(0, 150);
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(far));
+        QTest::mouseMove(view->viewport(), view->mapFromScene(far + QPointF(20, 0)));
+        QTest::mouseMove(view->viewport(), view->mapFromScene(far + QPointF(40, 0)));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(far + QPointF(40, 0)));
+        QVERIFY(view->draw_float_active);
+        QCOMPARE(qAlpha(view->draw_canvas->pixel(view->SceneToCanvas(right).toPoint())), 0);
+        view->FlushDrawSession();
+        QVERIFY(alpha_at(stick->freehand_layers[view->draw_layer], right) > 0); // the layer kept them
+        QVERIFY(view->draw_float_active);                                         // the move is still open
+
+        QCOMPARE(view->CopyFreehandLayers({ view->draw_layer }), 1);
+        QVERIFY(!view->draw_float_active);
+        QVERIFY(!view->freehand_clipboard[0].image.isNull());
+        QVERIFY(view->freehand_clipboard[0].image.width() < view->draw_canvas->width() / 4);
+        view->ExitDrawMode();
+        view->SetTool(NOTOOL);
+    }
+
+    // Switching layer options off un-parents the figure's views from their group; a view's
+    // SyncShapeLayers() then may delete a sibling depth item (here: an offset changed with no
+    // Refresh()). The group must not touch that item afterwards, and the remaining items end up
+    // top-level in the scene.
+    void DisablingLayerOptionsKeepsShapeLayersAlive()
+    {
+        AddFrame();
+        StickData *a = AddVectorStick(QPointF(200, 100), QPointF(200, 200),
+                                      { SquareShape(QPointF(-0.5, 0), 1.0, QBrush(Qt::gray)),
+                                        SquareShape(QPointF(0, 0.5), 0.3, QBrush(Qt::darkGray)) });
+        a->vector_depth_enabled = true;
+        a->vector_shapes[0].depth_offset = 1;
+        a->vector_shapes[1].depth_offset = 2;
+        a->view->Refresh(0);
+        QCOMPARE(a->view->shape_layers.size(), 2);
+        StickFigure *figure = CurrentStickFigure();
+        figure->layer_options.outline.enabled = true;
+        CurrentFrame()->SyncLayerEffects();
+        QVERIFY(figure->layer_group != nullptr);
+        QVERIFY(a->view->parentItem() == figure->layer_group);
+        for (VectorShapeLayerItem *layer : a->view->shape_layers)
+            QVERIFY(layer->parentItem() == figure->layer_group);
+
+        a->vector_shapes[1].depth_offset = 0; // no Refresh(): the offset-2 item is now unused
+        figure->layer_options = LayerOptions();
+        CurrentFrame()->SyncLayerEffects();
+        QVERIFY(figure->layer_group == nullptr);
+        QCOMPARE(a->view->shape_layers.size(), 1);
+        QCOMPARE(a->view->shape_layers[0]->depth_offset, 1.0);
+        QVERIFY(a->view->shape_layers[0]->parentItem() == nullptr);
+        QCOMPARE(a->view->shape_layers[0]->scene(), a->view->scene());
+    }
+
+    // The per-view mask caches drop an entry when its layer or shape stops being masked or is
+    // deleted, instead of keeping the image until the view leaves its scene.
+    void MaskCachesDropStaleEntries()
+    {
+        StickData stick;
+        stick.stick_type = StickData::FREEHAND;
+        stick.my_line = QLineF(100, 60, 100, 140);
+        FreehandLayer mask;
+        mask.image = QImage(10, 10, QImage::Format_ARGB32_Premultiplied);
+        mask.image.fill(Qt::black);
+        mask.visible = false;
+        FreehandLayer layer;
+        layer.image = QImage(20, 20, QImage::Format_ARGB32_Premultiplied);
+        layer.image.fill(Qt::red);
+        layer.mask = 0;
+        stick.freehand_layers = { mask, layer };
+        stick.RebuildFreehandComposite();
+        StickData vector;
+        vector.stick_type = StickData::VECTOR;
+        vector.my_line = QLineF(100, 60, 100, 140);
+        vector.vector_shapes << SquareShape(QPointF(-0.5, 0), 1.0, QBrush(Qt::black))
+                             << SquareShape(QPointF(-0.25, 0.25), 0.5, QBrush(Qt::red));
+        vector.vector_shapes[1].mask = 0;
+        // declared after the records: on any early return the scene and its views go first
+        QGraphicsScene render_scene;
+        render_scene.setSceneRect(0, 0, 200, 200);
+        StickGraphicsItem *item = new StickGraphicsItem(&stick);
+        render_scene.addItem(item);
+        auto paint = [&render_scene]{
+            QImage img(200, 200, QImage::Format_ARGB32);
+            QPainter painter(&img);
+            render_scene.render(&painter, QRectF(0, 0, 200, 200), QRectF(0, 0, 200, 200));
+        };
+        paint();
+        QVERIFY(item->masked_layer_cache.contains(1));
+        stick.freehand_layers[1].mask = FreehandLayer::NO_MASK;
+        paint();
+        QVERIFY(!item->masked_layer_cache.contains(1)); // unmasked: its image is not kept
+        stick.freehand_layers[1].mask = 0;
+        paint();
+        QVERIFY(item->masked_layer_cache.contains(1));
+        stick.freehand_layers.removeLast();             // the masked layer is deleted
+        paint();
+        QVERIFY(item->masked_layer_cache.isEmpty());
+
+        // the vector cache, likewise
+        StickGraphicsItem *vector_item = new StickGraphicsItem(&vector);
+        render_scene.addItem(vector_item);
+        paint();
+        QVERIFY(vector_item->masked_cache.contains(1));
+        vector.vector_shapes[1].mask = VectorShape::NO_MASK;
+        paint();
+        QVERIFY(!vector_item->masked_cache.contains(1));
+        vector.vector_shapes[1].mask = 0;
+        paint();
+        QVERIFY(vector_item->masked_cache.contains(1));
+        vector.vector_shapes.removeLast();
+        paint();
+        QVERIFY(vector_item->masked_cache.isEmpty());
+        render_scene.clear(); // the views go before the records they read
     }
 };
 

@@ -235,12 +235,15 @@ void KeepCopiedMasks(QList<Layer> &copied, const QList<int> &sources)
 }
 
 /**
- * @brief Cuts @p image by @p mask, pixel by pixel on the same grid: DestinationOut scales the
+ * @brief Cuts @p image by @p mask, pixel by pixel on one grid: DestinationOut scales the
  *        image's alpha by (1 - mask alpha), DestinationIn (@p inverted) by the mask alpha.
  *        Shared by a masked vector shape and a masked freehand layer.
  * @param image premultiplied image to cut in place.
+ * @param offset where the mask's top-left pixel lies in @p image (a freehand layer and its mask
+ *        each cover their own rectangle of the grid). Inverted, whatever the mask does not cover
+ *        has mask alpha 0 and is cleared; a null mask then clears everything.
  */
-void CutByMask(QImage &image, const QImage &mask, bool inverted);
+void CutByMask(QImage &image, const QImage &mask, bool inverted, const QPoint &offset = QPoint());
 
 /**
  * @brief Index of the topmost visible shape of @p stick under @p scene_pt, or -1. "Topmost" is

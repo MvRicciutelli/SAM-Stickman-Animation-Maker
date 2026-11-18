@@ -1464,30 +1464,6 @@ QImage MyView::MakeRoundBrush(int size, int hardness, int roundness)
     return mask.convertToFormat(QImage::Format_Alpha8);
 }
 
-/// @details Tight bounding rect of the non-transparent pixels (alpha > 0). Empty rect
-/// when the image is fully transparent — the "nothing painted" signal for ExitDrawMode().
-QRect MyView::OpaqueBounds(const QImage &img)
-{
-    if(img.isNull())
-        return QRect();
-    QImage a = img.convertToFormat(QImage::Format_ARGB32);
-    int min_x = a.width(), min_y = a.height(), max_x = -1, max_y = -1;
-    for(int y = 0; y < a.height(); y++){
-        const QRgb *row = reinterpret_cast<const QRgb*>(a.constScanLine(y));
-        for(int x = 0; x < a.width(); x++){
-            if(qAlpha(row[x]) != 0){
-                if(x < min_x) min_x = x;
-                if(x > max_x) max_x = x;
-                if(y < min_y) min_y = y;
-                if(y > max_y) max_y = y;
-            }
-        }
-    }
-    if(max_x < 0)
-        return QRect();
-    return QRect(QPoint(min_x, min_y), QPoint(max_x, max_y));
-}
-
 /// @details Pen pressure (0..1 from tabletEvent) is remapped so a "normal", half-way press
 /// (0.5) reproduces the dialled-in size/opacity exactly, instead of always undershooting it
 /// (a plain 0..1 multiplier would make even a firm press cut the selected value in half).
@@ -1611,25 +1587,41 @@ void MyView::PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_sce
     }
 }
 
-/// @details Session-local undo push: drops any redo tail, then snapshots the canvas. This
+/// @details Session-local undo push: drops any redo tail, then snapshots the layer stack. This
 /// chain lives only while draw_mode is active and never touches undo_stack (spec).
 ///
-/// Capped like undo_stack is (MAXUNDO), and for a much more pressing reason: an entry here is
-/// a WHOLE canvas, and the canvas is a square the size of the viewport's diagonal — about
-/// 19 MB at 1080p. Uncapped, a long drawing session kept one per stroke and ran into the
-/// gigabytes. The oldest snapshot goes first, so the depth is the last MAXDRAWUNDO strokes.
+/// The stack is copy-on-write and the layers other than the active one are already cut to their
+/// own pixels (LoadDrawCanvas()), so they cost nothing per entry. The active layer is the whole
+/// canvas, a square the size of the viewport's diagonal (about 19 MB at 1080p): the entry keeps it
+/// cut to its painted pixels instead (StickData::CropFreehandLayer()), and a step that did not touch
+/// the canvas (rename, visibility, mask, depth) reuses the previous entry's cut. Capped at
+/// MAXDRAWUNDO all the same; the oldest snapshot goes first.
 ///
-/// ponytail: whole-canvas snapshots; per-stroke dirty rectangles if the cap ever feels tight.
+/// ponytail: an entry costs the active layer's whole painted box per stroke, and each push scans
+/// the canvas once (a few ms at 1080p); patches of each stroke's changed rectangle would cost
+/// less, but would trust every canvas-writing path to report its rectangle.
 void MyView::PushDrawUndo()
 {
     if(!draw_canvas || !draw_target)
         return;
-    // the step is the whole layer stack; copy-on-write keeps the untouched layers shared, so a
-    // stroke still costs one canvas, as when there was one layer
     SyncDrawCanvas();
     while(draw_undo.count() > draw_undo_idx + 1)
         draw_undo.removeLast();
-    draw_undo.append({ draw_target->freehand_layers, draw_layer, draw_target->vector_depth_enabled });
+    DrawUndoState state{ draw_target->freehand_layers, draw_layer, draw_target->vector_depth_enabled };
+    if(draw_layer >= 0 && draw_layer < state.layers.size()){
+        FreehandLayer &active = state.layers[draw_layer]; // detaches the entry's list, not the stick's
+        const bool unchanged = !draw_undo.isEmpty() && draw_last_push_key == draw_layer_canvas.cacheKey();
+        if(unchanged){
+            // same canvas buffer as at the last push: same pixels, so that entry's cut is this one
+            const DrawUndoState &previous = draw_undo.last();
+            active.image = previous.layers.at(previous.layer).image;
+            active.origin = previous.layers.at(previous.layer).origin;
+        } else {
+            StickData::CropFreehandLayer(active);
+        }
+    }
+    draw_last_push_key = draw_layer_canvas.cacheKey();
+    draw_undo.append(state);
     while(draw_undo.count() > MAXDRAWUNDO)
         draw_undo.removeFirst(); // when dropping from the head the current index shifts along with the list
     draw_undo_idx = draw_undo.count() - 1;
@@ -1637,20 +1629,58 @@ void MyView::PushDrawUndo()
 }
 
 /// @details The list's own element is assigned, so the list detaches from any clone sharing it
-/// (an undo snapshot, a render clone) and only this stick sees the new pixels.
+/// (an undo snapshot, a render clone) and only this stick sees the new pixels. The canvas is the
+/// whole grid, so the active layer's origin is 0.
 void MyView::SyncDrawCanvas()
 {
     if(!draw_target || draw_layer < 0 || draw_layer >= draw_target->freehand_layers.size())
         return;
-    draw_target->freehand_layers[draw_layer].image = draw_layer_canvas;
+    FreehandLayer &active = draw_target->freehand_layers[draw_layer];
+    active.image = draw_layer_canvas;
+    active.origin = QPoint();
 }
 
+/// @details The record's active layer becomes the expanded canvas too (shared, no copy), so the
+/// record and the canvas agree until the next stroke. A non-active layer that still covers the whole
+/// canvas (the previous active one) is cut back first; one painted edge to edge is recognized by its
+/// borders and kept without a scan.
 void MyView::LoadDrawCanvas()
 {
     if(!draw_target || draw_target->freehand_layers.isEmpty())
         return;
-    draw_layer = qBound(0, draw_layer, int(draw_target->freehand_layers.size()) - 1);
-    draw_layer_canvas = draw_target->freehand_layers[draw_layer].image;
+    QList<FreehandLayer> &layers = draw_target->freehand_layers;
+    draw_layer = qBound(0, draw_layer, int(layers.size()) - 1);
+    const QSize grid = draw_target->freehand_grid; // the canvas size, fixed for the session
+    for(int i = 0; i < layers.size(); i++){
+        const FreehandLayer &layer = layers.at(i);
+        if(i != draw_layer && layer.origin.isNull() && layer.image.size() == grid)
+            StickData::CropFreehandLayer(layers[i]);
+    }
+    FreehandLayer &active = layers[draw_layer];
+    if(!(active.origin.isNull() && active.image.size() == grid) && !grid.isEmpty()){
+        QImage canvas(grid, QImage::Format_ARGB32_Premultiplied);
+        canvas.fill(Qt::transparent);
+        if(!active.image.isNull()){
+            QPainter p(&canvas);
+            p.drawImage(active.origin, active.image);
+        }
+        active.image = canvas;
+        active.origin = QPoint();
+    }
+    draw_layer_canvas = active.image;
+}
+
+/// @details The composite is rebuilt from the record, which holds the canvas as of the last stroke
+/// (every stroke pushes an undo step, which syncs). With a lifted float the canvas has a hole the
+/// layer does not: the layer is kept as it is, so the record shows the pixels where they were before
+/// the uncommitted move.
+void MyView::FlushDrawSession()
+{
+    if(!draw_mode || !draw_target)
+        return;
+    if(!draw_float_active)
+        SyncDrawCanvas();
+    draw_target->RebuildFreehandComposite();
 }
 
 /// @details The float belongs to the layer it was lifted from, so it is committed (one undo step)
@@ -1725,15 +1755,15 @@ void MyView::EndLayerEdit()
     }
 }
 
-/// @details Appended and then moved, so the masks of the layers above keep naming theirs.
+/// @details Appended and then moved, so the masks of the layers above keep naming theirs. The new
+/// layer is empty (a null image, no allocation); it becomes active, so EndLayerEdit() gives it the
+/// working canvas.
 bool MyView::AddFreehandLayer()
 {
     if(!BeginLayerEdit())
         return false;
     QList<FreehandLayer> &layers = draw_target->freehand_layers;
     FreehandLayer layer;
-    layer.image = QImage(layers[0].image.size(), QImage::Format_ARGB32_Premultiplied);
-    layer.image.fill(Qt::transparent);
     int n = layers.size() + 1;
     auto taken = [&layers](const QString &name){
         for(const FreehandLayer &l : layers)
@@ -1815,6 +1845,35 @@ void MyView::RenameFreehandLayer(int index, const QString &name)
     EndLayerEdit();
 }
 
+/// @brief Redraws @p layer through @p to_canvas (its own pixel -> canvas pixel), keeping only the
+///        part that lands on a @p canvas_size canvas: just that footprint is allocated, and the
+///        origin says where it sits. An empty layer, or one landing wholly off the canvas, ends empty.
+/// @details Shared by EnterDrawMode()'s bake, the layer flips and the layer paste, which used to
+/// allocate a whole canvas per layer.
+static void RedrawFreehandLayer(FreehandLayer &layer, const QTransform &to_canvas, const QSize &canvas_size)
+{
+    if(layer.image.isNull()){
+        layer.origin = QPoint();
+        return;
+    }
+    const QRect footprint = to_canvas.mapRect(QRectF(QPointF(0, 0), QSizeF(layer.image.size()))).toAlignedRect()
+                          & QRect(QPoint(0, 0), canvas_size);
+    if(footprint.isEmpty()){
+        layer.image = QImage();
+        layer.origin = QPoint();
+        return;
+    }
+    QImage redrawn(footprint.size(), QImage::Format_ARGB32_Premultiplied);
+    redrawn.fill(Qt::transparent);
+    QPainter p(&redrawn);
+    p.setRenderHint(QPainter::SmoothPixmapTransform);
+    p.setTransform(to_canvas * QTransform::fromTranslate(-footprint.x(), -footprint.y()));
+    p.drawImage(0, 0, layer.image);
+    p.end();
+    layer.image = redrawn;
+    layer.origin = footprint.topLeft();
+}
+
 /// @details The mirror is built in the scene, so "horizontal" is the screen's whatever the canvas's
 /// rotation, and conjugated into canvas pixels through draw_disp (FlipVectorShapes()'s rule, with
 /// pixels in place of anchors). The pixels are resampled unless the canvas is upright.
@@ -1825,14 +1884,14 @@ bool MyView::FlipFreehandLayers(const QList<int> &indices, bool horizontal)
     if(!BeginLayerEdit())
         return false;
     QList<FreehandLayer> &layers = draw_target->freehand_layers;
-    const QSize size = layers[0].image.size();
+    const QSize size = draw_target->freehand_grid; // the canvas
     const QTransform pix_to_scene = QTransform::fromTranslate(-size.width()/2.0, -size.height()/2.0) * draw_disp;
     QRectF box;
     QList<int> valid;
     for(int idx : indices)
         if(idx >= 0 && idx < layers.size() && !valid.contains(idx)){
             valid << idx;
-            const QRect painted = OpaqueBounds(layers[idx].image);
+            const QRect painted = OpaqueBounds(layers.at(idx).image).translated(layers.at(idx).origin);
             if(!painted.isEmpty())
                 box |= pix_to_scene.mapRect(QRectF(painted.adjusted(0, 0, 1, 1)));
         }
@@ -1840,26 +1899,23 @@ bool MyView::FlipFreehandLayers(const QList<int> &indices, bool horizontal)
         return false;
     const QTransform in_pixels = pix_to_scene * ScreenMirror(box.center(), horizontal) * pix_to_scene.inverted();
     for(int idx : valid){
-        QImage flipped(size, QImage::Format_ARGB32_Premultiplied);
-        flipped.fill(Qt::transparent);
-        QPainter p(&flipped);
-        p.setRenderHint(QPainter::SmoothPixmapTransform);
-        p.setTransform(in_pixels);
-        p.drawImage(0, 0, layers[idx].image);
-        p.end();
-        layers[idx].image = flipped;
+        FreehandLayer &layer = layers[idx];
+        RedrawFreehandLayer(layer, QTransform::fromTranslate(layer.origin.x(), layer.origin.y()) * in_pixels, size);
     }
     EndLayerEdit();
     return true;
 }
 
-/// @details CopyVectorShapes()'s rules: the copy goes with the transform that put its pixels in the
-/// scene (one for all, they share a grid), so a paste can put them back where they were painted on
-/// any freehand; a mask is kept only when its layer is copied too (KeepCopiedMasks()).
+/// @details CopyVectorShapes()'s rules: the copy goes with the transform that put its grid in the
+/// scene (one for all), so a paste can put the pixels back where they were painted on any freehand;
+/// a mask is kept only when its layer is copied too (KeepCopiedMasks()). A lifted pixel float is
+/// committed first, or the copy would hold the hole it left. Each copied layer keeps only its own
+/// pixels (its origin says where they were), so the clipboard never holds a whole canvas.
 int MyView::CopyFreehandLayers(QList<int> indices)
 {
     if(!draw_mode || !draw_target || draw_target->freehand_layers.isEmpty())
         return 0;
+    CommitPixelFloat();
     SyncDrawCanvas();
     std::sort(indices.begin(), indices.end());
     indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
@@ -1874,14 +1930,17 @@ int MyView::CopyFreehandLayers(QList<int> indices)
     if(copied.isEmpty())
         return 0; // nothing selected: the previous copy stays
     KeepCopiedMasks(copied, sources);
-    const QSize size = layers[0].image.size();
+    for(FreehandLayer &layer : copied)
+        StickData::CropFreehandLayer(layer);
+    const QSize size = draw_target->freehand_grid;
     freehand_clipboard = copied;
     freehand_clip_to_scene = QTransform::fromTranslate(-size.width()/2.0, -size.height()/2.0) * draw_disp;
     return copied.size();
 }
 
-/// @details PasteVectorShapes()'s rules: redrawn through the clipboard's pixel->scene transform and
+/// @details PasteVectorShapes()'s rules: redrawn through the clipboard's grid->scene transform and
 /// this canvas's scene->pixel one, on top, in copied order, buffer masks offset onto the pasted block.
+/// Each pasted layer allocates only where it lands (RedrawFreehandLayer()).
 QString MyView::PasteFreehandLayers()
 {
     if(freehand_clipboard.isEmpty())
@@ -1889,19 +1948,12 @@ QString MyView::PasteFreehandLayers()
     if(!BeginLayerEdit())
         return tr("Edit a freehand drawing to paste the layers into.");
     QList<FreehandLayer> &layers = draw_target->freehand_layers;
-    const QSize size = layers[0].image.size();
+    const QSize size = draw_target->freehand_grid; // the canvas
     const QTransform to_pixels = freehand_clip_to_scene * draw_disp_inv
             * QTransform::fromTranslate(size.width()/2.0, size.height()/2.0);
     const int first = layers.size();
     for(FreehandLayer layer : freehand_clipboard){
-        QImage pasted(size, QImage::Format_ARGB32_Premultiplied);
-        pasted.fill(Qt::transparent);
-        QPainter p(&pasted);
-        p.setRenderHint(QPainter::SmoothPixmapTransform);
-        p.setTransform(to_pixels);
-        p.drawImage(0, 0, layer.image);
-        p.end();
-        layer.image = pasted;
+        RedrawFreehandLayer(layer, QTransform::fromTranslate(layer.origin.x(), layer.origin.y()) * to_pixels, size);
         if(layer.mask >= 0)
             layer.mask += first;
         layers << layer;
@@ -2081,8 +2133,10 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
     // The stick's CURRENT on-screen appearance (needed to re-open an existing drawing for
     // editing) is captured here, before anything below overwrites the stick's own transform.
     // A drawing from before layers existed (or one made just now) becomes its one layer first.
-    // Every layer has the composite's size, so one painted size and one transform place them all.
+    // The composite has the grid's size, so one painted size and one transform place every layer,
+    // each at its own origin on the grid.
     stick->EnsureFreehandLayers();
+    const QSize old_grid = stick->FreehandGrid();
     QSizeF old_size;
     QTransform old_disp; // old appearance's centred local pixel -> scene transform
     if(stick->view && stick->stick_img && !stick->stick_img->isNull()){
@@ -2133,36 +2187,38 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
     draw_disp = disp * draw_branch;
     draw_disp_inv = draw_disp.inverted();
 
-    // Bake each layer's old appearance (positioned in SCENE space by old_disp) into a new canvas
-    // of its own. Four QTransform stages chained with operator* into one matrix — for `A * B`, a
-    // point is mapped by A first, then B, so reading left-to-right below IS the pipeline order:
-    //   old pixel scaled to its painted size -> centred on its own middle -> placed in the scene
-    //   (old_disp) -> back into the new canvas's centred pixel space (draw_disp_inv, the exact
-    //   inverse of draw_disp above) -> shifted from centred to the canvas's raw top-left addressing.
+    // Bake each layer's old appearance (positioned in SCENE space by old_disp) onto the new canvas
+    // grid, allocating only the layer's footprint there (RedrawFreehandLayer()). The QTransform
+    // stages are chained with operator* into one matrix — for `A * B`, a point is mapped by A first,
+    // then B, so reading left-to-right below IS the pipeline order:
+    //   layer pixel -> old grid pixel (its origin) -> scaled to the painted size (CalcImg()'s
+    //   scaling) -> centred on the painted image's middle -> placed in the scene (old_disp) -> back
+    //   into the new canvas's centred pixel space (draw_disp_inv, the exact inverse of draw_disp
+    //   above) -> shifted from centred to the canvas's raw top-left addressing.
+    const QSize canvas_size(D, D);
     for(FreehandLayer &layer : stick->freehand_layers){
-        QImage canvas(D, D, QImage::Format_ARGB32_Premultiplied);
-        canvas.fill(Qt::transparent);
-        if(!old_size.isEmpty() && !layer.image.isNull()){
-            const QImage old_scaled = layer.image.scaled(old_size.width(), old_size.height()); // CalcImg()'s scaling
-            QTransform bake =
-                  QTransform::fromTranslate(-old_scaled.width()/2.0, -old_scaled.height()/2.0) // raw -> centred
-                * old_disp                                                                     // -> scene
-                * draw_disp_inv                                                                // -> new canvas, centred
-                * QTransform::fromTranslate(D/2.0, D/2.0);                                      // -> new canvas, raw
-            QPainter cp(&canvas);
-            cp.setRenderHint(QPainter::SmoothPixmapTransform);
-            cp.setTransform(bake);
-            cp.drawImage(0, 0, old_scaled);
-            cp.end();
+        if(old_size.isEmpty() || old_grid.isEmpty()){
+            layer.image = QImage(); // nothing on screen to bake: empty until painted
+            layer.origin = QPoint();
+            continue;
         }
-        layer.image = canvas;
+        const QTransform bake =
+              QTransform::fromTranslate(layer.origin.x(), layer.origin.y())
+            * QTransform::fromScale(old_size.width() / old_grid.width(), old_size.height() / old_grid.height())
+            * QTransform::fromTranslate(-old_size.width()/2.0, -old_size.height()/2.0)
+            * old_disp
+            * draw_disp_inv
+            * QTransform::fromTranslate(D/2.0, D/2.0);
+        RedrawFreehandLayer(layer, bake, canvas_size);
     }
-    // the composite only has to have the canvas size during the session (CalcImgSize()):
-    // paint() draws the layers, and the working canvas for the active one
-    stick->RebuildFreehandComposite();
+    stick->freehand_grid = canvas_size;
     draw_layer = stick->freehand_layers.size() - 1; // the top layer; the panel can pick another
-    draw_layer_canvas = stick->freehand_layers[draw_layer].image;
+    LoadDrawCanvas(); // the active layer becomes the whole canvas; the others keep their footprints
     draw_canvas = &draw_layer_canvas;
+    // the composite only has to have the canvas size during the session (CalcImgSize()): paint()
+    // draws the layers, and the working canvas for the active one. Built after LoadDrawCanvas(), so
+    // a lone layer shares the canvas instead of costing a second one
+    stick->RebuildFreehandComposite();
 
     // the stick stays in its real frame (2-click skeleton); the DxD canvas covers the
     // viewport rotated by theta and centred on vc
@@ -2197,8 +2253,8 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
 }
 
 /**
- * @details Crops the canvas to the painted pixels (spec: "bbox optimized to actual drawing
- * size") and re-anchors the cropped image on the stick's own skeleton at the stick's
+ * @details Cuts every layer to its own painted pixels (spec: "bbox optimized to actual drawing
+ * size"; StickData::CropFreehandLayers()) and re-anchors the result on the stick's own skeleton at the stick's
  * rotation (the drawing was painted in that frame, so no re-rotation is needed), then
  * discards the session's undo chain. When nothing was painted the canvas is left a 1x1
  * transparent placeholder
@@ -2232,46 +2288,16 @@ void MyView::ExitDrawMode()
     if(!stick || !canvas || stick->freehand_layers.isEmpty())
         return;
 
-    // All layers share one pixel grid, so they are cropped to ONE rect: the union of their
-    // painted pixels, hidden layers included (hidden is not deleted).
-    QRect bounds;
-    for(const FreehandLayer &layer : stick->freehand_layers)
-        bounds |= OpaqueBounds(layer.image);
-    const QSize canvas_size = stick->freehand_layers[0].image.size();
-    double canvas_half_w = canvas_size.width()/2.0, canvas_half_h = canvas_size.height()/2.0;
-    if(bounds.isEmpty())
-        bounds = QRect(int(canvas_half_w), int(canvas_half_h), 1, 1); // nothing was painted: 1x1 invisible placeholder
-
-    for(FreehandLayer &layer : stick->freehand_layers)
-        layer.image = layer.image.copy(bounds);
-    stick->RebuildFreehandComposite();
-
     // The drawing is ALREADY sitting in the stick's own rotated frame (that's the whole point of
-    // painting in a canvas pre-rotated by EnterDrawMode), so no re-rotation is needed here — just
-    // crop it and re-anchor the cropped image on the same skeleton/rotation, exactly like an
-    // IMAGE stick, so it stays exactly where it was painted and keeps rotating with the stick.
-    double bw = bounds.width(), bh = bounds.height();
-    QPointF center_px(bounds.x() + bw/2.0, bounds.y() + bh/2.0);
-    // Crop centre, in canvas-pixel space, re-centred (- canvas_half_w/h) then mapped through
-    // draw_disp — the same centred-pixel-to-scene transform EnterDrawMode() built — to land in
-    // scene coordinates.
-    QPointF crop_center_scene = draw_disp.map(center_px - QPointF(canvas_half_w, canvas_half_h));
-    // ...then back from under the global transforms, which paint() keeps applying on top
-    crop_center_scene = draw_branch.inverted().map(crop_center_scene);
-    double len = draw_orig_line.length();
-    QPointF p1 = draw_orig_line.p1();
-    QTransform rot; rot.rotate(draw_theta);
-    stick->my_line = draw_orig_line;                               // normal skeleton/origin/rotation
-    stick->img_angle = draw_theta;                                // follows the line, like an IMAGE
+    // painting in a canvas pre-rotated by EnterDrawMode), so no re-rotation is needed here: the
+    // skeleton and rotation stay the session's, and every layer is cut to its own painted pixels,
+    // hidden ones included (hidden is not deleted), with the placement re-solved so nothing moves
+    // (StickData::CroppedFreehand(), the one crop rule also used by the file writer and the
+    // library). Nothing painted at all leaves an invisible 1x1 placeholder.
+    stick->my_line = draw_orig_line;   // normal skeleton/origin/rotation
+    stick->img_angle = draw_theta;     // follows the line, like an IMAGE
     stick->img_angle_offset = 0;
-    // img_offset must place the image so its own centre lands on crop_center_scene; since
-    // paint() applies scene = p1 + R(img_angle)*img_offset (+ ...), solving for img_offset means
-    // undoing that rotation on the vector from p1 to the target centre — R(-theta), built here as
-    // rot.inverted() (Qt QTransform), mapped over (crop_center_scene - p1).
-    stick->img_offset = rot.inverted().map(crop_center_scene - p1);
-    double max_dim = qMax(bw, bh);
-    stick->img_w_scale = float(max_dim * draw_px_scale / len);    // CalcImg() -> the size it was painted at
-    stick->img_h_scale = float(max_dim * draw_px_scale / len);
+    stick->CropFreehandLayers();
 
     if(stick->view){
         stick->view->stick_handle[0]->show();
@@ -3015,6 +3041,7 @@ void MyView::ConvertStick(StickData *stick, int new_type, const QImage &image,
     stick->vertex_caps.clear();
     stick->vector_shapes.clear();
     stick->freehand_layers.clear();
+    stick->freehand_grid = QSize();
     stick->text.clear();
     stick->img_offset = QPointF(0, 0);
     stick->img_angle_offset = 0;
@@ -6354,12 +6381,24 @@ bool MyView::LoadLibrary(QString file_name, int mode){
     }
     return true;
 }
+/// @brief Cuts the FREEHAND sticks of a library entry to their own pixels: a figure added during a
+///        draw session would otherwise keep whole session canvases in the library (the copy only;
+///        the live figure and its session are untouched).
+static void CropLibraryFreehands(StickFigureData *figure_data)
+{
+    for(StickData *stick : figure_data->stick_list)
+        if(stick->stick_type == StickData::FREEHAND)
+            stick->CropFreehandLayers();
+}
+
 /**
  * @details Extracts the current figure into a data record, appends it to the library
- * buffer and creates its widget entry (insert-after-current + select, as before).
+ * buffer and creates its widget entry (insert-after-current + select, as before). A draw
+ * session is flushed first (FlushDrawSession()), so the entry has the current drawing.
  * @return the live source figure, or nullptr if it has no sticks.
  */
 StickFigure* MyView::AddStickFigureToLibrary(const QString &name){
+    FlushDrawSession();
     // with a multi-selection every selected figure goes into the library — the only
     // export allowed for a multi-selection (spec); the selection stays active
     if(MultiSelectionActive()){
@@ -6369,6 +6408,7 @@ StickFigure* MyView::AddStickFigureToLibrary(const QString &name){
             if(S->stick_list.isEmpty())
                 continue;
             StickFigureData *figure_data = ExtractStickFigureData(*S);
+            CropLibraryFreehands(figure_data);
             stick_library_buffer->stick_figures.append(figure_data);
             QListWidgetItem *added_item = new QListWidgetItem();
             added_item->setData(Qt::UserRole,QVariant::fromValue(figure_data));
@@ -6384,6 +6424,7 @@ StickFigure* MyView::AddStickFigureToLibrary(const QString &name){
     if(my_animation->CurrentFrame()->CurrentStickFigure()->stick_list.count()>0)
     {
         StickFigureData *figure_data = ExtractStickFigureData(*my_animation->CurrentFrame()->CurrentStickFigure());
+        CropLibraryFreehands(figure_data);
         if(!name.isEmpty())
             figure_data->name = name;
         stick_library_buffer->stick_figures.append(figure_data);

@@ -89,7 +89,11 @@ top-level items and are not affected by the effect.
   other order would destroy the views behind the stick loop's back, which then skips
   `RemoveImagesFromListWidget()` and `DetachView()` for them.
 - Turning the options off moves every child back to top level (`setParentItem(nullptr)` keeps it in
-  the scene) BEFORE the group is deleted, for the same reason.
+  the scene) BEFORE the group is deleted, for the same reason. The loop is
+  `while(!childItems().isEmpty()) childItems().constFirst()->setParentItem(nullptr);`, never a loop
+  over a copied child list: un-parenting a view runs `SyncShapeLayers()`, which may delete sibling
+  `VectorShapeLayerItem`s, so a copied list could hold freed pointers. `DisablingLayerOptionsKeepsShapeLayersAlive`
+  pins it (no counterproof yet).
 - `MoveToFrame()` removes the old frame's groups from the scene; they are not reachable through the
   figure's stick list.
 

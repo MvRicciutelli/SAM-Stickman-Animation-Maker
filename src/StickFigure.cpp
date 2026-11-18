@@ -126,8 +126,10 @@ void StickFigure::SyncLayerGroup()
     if(!layer_options.IsActive()){
         if(layer_group == nullptr)
             return;
-        for(QGraphicsItem *child : layer_group->childItems())
-            child->setParentItem(nullptr);
+        // re-read every time: un-parenting a view runs its SyncShapeLayers(), which may delete
+        // sibling depth items, so a copy of the child list taken once could hold freed pointers
+        while(!layer_group->childItems().isEmpty())
+            layer_group->childItems().constFirst()->setParentItem(nullptr);
         delete layer_group;
         layer_group = nullptr;
         return;

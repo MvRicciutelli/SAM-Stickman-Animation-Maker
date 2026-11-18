@@ -504,7 +504,8 @@ public:
     QHash<int, MaskedShapeCache> masked_cache; ///< per shape index; freed when the view leaves its scene
 
     /// @brief One masked FREEHAND layer as StickData::FreehandLayerImage() composed it, keyed by
-    ///        every input it read: the cacheKey() and inversion of each layer along the mask chain.
+    ///        every input it read: the cacheKey(), origin and inversion of each layer along the mask
+    ///        chain. An entry goes when its layer is unmasked, emptied or deleted.
     struct MaskedLayerCache {
         QImage image;
         QList<qint64> key;
@@ -616,8 +617,8 @@ public:
     VectorShapeLayerItem *LayerAtOffset(double offset) const;
 
     /**
-     * @brief Paints the visible FREEHAND layers that belong to @p layer, bottom first, each cut
-     *        by its mask (FreehandLayer::mask) when it has one.
+     * @brief Paints the visible FREEHAND layers that belong to @p layer, bottom first, each in its
+     *        own rectangle of the grid (FreehandLayer::origin) and cut by its mask when it has one.
      * @param painter the painter, in scene coordinates.
      * @param layer the depth item being painted, or nullptr for the layers this view paints itself.
      */

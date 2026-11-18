@@ -313,10 +313,22 @@ public:
     QPointF SceneToCanvas(const QPointF &scene) const; ///< scene coord -> raw canvas pixel (every layer shares the grid)
     QPointF CanvasToScene(const QPointF &canvas) const; ///< raw canvas pixel -> scene coord
 
-    /// @brief Writes draw_layer_canvas back into the active layer (copy-on-write: no pixels copied).
+    /// @brief Writes draw_layer_canvas back into the active layer, as the whole grid at origin 0
+    ///        (copy-on-write: no pixels copied).
     void SyncDrawCanvas();
-    /// @brief Loads the active layer into draw_layer_canvas (after the layer list or draw_layer changed).
+    /**
+     * @brief Loads the active layer into draw_layer_canvas, expanded to the whole canvas (after the
+     *        layer list or draw_layer changed). Any OTHER layer still holding a whole canvas is cut
+     *        back to its own pixels first, so a session holds one full canvas, the active one.
+     */
     void LoadDrawCanvas();
+    /**
+     * @brief Makes the draw target's record match the screen without ending the session: the
+     *        working canvas back into its layer (not while a pixel float is lifted: the layer
+     *        then still holds those pixels) and the composite rebuilt. No-op outside draw mode.
+     *        Called before a save or a library add, which read the record.
+     */
+    void FlushDrawSession();
     /**
      * @brief Makes layer @p index the one the tools paint on. Not an undo step; a floating pixel
      *        selection is committed into the layer it was lifted from first. No-op outside draw mode.
@@ -363,8 +375,8 @@ public:
     /// @brief Puts every layer back at the stick's own depth. No undo step when none had an offset.
     void ResetFreehandLayerDepths();
 
-    QList<FreehandLayer> freehand_clipboard; ///< filled by CopyFreehandLayers() (masks as clipboard places); survives frame changes
-    QTransform freehand_clip_to_scene;       ///< clipboard pixel (top-left addressing) -> scene, at copy time
+    QList<FreehandLayer> freehand_clipboard; ///< filled by CopyFreehandLayers(), each layer cut to its own pixels (masks as clipboard places); survives frame changes
+    QTransform freehand_clip_to_scene;       ///< source grid pixel (top-left addressing) -> scene, at copy time; a clipboard layer's pixel p is grid pixel p + origin
     // brush state — edited live by DrawModeWidget's controls (widget.cpp):
     bool draw_eraser = false;               ///< eraser sub-tool (composites DestinationOut)
     bool draw_pressure_size = true;         ///< pen-pressure-drives-size checkbox (Phase 3); ignored on mouse input
@@ -1714,13 +1726,15 @@ private:
 
     // ---- Freehand draw-mode internals ------------------------------------------------
     /// @brief One draw-local undo entry: the whole layer stack (copy-on-write, so the layers a
-    ///        step did not touch are shared) and which layer was active.
+    ///        step did not touch are shared) and which layer was active. The active layer is
+    ///        stored cut to its own pixels (PushDrawUndo()), not as the whole canvas.
     struct DrawUndoState {
         QList<FreehandLayer> layers;
         int layer = 0;
         bool depth_enabled = false;
     };
     QList<DrawUndoState> draw_undo; ///< per-step layer-stack snapshots (session-local undo chain)
+    qint64 draw_last_push_key = 0;  ///< draw_layer_canvas.cacheKey() at the last PushDrawUndo(): unchanged = reuse that crop
     /// @brief Puts a draw_undo entry back: layers, active layer, working canvas, repaint, panel.
     void RestoreDrawState(const DrawUndoState &state);
     /**
@@ -1804,8 +1818,6 @@ private:
     /** @brief Ends a polygonal selection (gesture 6): with @p commit and >=3 vertices the polygon
      *  becomes the selection with the pending op; otherwise it is dropped. */
     void FinishPolySelection(bool commit);
-    /** @brief Tight bounding rect of the non-transparent pixels of an image (empty if none). */
-    static QRect OpaqueBounds(const QImage &img);
 
     /**
      * @brief Cleanup run when leaving a tool (called by SetTool before switching).

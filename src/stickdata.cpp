@@ -328,6 +328,7 @@ void StickData::CopyFrom(const StickData &source)
     vector_shapes = source.vector_shapes;
     vector_depth_enabled = source.vector_depth_enabled;
     freehand_layers = source.freehand_layers;
+    freehand_grid = source.freehand_grid;
     text = source.text;
     text_font = source.text_font;
     text_align = source.text_align;
@@ -383,6 +384,89 @@ double StickData::FreehandLayerDepth(int layer_index) const
     return z + freehand_layers[layer_index].depth_offset;
 }
 
+/// @details ARGB32 and ARGB32_Premultiplied keep alpha in the same byte, so those are scanned in
+/// place; only another format is converted first (the conversion used to copy every session canvas
+/// it scanned). Each row is scanned from both ends only as far as its first opaque pixel.
+QRect OpaqueBounds(const QImage &image)
+{
+    if (image.isNull())
+        return QRect();
+    QImage converted;
+    const QImage *scan = &image;
+    if (image.format() != QImage::Format_ARGB32 && image.format() != QImage::Format_ARGB32_Premultiplied) {
+        converted = image.convertToFormat(QImage::Format_ARGB32);
+        scan = &converted;
+    }
+    const int width = scan->width();
+    int min_x = width, min_y = scan->height(), max_x = -1, max_y = -1;
+    for (int y = 0; y < scan->height(); y++) {
+        const QRgb *row = reinterpret_cast<const QRgb *>(scan->constScanLine(y));
+        int first = 0;
+        while (first < width && qAlpha(row[first]) == 0)
+            first++;
+        if (first == width)
+            continue;
+        int last = width - 1;
+        while (qAlpha(row[last]) == 0)
+            last--;
+        min_x = qMin(min_x, first);
+        max_x = qMax(max_x, last);
+        min_y = qMin(min_y, y);
+        max_y = y;
+    }
+    if (max_x < 0)
+        return QRect();
+    return QRect(QPoint(min_x, min_y), QPoint(max_x, max_y));
+}
+
+/// True when OpaqueBounds(@p image) is the whole image, checked on the borders only: an opaque
+/// pixel on the top row, the bottom row, the left and the right column. False for a format this
+/// cannot read in place (the caller then scans).
+static bool TouchesAllBorders(const QImage &image)
+{
+    if (image.isNull())
+        return false;
+    if (!image.hasAlphaChannel())
+        return true; // every pixel is opaque
+    if (image.format() != QImage::Format_ARGB32 && image.format() != QImage::Format_ARGB32_Premultiplied)
+        return false;
+    const int width = image.width(), height = image.height();
+    auto row_painted = [&image, width](int y) {
+        const QRgb *row = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+        for (int x = 0; x < width; x++)
+            if (qAlpha(row[x]) != 0)
+                return true;
+        return false;
+    };
+    if (!row_painted(0) || !row_painted(height - 1))
+        return false;
+    bool left = false, right = false;
+    for (int y = 0; y < height && !(left && right); y++) {
+        const QRgb *row = reinterpret_cast<const QRgb *>(image.constScanLine(y));
+        left = left || qAlpha(row[0]) != 0;
+        right = right || qAlpha(row[width - 1]) != 0;
+    }
+    return left && right;
+}
+
+/// @details The stored grid wins; while it is unset (a record from before grids, a test building
+/// layers by hand) the composite's size is the grid CalcImgSize() already scales, and with no
+/// composite either, the layers' extent counted from (0,0).
+QSize StickData::FreehandGrid() const
+{
+    if (!freehand_grid.isEmpty())
+        return freehand_grid;
+    if (stick_img != nullptr && !stick_img->isNull())
+        return stick_img->size();
+    QRect extent;
+    for (const FreehandLayer &layer : freehand_layers)
+        if (!layer.image.isNull())
+            extent |= QRect(layer.origin, layer.image.size());
+    if (extent.isEmpty())
+        return QSize();
+    return QSize(extent.right() + 1, extent.bottom() + 1);
+}
+
 /// @details The layer is named "Layer 1" and shares the image (copy-on-write).
 void StickData::EnsureFreehandLayers()
 {
@@ -393,43 +477,53 @@ void StickData::EnsureFreehandLayers()
     if (stick_img != nullptr)
         layer.image = *stick_img;
     freehand_layers.append(layer);
+    freehand_grid = layer.image.size();
 }
 
 /// @details DestinationOut scales this layer's alpha by (1 - mask alpha), DestinationIn (inverted)
-/// by the mask alpha: the rule of StickGraphicsItem::MaskedShapeImage(), but on the shared pixel
-/// grid, so no device mapping is needed. The mask is cut by ITS mask first, so masks compound.
+/// by the mask alpha: the rule of StickGraphicsItem::MaskedShapeImage(), on the stick's grid, the
+/// mask placed by the difference of the two origins. The mask is cut by ITS mask first, so masks
+/// compound.
 QImage StickData::FreehandLayerImage(int index, int depth) const
 {
     if (index < 0 || index >= freehand_layers.size())
         return QImage();
     const FreehandLayer &layer = freehand_layers[index];
-    if (layer.mask < 0 || layer.mask >= freehand_layers.size() || depth <= 0)
+    if (layer.image.isNull() || layer.mask < 0 || layer.mask >= freehand_layers.size() || depth <= 0)
         return layer.image;
     QImage image = layer.image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
-    CutByMask(image, FreehandLayerImage(layer.mask, depth - 1), layer.mask_inverted);
+    CutByMask(image, FreehandLayerImage(layer.mask, depth - 1), layer.mask_inverted,
+              freehand_layers[layer.mask].origin - layer.origin);
     return image;
 }
 
 /// @details stick_img stays an owned entry of stick_img_list (the ownership rule of the image
-/// types), so every reader of stick_img works unchanged. The composite has the layers' size.
+/// types), so every reader of stick_img works unchanged. The composite has the grid's size, which
+/// an unset grid takes from FreehandGrid() here.
 void StickData::RebuildFreehandComposite()
 {
     if (freehand_layers.isEmpty())
         return;
+    if (freehand_grid.isEmpty())
+        freehand_grid = FreehandGrid();
+    const QSize grid = freehand_grid.isEmpty() ? QSize(1, 1) : freehand_grid;
+    // at(): read-only, so a list shared with an undo snapshot is not detached
     QList<int> shown;
     for (int i = 0; i < freehand_layers.size(); i++)
-        if (freehand_layers[i].visible)
+        if (freehand_layers.at(i).visible && !freehand_layers.at(i).image.isNull())
             shown << i;
-    const QSize size = freehand_layers[0].image.size();
     QImage composite;
-    if (shown.size() == 1 && freehand_layers[shown[0]].mask < 0) {
-        composite = freehand_layers[shown[0]].image; // shared: no pixels copied
-    } else {
-        composite = QImage(size.isEmpty() ? QSize(1, 1) : size, QImage::Format_ARGB32_Premultiplied);
+    if (shown.size() == 1) {
+        const FreehandLayer &only = freehand_layers.at(shown[0]);
+        if (only.mask < 0 && only.origin.isNull() && only.image.size() == grid)
+            composite = only.image; // shared: no pixels copied
+    }
+    if (composite.isNull()) {
+        composite = QImage(grid, QImage::Format_ARGB32_Premultiplied);
         composite.fill(Qt::transparent);
         QPainter p(&composite);
         for (int i : shown)
-            p.drawImage(0, 0, FreehandLayerImage(i));
+            p.drawImage(freehand_layers.at(i).origin, FreehandLayerImage(i));
         p.end();
     }
     if (stick_img_list.isEmpty()) {
@@ -439,6 +533,86 @@ void StickData::RebuildFreehandComposite()
         *stick_img_list[0] = composite;
     }
     stick_img = stick_img_list[0];
+}
+
+/// @details The border check makes this nearly free on a layer that is already tight (every layer
+/// after a session ends), so the file writer can call it on every save.
+void StickData::CropFreehandLayer(FreehandLayer &layer)
+{
+    if (layer.image.isNull()) {
+        layer.origin = QPoint();
+        return;
+    }
+    if (TouchesAllBorders(layer.image))
+        return;
+    const QRect box = OpaqueBounds(layer.image);
+    if (box.isEmpty()) {
+        layer.image = QImage();
+        layer.origin = QPoint();
+        return;
+    }
+    layer.image = layer.image.copy(box);
+    layer.origin += box.topLeft();
+}
+
+/// @details CalcImgSize() maps the grid's longer side to my_line.length() * img_w_scale (x) and
+/// img_h_scale (y), so a grid pixel is k = len * scale / max(W, H) stick units in each axis. A grid
+/// cut to a box keeps k by setting scale = k * max(w, h) / len, and keeps the pixels in place by
+/// moving img_offset by k times the shift of the grid's centre: img_offset is applied after
+/// img_angle_offset's rotation, in the same frame as the image, so no rotation is involved. On a
+/// session record (img_angle_offset 0, a D x D grid, k = MyView::draw_px_scale) this is exactly what
+/// ExitDrawMode() computed through draw_disp, whose global part cancels.
+StickData::FreehandCrop StickData::CroppedFreehand() const
+{
+    FreehandCrop crop;
+    crop.layers = freehand_layers;
+    crop.grid = FreehandGrid();
+    crop.img_offset = img_offset;
+    crop.img_w_scale = img_w_scale;
+    crop.img_h_scale = img_h_scale;
+    if (crop.grid.isEmpty())
+        return crop;
+    QRect used;
+    for (FreehandLayer &layer : crop.layers) {
+        CropFreehandLayer(layer);
+        if (!layer.image.isNull())
+            used |= QRect(layer.origin, layer.image.size());
+    }
+    const QRect old_grid(QPoint(0, 0), crop.grid);
+    if (used.isEmpty()) // nothing painted: an invisible 1x1 placeholder, as the session always left
+        used = QRect(crop.grid.width() / 2, crop.grid.height() / 2, 1, 1);
+    if (used == old_grid)
+        return crop; // already tight: nothing moves
+    for (FreehandLayer &layer : crop.layers)
+        if (!layer.image.isNull())
+            layer.origin -= used.topLeft();
+    crop.grid = used.size();
+    const double len = my_line.length();
+    const int old_max = qMax(old_grid.width(), old_grid.height());
+    if (len > 0) {
+        const double kx = len * img_w_scale / old_max;
+        const double ky = len * img_h_scale / old_max;
+        const QPointF shift(used.x() + used.width() / 2.0 - old_grid.width() / 2.0,
+                            used.y() + used.height() / 2.0 - old_grid.height() / 2.0);
+        crop.img_offset = img_offset + QPointF(kx * shift.x(), ky * shift.y());
+        const int new_max = qMax(used.width(), used.height());
+        crop.img_w_scale = float(kx * new_max / len);
+        crop.img_h_scale = float(ky * new_max / len);
+    }
+    return crop;
+}
+
+void StickData::CropFreehandLayers()
+{
+    if (freehand_layers.isEmpty())
+        return;
+    const FreehandCrop crop = CroppedFreehand();
+    freehand_layers = crop.layers;
+    freehand_grid = crop.grid;
+    img_offset = crop.img_offset;
+    img_w_scale = crop.img_w_scale;
+    img_h_scale = crop.img_h_scale;
+    RebuildFreehandComposite();
 }
 
 /// @details The derivation is StrokeBrushFor()'s (vectorshape.cpp), shared with a VECTOR stick's
@@ -1177,20 +1351,49 @@ static void ReadVectorShapes(QDataStream &stream, StickData &stick_data)
 }
 
 /// @details A FREEHAND stick's layers (record v12 on): their own format version, the count, then
-/// per layer the image (through the image table, so a .sam v3 stores pixels shared with the
-/// composite once), name, visibility, depth offset, mask and inversion; the per-layer depth switch
-/// after the last one. An empty list is written as such: the reader then rebuilds one layer from
-/// the composite (EnsureFreehandLayers()).
-static void WriteFreehandLayers(QDataStream &stream, const StickData &stick_data)
+/// per layer the image (through the image table, so a .sam v3 stores a repeated one once), name,
+/// visibility, depth offset, mask, inversion and (FREEHAND_LAYERS_ORIGIN) its origin on the grid;
+/// the per-layer depth switch after the last one. An empty list is written as such: the reader then
+/// rebuilds one layer from the composite (EnsureFreehandLayers()).
+/// @param layers the list to write: the stick's own, or its cropped copy (StickData::CroppedFreehand()).
+static void WriteFreehandLayers(QDataStream &stream, const QList<FreehandLayer> &layers, bool depth_enabled)
 {
     stream << StickData::FREEHAND_LAYERS_VERSION;
-    stream << (qint32)stick_data.freehand_layers.size();
-    for (const FreehandLayer &layer : stick_data.freehand_layers) {
+    stream << (qint32)layers.size();
+    for (const FreehandLayer &layer : layers) {
         WriteRecordImage(stream, layer.image);
         stream << layer.name << layer.visible << (double)layer.depth_offset;
         stream << layer.mask << layer.mask_inverted;
+        stream << (qint32)layer.origin.x() << (qint32)layer.origin.y();
     }
-    stream << stick_data.vector_depth_enabled;
+    stream << depth_enabled;
+}
+
+/// Load-time repair: every layer must lie inside the grid (the composite, the masks and the crop
+/// rely on it). A layer partly outside keeps the part inside, one wholly outside becomes empty.
+/// Only a corrupt or hand-made file needs it. An unset grid is first derived (FreehandGrid()).
+static void FitFreehandLayersToGrid(StickData &stick_data)
+{
+    if (stick_data.freehand_grid.isEmpty())
+        stick_data.freehand_grid = stick_data.FreehandGrid();
+    const QRect grid(QPoint(0, 0), stick_data.freehand_grid);
+    for (FreehandLayer &layer : stick_data.freehand_layers) {
+        if (layer.image.isNull()) {
+            layer.origin = QPoint();
+            continue;
+        }
+        const QRect rect(layer.origin, layer.image.size());
+        if (grid.contains(rect))
+            continue;
+        const QRect inside = rect & grid;
+        if (inside.isEmpty()) {
+            layer.image = QImage();
+            layer.origin = QPoint();
+            continue;
+        }
+        layer.image = layer.image.copy(inside.translated(-layer.origin));
+        layer.origin = inside.topLeft();
+    }
 }
 
 static void ReadFreehandLayers(QDataStream &stream, StickData &stick_data)
@@ -1210,12 +1413,18 @@ static void ReadFreehandLayers(QDataStream &stream, StickData &stick_data)
         ReadRecordImage(stream, layer.image);
         stream >> layer.name >> layer.visible >> layer.depth_offset;
         stream >> layer.mask >> layer.mask_inverted;
+        if (format >= StickData::FREEHAND_LAYERS_ORIGIN) {
+            qint32 x = 0, y = 0;
+            stream >> x >> y;
+            layer.origin = QPoint(x, y);
+        }
         if (stream.status() != QDataStream::Ok)
             break; // truncated file: no layers made up from data that is not there
         layers.append(layer);
     }
     stream >> stick_data.vector_depth_enabled;
     BreakBadMasks(layers); // as ReadVectorShapes() does
+    FitFreehandLayersToGrid(stick_data);
 }
 
 QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
@@ -1267,22 +1476,33 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
         WriteXfBody(stream, stick_data.global_xf);
         WriteXfFlips(stream, stick_data.global_xf);
     }
+    // A FREEHAND from v13 on is written cropped to its painted pixels (CroppedFreehand(), on a copy:
+    // a save during a draw session leaves the session alone) and without its composite, which the
+    // reader rebuilds from the layers. The image block's size slot then carries the grid.
+    const bool freehand_v13 = stick_data.stick_type == StickData::FREEHAND && stick_data.version >= 13
+                              && !stick_data.freehand_layers.isEmpty();
+    const StickData::FreehandCrop crop = freehand_v13 ? stick_data.CroppedFreehand() : StickData::FreehandCrop();
     if ((stick_data.stick_type == StickData::CIRCLE) || stick_data.IsImageType() || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE) || (stick_data.stick_type == StickData::TEXT) || (stick_data.stick_type == StickData::VECTOR)) {
         if (stick_data.IsImageType()) {
             // stick_img può essere nullo solo per un record ricostruito da un file corrotto:
             // meglio serializzare una QSize vuota che dereferenziare un puntatore nullo
             QSize imgSize = stick_data.stick_img ? stick_data.stick_img->size() : QSize();
+            if (freehand_v13)
+                imgSize = crop.grid;
             stream << imgSize;
         }
         stream << stick_data.img_angle;
         stream << stick_data.img_angle_offset; // mancava: si azzerava a ogni save/load/clone (vedi paint(): img_angle+img_angle_offset)
-        stream << stick_data.img_h_scale;
-        stream << stick_data.img_w_scale;
-        stream << stick_data.img_offset;
+        stream << (freehand_v13 ? crop.img_h_scale : stick_data.img_h_scale);
+        stream << (freehand_v13 ? crop.img_w_scale : stick_data.img_w_scale);
+        stream << (freehand_v13 ? crop.img_offset : stick_data.img_offset);
         stream << stick_data.hard_top;
         stream << stick_data.hard_bottom;
 
-        if (stick_data.IsImageType()) {
+        if (freehand_v13) {
+            stream << (qint32)0;  // no image: the composite is derived
+            stream << (qint32)-1;
+        } else if (stick_data.IsImageType()) {
             stream << (qint32)stick_data.stick_img_list.length();
             stream << (qint32)stick_data.stick_img_list.indexOf(stick_data.stick_img);
             int j = 0;
@@ -1333,7 +1553,8 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
         if (stick_data.stick_type == StickData::VECTOR)
             WriteVectorShapes(stream, stick_data); // the type exists from v11 on
         if (stick_data.stick_type == StickData::FREEHAND && stick_data.version >= 12)
-            WriteFreehandLayers(stream, stick_data);
+            WriteFreehandLayers(stream, freehand_v13 ? crop.layers : stick_data.freehand_layers,
+                                stick_data.vector_depth_enabled);
     }
 
     return stream;
@@ -1394,7 +1615,11 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
             // ogni immagine, e da quando le immagini non sono più preallocate su questa
             // QSize nessuno la usa
             stream >> mysize;
-            Q_UNUSED(mysize);
+            // a v13 FREEHAND's size is its grid (no composite is stored); anything else ignores it.
+            // A size no QImage could hold (a corrupt file) is left unset: FreehandGrid() derives it
+            if (stick_data.stick_type == StickData::FREEHAND && stick_data.version >= 13
+                    && mysize.width() <= 32767 && mysize.height() <= 32767)
+                stick_data.freehand_grid = mysize;
         }
         stream >> stick_data.img_angle;
         stream >> stick_data.img_angle_offset;
@@ -1511,9 +1736,13 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
         if (stick_data.stick_type == StickData::FREEHAND && stick_data.version >= 12)
             ReadFreehandLayers(stream, stick_data);
     }
-    // a FREEHAND older than v12 (or saved with no layers yet) is its one image: one layer
-    if (stick_data.stick_type == StickData::FREEHAND)
+    // a FREEHAND older than v12 (or saved with no layers yet) is its one image: one layer. From
+    // v13 on the composite is not stored: rebuilt from the layers here
+    if (stick_data.stick_type == StickData::FREEHAND) {
         stick_data.EnsureFreehandLayers();
+        if (stick_data.stick_img_list.isEmpty())
+            stick_data.RebuildFreehandComposite();
+    }
     // before v9 the offset and rotation of IMAGE/POLYGON/TEXT (and an IMAGE's scale) were the
     // img_* fields, which the image panel edited: that panel is the Stick Transform now, so they
     // move into local_xf. Same drawn geometry: local_xf sits exactly where img_offset/

@@ -38,7 +38,8 @@ helpers `RemoveVectorShape()`, `ReorderVectorShape()` and `MaskChainReaches()`
 (see Masks). These three are templates over the layer type, shared with FREEHAND layers
 (`ARCH_FREEHAND_LAYERS.md`), as are `MaskChangeAllowed()` (the check behind
 `SetVectorShapeMask()`), `KeepCopiedMasks()` (copy-time remap), `BreakBadMasks()` (load-time
-repair) and the plain `CutByMask(QImage&, mask, inverted)` used by `MaskedShapeImage()`.
+repair) and `CutByMask(QImage&, mask, inverted, QPoint offset = QPoint())` used by `MaskedShapeImage()` (no
+offset there: same-size images; the offset is for FREEHAND layers, see `ARCH_FREEHAND_LAYERS.md`).
 
 ### Serialization
 
@@ -194,7 +195,9 @@ image per view (`masked_cache`). The key is compared by VALUE: the whole `vector
 `PolygonTransform()`, the stick's local frame, the device transform, area, dpr, hints,
 `onion_render` and the scene rect. Only images <= 4 Mpx are kept. **A field added to
 `VectorShape`, `VectorNode` or `BrushStroke` must be added to its `operator==`, or a masked shape
-keeps a stale image.** The cache is freed in `itemChange()` when the view leaves its scene. 3 masked
+keeps a stale image.** At paint time the entry of a shape that is no longer masked, and entries whose
+index is past the end of the list (deleted shape), are dropped (`DropCacheEntriesFrom()`). The cache
+is freed in `itemChange()` when the view leaves its scene. 3 masked
 sticks: 4.04 -> 0.19 ms. Pinned by `MaskedVectorShapeCacheFollowsShapesAndZoom`.
 
 Every image/video export, icon and onion skin renders through

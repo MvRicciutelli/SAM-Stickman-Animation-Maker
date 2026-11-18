@@ -2,15 +2,30 @@
 #include "stickdata.h"
 #include <QPainter>
 #include <QPainterPathStroker>
+#include <QRegion>
 #include <algorithm>
 
-/// @details The mask is drawn 1:1 from the top-left: both images must share one pixel grid.
-void CutByMask(QImage &image, const QImage &mask, bool inverted)
+/// @details The mask is drawn 1:1 at @p offset, on the image's own pixel grid. DestinationIn only
+/// touches where the mask is drawn, so for an inverted cut the part of the image outside the mask's
+/// rectangle is cleared first. A same-size mask at offset 0 (every vector shape) skips that step,
+/// which also keeps it clear of the device pixel ratio those images carry.
+void CutByMask(QImage &image, const QImage &mask, bool inverted, const QPoint &offset)
 {
+    if(image.isNull())
+        return;
     QPainter p(&image);
+    if(inverted && (mask.isNull() || !offset.isNull() || mask.size() != image.size())){
+        const QRect covered = mask.isNull() ? QRect() : QRect(offset, mask.size());
+        p.setCompositionMode(QPainter::CompositionMode_Clear);
+        p.setClipRegion(QRegion(image.rect()) - QRegion(covered));
+        p.fillRect(image.rect(), Qt::transparent);
+        p.setClipping(false);
+    }
+    if(mask.isNull())
+        return;
     p.setCompositionMode(inverted ? QPainter::CompositionMode_DestinationIn
                                   : QPainter::CompositionMode_DestinationOut);
-    p.drawImage(0, 0, mask);
+    p.drawImage(offset, mask);
 }
 
 /// @details A segment is straight only when BOTH inner handles are zero: one handle alone still
