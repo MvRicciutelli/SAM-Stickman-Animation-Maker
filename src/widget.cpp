@@ -135,7 +135,8 @@ std::function<void(StickData *)> refresh_text_panel; ///< vedi uiItems.h
 std::function<void(StickData *)> refresh_transform_panel; ///< vedi uiItems.h
 QWidget * advanced_vector_tab = nullptr; ///< VECTOR panel, built by Widget::BuildVectorPanel()
 std::function<void(StickData *)> refresh_vector_panel; ///< see uiItems.h
-QWidget * advanced_draw_tab; ///< freehand draw-mode panel (brush/eraser/size/opacity/color); built in Widget's ctor
+QWidget * advanced_draw_tab; ///< freehand draw-mode panel (tools, layers, brush); built in Widget's ctor
+std::function<void(StickData *)> refresh_freehand_panel; ///< see uiItems.h
 QWidget * advanced_ik_tab;
 QCheckBox * ik_active_check;
 QWidget * library_tab;
@@ -149,6 +150,277 @@ QSlider*  circle_squash_slider;
 QSpinBox * circle_squash_spinbox;
 // frame_copy_buffer è diventato un membro privato di Widget (widget.h), ed è una LISTA:
 // si copiano N frame contigui in un colpo
+
+namespace {
+/**
+ * @brief What a layer section (BuildLayerSection()) does to the layers of one stick type: VECTOR
+ *        shapes or FREEHAND raster layers. Every edit is a MyView method; the section only maps
+ *        rows to indices. @c Layer has name, visible, depth_offset, mask, mask_inverted, NO_MASK.
+ */
+template <typename Layer>
+struct LayerPanelOps {
+    QString noun;                                        ///< "shape" / "layer", for the tooltips
+    std::function<StickData*()> stick;                   ///< the stick the panel edits now, or nullptr
+    std::function<QList<Layer>*(StickData*)> layers;     ///< its layer list
+    std::function<double(const StickData*, int)> depth;  ///< a layer's frame-wide depth
+    std::function<QIcon(const StickData*, int)> icon;    ///< a row's 32 px thumbnail
+    std::function<int(StickData*)> current;              ///< the current layer, or -1
+    std::function<void(int)> set_current;                ///< a row became current (not an undo step)
+    std::function<void()> add;                           ///< empty: no "New" button
+    std::function<void(int, bool)> set_visible;
+    std::function<void(int, const QString &)> rename;
+    std::function<void(int, int)> move;
+    std::function<void(QList<int>)> remove;
+    std::function<void(QList<int>)> copy;
+    std::function<QString()> paste;                      ///< why nothing was pasted, or empty
+    std::function<void(QList<int>, bool)> flip;
+    std::function<void(int, int, bool)> set_mask;
+    std::function<void(bool)> set_depth_enabled;
+    std::function<void(QList<int>, double)> set_depth;
+    std::function<void()> reset_depths;
+};
+
+/**
+ * @brief Builds the layer list, its buttons, the mask row and the per-layer depth controls into
+ *        @p col, for the stick type @p ops describes. The rows list the top layer first, as a
+ *        layer panel does, so row r is layer count-1-r.
+ * @param sync the flag that is true while the rows are rebuilt (the list's signals are echoes then).
+ * @return the refresh: rebuilds the rows, the mask row and the depth controls from a stick.
+ *
+ * Shared by the vector panel and the freehand draw panel, so both behave the same.
+ */
+template <typename Layer>
+std::function<void(StickData *)> BuildLayerSection(QWidget *tab, QVBoxLayout *col,
+                                                   const LayerPanelOps<Layer> &ops, bool *sync)
+{
+    const QString noun = ops.noun;
+    QListWidget *layers = new QListWidget(tab);
+    layers->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    layers->setIconSize(QSize(32, 32));
+    layers->setToolTip(Widget::tr("%1 layers, front first. Checked = visible; double-click to rename.")
+                       .arg(noun.left(1).toUpper() + noun.mid(1)));
+    col->addWidget(layers, 1);
+    QGridLayout *layer_buttons = new QGridLayout();
+    QPushButton *new_btn = ops.add ? new QPushButton(Widget::tr("New"), tab) : nullptr;
+    QPushButton *up_btn = new QPushButton(Widget::tr("Up"), tab);
+    QPushButton *down_btn = new QPushButton(Widget::tr("Down"), tab);
+    QPushButton *delete_btn = new QPushButton(Widget::tr("Delete"), tab);
+    QPushButton *copy_btn = new QPushButton(Widget::tr("Copy"), tab);
+    QPushButton *paste_btn = new QPushButton(Widget::tr("Paste"), tab);
+    QPushButton *flip_h_btn = new QPushButton(Widget::tr("Flip H"), tab);
+    QPushButton *flip_v_btn = new QPushButton(Widget::tr("Flip V"), tab);
+    up_btn->setToolTip(Widget::tr("Move the %1 one step towards the front").arg(noun));
+    down_btn->setToolTip(Widget::tr("Move the %1 one step towards the back").arg(noun));
+    copy_btn->setToolTip(Widget::tr("Copy the selected %1s, to paste them into any stick of this kind").arg(noun));
+    paste_btn->setToolTip(Widget::tr("Paste the copied %1s on top of this stick's, where they were drawn").arg(noun));
+    flip_h_btn->setToolTip(Widget::tr("Flip the selected %1s horizontally (left to right), together").arg(noun));
+    flip_v_btn->setToolTip(Widget::tr("Flip the selected %1s vertically (top to bottom), together").arg(noun));
+    layer_buttons->addWidget(up_btn, 0, 0);
+    layer_buttons->addWidget(down_btn, 0, 1);
+    layer_buttons->addWidget(delete_btn, 0, 2);
+    layer_buttons->addWidget(copy_btn, 1, 0);
+    layer_buttons->addWidget(paste_btn, 1, 1);
+    if(new_btn != nullptr){
+        new_btn->setToolTip(Widget::tr("Add an empty %1 above the current one").arg(noun));
+        layer_buttons->addWidget(new_btn, 1, 2);
+    }
+    layer_buttons->addWidget(flip_h_btn, 2, 0);
+    layer_buttons->addWidget(flip_v_btn, 2, 1);
+    col->addLayout(layer_buttons);
+
+    // the current layer's mask: another layer of this stick, front first like the rows
+    QComboBox *mask_combo = new QComboBox(tab);
+    mask_combo->setToolTip(Widget::tr("Mask of the selected %1: where the mask %1 is, this %1 turns "
+                                      "transparent, as much as the mask is opaque. A hidden %1 still masks.\n"
+                                      "Greyed out: %1s that this one already masks, directly or through other masks.").arg(noun));
+    QCheckBox *mask_invert = new QCheckBox(Widget::tr("Invert"), tab);
+    mask_invert->setToolTip(Widget::tr("Show the %1 only where the mask is, instead of everywhere else").arg(noun));
+    QHBoxLayout *mask_row = new QHBoxLayout();
+    mask_row->addWidget(new QLabel(Widget::tr("Mask"), tab));
+    mask_row->addWidget(mask_combo, 1);
+    mask_row->addWidget(mask_invert);
+    col->addLayout(mask_row);
+
+    // per-layer depth. Off (the default) the layers are drawn in layer order at the stick's depth;
+    // on, a layer can be given a depth of its own. The slider and spin box have the range and
+    // resolution of the stick Depth tab's (depthSlider/depthSpinbox in widget.ui) and, like those,
+    // only hold a value: nothing changes until "Set depth" is pressed.
+    QCheckBox *depth_check = new QCheckBox(Widget::tr("Own depth per %1").arg(noun), tab);
+    depth_check->setToolTip(Widget::tr("Off: the %1s are drawn in layer order, at the stick's depth.\n"
+                                       "On: each %1 can have its own depth, in front of or behind other sticks.").arg(noun));
+    QSlider *depth_slider = new QSlider(Qt::Horizontal, tab);
+    depth_slider->setRange(0, 9999);
+    QDoubleSpinBox *depth_spin = new QDoubleSpinBox(tab);
+    depth_spin->setDecimals(2);
+    depth_spin->setSingleStep(0.01);
+    QPushButton *set_depth_btn = new QPushButton(Widget::tr("Set depth"), tab);
+    QPushButton *reset_depth_btn = new QPushButton(Widget::tr("Reset depths"), tab);
+    set_depth_btn->setToolTip(Widget::tr("Give the selected %1s this depth").arg(noun));
+    reset_depth_btn->setToolTip(Widget::tr("Put every %1 back at the stick's depth, so the layer order decides again").arg(noun));
+    const QList<QWidget*> depth_controls = { depth_slider, depth_spin, set_depth_btn, reset_depth_btn };
+    for(QWidget *control : depth_controls)
+        control->setEnabled(false);
+    QHBoxLayout *depth_value_row = new QHBoxLayout();
+    depth_value_row->addWidget(depth_slider, 1);
+    depth_value_row->addWidget(depth_spin);
+    QHBoxLayout *depth_button_row = new QHBoxLayout();
+    depth_button_row->addWidget(set_depth_btn);
+    depth_button_row->addWidget(reset_depth_btn);
+    col->addWidget(depth_check);
+    col->addLayout(depth_value_row);
+    col->addLayout(depth_button_row);
+    // the slider is integer-stepped, the depth has two decimals: x100, as in the Depth tab
+    QObject::connect(depth_slider, &QSlider::valueChanged, tab, [depth_spin](int value){
+        depth_spin->setValue(value / 100.0);
+    });
+    QObject::connect(depth_spin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), tab, [depth_slider](double value){
+        depth_slider->setValue(qRound(value * 100));
+    });
+
+    auto layer_of = [](QListWidgetItem *item){ return item->data(Qt::UserRole).toInt(); };
+    auto selected_layers = [layers, layer_of]{
+        QList<int> indices;
+        for(QListWidgetItem *item : layers->selectedItems())
+            indices << layer_of(item);
+        return indices;
+    };
+
+    // the mask selector echoes the current layer; refilled with the rows and whenever another
+    // layer becomes current
+    auto refresh_mask = [ops, sync, mask_combo, mask_invert](StickData *cs){
+        const bool was_sync = *sync;
+        *sync = true;
+        mask_combo->clear();
+        QList<Layer> *list = cs != nullptr ? ops.layers(cs) : nullptr;
+        const int current = list != nullptr ? ops.current(cs) : -1;
+        mask_combo->setEnabled(current >= 0);
+        mask_invert->setEnabled(current >= 0 && (*list)[current].mask >= 0);
+        mask_invert->setChecked(current >= 0 && (*list)[current].mask_inverted);
+        if(current >= 0){
+            mask_combo->addItem(Widget::tr("None"), Layer::NO_MASK);
+            QStandardItemModel *model = qobject_cast<QStandardItemModel*>(mask_combo->model());
+            for(int i = list->size() - 1; i >= 0; i--){
+                if(i == current)
+                    continue;
+                mask_combo->addItem((*list)[i].name, i);
+                // a layer already masked by the current one, through any chain, would close a loop
+                model->item(mask_combo->count() - 1)->setEnabled(!MaskChainReaches(*list, i, current));
+            }
+            mask_combo->setCurrentIndex(qMax(0, mask_combo->findData((*list)[current].mask)));
+        }
+        *sync = was_sync;
+    };
+
+    auto refresh = [ops, sync, layers, depth_check, depth_controls, depth_spin, refresh_mask](StickData *cs){
+        *sync = true;
+        layers->clear();
+        QList<Layer> *list = cs != nullptr ? ops.layers(cs) : nullptr;
+        const bool own_depth = list != nullptr && cs->vector_depth_enabled;
+        depth_check->setChecked(own_depth);
+        for(QWidget *control : depth_controls)
+            control->setEnabled(own_depth);
+        if(list != nullptr){
+            for(int i = list->size() - 1; i >= 0; i--){
+                const Layer &layer = (*list)[i];
+                QListWidgetItem *item = new QListWidgetItem(ops.icon(cs, i), layer.name, layers);
+                item->setData(Qt::UserRole, i);
+                item->setFlags(item->flags() | Qt::ItemIsEditable | Qt::ItemIsUserCheckable);
+                item->setCheckState(layer.visible ? Qt::Checked : Qt::Unchecked);
+                QStringList tip;
+                if(own_depth)
+                    tip << Widget::tr("Depth %1").arg(ops.depth(cs, i), 0, 'f', 2);
+                if(layer.mask >= 0)
+                    tip << (layer.mask_inverted ? Widget::tr("Shown only inside %1") : Widget::tr("Masked by %1"))
+                               .arg((*list)[layer.mask].name);
+                if(!tip.isEmpty())
+                    item->setToolTip(tip.join('\n'));
+            }
+            const int current = ops.current(cs);
+            if(current >= 0){
+                layers->setCurrentRow(list->size() - 1 - current);
+                if(own_depth)
+                    depth_spin->setValue(ops.depth(cs, current));
+            }
+        }
+        refresh_mask(cs);
+        *sync = false;
+    };
+
+    QObject::connect(layers, &QListWidget::currentRowChanged, tab, [ops, sync, layers, layer_of, depth_spin, refresh_mask](int){
+        if(*sync || layers->currentItem() == nullptr)
+            return;
+        ops.set_current(layer_of(layers->currentItem()));
+        StickData *cs = ops.stick();
+        if(cs != nullptr && cs->vector_depth_enabled) // the depth follows, when layers have their own
+            depth_spin->setValue(ops.depth(cs, layer_of(layers->currentItem())));
+        refresh_mask(cs); // and the mask selector
+    });
+    // both controls send the pair, so one edit is one undo step whichever was touched
+    auto apply_mask = [ops, sync, mask_combo, mask_invert]{
+        StickData *cs = ops.stick();
+        if(!*sync && cs != nullptr)
+            ops.set_mask(ops.current(cs), mask_combo->currentData().toInt(), mask_invert->isChecked());
+    };
+    QObject::connect(mask_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), tab, apply_mask);
+    QObject::connect(mask_invert, &QCheckBox::toggled, tab, apply_mask);
+    QObject::connect(depth_check, &QCheckBox::toggled, tab, [ops, sync](bool on){
+        if(!*sync)
+            ops.set_depth_enabled(on); // the controls are enabled by the refresh it announces
+    });
+    QObject::connect(set_depth_btn, &QPushButton::clicked, tab, [ops, selected_layers, depth_spin]{
+        ops.set_depth(selected_layers(), depth_spin->value());
+    });
+    QObject::connect(reset_depth_btn, &QPushButton::clicked, tab, [ops]{ ops.reset_depths(); });
+    QObject::connect(layers, &QListWidget::itemChanged, tab, [ops, sync, layer_of](QListWidgetItem *item){
+        if(*sync)
+            return;
+        StickData *cs = ops.stick();
+        QList<Layer> *list = cs != nullptr ? ops.layers(cs) : nullptr;
+        const int i = layer_of(item);
+        if(list == nullptr || i < 0 || i >= list->size())
+            return;
+        const bool visible = item->checkState() == Qt::Checked;
+        if(visible != (*list)[i].visible)
+            ops.set_visible(i, visible);
+        else if(item->text() != (*list)[i].name)
+            ops.rename(i, item->text());
+    });
+    if(new_btn != nullptr)
+        QObject::connect(new_btn, &QPushButton::clicked, tab, [ops]{ ops.add(); });
+    QObject::connect(up_btn, &QPushButton::clicked, tab, [ops, layers, layer_of]{
+        if(layers->currentItem() != nullptr)
+            ops.move(layer_of(layers->currentItem()), +1);
+    });
+    QObject::connect(down_btn, &QPushButton::clicked, tab, [ops, layers, layer_of]{
+        if(layers->currentItem() != nullptr)
+            ops.move(layer_of(layers->currentItem()), -1);
+    });
+    QObject::connect(delete_btn, &QPushButton::clicked, tab, [ops, selected_layers]{ ops.remove(selected_layers()); });
+    QObject::connect(copy_btn, &QPushButton::clicked, tab, [ops, selected_layers]{ ops.copy(selected_layers()); });
+    QObject::connect(flip_h_btn, &QPushButton::clicked, tab, [ops, selected_layers]{ ops.flip(selected_layers(), true); });
+    QObject::connect(flip_v_btn, &QPushButton::clicked, tab, [ops, selected_layers]{ ops.flip(selected_layers(), false); });
+    QObject::connect(paste_btn, &QPushButton::clicked, tab, [ops, tab, noun]{
+        const QString why = ops.paste();
+        if(!why.isEmpty())
+            QMessageBox::warning(tab, Widget::tr("Paste %1s").arg(noun), why);
+    });
+    return refresh;
+}
+
+/// @brief A FREEHAND layer's 32 px row thumbnail: the layer's pixels scaled to fit, centred.
+QIcon FreehandLayerIcon(const QImage &image)
+{
+    QPixmap pm(32, 32);
+    pm.fill(Qt::transparent);
+    if(!image.isNull()){
+        const QImage fitted = image.scaled(32, 32, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        QPainter p(&pm);
+        p.drawImage((32 - fitted.width()) / 2, (32 - fitted.height()) / 2, fitted);
+    }
+    return QIcon(pm);
+}
+} // namespace
+
 
 //----------------------
 qint32 W                   = DEFAULTWIDTH;
@@ -695,8 +967,8 @@ Widget::Widget(QWidget *parent)
         // three pixel-selection tools (rectangle, lasso, polygon), the transform of the selected pixels and the
         // paint bucket. The QButtonGroup keeps them exclusive; every click goes to
         // MyView::SetDrawTool(), which drops the selection when switching to brush/eraser.
-        // 36x36 PNGs shown 1:1 in rows of four; the hover/pressed/checked look comes from ToolButtonStyle()
-        // (the "Edit drawing" button is inserted in front of the grid further down)
+        // 36x36 PNGs shown 1:1 in rows of five; the hover/pressed/checked look comes from ToolButtonStyle()
+        // (the "Edit drawing" button takes the first cell further down, so the ten buttons fill two rows)
         QHBoxLayout *tool_row = new QHBoxLayout();
         tool_row->setSpacing(1);
         QGridLayout *tool_grid = new QGridLayout();
@@ -717,7 +989,7 @@ Widget::Widget(QWidget *parent)
             { "Transform selected pixels", MyView::DT_TRANSFORM, QIcon(":/resources/36_transform_00001.png") },
             { "Paint bucket: fill the selection or a closed area with the Style fill color",
               MyView::DT_FILL, QIcon(":/resources/36_fill_00001.png") } };
-        int tool_idx = 0;
+        int tool_idx = 1; // cell 0 is the "Edit drawing" button, added further down
         for(const auto &dt : draw_tools){
             QToolButton *b = new QToolButton(advanced_draw_tab);
             b->setIcon(dt.icon);
@@ -727,7 +999,7 @@ Widget::Widget(QWidget *parent)
             b->setStyleSheet(ToolButtonStyle());
             b->setCheckable(true);
             tool_group->addButton(b, dt.id);
-            tool_grid->addWidget(b, tool_idx / 4, tool_idx % 4);
+            tool_grid->addWidget(b, tool_idx / 5, tool_idx % 5);
             tool_idx++;
         }
         // the buttons show the view's sub-tool while in draw mode and none pressed outside it
@@ -741,16 +1013,25 @@ Widget::Widget(QWidget *parent)
                 tool_group->setExclusive(true);
             }
         };
-        // a tool works at once: out of draw mode (e.g. after another toolbar tool), it first
-        // enters draw mode on the selected freehand, as the "Edit drawing" button does.
+        // the selected freehand, if the selection is one
+        auto selected_freehand = [this]() -> StickData* {
+            if(view->my_animation->current_frame == nullptr
+                    || view->my_animation->CurrentFrame()->CurrentStickFigure() == nullptr)
+                return nullptr;
+            StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
+            return cs != nullptr && cs->stick_type == StickData::FREEHAND ? cs : nullptr;
+        };
+        // a tool or a layer edit works at once: out of draw mode (e.g. after another toolbar
+        // tool), it first enters draw mode on the selected freehand, as the "Edit drawing" button does
+        auto enter_draw_mode = [this, selected_freehand]{
+            if(view->draw_mode)
+                return;
+            if(StickData *cs = selected_freehand())
+                view->EnterDrawMode(cs, true);
+        };
         // EnterDrawMode() starts on the brush, so the clicked tool is set after it
-        connect(tool_group, &QButtonGroup::idClicked, this, [this, sync_tool_buttons](int id){
-            if(!view->draw_mode && view->my_animation->current_frame != nullptr
-                    && view->my_animation->CurrentFrame()->CurrentStickFigure() != nullptr){
-                StickData *cs = view->my_animation->CurrentFrame()->CurrentStick();
-                if(cs != nullptr && cs->stick_type == StickData::FREEHAND)
-                    view->EnterDrawMode(cs, true);
-            }
+        connect(tool_group, &QButtonGroup::idClicked, this, [this, sync_tool_buttons, enter_draw_mode](int id){
+            enter_draw_mode();
             view->SetDrawTool(id);
             sync_tool_buttons();
         });
@@ -758,6 +1039,42 @@ Widget::Widget(QWidget *parent)
         // no colour control here: the brush and the bucket paint with the Style column's fill colour
         tool_row->addStretch();
         col->addLayout(tool_row);
+
+        // the raster layers: the vector panel's section (BuildLayerSection()), on freehand_layers.
+        // Every edit enters draw mode first and is a draw-local undo step (MyView, "Freehand layers")
+        LayerPanelOps<FreehandLayer> ops;
+        ops.noun = tr("layer");
+        ops.stick = [this, selected_freehand]{ return view->draw_mode ? view->draw_target : selected_freehand(); };
+        ops.layers = [](StickData *cs){
+            return cs->stick_type == StickData::FREEHAND ? &cs->freehand_layers : nullptr;
+        };
+        ops.depth = [](const StickData *cs, int i){ return cs->FreehandLayerDepth(i); };
+        ops.icon = [](const StickData *cs, int i){ return FreehandLayerIcon(cs->freehand_layers[i].image); };
+        ops.current = [this](StickData *cs){
+            return view->draw_mode && view->draw_target == cs ? view->draw_layer : int(cs->freehand_layers.size()) - 1;
+        };
+        ops.set_current = [this, enter_draw_mode](int i){ enter_draw_mode(); view->SetDrawLayer(i); };
+        ops.add = [this, enter_draw_mode]{ enter_draw_mode(); view->AddFreehandLayer(); };
+        ops.set_visible = [this, enter_draw_mode](int i, bool visible){ enter_draw_mode(); view->SetFreehandLayerVisible(i, visible); };
+        ops.rename = [this, enter_draw_mode](int i, const QString &name){ enter_draw_mode(); view->RenameFreehandLayer(i, name); };
+        ops.move = [this, enter_draw_mode](int i, int delta){ enter_draw_mode(); view->MoveFreehandLayer(i, delta); };
+        ops.remove = [this, enter_draw_mode](QList<int> indices){ enter_draw_mode(); view->DeleteFreehandLayers(indices); };
+        ops.copy = [this, enter_draw_mode](QList<int> indices){ enter_draw_mode(); view->CopyFreehandLayers(indices); };
+        ops.paste = [this, enter_draw_mode]{ enter_draw_mode(); return view->PasteFreehandLayers(); };
+        ops.flip = [this, enter_draw_mode](QList<int> indices, bool horizontal){ enter_draw_mode(); view->FlipFreehandLayers(indices, horizontal); };
+        ops.set_mask = [this, enter_draw_mode](int i, int mask, bool inverted){ enter_draw_mode(); view->SetFreehandLayerMask(i, mask, inverted); };
+        ops.set_depth_enabled = [this, enter_draw_mode](bool on){ enter_draw_mode(); view->SetFreehandDepthEnabled(on); };
+        ops.set_depth = [this, enter_draw_mode](QList<int> indices, double depth){ enter_draw_mode(); view->SetFreehandLayerDepth(indices, depth); };
+        ops.reset_depths = [this, enter_draw_mode]{ enter_draw_mode(); view->ResetFreehandLayerDepths(); };
+        refresh_freehand_panel = BuildLayerSection(advanced_draw_tab, col, ops, &freehand_panel_sync);
+        // queued, like the vector panel's: an edit can announce itself from inside the list's own
+        // signals (a rename, a visibility toggle), and rebuilding there would delete that item
+        auto refresh_layers = [this, ops]{
+            if(refresh_freehand_panel)
+                refresh_freehand_panel(ops.stick());
+        };
+        connect(view, &MyView::FreehandLayersChanged, this, refresh_layers, Qt::QueuedConnection);
+        connect(view, &MyView::DrawModeChanged, this, refresh_layers, Qt::QueuedConnection);
 
         // dimensione
         QHBoxLayout *size_row = new QHBoxLayout();
@@ -942,7 +1259,7 @@ Widget::Widget(QWidget *parent)
         connect(roundness_spin, QOverload<int>::of(&QSpinBox::valueChanged), this,
                 [this, rebuild_round](int v){ view->draw_brush_roundness = v; rebuild_round(); });
 
-        // actions: enter/exit draw mode on an existing freehand (first on the tool row, before
+        // actions: enter/exit draw mode on an existing freehand (first cell of the tool grid, before
         // the brush; a 36x36 icon like the tools) + session undo/redo
         QHBoxLayout *action_row = new QHBoxLayout();
         QToolButton *enter_btn = new QToolButton(advanced_draw_tab);
@@ -953,8 +1270,7 @@ Widget::Widget(QWidget *parent)
         enter_btn->setStyleSheet(ToolButtonStyle());
         QPushButton *undo_btn = new QPushButton(tr("Undo"), advanced_draw_tab);
         QPushButton *redo_btn = new QPushButton(tr("Redo"), advanced_draw_tab);
-        tool_row->insertWidget(0, enter_btn);
-        tool_row->insertSpacing(1, 4);
+        tool_grid->addWidget(enter_btn, 0, 0);
         action_row->addWidget(undo_btn);
         action_row->addWidget(redo_btn);
         col->addLayout(action_row);
@@ -3733,6 +4049,7 @@ static QIcon VectorShapeIcon(const VectorShape &shape, const QTransform &to_scen
     return QIcon(pm);
 }
 
+
 /// @details The VECTOR panel: the six vector tools, the shape layers and their buttons. The rows
 /// list the top shape first, as a layer panel does, so row r is shape count-1-r. Every action is a
 /// MyView method (reachable from the tests, which do not link this file); the panel only maps rows
@@ -3809,151 +4126,33 @@ void Widget::BuildVectorPanel()
         view->ToggleVectorNodeCurves();
     });
 
-    QListWidget *layers = new QListWidget(advanced_vector_tab);
-    layers->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    layers->setIconSize(QSize(32, 32));
-    layers->setToolTip(tr("Shape layers, front first. Checked = visible; double-click to rename."));
-    col->addWidget(layers, 1);
-    QGridLayout *layer_buttons = new QGridLayout();
-    QPushButton *up_btn = new QPushButton(tr("Up"), advanced_vector_tab);
-    QPushButton *down_btn = new QPushButton(tr("Down"), advanced_vector_tab);
-    QPushButton *delete_btn = new QPushButton(tr("Delete"), advanced_vector_tab);
-    QPushButton *copy_btn = new QPushButton(tr("Copy"), advanced_vector_tab);
-    QPushButton *paste_btn = new QPushButton(tr("Paste"), advanced_vector_tab);
-    up_btn->setToolTip(tr("Move the shape one step towards the front"));
-    down_btn->setToolTip(tr("Move the shape one step towards the back"));
-    copy_btn->setToolTip(tr("Copy the selected shapes, to paste them into any vector stick"));
-    paste_btn->setToolTip(tr("Paste the copied shapes on top of this stick's, where they were drawn"));
-    QPushButton *flip_h_btn = new QPushButton(tr("Flip H"), advanced_vector_tab);
-    QPushButton *flip_v_btn = new QPushButton(tr("Flip V"), advanced_vector_tab);
-    flip_h_btn->setToolTip(tr("Flip the selected shapes horizontally (left to right), together"));
-    flip_v_btn->setToolTip(tr("Flip the selected shapes vertically (top to bottom), together"));
-    layer_buttons->addWidget(up_btn, 0, 0);
-    layer_buttons->addWidget(down_btn, 0, 1);
-    layer_buttons->addWidget(delete_btn, 0, 2);
-    layer_buttons->addWidget(copy_btn, 1, 0);
-    layer_buttons->addWidget(paste_btn, 1, 1);
-    layer_buttons->addWidget(flip_h_btn, 2, 0);
-    layer_buttons->addWidget(flip_v_btn, 2, 1);
-    col->addLayout(layer_buttons);
-
-    // the current shape's mask: another shape of this stick, front first like the rows
-    QComboBox *mask_combo = new QComboBox(advanced_vector_tab);
-    mask_combo->setToolTip(tr("Mask of the selected shape: where the mask shape is, this shape turns "
-                              "transparent, as much as the mask is opaque. A hidden shape still masks.\n"
-                              "Greyed out: shapes that this one already masks, directly or through other masks."));
-    QCheckBox *mask_invert = new QCheckBox(tr("Invert"), advanced_vector_tab);
-    mask_invert->setToolTip(tr("Show the shape only where the mask is, instead of everywhere else"));
-    QHBoxLayout *mask_row = new QHBoxLayout();
-    mask_row->addWidget(new QLabel(tr("Mask"), advanced_vector_tab));
-    mask_row->addWidget(mask_combo, 1);
-    mask_row->addWidget(mask_invert);
-    col->addLayout(mask_row);
-
-    // per-shape depth. Off (the default) the shapes are drawn in layer order at the stick's depth;
-    // on, a shape can be given a depth of its own. The slider and spin box have the range and
-    // resolution of the stick Depth tab's (depthSlider/depthSpinbox in widget.ui) and, like those,
-    // only hold a value: nothing changes until "Set depth" is pressed.
-    QCheckBox *depth_check = new QCheckBox(tr("Own depth per shape"), advanced_vector_tab);
-    depth_check->setToolTip(tr("Off: the shapes are drawn in layer order, at the stick's depth.\n"
-                               "On: each shape can have its own depth, in front of or behind other sticks."));
-    QSlider *shape_depth_slider = new QSlider(Qt::Horizontal, advanced_vector_tab);
-    shape_depth_slider->setRange(0, 9999);
-    QDoubleSpinBox *shape_depth_spin = new QDoubleSpinBox(advanced_vector_tab);
-    shape_depth_spin->setDecimals(2);
-    shape_depth_spin->setSingleStep(0.01);
-    QPushButton *set_depth_btn = new QPushButton(tr("Set depth"), advanced_vector_tab);
-    QPushButton *reset_depth_btn = new QPushButton(tr("Reset depths"), advanced_vector_tab);
-    set_depth_btn->setToolTip(tr("Give the selected shapes this depth"));
-    reset_depth_btn->setToolTip(tr("Put every shape back at the stick's depth, so the layer order decides again"));
-    const QList<QWidget*> depth_controls = { shape_depth_slider, shape_depth_spin, set_depth_btn, reset_depth_btn };
-    for(QWidget *control : depth_controls)
-        control->setEnabled(false);
-    QHBoxLayout *depth_value_row = new QHBoxLayout();
-    depth_value_row->addWidget(shape_depth_slider, 1);
-    depth_value_row->addWidget(shape_depth_spin);
-    QHBoxLayout *depth_button_row = new QHBoxLayout();
-    depth_button_row->addWidget(set_depth_btn);
-    depth_button_row->addWidget(reset_depth_btn);
-    col->addWidget(depth_check);
-    col->addLayout(depth_value_row);
-    col->addLayout(depth_button_row);
-    // the slider is integer-stepped, the depth has two decimals: x100, as in the Depth tab
-    connect(shape_depth_slider, &QSlider::valueChanged, this, [shape_depth_spin](int value){
-        shape_depth_spin->setValue(value / 100.0);
-    });
-    connect(shape_depth_spin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [shape_depth_slider](double value){
-        shape_depth_slider->setValue(qRound(value * 100));
-    });
-
-    auto shape_of = [](QListWidgetItem *item){ return item->data(Qt::UserRole).toInt(); };
-    auto selected_shapes = [layers, shape_of]{
-        QList<int> indices;
-        for(QListWidgetItem *item : layers->selectedItems())
-            indices << shape_of(item);
-        return indices;
+    // the shape layers: the section is shared with the freehand draw panel (BuildLayerSection())
+    LayerPanelOps<VectorShape> ops;
+    ops.noun = tr("shape");
+    ops.stick = [this]{ return view->VectorStick(); };
+    ops.layers = [](StickData *cs){
+        return cs->stick_type == StickData::VECTOR ? &cs->vector_shapes : nullptr;
     };
-
-    // the mask selector echoes the current shape; refilled with the rows and whenever another
-    // shape becomes current
-    auto refresh_mask = [this, mask_combo, mask_invert](StickData *cs){
-        const bool was_sync = vector_panel_sync;
-        vector_panel_sync = true;
-        mask_combo->clear();
-        const int current = cs != nullptr && cs->stick_type == StickData::VECTOR
-                          ? view->my_animation->CurrentVectorShape(cs) : -1;
-        mask_combo->setEnabled(current >= 0);
-        mask_invert->setEnabled(current >= 0 && cs->vector_shapes[current].mask >= 0);
-        mask_invert->setChecked(current >= 0 && cs->vector_shapes[current].mask_inverted);
-        if(current >= 0){
-            mask_combo->addItem(tr("None"), VectorShape::NO_MASK);
-            QStandardItemModel *model = qobject_cast<QStandardItemModel*>(mask_combo->model());
-            for(int i = cs->vector_shapes.size() - 1; i >= 0; i--){
-                if(i == current)
-                    continue;
-                mask_combo->addItem(cs->vector_shapes[i].name, i);
-                // a shape already masked by the current one, through any chain, would close a loop
-                model->item(mask_combo->count() - 1)->setEnabled(!MaskChainReaches(cs->vector_shapes, i, current));
-            }
-            mask_combo->setCurrentIndex(qMax(0, mask_combo->findData(cs->vector_shapes[current].mask)));
-        }
-        vector_panel_sync = was_sync;
+    ops.depth = [](const StickData *cs, int i){ return cs->VectorShapeDepth(i); };
+    ops.icon = [](const StickData *cs, int i){ return VectorShapeIcon(cs->vector_shapes[i], cs->PolygonTransform()); };
+    ops.current = [this](StickData *cs){ return view->my_animation->CurrentVectorShape(cs); };
+    ops.set_current = [this](int i){
+        view->my_animation->vector_shape_row = i;
+        view->my_animation->UpdateStyleControls(); // the Style column follows the shape
     };
+    ops.set_visible = [this](int i, bool visible){ view->SetVectorShapeVisible(i, visible); };
+    ops.rename = [this](int i, const QString &name){ view->RenameVectorShape(i, name); };
+    ops.move = [this](int i, int delta){ view->MoveVectorShape(i, delta); };
+    ops.remove = [this](QList<int> indices){ view->DeleteVectorShapes(indices); };
+    ops.copy = [this](QList<int> indices){ view->CopyVectorShapes(indices); };
+    ops.paste = [this]{ return view->PasteVectorShapes(); };
+    ops.flip = [this](QList<int> indices, bool horizontal){ view->FlipVectorShapes(indices, horizontal); };
+    ops.set_mask = [this](int i, int mask, bool inverted){ view->SetVectorShapeMask(i, mask, inverted); };
+    ops.set_depth_enabled = [this](bool on){ view->SetVectorDepthEnabled(on); };
+    ops.set_depth = [this](QList<int> indices, double depth){ view->SetVectorShapeDepth(indices, depth); };
+    ops.reset_depths = [this]{ view->ResetVectorShapeDepths(); };
+    refresh_vector_panel = BuildLayerSection(advanced_vector_tab, col, ops, &vector_panel_sync);
 
-    refresh_vector_panel = [this, layers, depth_check, depth_controls, shape_depth_spin, refresh_mask](StickData *cs){
-        vector_panel_sync = true;
-        layers->clear();
-        const bool own_depth = cs != nullptr && cs->stick_type == StickData::VECTOR && cs->vector_depth_enabled;
-        depth_check->setChecked(own_depth);
-        for(QWidget *control : depth_controls)
-            control->setEnabled(own_depth);
-        if(cs != nullptr && cs->stick_type == StickData::VECTOR){
-            const QTransform to_scene = cs->PolygonTransform();
-            for(int i = cs->vector_shapes.size() - 1; i >= 0; i--){
-                const VectorShape &shape = cs->vector_shapes[i];
-                QListWidgetItem *item = new QListWidgetItem(VectorShapeIcon(shape, to_scene), shape.name, layers);
-                item->setData(Qt::UserRole, i);
-                item->setFlags(item->flags() | Qt::ItemIsEditable | Qt::ItemIsUserCheckable);
-                item->setCheckState(shape.visible ? Qt::Checked : Qt::Unchecked);
-                QStringList tip;
-                if(own_depth)
-                    tip << tr("Depth %1").arg(cs->VectorShapeDepth(i), 0, 'f', 2);
-                if(shape.mask >= 0)
-                    tip << (shape.mask_inverted ? tr("Shown only inside %1") : tr("Masked by %1"))
-                               .arg(cs->vector_shapes[shape.mask].name);
-                if(!tip.isEmpty())
-                    item->setToolTip(tip.join('\n'));
-            }
-            const int current = view->my_animation->CurrentVectorShape(cs);
-            if(current >= 0){
-                layers->setCurrentRow(cs->vector_shapes.size() - 1 - current);
-                if(own_depth)
-                    shape_depth_spin->setValue(cs->VectorShapeDepth(current));
-            }
-        }
-        refresh_mask(cs);
-        vector_panel_sync = false;
-    };
     // queued: the edits that announce themselves can run from inside one of the list's own
     // signals (a rename, a visibility toggle), and rebuilding the rows there would delete the
     // very item being reported
@@ -3964,72 +4163,4 @@ void Widget::BuildVectorPanel()
     };
     connect(view, &MyView::VectorShapesChanged, this, refresh_current, Qt::QueuedConnection);
     connect(&view->undo_stack, &QUndoStack::indexChanged, this, refresh_current, Qt::QueuedConnection);
-
-    connect(layers, &QListWidget::currentRowChanged, this, [this, layers, shape_of, shape_depth_spin, refresh_mask](int){
-        if(vector_panel_sync || layers->currentItem() == nullptr)
-            return;
-        view->my_animation->vector_shape_row = shape_of(layers->currentItem());
-        view->my_animation->UpdateStyleControls(); // the Style column follows the shape
-        StickData *cs = view->VectorStick();
-        if(cs != nullptr && cs->vector_depth_enabled) // and so does the depth, when shapes have their own
-            shape_depth_spin->setValue(cs->VectorShapeDepth(view->my_animation->vector_shape_row));
-        refresh_mask(cs); // and the mask selector
-    });
-    // both controls send the pair, so one edit is one undo step whichever was touched
-    auto apply_mask = [this, mask_combo, mask_invert]{
-        StickData *cs = view->VectorStick();
-        if(!vector_panel_sync && cs != nullptr)
-            view->SetVectorShapeMask(view->my_animation->CurrentVectorShape(cs),
-                                     mask_combo->currentData().toInt(), mask_invert->isChecked());
-    };
-    connect(mask_combo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, apply_mask);
-    connect(mask_invert, &QCheckBox::toggled, this, apply_mask);
-    connect(depth_check, &QCheckBox::toggled, this, [this](bool on){
-        if(!vector_panel_sync)
-            view->SetVectorDepthEnabled(on); // the controls are enabled by the refresh it announces
-    });
-    connect(set_depth_btn, &QPushButton::clicked, this, [this, selected_shapes, shape_depth_spin]{
-        view->SetVectorShapeDepth(selected_shapes(), shape_depth_spin->value());
-    });
-    connect(reset_depth_btn, &QPushButton::clicked, this, [this]{
-        view->ResetVectorShapeDepths();
-    });
-    connect(layers, &QListWidget::itemChanged, this, [this, shape_of](QListWidgetItem *item){
-        if(vector_panel_sync)
-            return;
-        StickData *cs = view->VectorStick();
-        const int i = shape_of(item);
-        if(cs == nullptr || i < 0 || i >= cs->vector_shapes.size())
-            return;
-        const bool visible = item->checkState() == Qt::Checked;
-        if(visible != cs->vector_shapes[i].visible)
-            view->SetVectorShapeVisible(i, visible);
-        else if(item->text() != cs->vector_shapes[i].name)
-            view->RenameVectorShape(i, item->text());
-    });
-    connect(up_btn, &QPushButton::clicked, this, [this, layers, shape_of]{
-        if(layers->currentItem() != nullptr)
-            view->MoveVectorShape(shape_of(layers->currentItem()), +1);
-    });
-    connect(down_btn, &QPushButton::clicked, this, [this, layers, shape_of]{
-        if(layers->currentItem() != nullptr)
-            view->MoveVectorShape(shape_of(layers->currentItem()), -1);
-    });
-    connect(delete_btn, &QPushButton::clicked, this, [this, selected_shapes]{
-        view->DeleteVectorShapes(selected_shapes());
-    });
-    connect(copy_btn, &QPushButton::clicked, this, [this, selected_shapes]{
-        view->CopyVectorShapes(selected_shapes());
-    });
-    connect(flip_h_btn, &QPushButton::clicked, this, [this, selected_shapes]{
-        view->FlipVectorShapes(selected_shapes(), true);
-    });
-    connect(flip_v_btn, &QPushButton::clicked, this, [this, selected_shapes]{
-        view->FlipVectorShapes(selected_shapes(), false);
-    });
-    connect(paste_btn, &QPushButton::clicked, this, [this]{
-        const QString why = view->PasteVectorShapes();
-        if(!why.isEmpty())
-            QMessageBox::warning(this, tr("Paste shapes"), why);
-    });
 }

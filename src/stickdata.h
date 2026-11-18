@@ -18,6 +18,37 @@
 class StickGraphicsItem; // defined in stick.h; forward-declared to avoid a header cycle
 
 /**
+ * @brief One raster layer of a FREEHAND stick.
+ *
+ * Pure value type, like VectorShape: the image is copy-on-write, so the layer list, an undo
+ * snapshot and the layer clipboard copy it with no ownership rule. Every layer of one stick has
+ * the same size and the same pixel grid (one canvas each, cropped together by
+ * MyView::ExitDrawMode()), so a mask is a pixel-by-pixel operation.
+ */
+struct FreehandLayer
+{
+    static constexpr qint32 NO_MASK = -1; ///< the value of @c mask for a layer nothing masks
+
+    QImage image;                    ///< the layer's pixels, Format_ARGB32_Premultiplied
+    QString name;                    ///< the layer's name in the draw-mode panel
+    bool visible = true;             ///< hidden layers are not painted (a hidden mask still masks)
+    double depth_offset = 0;         ///< own depth, as a distance from the stick's z; read only while
+                                     ///< StickData::vector_depth_enabled (see StickData::FreehandLayerDepth())
+    qint32 mask = NO_MASK;           ///< index, in the same list, of the layer masking this one, or NO_MASK.
+                                     ///< Never this layer nor a loop (MaskChainReaches()); every removal and
+                                     ///< reorder goes through RemoveVectorShape()/ReorderVectorShape()
+    bool mask_inverted = false;      ///< false: transparent where the mask is; true: shown only there
+
+    /// @brief Field by field, every field (a new field must be compared here too).
+    bool operator==(const FreehandLayer &other) const
+    {
+        return image == other.image && name == other.name && visible == other.visible
+                && depth_offset == other.depth_offset && mask == other.mask
+                && mask_inverted == other.mask_inverted;
+    }
+};
+
+/**
  * @brief One set of "Stick Transform" parameters, in a stick's own frame (origin P1, +y along
  *        the stick, so x is the "horizontal"/"width" axis). A stick carries two: StickData's
  *        local_xf (its own shape) and global_xf (its shape and its descendants').
@@ -72,10 +103,10 @@ public:
                         ///< interior vertices live in polygon_points, with per-vertex
                         ///< width (taper) and corner curvature in vertex_widths/
                         ///< vertex_curvatures
-        FREEHAND = 24,  ///< raster paint stick: a single stick_img painted freehand in
-                        ///< draw mode (myview.cpp). Rendered/transformed/serialized
-                        ///< exactly like IMAGE (see IsImageType()); its one image never
-                        ///< enters the image-variant list widget (23 is the DRAW_IK tool id)
+        FREEHAND = 24,  ///< raster paint stick: a stack of raster layers (freehand_layers)
+                        ///< painted in draw mode (myview.cpp). Placed/transformed like IMAGE
+                        ///< (see IsImageType()); its one stick_img is the layers' composite and
+                        ///< never enters the image-variant list widget (23 is the DRAW_IK tool id)
         TEXT = 25,      ///< paragraph of text laid out along the stick; the skeleton is
                         ///< invisible (drawn only while `text` is empty, i.e. during the
                         ///< 2-click drawing preview). Content/font/layout live in the
@@ -213,7 +244,7 @@ public:
     /// The newest record format this build reads AND writes; operator>> refuses anything above
     /// it (RejectNewerVersion()), because a newer record's extra fields would be read as the
     /// start of the next record and desync the whole stream.
-    static constexpr qint32 CURRENT_VERSION = 11;
+    static constexpr qint32 CURRENT_VERSION = 12;
     /// The formats of a VECTOR stick's shape list, each named after the fields it added: the read
     /// and write gates compare against these, never against a bare number.
     enum VectorShapesFormat : qint32 {
@@ -224,12 +255,20 @@ public:
     /// Format of a VECTOR stick's shape list, written at its head: the shapes have a version of
     /// their own so they can grow fields without raising every stick record's.
     static constexpr qint32 VECTOR_SHAPES_VERSION = VECTOR_SHAPES_MASK;
+    /// The formats of a FREEHAND stick's layer list (record version 12 on), named like
+    /// VectorShapesFormat: the gates compare against these names.
+    enum FreehandLayersFormat : qint32 {
+        FREEHAND_LAYERS_BASE = 1 ///< image, name, visibility, depth offset, mask, inversion; then the depth switch
+    };
+    /// Format of a FREEHAND stick's layer list, written at its head.
+    static constexpr qint32 FREEHAND_LAYERS_VERSION = FREEHAND_LAYERS_BASE;
     qint32 version = CURRENT_VERSION; ///< serialization format version of this record; 2 adds the
                                      ///< IK fields below, 3 adds TEXT's text_v_stretch, 4 adds
                                      ///< brush_follows_stick, 5 adds texture_tiled, 6 adds
                                      ///< stroke_brush, 7 adds MULTILINE's vertex_parents, 8 its
                                      ///< vertex_caps, 9 local_xf's offset/angle/scale, 10 its flips and
-                                     ///< global_xf, 11 the VECTOR type (vector_shapes) — all gated in operator<</operator>> so files saved before
+                                     ///< global_xf, 11 the VECTOR type (vector_shapes), 12 a FREEHAND's
+                                     ///< freehand_layers — all gated in operator<</operator>> so files saved before
                                      ///< those fields existed still load (and operator>> then
                                      ///< raises the record to CURRENT_VERSION)
     qint32 stick_type = StickType::LINE;///< StickType value; drives painting and serialization
@@ -325,7 +364,8 @@ public:
     bool hard_top = false;           ///< TAPER: draw the far end flat instead of rounded
     bool hard_bottom = false;        ///< TAPER: draw the near end flat instead of rounded
     QImage *stick_img = nullptr;     ///< currently displayed image; points into stick_img_list, not separately owned
-    QList<QImage*> stick_img_list;    ///< owned image variants of an IMAGE stick
+    QList<QImage*> stick_img_list;    ///< owned image variants of an IMAGE stick; for a FREEHAND, one image:
+                                      ///< the composite of freehand_layers (RebuildFreehandComposite())
     QList<QString> img_name_list;     ///< display names of stick_img_list entries, parallel by index
     /**
      * @brief Extra vertices of a POLYGON or MULTILINE stick, in normalized
@@ -417,13 +457,52 @@ public:
     QList<VectorShape> vector_shapes;
 
     /**
-     * @brief VECTOR only: true when each shape is drawn at its own depth instead of the stick's.
+     * @brief VECTOR and FREEHAND: true when each shape (layer) is drawn at its own depth instead
+     *        of the stick's.
      *
      * Off (the default), every shape is drawn at z, in layer order. On, a shape is drawn at
-     * VectorShapeDepth(), which can put it in front of or behind OTHER sticks of the frame; shapes
-     * sharing a depth keep their layer order. The offsets survive switching it off and on again.
+     * VectorShapeDepth() (a FREEHAND layer at FreehandLayerDepth()), which can put it in front of
+     * or behind OTHER sticks of the frame; shapes sharing a depth keep their layer order. The
+     * offsets survive switching it off and on again.
      */
     bool vector_depth_enabled = false;
+
+    /**
+     * @brief FREEHAND only: the raster layers, in drawing order (the last one on top).
+     *
+     * The source of truth for a FREEHAND's pixels; stick_img (the one entry of stick_img_list) is
+     * their composite, kept for every reader that wants one picture (size, onion skins, foreign
+     * exporters). Empty means "not split yet": an older record, or a freehand made before its
+     * first draw session; EnsureFreehandLayers() turns the image into one layer.
+     */
+    QList<FreehandLayer> freehand_layers;
+
+    /**
+     * @brief Makes freehand_layers one layer holding stick_img when it is empty.
+     * @details Called on load (FREEHAND records only) and when draw mode starts (on whatever
+     * stick it starts), so the rest of the code can assume a FREEHAND has at least one layer.
+     */
+    void EnsureFreehandLayers();
+
+    /**
+     * @brief FREEHAND only: layer @p index with its mask chain applied (pixel by pixel; the
+     *        layers share one pixel grid). The image itself when the layer has no mask.
+     * @param depth bounds the recursion over the chain, even over a loop no edit can make.
+     */
+    QImage FreehandLayerImage(int index, int depth = 64) const;
+
+    /**
+     * @brief Rebuilds stick_img as the composite of the visible freehand_layers (masks
+     *        applied, per-layer depths ignored). A lone visible unmasked layer is shared
+     *        (copy-on-write), so it costs nothing and a .sam stores its pixels once.
+     */
+    void RebuildFreehandComposite();
+
+    /**
+     * @brief The frame-wide depth FREEHAND layer @p layer_index is drawn at: z while
+     *        vector_depth_enabled is off, z + the layer's depth_offset otherwise.
+     */
+    double FreehandLayerDepth(int layer_index) const;
 
     /**
      * @brief The frame-wide depth shape @p shape_index is drawn at.

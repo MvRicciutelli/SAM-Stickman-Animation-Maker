@@ -296,8 +296,75 @@ public:
     // intercepted here and the tool switch is bypassed. See EnterDrawMode()/ExitDrawMode().
     bool draw_mode = false;                 ///< true between EnterDrawMode() and ExitDrawMode()
     StickData *draw_target = nullptr;       ///< the FREEHAND stick being painted (nullptr outside draw mode)
-    QImage *draw_canvas = nullptr;          ///< == draw_target->stick_img during the session; painted in place (live)
+    QImage *draw_canvas = nullptr;          ///< &draw_layer_canvas during the session (nullptr outside it); painted in place (live)
+    /**
+     * @brief The active layer's pixels while it is being painted: the working copy of
+     *        draw_target->freehand_layers[draw_layer].image.
+     *
+     * Owned here, not a pointer into the layer list: that list is implicitly shared with every
+     * clone (undo snapshots, onion and icon renders), so painting through a pointer into it would
+     * reach the clones, and any detach would leave the pointer dangling. SyncDrawCanvas() writes it
+     * back (copy-on-write, free) at every draw-local undo step; paint() shows it for the active layer.
+     */
+    QImage draw_layer_canvas;
+    int draw_layer = 0;                     ///< index into draw_target->freehand_layers the tools paint on
     QRectF draw_region;                     ///< scene rect the canvas covers (the enter-time visible viewport)
+
+    QPointF SceneToCanvas(const QPointF &scene) const; ///< scene coord -> raw canvas pixel (every layer shares the grid)
+    QPointF CanvasToScene(const QPointF &canvas) const; ///< raw canvas pixel -> scene coord
+
+    /// @brief Writes draw_layer_canvas back into the active layer (copy-on-write: no pixels copied).
+    void SyncDrawCanvas();
+    /// @brief Loads the active layer into draw_layer_canvas (after the layer list or draw_layer changed).
+    void LoadDrawCanvas();
+    /**
+     * @brief Makes layer @p index the one the tools paint on. Not an undo step; a floating pixel
+     *        selection is committed into the layer it was lifted from first. No-op outside draw mode.
+     */
+    void SetDrawLayer(int index);
+
+    // ---- Freehand layers (draw-mode panel). Each edit needs draw mode (the panel enters it
+    // first), is one draw-local undo step, and ends with FreehandLayersChanged. Indices are into
+    // draw_target->freehand_layers (0 = bottom). ----
+    /// @brief Adds a transparent layer above the active one and makes it active. @return false outside draw mode.
+    bool AddFreehandLayer();
+    /// @brief Deletes the layers at @p indices; the last remaining layer is never deleted. @return false when nothing was deleted.
+    bool DeleteFreehandLayers(QList<int> indices);
+    /// @brief Moves layer @p index by @p delta places (> 0 = towards the front). @return false when it did not move.
+    bool MoveFreehandLayer(int index, int delta);
+    /// @brief Shows or hides one layer. No-op when unchanged.
+    void SetFreehandLayerVisible(int index, bool visible);
+    /// @brief Renames one layer. No-op when unchanged.
+    void RenameFreehandLayer(int index, const QString &name);
+    /**
+     * @brief Mirrors the layers at @p indices on screen, together about the centre of their
+     *        painted pixels' joint scene bounding box.
+     * @param horizontal true = left/right, false = top/bottom.
+     * @return false when nothing was flipped (no valid index, or nothing painted on them).
+     */
+    bool FlipFreehandLayers(const QList<int> &indices, bool horizontal);
+    /// @brief Copies the layers at @p indices into freehand_clipboard, placed in the scene. @return how many.
+    int CopyFreehandLayers(QList<int> indices);
+    /**
+     * @brief Pastes freehand_clipboard as new layers on top, where they were painted (any freehand,
+     *        any frame). The clipboard stays, so it can be pasted again.
+     * @return an empty string on success, or why nothing was pasted.
+     */
+    QString PasteFreehandLayers();
+    /**
+     * @brief Masks layer @p index with layer @p mask (-1 = no mask).
+     * @return false when nothing changed: out of range, unchanged, or a mask closing a loop.
+     */
+    bool SetFreehandLayerMask(int index, int mask, bool inverted);
+    /// @brief Turns per-layer depth on or off (StickData::vector_depth_enabled).
+    void SetFreehandDepthEnabled(bool enabled);
+    /// @brief Gives the layers at @p indices the frame-wide depth @p depth (clamped to MINDEPTH..MAXDEPTH).
+    void SetFreehandLayerDepth(const QList<int> &indices, double depth);
+    /// @brief Puts every layer back at the stick's own depth. No undo step when none had an offset.
+    void ResetFreehandLayerDepths();
+
+    QList<FreehandLayer> freehand_clipboard; ///< filled by CopyFreehandLayers() (masks as clipboard places); survives frame changes
+    QTransform freehand_clip_to_scene;       ///< clipboard pixel (top-left addressing) -> scene, at copy time
     // brush state — edited live by DrawModeWidget's controls (widget.cpp):
     bool draw_eraser = false;               ///< eraser sub-tool (composites DestinationOut)
     bool draw_pressure_size = true;         ///< pen-pressure-drives-size checkbox (Phase 3); ignored on mouse input
@@ -1079,6 +1146,10 @@ signals:
     ///        current); the vector panel rebuilds its layer rows from it.
     void VectorShapesChanged();
 
+    /// @brief Fired after an edit of the freehand being drawn's layers (or of which one is
+    ///        active), and after every draw-local undo step; the draw panel rebuilds its layer rows.
+    void FreehandLayersChanged();
+
 
     // QWidget interface
 protected:
@@ -1642,7 +1713,23 @@ private:
     void DrawCmd(QPointF* point, int mode);
 
     // ---- Freehand draw-mode internals ------------------------------------------------
-    QList<QImage> draw_undo;      ///< per-stroke canvas snapshots (session-local undo chain)
+    /// @brief One draw-local undo entry: the whole layer stack (copy-on-write, so the layers a
+    ///        step did not touch are shared) and which layer was active.
+    struct DrawUndoState {
+        QList<FreehandLayer> layers;
+        int layer = 0;
+        bool depth_enabled = false;
+    };
+    QList<DrawUndoState> draw_undo; ///< per-step layer-stack snapshots (session-local undo chain)
+    /// @brief Puts a draw_undo entry back: layers, active layer, working canvas, repaint, panel.
+    void RestoreDrawState(const DrawUndoState &state);
+    /**
+     * @brief Shared start of every layer edit: false outside draw mode; otherwise commits a
+     *        floating pixel selection and syncs the working canvas into its layer.
+     */
+    bool BeginLayerEdit();
+    /// @brief Shared end of every layer edit: reload the canvas, push one undo step, repaint, announce.
+    void EndLayerEdit();
     int draw_undo_idx = -1;       ///< current position in draw_undo (-1 = empty)
     bool draw_stroking = false;   ///< true between brush press and release
     QPointF draw_last_pos;        ///< last stamped scene position, for stroke interpolation
@@ -1695,8 +1782,6 @@ private:
     double  draw_sel_sx0 = 1, draw_sel_sy0 = 1; ///< gizmo scale at gesture start
     double  draw_sel_ang0 = 0;    ///< pointer angle (deg) at rotate-gesture start
 
-    QPointF SceneToCanvas(const QPointF &scene) const; ///< scene coord -> raw canvas pixel
-    QPointF CanvasToScene(const QPointF &canvas) const; ///< raw canvas pixel -> scene coord
     /** @brief Upright frame -> canvas pixel: cancels the canvas's on-screen rotation (the stick's),
      *  so a box axis-aligned in this frame shows upright on screen. */
     QTransform SelFrame() const;

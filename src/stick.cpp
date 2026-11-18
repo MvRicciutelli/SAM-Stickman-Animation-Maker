@@ -492,18 +492,15 @@ QImage StickGraphicsItem::MaskedShapeImage(int index, const QTransform &to_image
     QImage image(size * dpr, QImage::Format_ARGB32_Premultiplied);
     image.setDevicePixelRatio(dpr);
     image.fill(Qt::transparent);
-    QPainter p(&image);
-    p.setRenderHints(hints);
-    p.setTransform(to_image);
-    PaintShape(&p, index);
-    const VectorShape &shape = data->vector_shapes[index];
-    if(shape.mask >= 0 && shape.mask < data->vector_shapes.size() && depth > 0){
-        const QImage mask = MaskedShapeImage(shape.mask, to_image, size, dpr, hints, depth - 1);
-        p.resetTransform();
-        p.setCompositionMode(shape.mask_inverted ? QPainter::CompositionMode_DestinationIn
-                                                 : QPainter::CompositionMode_DestinationOut);
-        p.drawImage(0, 0, mask);
+    {
+        QPainter p(&image);
+        p.setRenderHints(hints);
+        p.setTransform(to_image);
+        PaintShape(&p, index);
     }
+    const VectorShape &shape = data->vector_shapes[index];
+    if(shape.mask >= 0 && shape.mask < data->vector_shapes.size() && depth > 0)
+        CutByMask(image, MaskedShapeImage(shape.mask, to_image, size, dpr, hints, depth - 1), shape.mask_inverted);
     return image;
 }
 
@@ -511,12 +508,78 @@ QImage StickGraphicsItem::MaskedShapeImage(int index, const QTransform &to_image
 /// comparison are then the same number by construction, whatever happens to the stick's z.
 VectorShapeLayerItem *StickGraphicsItem::ShapeLayer(const VectorShape &shape) const
 {
-    if(!data->vector_depth_enabled || shape.depth_offset == 0)
+    return LayerAtOffset(shape.depth_offset);
+}
+
+/// @details Matched on the stored offset itself, as ShapeLayer() explains.
+VectorShapeLayerItem *StickGraphicsItem::LayerAtOffset(double offset) const
+{
+    if(!data->vector_depth_enabled || offset == 0)
         return nullptr;
     for(VectorShapeLayerItem *layer : shape_layers)
-        if(layer->depth_offset == shape.depth_offset)
+        if(layer->depth_offset == offset)
             return layer;
     return nullptr;
+}
+
+/// @details The transform is the one the image branch of paint() uses (spine + Stick Transform,
+/// then the canvas's internal placement); every layer has the composite's size, so all of them
+/// land in the same target rect. Shared by paint() (layer == nullptr) and VectorShapeLayerItem.
+void StickGraphicsItem::PaintFreehandLayers(QPainter *painter, const VectorShapeLayerItem *layer)
+{
+    const QSizeF size = CalcImgSize();
+    if(size.isEmpty())
+        return;
+    const QRectF target(QPointF(-size.width()/2, -size.height()/2), size);
+    painter->save();
+    painter->setTransform(StickLocalFrame(data), true);
+    painter->rotate(data->img_angle_offset);
+    painter->translate(data->img_offset);
+    // while this stick is being painted, its active layer lives in the view's working canvas
+    // (MyView::draw_layer_canvas), which the layer list only receives at each undo step
+    const bool drawing = V != nullptr && V->draw_mode && V->draw_target == data && V->draw_canvas != nullptr;
+    for(int i = 0; i < data->freehand_layers.size(); i++){
+        const FreehandLayer &fl = data->freehand_layers[i];
+        if(!fl.visible || fl.image.isNull() || LayerAtOffset(fl.depth_offset) != layer)
+            continue;
+        if(drawing && i == V->draw_layer)
+            painter->drawImage(target, LiveFreehandLayer(i));
+        else
+            painter->drawImage(target, CachedFreehandLayer(i));
+    }
+    painter->restore();
+}
+
+/// @details The live canvas, cut by the mask chain when the layer has one. ponytail: a masked
+/// active layer is recomposed on every repaint of a stroke, and a layer masked BY the active one
+/// shows the mask as of the last undo step until the stroke ends.
+QImage StickGraphicsItem::LiveFreehandLayer(int index)
+{
+    const FreehandLayer &fl = data->freehand_layers[index];
+    if(fl.mask < 0 || fl.mask >= data->freehand_layers.size())
+        return *V->draw_canvas;
+    QImage image = V->draw_canvas->convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    CutByMask(image, CachedFreehandLayer(fl.mask), fl.mask_inverted);
+    return image;
+}
+
+/// @details The key walks the chain the way FreehandLayerImage() does, so any edit of a layer it
+/// reads (pixels: cacheKey(); inversion; which layer masks it) misses. ponytail: one canvas-sized
+/// image per masked layer per view; a stroke on a masked layer recomposes it on every repaint.
+QImage StickGraphicsItem::CachedFreehandLayer(int index)
+{
+    const QList<FreehandLayer> &layers = data->freehand_layers;
+    if(layers[index].mask < 0)
+        return layers[index].image;
+    QList<qint64> key;
+    for(int i = index, steps = 0; i >= 0 && i < layers.size() && steps <= layers.size(); i = layers[i].mask, steps++)
+        key << i << layers[i].image.cacheKey() << (layers[i].mask_inverted ? 1 : 0);
+    const auto found = masked_layer_cache.constFind(index);
+    if(found != masked_layer_cache.cend() && found->key == key)
+        return found->image;
+    const QImage image = data->FreehandLayerImage(index);
+    masked_layer_cache.insert(index, { image, key });
+    return image;
 }
 
 VectorShapeLayerItem *StickGraphicsItem::TopShapeLayer() const
@@ -541,6 +604,11 @@ void StickGraphicsItem::SyncShapeLayers()
         for(const VectorShape &shape : data->vector_shapes)
             if(shape.depth_offset != 0 && !wanted.contains(shape.depth_offset))
                 wanted << shape.depth_offset;
+    }
+    if(data->stick_type == StickData::FREEHAND && data->vector_depth_enabled){
+        for(const FreehandLayer &layer : data->freehand_layers)
+            if(layer.depth_offset != 0 && !wanted.contains(layer.depth_offset))
+                wanted << layer.depth_offset;
     }
     for(int i = shape_layers.size() - 1; i >= 0; i--){
         if(wanted.removeOne(shape_layers[i]->depth_offset))
@@ -583,6 +651,7 @@ QVariant StickGraphicsItem::itemChange(GraphicsItemChange change, const QVariant
     if(change == ItemSceneHasChanged && scene() == nullptr){
         // off the canvas (a frame left): views of visited frames live on, their caches need not
         masked_cache.clear();
+        masked_layer_cache.clear();
         text_layout.reset();
         multiline_valid = false;
         multiline_spine = multiline_bands = QPainterPath();
@@ -620,6 +689,10 @@ void VectorShapeLayerItem::paint(QPainter *painter, const QStyleOptionGraphicsIt
     if(owner == nullptr)
         return;
     setZValue(owner->data->z + depth_offset);
+    if(owner->data->stick_type == StickData::FREEHAND){
+        owner->PaintFreehandLayers(painter, this);
+        return;
+    }
     owner->PaintVectorShapes(painter, this);
     if(owner->TopShapeLayer() == this)
         owner->PaintVectorOverlay(painter);
@@ -787,7 +860,13 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         // painter la ricampiona una volta sola, dove prima ogni repaint faceva un scaled()
         // e poi una conversione in QPixmap, entrambi grandi quanto l'immagine dipinta
         const QSizeF size = CalcImgSize();
-        if(!size.isEmpty()){
+        // a FREEHAND paints its layers one by one (hidden ones skipped, masks, own depths); the
+        // onion ghost stays its composite, greyed once and cached
+        if(!size.isEmpty() && data->stick_type == StickData::FREEHAND
+                && !data->freehand_layers.isEmpty() && !onion_render){
+            PaintFreehandLayers(painter, nullptr);
+        }
+        else if(!size.isEmpty()){
             QRectF target(QPointF(-size.width()/2,-size.height()/2), size);
             painter->save();
             painter->setTransform(StickLocalFrame(data), true); // spina + Stick Transform

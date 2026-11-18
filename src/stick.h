@@ -503,6 +503,26 @@ public:
     };
     QHash<int, MaskedShapeCache> masked_cache; ///< per shape index; freed when the view leaves its scene
 
+    /// @brief One masked FREEHAND layer as StickData::FreehandLayerImage() composed it, keyed by
+    ///        every input it read: the cacheKey() and inversion of each layer along the mask chain.
+    struct MaskedLayerCache {
+        QImage image;
+        QList<qint64> key;
+    };
+    QHash<int, MaskedLayerCache> masked_layer_cache; ///< per layer index; freed when the view leaves its scene
+
+    /**
+     * @brief StickData::FreehandLayerImage() for layer @p index, reused while no layer of its mask
+     *        chain changed. A layer with no mask is returned as it is, with no copy.
+     */
+    QImage CachedFreehandLayer(int index);
+
+    /**
+     * @brief The active layer of the freehand being painted: MyView's working canvas, cut by the
+     *        layer's mask chain when it has one. Only while MyView::draw_target is this stick.
+     */
+    QImage LiveFreehandLayer(int index);
+
     /**
      * @brief MaskedShapeImage() for shape @p index over @p area, reused while nothing it reads changed.
      * @param index a valid index into StickData::vector_shapes.
@@ -564,8 +584,9 @@ public:
     static QSet<StickGraphicsItem*> cached_views; ///< canvas views that paint through the item cache
 
     /**
-     * @brief The extra scene items that paint this VECTOR stick's shapes having a depth of their
-     *        own (StickData::vector_depth_enabled), one per distinct VectorShape::depth_offset.
+     * @brief The extra scene items that paint this VECTOR stick's shapes (or FREEHAND stick's
+     *        layers) having a depth of their own (StickData::vector_depth_enabled), one per
+     *        distinct depth offset.
      *
      * Owned by this view and kept in the same scene as it by SyncShapeLayers(), the only code
      * that creates or destroys one. Empty for every other stick.
@@ -587,6 +608,20 @@ public:
      *        exist yet (it is then drawn with the stick rather than not at all).
      */
     VectorShapeLayerItem *ShapeLayer(const VectorShape &shape) const;
+
+    /**
+     * @brief The layer item that paints whatever has depth offset @p offset, or nullptr when this
+     *        view paints it itself (offset 0, per-layer depth off, or no such item yet).
+     */
+    VectorShapeLayerItem *LayerAtOffset(double offset) const;
+
+    /**
+     * @brief Paints the visible FREEHAND layers that belong to @p layer, bottom first, each cut
+     *        by its mask (FreehandLayer::mask) when it has one.
+     * @param painter the painter, in scene coordinates.
+     * @param layer the depth item being painted, or nullptr for the layers this view paints itself.
+     */
+    void PaintFreehandLayers(QPainter *painter, const VectorShapeLayerItem *layer);
 
     /**
      * @brief The layer in front of everything else this stick paints, or nullptr when that is
@@ -716,7 +751,8 @@ private:
 };
 
 /**
- * @brief Paints the shapes of one VECTOR stick that share one depth other than the stick's own.
+ * @brief Paints the shapes of one VECTOR stick (or the layers of one FREEHAND stick) that share
+ *        one depth other than the stick's own.
  *
  * A QGraphicsItem has a single z, so a shape that must show in front of (or behind) ANOTHER stick
  * cannot be painted by its own stick's item: it gets this helper, a top-level item at
@@ -747,7 +783,7 @@ public:
     void OwnerGeometryChanging() { prepareGeometryChange(); }
 
     StickGraphicsItem *owner = nullptr; ///< non-owning; set to nullptr by the owner before it deletes this
-    double depth_offset = 0;            ///< the VectorShape::depth_offset this layer paints
+    double depth_offset = 0;            ///< the VectorShape/FreehandLayer depth_offset this layer paints
 };
 
 /**

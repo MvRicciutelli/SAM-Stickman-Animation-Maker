@@ -572,6 +572,8 @@ private:
     bool text_panel_sync = false;
     /// True while refresh_vector_panel rebuilds the layer rows: the list's signals are then echoes, not edits.
     bool vector_panel_sync = false;
+    /// Same as vector_panel_sync, for the draw panel's layer rows (refresh_freehand_panel).
+    bool freehand_panel_sync = false;
 
     /**
      * @brief True once the current text-panel editing session has taken its undo

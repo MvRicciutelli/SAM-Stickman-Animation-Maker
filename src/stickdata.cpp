@@ -2,6 +2,7 @@
 #include <cmath>
 #include <QCoreApplication>
 #include <QFontDatabase>
+#include <QPainter>
 #include <QtMath>
 
 /// @details Filled by operator>> when a TEXT stick names a font this system doesn't have;
@@ -326,6 +327,7 @@ void StickData::CopyFrom(const StickData &source)
     vertex_caps = source.vertex_caps;
     vector_shapes = source.vector_shapes;
     vector_depth_enabled = source.vector_depth_enabled;
+    freehand_layers = source.freehand_layers;
     text = source.text;
     text_font = source.text_font;
     text_align = source.text_align;
@@ -371,6 +373,72 @@ double StickData::VectorShapeDepth(int shape_index) const
     if (!vector_depth_enabled || shape_index < 0 || shape_index >= vector_shapes.size())
         return z;
     return z + vector_shapes[shape_index].depth_offset;
+}
+
+/// @details Same rule as VectorShapeDepth(), for paint (StickGraphicsItem) and the draw-mode panel.
+double StickData::FreehandLayerDepth(int layer_index) const
+{
+    if (!vector_depth_enabled || layer_index < 0 || layer_index >= freehand_layers.size())
+        return z;
+    return z + freehand_layers[layer_index].depth_offset;
+}
+
+/// @details The layer is named "Layer 1" and shares the image (copy-on-write).
+void StickData::EnsureFreehandLayers()
+{
+    if (!freehand_layers.isEmpty())
+        return;
+    FreehandLayer layer;
+    layer.name = QStringLiteral("Layer 1");
+    if (stick_img != nullptr)
+        layer.image = *stick_img;
+    freehand_layers.append(layer);
+}
+
+/// @details DestinationOut scales this layer's alpha by (1 - mask alpha), DestinationIn (inverted)
+/// by the mask alpha: the rule of StickGraphicsItem::MaskedShapeImage(), but on the shared pixel
+/// grid, so no device mapping is needed. The mask is cut by ITS mask first, so masks compound.
+QImage StickData::FreehandLayerImage(int index, int depth) const
+{
+    if (index < 0 || index >= freehand_layers.size())
+        return QImage();
+    const FreehandLayer &layer = freehand_layers[index];
+    if (layer.mask < 0 || layer.mask >= freehand_layers.size() || depth <= 0)
+        return layer.image;
+    QImage image = layer.image.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    CutByMask(image, FreehandLayerImage(layer.mask, depth - 1), layer.mask_inverted);
+    return image;
+}
+
+/// @details stick_img stays an owned entry of stick_img_list (the ownership rule of the image
+/// types), so every reader of stick_img works unchanged. The composite has the layers' size.
+void StickData::RebuildFreehandComposite()
+{
+    if (freehand_layers.isEmpty())
+        return;
+    QList<int> shown;
+    for (int i = 0; i < freehand_layers.size(); i++)
+        if (freehand_layers[i].visible)
+            shown << i;
+    const QSize size = freehand_layers[0].image.size();
+    QImage composite;
+    if (shown.size() == 1 && freehand_layers[shown[0]].mask < 0) {
+        composite = freehand_layers[shown[0]].image; // shared: no pixels copied
+    } else {
+        composite = QImage(size.isEmpty() ? QSize(1, 1) : size, QImage::Format_ARGB32_Premultiplied);
+        composite.fill(Qt::transparent);
+        QPainter p(&composite);
+        for (int i : shown)
+            p.drawImage(0, 0, FreehandLayerImage(i));
+        p.end();
+    }
+    if (stick_img_list.isEmpty()) {
+        stick_img_list.append(new QImage(composite));
+        img_name_list.append(QStringLiteral("freehand"));
+    } else {
+        *stick_img_list[0] = composite;
+    }
+    stick_img = stick_img_list[0];
 }
 
 /// @details The derivation is StrokeBrushFor()'s (vectorshape.cpp), shared with a VECTOR stick's
@@ -1105,11 +1173,49 @@ static void ReadVectorShapes(QDataStream &stream, StickData &stick_data)
         stream >> stick_data.vector_depth_enabled;
     // a mask must name another shape of this list and close no loop: anything else (a corrupt or
     // truncated file) is no mask, so the painter's recursion over the chain always ends
-    for (int i = 0; i < shapes.size(); i++) {
-        VectorShape &shape = shapes[i];
-        if (shape.mask < 0 || shape.mask >= shapes.size() || MaskChainReaches(shapes, shape.mask, i))
-            shape.mask = VectorShape::NO_MASK;
+    BreakBadMasks(shapes);
+}
+
+/// @details A FREEHAND stick's layers (record v12 on): their own format version, the count, then
+/// per layer the image (through the image table, so a .sam v3 stores pixels shared with the
+/// composite once), name, visibility, depth offset, mask and inversion; the per-layer depth switch
+/// after the last one. An empty list is written as such: the reader then rebuilds one layer from
+/// the composite (EnsureFreehandLayers()).
+static void WriteFreehandLayers(QDataStream &stream, const StickData &stick_data)
+{
+    stream << StickData::FREEHAND_LAYERS_VERSION;
+    stream << (qint32)stick_data.freehand_layers.size();
+    for (const FreehandLayer &layer : stick_data.freehand_layers) {
+        WriteRecordImage(stream, layer.image);
+        stream << layer.name << layer.visible << (double)layer.depth_offset;
+        stream << layer.mask << layer.mask_inverted;
     }
+    stream << stick_data.vector_depth_enabled;
+}
+
+static void ReadFreehandLayers(QDataStream &stream, StickData &stick_data)
+{
+    QList<FreehandLayer> &layers = stick_data.freehand_layers;
+    qint32 format = 0;
+    stream >> format;
+    if (RejectNewerVersion(stream, "freehand layers", format, StickData::FREEHAND_LAYERS_VERSION))
+        return;
+    qint32 count = 0;
+    stream >> count;
+    // the count comes from the file: a corrupt one must not make us allocate without end
+    if (stream.status() != QDataStream::Ok || count < 0 || count > 100000)
+        return;
+    for (qint32 i = 0; i < count; i++) {
+        FreehandLayer layer;
+        ReadRecordImage(stream, layer.image);
+        stream >> layer.name >> layer.visible >> layer.depth_offset;
+        stream >> layer.mask >> layer.mask_inverted;
+        if (stream.status() != QDataStream::Ok)
+            break; // truncated file: no layers made up from data that is not there
+        layers.append(layer);
+    }
+    stream >> stick_data.vector_depth_enabled;
+    BreakBadMasks(layers); // as ReadVectorShapes() does
 }
 
 QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
@@ -1226,6 +1332,8 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
         }
         if (stick_data.stick_type == StickData::VECTOR)
             WriteVectorShapes(stream, stick_data); // the type exists from v11 on
+        if (stick_data.stick_type == StickData::FREEHAND && stick_data.version >= 12)
+            WriteFreehandLayers(stream, stick_data);
     }
 
     return stream;
@@ -1400,7 +1508,12 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
         }
         if (stick_data.stick_type == StickData::VECTOR)
             ReadVectorShapes(stream, stick_data);
+        if (stick_data.stick_type == StickData::FREEHAND && stick_data.version >= 12)
+            ReadFreehandLayers(stream, stick_data);
     }
+    // a FREEHAND older than v12 (or saved with no layers yet) is its one image: one layer
+    if (stick_data.stick_type == StickData::FREEHAND)
+        stick_data.EnsureFreehandLayers();
     // before v9 the offset and rotation of IMAGE/POLYGON/TEXT (and an IMAGE's scale) were the
     // img_* fields, which the image panel edited: that panel is the Stick Transform now, so they
     // move into local_xf. Same drawn geometry: local_xf sits exactly where img_offset/

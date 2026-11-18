@@ -450,6 +450,10 @@ void Animation::UpdateSliders(){
         if(refresh_vector_panel)
             refresh_vector_panel(cs);
     }
+    else if(cs->stick_type == StickData::FREEHAND){
+        if(refresh_freehand_panel)
+            refresh_freehand_panel(cs);
+    }
     edit_line_thickness_slider->setValue(cs->pen.width());
     elongate_spinbox->setValue(  current_frame->CurrentStick()->my_line.length());
 

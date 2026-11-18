@@ -6261,6 +6261,37 @@ private slots:
         view->SetTool(NOTOOL);
     }
 
+    // The transform tool with nothing selected: a click anywhere selects the layer's painted
+    // pixels and drags them; on an empty layer it does nothing.
+    void TransformToolWithoutSelectionMovesTheWholeLayer()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        StickData *stick = DrawStick(QPointF(100, 100), QPointF(200, 100));
+        view->EnterDrawMode(stick, false);
+        QImage &canvas = *view->draw_canvas;
+        canvas.fill(Qt::transparent);
+        view->DiscardPixelSelection();
+        view->SetDrawTool(MyView::DT_TRANSFORM);
+        const QPointF centre = view->mapToScene(view->viewport()->rect()).boundingRect().center();
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(centre));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(centre));
+        QVERIFY2(view->draw_selection.isEmpty() && !view->draw_float_active, "an empty layer got selected");
+
+        const QRect painted(canvas.width()/2 - 20, canvas.height()/2 - 10, 40, 20);
+        { QPainter p(&canvas); p.fillRect(painted, Qt::red); }
+        const QPointF far = centre + QPointF(200, 150);  // well outside the painted pixels
+        QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(far));
+        QCOMPARE(view->draw_selection, QRegion(painted));
+        QTest::mouseMove(view->viewport(), view->mapFromScene(far + QPointF(20, 0)));
+        QTest::mouseMove(view->viewport(), view->mapFromScene(far + QPointF(40, 0)));
+        QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(far + QPointF(40, 0)));
+        QVERIFY2(view->draw_float_active, "the click did not lift the layer");
+        QVERIFY2(view->draw_sel_t.manhattanLength() > 20, "the drag did not move the layer");
+        view->ExitDrawMode();
+        view->SetTool(NOTOOL);
+    }
+
     // The paint bucket fills the closed area under the click with the Style fill colour and stops
     // at the stroke around it; with a pixel selection it fills the selection instead. Smooth
     // selection rounds the selection's corners and drops a speck narrower than the width.
@@ -9095,6 +9126,264 @@ private slots:
             layer_effects_max_bands = 8;
             QCOMPARE(ApplyLayerEffects(tall, glow, identity), one_piece);
         }
+    }
+
+    // A FREEHAND's layers (record v12) stream and Clone() with every field; the composite in
+    // stick_img skips hidden layers and applies masks (a hidden mask still masks); a v11 record
+    // loads as one layer holding its image; a mask loop is broken on load.
+    void FreehandLayersRoundTrip()
+    {
+        auto square = [](const QColor &colour, const QRect &painted){
+            QImage image(10, 10, QImage::Format_ARGB32); // ARGB32: what a stream reads back
+            image.fill(Qt::transparent);
+            QPainter p(&image);
+            p.fillRect(painted, colour);
+            return image;
+        };
+        StickData source;
+        source.stick_type = StickData::FREEHAND;
+        source.my_line = QLineF(20, 20, 20, 60);
+        source.z = 2;
+        FreehandLayer bottom;
+        bottom.name = "Bottom";
+        bottom.image = square(Qt::red, QRect(0, 0, 10, 10));
+        bottom.mask = 2;
+        FreehandLayer hidden;
+        hidden.name = "Hidden";
+        hidden.visible = false;
+        hidden.image = square(Qt::green, QRect(0, 0, 10, 10));
+        hidden.depth_offset = 1.5;
+        FreehandLayer mask;
+        mask.name = "Mask";
+        mask.visible = false;
+        mask.image = square(Qt::black, QRect(0, 0, 5, 10)); // the left half
+        source.freehand_layers = { bottom, hidden, mask };
+        source.vector_depth_enabled = true;
+        source.RebuildFreehandComposite();
+        QVERIFY(source.stick_img != nullptr);
+        QCOMPARE(source.stick_img->size(), QSize(10, 10));
+        QCOMPARE(qAlpha(source.stick_img->pixel(2, 2)), 0);              // cut by the hidden mask
+        QCOMPARE(QColor(source.stick_img->pixel(7, 2)), QColor(Qt::red)); // the green layer is hidden
+        source.freehand_layers[0].mask_inverted = true;
+        source.RebuildFreehandComposite();
+        QCOMPARE(QColor(source.stick_img->pixel(2, 2)), QColor(Qt::red));
+        QCOMPARE(qAlpha(source.stick_img->pixel(7, 2)), 0);
+        QCOMPARE(source.FreehandLayerDepth(1), 3.5);
+
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << source;
+        }
+        StickData loaded;
+        {
+            QDataStream in(&bytes, QIODevice::ReadOnly);
+            in >> loaded;
+        }
+        QCOMPARE(loaded.freehand_layers.size(), 3);
+        QVERIFY(loaded.freehand_layers == source.freehand_layers);
+        QVERIFY(loaded.vector_depth_enabled);
+        StickData *copy = source.Clone();
+        QVERIFY(copy->freehand_layers == source.freehand_layers);
+        delete copy;
+
+        // a v11 record has no layer list: its image becomes "Layer 1"
+        StickData old;
+        old.stick_type = StickData::FREEHAND;
+        old.my_line = QLineF(20, 20, 20, 60);
+        old.version = 11;
+        QImage *drawing = new QImage(square(Qt::blue, QRect(2, 2, 3, 3)));
+        old.stick_img_list << drawing;
+        old.img_name_list << "freehand";
+        old.stick_img = drawing;
+        QByteArray old_bytes;
+        {
+            QDataStream out(&old_bytes, QIODevice::WriteOnly);
+            out << old;
+        }
+        StickData old_loaded;
+        {
+            QDataStream in(&old_bytes, QIODevice::ReadOnly);
+            in >> old_loaded;
+        }
+        QCOMPARE(old_loaded.version, StickData::CURRENT_VERSION);
+        QCOMPARE(old_loaded.freehand_layers.size(), 1);
+        QCOMPARE(old_loaded.freehand_layers[0].name, QString("Layer 1"));
+        QCOMPARE(old_loaded.freehand_layers[0].image, *drawing);
+
+        // 0 -> 2 -> 0 can only come from a corrupt file: one of the two masks goes
+        source.freehand_layers[2].mask = 0;
+        QByteArray looped;
+        {
+            QDataStream out(&looped, QIODevice::WriteOnly);
+            out << source;
+        }
+        StickData unlooped;
+        {
+            QDataStream in(&looped, QIODevice::ReadOnly);
+            in >> unlooped;
+        }
+        for (int i = 0; i < unlooped.freehand_layers.size(); i++)
+            if (unlooped.freehand_layers[i].mask >= 0)
+                QVERIFY(!MaskChainReaches(unlooped.freehand_layers, unlooped.freehand_layers[i].mask, i));
+    }
+
+    // The draw-mode layer edits on the live canvas: new layer above the active one, strokes on the
+    // active layer only, visibility, rename, reorder (the active layer follows), draw-local
+    // undo/redo of the whole stack, a joint flip, delete (never the last layer), the session
+    // as ONE global undo step, every layer cropped to the same rect on exit, and copy/paste into
+    // another freehand on another frame where the pixels were painted.
+    void FreehandLayerOpsInDrawMode()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        StickData *stick = DrawStick(QPointF(100, 100), QPointF(100, 200)); // upright: flips are exact
+        stick->stick_type = StickData::FREEHAND;
+        // the stack may sit at its MAXUNDO cap, so the session's one step is read as its top command
+        auto top_step = [this]{ return view->undo_stack.command(view->undo_stack.index() - 1); };
+        const QUndoCommand *before = top_step();
+        view->EnterDrawMode(stick, true);
+        const QUndoCommand *session = top_step();
+        QVERIFY(session != before);
+        QCOMPARE(stick->freehand_layers.size(), 1);
+        QCOMPARE(view->draw_layer, 0);
+        view->draw_brush_size = 10;
+        view->draw_brush_hardness = 100;
+        auto dab = [this](const QPointF &at){
+            QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(at));
+            QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(at));
+        };
+        // a layer's alpha under a scene point, while its stick is the one in draw mode
+        auto alpha_at = [this](StickData *s, int layer, const QPointF &scene){
+            return qAlpha(s->freehand_layers[layer].image.pixel(view->SceneToCanvas(scene).toPoint()));
+        };
+        const QPointF left(300, 300), right(400, 300);
+        dab(left);
+        QVERIFY(view->AddFreehandLayer());
+        QCOMPARE(stick->freehand_layers.size(), 2);
+        QCOMPARE(view->draw_layer, 1);
+        QCOMPARE(stick->freehand_layers[1].name, QString("Layer 2"));
+        dab(right);
+        QVERIFY(alpha_at(stick, 0, left) > 0);
+        QCOMPARE(alpha_at(stick, 0, right), 0);
+        QVERIFY(alpha_at(stick, 1, right) > 0);
+        QCOMPARE(alpha_at(stick, 1, left), 0);
+
+        view->SetFreehandLayerVisible(0, false);
+        QVERIFY(!stick->freehand_layers[0].visible);
+        view->RenameFreehandLayer(1, "Top");
+        QVERIFY(view->MoveFreehandLayer(1, -1));
+        QCOMPARE(stick->freehand_layers[0].name, QString("Top"));
+        QCOMPARE(view->draw_layer, 0);                   // the active layer followed its layer
+        QVERIFY(!view->MoveFreehandLayer(0, -1));        // already at the bottom
+        view->Undo();                                    // draw-local: the move only
+        QCOMPARE(stick->freehand_layers[1].name, QString("Top"));
+        QCOMPARE(view->draw_layer, 1);
+        QCOMPARE(*view->draw_canvas, stick->freehand_layers[1].image);
+        view->Redo();
+        QCOMPARE(stick->freehand_layers[0].name, QString("Top"));
+
+        // flipped together about their joint box (300..400): the two dabs swap places
+        QVERIFY(view->FlipFreehandLayers({ 0, 1 }, true));
+        QVERIFY(alpha_at(stick, 0, left) > 0);
+        QCOMPARE(alpha_at(stick, 0, right), 0);
+        QVERIFY(alpha_at(stick, 1, right) > 0);
+        QCOMPARE(alpha_at(stick, 1, left), 0);
+
+        QCOMPARE(view->CopyFreehandLayers({ 0 }), 1);    // "Top", now painted at `left`
+        QVERIFY(view->DeleteFreehandLayers({ 0, 1 }));
+        QCOMPARE(stick->freehand_layers.size(), 1);      // never the last layer
+        QVERIFY(!view->DeleteFreehandLayers({ 0 }));
+        view->Undo();
+        QCOMPARE(stick->freehand_layers.size(), 2);
+
+        view->ExitDrawMode();
+        QCOMPARE(stick->freehand_layers.size(), 2);
+        QCOMPARE(stick->freehand_layers[0].image.size(), stick->freehand_layers[1].image.size());
+        QCOMPARE(stick->stick_img->size(), stick->freehand_layers[0].image.size());
+        QVERIFY(stick->freehand_layers[0].image.width() < 200); // cropped to the dabs, not the viewport
+        QCOMPARE(top_step(), session);                   // the layer edits took no global step
+
+        AddFrame();
+        StickData *other = DrawStick(QPointF(500, 100), QPointF(560, 180)); // a turned stick
+        other->stick_type = StickData::FREEHAND;
+        view->EnterDrawMode(other, false);
+        QCOMPARE(view->PasteFreehandLayers(), QString());
+        QCOMPARE(other->freehand_layers.size(), 2);
+        QCOMPARE(view->draw_layer, 1);
+        QCOMPARE(other->freehand_layers[1].name, QString("Top"));
+        QVERIFY(alpha_at(other, 1, left) > 0);           // where it was painted
+        QCOMPARE(alpha_at(other, 1, right), 0);
+        view->ExitDrawMode();
+        view->SetTool(NOTOOL);
+    }
+
+    // Masks and per-layer depth on the live canvas: a mask cuts (normal and inverted, a hidden
+    // mask included), loops, self and unchanged settings are refused, paint() skips hidden layers,
+    // and a layer at its own depth gets a helper item in the scene that undo takes away again.
+    void FreehandLayerMasksAndDepthRender()
+    {
+        AddFrame();
+        view->resize(800, 600);
+        StickData *stick = DrawStick(QPointF(100, 100), QPointF(100, 200));
+        stick->stick_type = StickData::FREEHAND;
+        view->EnterDrawMode(stick, false);
+        // mouse input counts as full pen pressure (2x size): off, so the dab sizes are the set ones
+        struct RestorePressure {
+            MyView *v;
+            ~RestorePressure() { v->draw_pressure_size = true; }
+        } restore_pressure{ view };
+        view->draw_pressure_size = false;
+        auto dab = [this](const QPointF &at){
+            QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(at));
+            QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, view->mapFromScene(at));
+        };
+        const QPointF centre(300, 300), ring(316, 300); // ring: inside the big dab, clear of the small one's soft edge
+        view->draw_brush_size = 40;
+        dab(centre);
+        QVERIFY(view->AddFreehandLayer());
+        view->draw_brush_size = 16;
+        dab(centre);
+
+        QVERIFY(view->SetFreehandLayerMask(0, 1, false));
+        QVERIFY(!view->SetFreehandLayerMask(1, 0, false)); // would loop
+        QVERIFY(!view->SetFreehandLayerMask(0, 1, false)); // unchanged
+        QVERIFY(!view->SetFreehandLayerMask(1, 1, false)); // itself
+        view->SetFreehandLayerVisible(1, false);           // a hidden mask still masks
+        auto layer_alpha = [this, stick](int layer, const QPointF &scene){
+            return qAlpha(stick->FreehandLayerImage(layer).pixel(view->SceneToCanvas(scene).toPoint()));
+        };
+        QCOMPARE(layer_alpha(0, centre), 0);
+        QVERIFY(layer_alpha(0, ring) > 0);
+        QVERIFY(view->SetFreehandLayerMask(0, 1, true));
+        QVERIFY(layer_alpha(0, centre) > 0);
+        QCOMPARE(layer_alpha(0, ring), 0);
+
+        // own depth: one helper item per distinct offset, in the stick's scene, gone on undo
+        view->SetFreehandDepthEnabled(true);
+        view->SetFreehandLayerDepth({ 0 }, stick->z + 2);
+        QCOMPARE(stick->view->shape_layers.size(), 1);
+        QCOMPARE(stick->view->shape_layers[0]->scene(), stick->view->scene());
+        QCOMPARE(stick->view->shape_layers[0]->zValue(), stick->z + 2);
+        view->Undo();
+        QCOMPARE(stick->view->shape_layers.size(), 0);
+        view->Redo();
+        QCOMPARE(stick->view->shape_layers.size(), 1);
+        view->ResetFreehandLayerDepths();
+        QCOMPARE(stick->view->shape_layers.size(), 0);
+        view->ExitDrawMode();
+
+        // paint(): the visible, inverted-masked layer shows only inside the (hidden) mask
+        QImage shot(800, 600, QImage::Format_ARGB32_Premultiplied);
+        shot.fill(Qt::transparent);
+        {
+            QPainter p(&shot);
+            QStyleOptionGraphicsItem option;
+            stick->view->paint(&p, &option, nullptr);
+        }
+        QVERIFY(qAlpha(shot.pixel(centre.toPoint())) > 0);
+        QCOMPARE(qAlpha(shot.pixel(ring.toPoint())), 0);
+        view->SetTool(NOTOOL);
     }
 };
 

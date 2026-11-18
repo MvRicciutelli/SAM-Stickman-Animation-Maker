@@ -35,7 +35,10 @@ segment), `MapNode()`, `MapShape()`, `VectorShapesCompatible()`, `ShapeAt()` (to
 shape hit by area or by outline, the outline widened by the pick radius) 
 `StrokeBrushFor()` (shared with `StickData::StrokeBrush()`), and the mask
 helpers `RemoveVectorShape()`, `ReorderVectorShape()` and `MaskChainReaches()`
-(see Masks).
+(see Masks). These three are templates over the layer type, shared with FREEHAND layers
+(`ARCH_FREEHAND_LAYERS.md`), as are `MaskChangeAllowed()` (the check behind
+`SetVectorShapeMask()`), `KeepCopiedMasks()` (copy-time remap), `BreakBadMasks()` (load-time
+repair) and the plain `CutByMask(QImage&, mask, inverted)` used by `MaskedShapeImage()`.
 
 ### Serialization
 
@@ -109,6 +112,8 @@ through its owner, `StickGraphicsItem::PaintVectorShapes(painter, layer)`
 (`layer == nullptr` is the stick's own item painting the offset-0 shapes), holds
 no data, takes no mouse input (`setAcceptedMouseButtons(Qt::NoButton)`) and
 reports the owner's bounding rect. `StickGraphicsItem::shape_layers` owns them.
+The class also serves FREEHAND layers: `paint()` dispatches to `PaintFreehandLayers()` for a
+FREEHAND owner (`ARCH_FREEHAND_LAYERS.md`).
 
 `SyncShapeLayers()` runs from `itemChange(ItemSceneHasChanged)` and from
 `Refresh()`, so the layers follow their view into every scene
@@ -321,7 +326,9 @@ VECTOR (`TextureArrowPoints`, `UpdateStyleControls`): v1 scope.
 ### Panel, clipboard, inbetweens
 
 `Widget::BuildVectorPanel()` builds the code-built `advanced_vector_tab` ("Vector
-Shapes", inserted by `Animation::UpdateTab`): tool buttons in a NON-exclusive
+Shapes", inserted by `Animation::UpdateTab`). Its layer section (list, buttons, mask row, depth
+controls) is `BuildLayerSection<Layer>()` in `widget.cpp`, shared with the freehand draw panel;
+the description below applies to both. Tool buttons in a NON-exclusive
 `QButtonGroup` (so "no tool" is possible, synced by `VectorToolChanged`), and a
 layer `QListWidget` listing the TOP shape first (row `r` = shape `count-1-r`)
 with a check box for visibility, an editable name, a 32px thumbnail

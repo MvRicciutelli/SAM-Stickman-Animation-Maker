@@ -113,31 +113,134 @@ VectorShape MapShape(const VectorShape &shape, const QTransform &xf);
  */
 bool VectorShapesCompatible(const QList<VectorShape> &a, const QList<VectorShape> &b);
 
+// The three mask helpers below are templates over the layer type: they serve a VECTOR stick's
+// VectorShape list and a FREEHAND stick's FreehandLayer list (stickdata.h) alike. A layer type
+// needs `mask`, `mask_inverted` and a static `NO_MASK`; a mask is an index into the same list.
+
 /**
- * @brief Removes shape @p index, keeping every other shape's mask on the shape it named: a mask
- *        on the removed shape is cleared (inversion included), a mask above it shifts down.
- * @param shapes a VECTOR stick's shape list.
+ * @brief Removes layer @p index, keeping every other layer's mask on the layer it named: a mask
+ *        on the removed layer is cleared (inversion included), a mask above it shifts down.
+ * @param shapes a VECTOR stick's shape list or a FREEHAND stick's layer list.
  * @param index a valid index into @p shapes.
+ * @details A mask is an index into the same list, so the one edit that can leave it naming the
+ * wrong layer, or none, is a change of the list's order or length: this and ReorderVectorShape()
+ * are those edits.
  */
-void RemoveVectorShape(QList<VectorShape> &shapes, int index);
+template <typename Layer>
+void RemoveVectorShape(QList<Layer> &shapes, int index)
+{
+    shapes.removeAt(index);
+    for(Layer &shape : shapes){
+        if(shape.mask == index){
+            shape.mask = Layer::NO_MASK;
+            shape.mask_inverted = false;
+        }
+        else if(shape.mask > index)
+            shape.mask--;
+    }
+}
 
 /**
- * @brief Moves shape @p from to position @p to, like QList::move(), with the masks following the
- *        shapes they name.
- * @param shapes a VECTOR stick's shape list.
- * @param from valid index of the shape to move.
+ * @brief Moves layer @p from to position @p to, like QList::move(), with the masks following the
+ *        layers they name.
+ * @param shapes a VECTOR stick's shape list or a FREEHAND stick's layer list.
+ * @param from valid index of the layer to move.
  * @param to valid index it ends up at.
+ * @details QList::move() shifts the layers between the two places by one towards @p from.
  */
-void ReorderVectorShape(QList<VectorShape> &shapes, int from, int to);
+template <typename Layer>
+void ReorderVectorShape(QList<Layer> &shapes, int from, int to)
+{
+    shapes.move(from, to);
+    for(Layer &shape : shapes){
+        if(shape.mask == from)
+            shape.mask = to;
+        else if(from < to && shape.mask > from && shape.mask <= to)
+            shape.mask--;
+        else if(from > to && shape.mask >= to && shape.mask < from)
+            shape.mask++;
+    }
+}
 
 /**
- * @brief True when following the masks from shape @p from (itself included) reaches shape
+ * @brief True when following the masks from layer @p from (itself included) reaches layer
  *        @p target, i.e. when giving @p target the mask @p from would close a loop.
- * @param shapes a VECTOR stick's shape list.
- * @param from the shape the walk starts at; out of range reaches nothing.
- * @param target the shape looked for.
+ * @param shapes a VECTOR stick's shape list or a FREEHAND stick's layer list.
+ * @param from the layer the walk starts at; out of range reaches nothing.
+ * @param target the layer looked for.
+ * @details The step bound only matters for a list that already holds a loop, which no edit makes
+ * and the readers break on load.
  */
-bool MaskChainReaches(const QList<VectorShape> &shapes, int from, int target);
+template <typename Layer>
+bool MaskChainReaches(const QList<Layer> &shapes, int from, int target)
+{
+    for(int steps = 0; from >= 0 && from < shapes.size() && steps <= shapes.size(); steps++){
+        if(from == target)
+            return true;
+        from = shapes[from].mask;
+    }
+    return false;
+}
+
+/**
+ * @brief Whether layer @p index may take mask @p mask with inversion @p inverted: the one check
+ *        behind MyView::SetVectorShapeMask() and MyView::SetFreehandLayerMask().
+ * @param inverted forced to false when @p mask is NO_MASK (no mask, no inversion).
+ * @return false for an index or mask out of range, the settings the layer already has, or a mask
+ *         that would close a loop (a layer masked by itself through any chain).
+ */
+template <typename Layer>
+bool MaskChangeAllowed(const QList<Layer> &shapes, int index, int mask, bool &inverted)
+{
+    if(index < 0 || index >= shapes.size() || mask < Layer::NO_MASK || mask >= shapes.size())
+        return false;
+    if(mask == Layer::NO_MASK)
+        inverted = false;
+    const Layer &shape = shapes.at(index);
+    return !((shape.mask == mask && shape.mask_inverted == inverted)
+             || (mask >= 0 && MaskChainReaches(shapes, mask, index)));
+}
+
+/**
+ * @brief Load-time repair: a mask that does not name another layer of the list, or closes a loop
+ *        (only a corrupt or truncated file can hold one), becomes NO_MASK, not inverted, so the
+ *        painters' recursion over a chain always ends.
+ */
+template <typename Layer>
+void BreakBadMasks(QList<Layer> &shapes)
+{
+    for(int i = 0; i < shapes.size(); i++){
+        Layer &shape = shapes[i];
+        if(shape.mask < 0 || shape.mask >= shapes.size() || MaskChainReaches(shapes, shape.mask, i)){
+            shape.mask = Layer::NO_MASK;
+            shape.mask_inverted = false;
+        }
+    }
+}
+
+/**
+ * @brief Re-expresses the masks of copied layers inside the copy: a mask is kept only when its
+ *        layer was copied too, as that layer's place in @p copied; otherwise NO_MASK, not inverted.
+ * @param copied the copied layers, in the order of @p sources.
+ * @param sources the index each copied layer had in its stick's list.
+ */
+template <typename Layer>
+void KeepCopiedMasks(QList<Layer> &copied, const QList<int> &sources)
+{
+    for(Layer &shape : copied){
+        const int place = sources.indexOf(shape.mask);
+        shape.mask = place >= 0 ? place : Layer::NO_MASK; // its mask stayed behind
+        shape.mask_inverted = shape.mask_inverted && place >= 0;
+    }
+}
+
+/**
+ * @brief Cuts @p image by @p mask, pixel by pixel on the same grid: DestinationOut scales the
+ *        image's alpha by (1 - mask alpha), DestinationIn (@p inverted) by the mask alpha.
+ *        Shared by a masked vector shape and a masked freehand layer.
+ * @param image premultiplied image to cut in place.
+ */
+void CutByMask(QImage &image, const QImage &mask, bool inverted);
 
 /**
  * @brief Index of the topmost visible shape of @p stick under @p scene_pt, or -1. "Topmost" is

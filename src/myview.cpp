@@ -430,7 +430,7 @@ void MyView::mousePressEvent(QMouseEvent *event)
             } else {
                 draw_stroking = true;
                 draw_last_pos = coord;
-                PaintStrokeSegment(coord, coord); // dab iniziale (click singolo = un punto)
+                PaintStrokeSegment(coord, coord); // first dab (a single click = one dot)
                 // the undo snapshot is taken at RELEASE, when the stroke is complete
             }
         }
@@ -1622,14 +1622,342 @@ void MyView::PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_sce
 /// ponytail: whole-canvas snapshots; per-stroke dirty rectangles if the cap ever feels tight.
 void MyView::PushDrawUndo()
 {
-    if(!draw_canvas)
+    if(!draw_canvas || !draw_target)
         return;
+    // the step is the whole layer stack; copy-on-write keeps the untouched layers shared, so a
+    // stroke still costs one canvas, as when there was one layer
+    SyncDrawCanvas();
     while(draw_undo.count() > draw_undo_idx + 1)
         draw_undo.removeLast();
-    draw_undo.append(*draw_canvas);
+    draw_undo.append({ draw_target->freehand_layers, draw_layer, draw_target->vector_depth_enabled });
     while(draw_undo.count() > MAXDRAWUNDO)
         draw_undo.removeFirst(); // when dropping from the head the current index shifts along with the list
     draw_undo_idx = draw_undo.count() - 1;
+    emit FreehandLayersChanged(); // the panel's thumbnails follow the strokes
+}
+
+/// @details The list's own element is assigned, so the list detaches from any clone sharing it
+/// (an undo snapshot, a render clone) and only this stick sees the new pixels.
+void MyView::SyncDrawCanvas()
+{
+    if(!draw_target || draw_layer < 0 || draw_layer >= draw_target->freehand_layers.size())
+        return;
+    draw_target->freehand_layers[draw_layer].image = draw_layer_canvas;
+}
+
+void MyView::LoadDrawCanvas()
+{
+    if(!draw_target || draw_target->freehand_layers.isEmpty())
+        return;
+    draw_layer = qBound(0, draw_layer, int(draw_target->freehand_layers.size()) - 1);
+    draw_layer_canvas = draw_target->freehand_layers[draw_layer].image;
+}
+
+/// @details The float belongs to the layer it was lifted from, so it is committed (one undo step)
+/// before the switch; the selection outline stays and now selects on the new layer.
+void MyView::SetDrawLayer(int index)
+{
+    if(!draw_mode || !draw_target || index < 0 || index >= draw_target->freehand_layers.size()
+            || index == draw_layer)
+        return;
+    CommitPixelFloat();
+    SyncDrawCanvas();
+    draw_layer = index;
+    LoadDrawCanvas();
+}
+
+/// @details A layer list restored from a step can hold other layers, at other depths: Refresh(0)
+/// re-syncs the depth items (SyncShapeLayers()) and the panel rebuilds from the signal.
+void MyView::RestoreDrawState(const DrawUndoState &state)
+{
+    draw_target->freehand_layers = state.layers;
+    draw_target->vector_depth_enabled = state.depth_enabled;
+    draw_layer = state.layer;
+    LoadDrawCanvas();
+    if(draw_target->view){
+        draw_target->view->Refresh(0);
+        draw_target->view->update();
+    }
+    emit FreehandLayersChanged();
+}
+
+// ===== Freehand layers (draw-mode panel) ==============================================
+// Every edit runs inside draw mode, between BeginLayerEdit() and EndLayerEdit(), and is one step
+// of the draw-local undo chain (the session itself is one global undo step). Layers are values
+// sharing one pixel grid. The rules are the vector shapes' and so is the code: the mask helpers
+// of vectorshape.h are templates over the layer type, and the two static helpers below serve
+// the vector ops further down too.
+
+/// @brief The scene mirror about @p centre: left/right when @p horizontal, top/bottom otherwise.
+/// Shared by the vector shape and freehand layer flips, which conjugate it into their own frames.
+static QTransform ScreenMirror(const QPointF &centre, bool horizontal)
+{
+    return QTransform::fromTranslate(-centre.x(), -centre.y())
+            * QTransform::fromScale(horizontal ? -1 : 1, horizontal ? 1 : -1)
+            * QTransform::fromTranslate(centre.x(), centre.y());
+}
+
+/// @brief A per-shape/per-layer depth as the offset from the stick's @p z that is stored: clamped
+/// to MINDEPTH..MAXDEPTH, and 0 when closer to z than the spin box's two decimals can say (z is
+/// often float-rounded, such as 1.0099999), so typing the stick's own depth means "the stick's plane".
+static double DepthOffset(double depth, double z)
+{
+    const double offset = qBound(double(MINDEPTH), depth, double(MAXDEPTH)) - z;
+    return qAbs(offset) < 0.005 ? 0 : offset;
+}
+
+bool MyView::BeginLayerEdit()
+{
+    if(!draw_mode || !draw_target || !draw_canvas || draw_target->freehand_layers.isEmpty())
+        return false;
+    CommitPixelFloat(); // a float belongs to the layer it was lifted from
+    SyncDrawCanvas();
+    return true;
+}
+
+void MyView::EndLayerEdit()
+{
+    LoadDrawCanvas();
+    PushDrawUndo(); // also announces FreehandLayersChanged
+    if(draw_target->view){
+        draw_target->view->Refresh(0); // re-syncs the per-layer depth items
+        draw_target->view->update();
+    }
+}
+
+/// @details Appended and then moved, so the masks of the layers above keep naming theirs.
+bool MyView::AddFreehandLayer()
+{
+    if(!BeginLayerEdit())
+        return false;
+    QList<FreehandLayer> &layers = draw_target->freehand_layers;
+    FreehandLayer layer;
+    layer.image = QImage(layers[0].image.size(), QImage::Format_ARGB32_Premultiplied);
+    layer.image.fill(Qt::transparent);
+    int n = layers.size() + 1;
+    auto taken = [&layers](const QString &name){
+        for(const FreehandLayer &l : layers)
+            if(l.name == name)
+                return true;
+        return false;
+    };
+    while(taken(tr("Layer %1").arg(n)))
+        n++;
+    layer.name = tr("Layer %1").arg(n);
+    layers.append(layer);
+    ReorderVectorShape(layers, layers.size() - 1, draw_layer + 1);
+    draw_layer++;
+    EndLayerEdit();
+    return true;
+}
+
+/// @details From the highest index down, so earlier removals do not shift later ones. A layer
+/// masked by a deleted one is left unmasked. The active layer follows its own layer when a layer
+/// below it goes; when it is the one deleted, the layer that took its place (or the new top) is.
+bool MyView::DeleteFreehandLayers(QList<int> indices)
+{
+    if(!draw_mode || !draw_target)
+        return false;
+    std::sort(indices.begin(), indices.end(), std::greater<int>());
+    indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+    QList<int> valid;
+    for(int idx : indices)
+        if(idx >= 0 && idx < draw_target->freehand_layers.size())
+            valid << idx;
+    if(valid.isEmpty() || draw_target->freehand_layers.size() < 2 || !BeginLayerEdit())
+        return false;
+    QList<FreehandLayer> &layers = draw_target->freehand_layers;
+    for(int idx : valid){
+        if(layers.size() < 2)
+            break; // a freehand keeps at least one layer
+        RemoveVectorShape(layers, idx);
+        if(idx < draw_layer)
+            draw_layer--;
+    }
+    EndLayerEdit(); // LoadDrawCanvas() clamps draw_layer
+    return true;
+}
+
+bool MyView::MoveFreehandLayer(int index, int delta)
+{
+    if(!draw_mode || !draw_target || index < 0 || index >= draw_target->freehand_layers.size())
+        return false;
+    const int target = qBound(0, index + delta, int(draw_target->freehand_layers.size()) - 1);
+    if(target == index || !BeginLayerEdit())
+        return false;
+    ReorderVectorShape(draw_target->freehand_layers, index, target);
+    // the active layer follows its layer, by the rule the masks follow theirs
+    if(draw_layer == index)
+        draw_layer = target;
+    else if(index < target && draw_layer > index && draw_layer <= target)
+        draw_layer--;
+    else if(index > target && draw_layer >= target && draw_layer < index)
+        draw_layer++;
+    EndLayerEdit();
+    return true;
+}
+
+void MyView::SetFreehandLayerVisible(int index, bool visible)
+{
+    if(!draw_mode || !draw_target || index < 0 || index >= draw_target->freehand_layers.size()
+            || draw_target->freehand_layers[index].visible == visible || !BeginLayerEdit())
+        return;
+    draw_target->freehand_layers[index].visible = visible;
+    EndLayerEdit();
+}
+
+void MyView::RenameFreehandLayer(int index, const QString &name)
+{
+    if(!draw_mode || !draw_target || index < 0 || index >= draw_target->freehand_layers.size()
+            || draw_target->freehand_layers[index].name == name || !BeginLayerEdit())
+        return;
+    draw_target->freehand_layers[index].name = name;
+    EndLayerEdit();
+}
+
+/// @details The mirror is built in the scene, so "horizontal" is the screen's whatever the canvas's
+/// rotation, and conjugated into canvas pixels through draw_disp (FlipVectorShapes()'s rule, with
+/// pixels in place of anchors). The pixels are resampled unless the canvas is upright.
+/// ponytail: pixels mirrored past the canvas edge are lost; the canvas covers the viewport, so
+/// that needs a drawing that reaches the edge of the screen.
+bool MyView::FlipFreehandLayers(const QList<int> &indices, bool horizontal)
+{
+    if(!BeginLayerEdit())
+        return false;
+    QList<FreehandLayer> &layers = draw_target->freehand_layers;
+    const QSize size = layers[0].image.size();
+    const QTransform pix_to_scene = QTransform::fromTranslate(-size.width()/2.0, -size.height()/2.0) * draw_disp;
+    QRectF box;
+    QList<int> valid;
+    for(int idx : indices)
+        if(idx >= 0 && idx < layers.size() && !valid.contains(idx)){
+            valid << idx;
+            const QRect painted = OpaqueBounds(layers[idx].image);
+            if(!painted.isEmpty())
+                box |= pix_to_scene.mapRect(QRectF(painted.adjusted(0, 0, 1, 1)));
+        }
+    if(box.isEmpty())
+        return false;
+    const QTransform in_pixels = pix_to_scene * ScreenMirror(box.center(), horizontal) * pix_to_scene.inverted();
+    for(int idx : valid){
+        QImage flipped(size, QImage::Format_ARGB32_Premultiplied);
+        flipped.fill(Qt::transparent);
+        QPainter p(&flipped);
+        p.setRenderHint(QPainter::SmoothPixmapTransform);
+        p.setTransform(in_pixels);
+        p.drawImage(0, 0, layers[idx].image);
+        p.end();
+        layers[idx].image = flipped;
+    }
+    EndLayerEdit();
+    return true;
+}
+
+/// @details CopyVectorShapes()'s rules: the copy goes with the transform that put its pixels in the
+/// scene (one for all, they share a grid), so a paste can put them back where they were painted on
+/// any freehand; a mask is kept only when its layer is copied too (KeepCopiedMasks()).
+int MyView::CopyFreehandLayers(QList<int> indices)
+{
+    if(!draw_mode || !draw_target || draw_target->freehand_layers.isEmpty())
+        return 0;
+    SyncDrawCanvas();
+    std::sort(indices.begin(), indices.end());
+    indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+    const QList<FreehandLayer> &layers = draw_target->freehand_layers;
+    QList<FreehandLayer> copied;
+    QList<int> sources;
+    for(int idx : indices)
+        if(idx >= 0 && idx < layers.size()){
+            copied << layers[idx];
+            sources << idx;
+        }
+    if(copied.isEmpty())
+        return 0; // nothing selected: the previous copy stays
+    KeepCopiedMasks(copied, sources);
+    const QSize size = layers[0].image.size();
+    freehand_clipboard = copied;
+    freehand_clip_to_scene = QTransform::fromTranslate(-size.width()/2.0, -size.height()/2.0) * draw_disp;
+    return copied.size();
+}
+
+/// @details PasteVectorShapes()'s rules: redrawn through the clipboard's pixel->scene transform and
+/// this canvas's scene->pixel one, on top, in copied order, buffer masks offset onto the pasted block.
+QString MyView::PasteFreehandLayers()
+{
+    if(freehand_clipboard.isEmpty())
+        return tr("No layer has been copied yet.");
+    if(!BeginLayerEdit())
+        return tr("Edit a freehand drawing to paste the layers into.");
+    QList<FreehandLayer> &layers = draw_target->freehand_layers;
+    const QSize size = layers[0].image.size();
+    const QTransform to_pixels = freehand_clip_to_scene * draw_disp_inv
+            * QTransform::fromTranslate(size.width()/2.0, size.height()/2.0);
+    const int first = layers.size();
+    for(FreehandLayer layer : freehand_clipboard){
+        QImage pasted(size, QImage::Format_ARGB32_Premultiplied);
+        pasted.fill(Qt::transparent);
+        QPainter p(&pasted);
+        p.setRenderHint(QPainter::SmoothPixmapTransform);
+        p.setTransform(to_pixels);
+        p.drawImage(0, 0, layer.image);
+        p.end();
+        layer.image = pasted;
+        if(layer.mask >= 0)
+            layer.mask += first;
+        layers << layer;
+    }
+    draw_layer = layers.size() - 1;
+    EndLayerEdit();
+    return QString();
+}
+
+/// @details The loop check lives here, where every caller goes through it (SetVectorShapeMask()).
+bool MyView::SetFreehandLayerMask(int index, int mask, bool inverted)
+{
+    if(!draw_mode || !draw_target || !MaskChangeAllowed(draw_target->freehand_layers, index, mask, inverted)
+            || !BeginLayerEdit())
+        return false;
+    draw_target->freehand_layers[index].mask = mask;
+    draw_target->freehand_layers[index].mask_inverted = inverted;
+    EndLayerEdit();
+    return true;
+}
+
+/// @details The depth items follow from EndLayerEdit()'s Refresh(0) (SyncShapeLayers()).
+/// ponytail: no Frame::Refresh() here (draw mode is on), so a new depth item tying with another
+/// stick's depth stacks last in the scene until the next frame refresh.
+void MyView::SetFreehandDepthEnabled(bool enabled)
+{
+    if(!draw_mode || !draw_target || draw_target->vector_depth_enabled == enabled || !BeginLayerEdit())
+        return;
+    draw_target->vector_depth_enabled = enabled;
+    EndLayerEdit();
+}
+
+/// @details Stored as an offset from the stick's z, snapped to 0 under 0.005 (SetVectorShapeDepth()'s rule).
+void MyView::SetFreehandLayerDepth(const QList<int> &indices, double depth)
+{
+    if(indices.isEmpty() || !BeginLayerEdit())
+        return;
+    const double offset = DepthOffset(depth, draw_target->z);
+    for(int idx : indices)
+        if(idx >= 0 && idx < draw_target->freehand_layers.size())
+            draw_target->freehand_layers[idx].depth_offset = offset;
+    EndLayerEdit();
+}
+
+void MyView::ResetFreehandLayerDepths()
+{
+    if(!draw_mode || !draw_target)
+        return;
+    bool any_offset = false;
+    for(const FreehandLayer &layer : draw_target->freehand_layers)
+        any_offset = any_offset || layer.depth_offset != 0;
+    if(!any_offset || !BeginLayerEdit())
+        return; // nothing to restore: no empty undo step
+    for(FreehandLayer &layer : draw_target->freehand_layers)
+        layer.depth_offset = 0;
+    EndLayerEdit();
 }
 
 /// @details Painted like a stick would be, with the Style column's paint: the fill (my_brush) and
@@ -1680,11 +2008,7 @@ void MyView::DrawStrokeUndo()
     if(!draw_canvas || draw_undo_idx <= 0)
         return;
     draw_undo_idx--;
-    *draw_canvas = draw_undo[draw_undo_idx];
-    if(draw_target && draw_target->view){
-        draw_target->view->Refresh(0);
-        draw_target->view->update();
-    }
+    RestoreDrawState(draw_undo[draw_undo_idx]);
 }
 
 /**
@@ -1697,11 +2021,7 @@ void MyView::DrawStrokeRedo()
     if(!draw_canvas || draw_undo_idx + 1 >= draw_undo.count())
         return;
     draw_undo_idx++;
-    *draw_canvas = draw_undo[draw_undo_idx];
-    if(draw_target && draw_target->view){
-        draw_target->view->Refresh(0);
-        draw_target->view->update();
-    }
+    RestoreDrawState(draw_undo[draw_undo_idx]);
 }
 
 /// @details In draw mode the toolbar Undo/Redo buttons and the Ctrl+Z/Y shortcuts drive
@@ -1760,10 +2080,13 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
 
     // The stick's CURRENT on-screen appearance (needed to re-open an existing drawing for
     // editing) is captured here, before anything below overwrites the stick's own transform.
-    QImage old_scaled;
+    // A drawing from before layers existed (or one made just now) becomes its one layer first.
+    // Every layer has the composite's size, so one painted size and one transform place them all.
+    stick->EnsureFreehandLayers();
+    QSizeF old_size;
     QTransform old_disp; // old appearance's centred local pixel -> scene transform
     if(stick->view && stick->stick_img && !stick->stick_img->isNull()){
-        old_scaled = stick->view->CalcImg();
+        old_size = stick->view->CalcImgSize();
         old_disp = stick->ShapeFrame(); // spine + Stick Transform, as in paint()
         old_disp.rotate(stick->img_angle_offset);
         old_disp.translate(stick->img_offset.x(), stick->img_offset.y());
@@ -1810,34 +2133,36 @@ void MyView::EnterDrawMode(StickData *stick, bool take_undo)
     draw_disp = disp * draw_branch;
     draw_disp_inv = draw_disp.inverted();
 
-    QImage *canvas = new QImage(D, D, QImage::Format_ARGB32_Premultiplied);
-    canvas->fill(Qt::transparent);
-    // Bake the old appearance (positioned in SCENE space by old_disp) into the new canvas.
-    // Four QTransform stages chained with operator* into one matrix — for `A * B`, a point is
-    // mapped by A first, then B, so reading left-to-right below IS the pipeline order:
-    //   old raw pixel -> centred on its own middle -> placed in the scene (old_disp) ->
-    //   back into the new canvas's centred pixel space (draw_disp_inv, the exact inverse of
-    //   draw_disp above) -> shifted from centred to the canvas's raw top-left addressing.
-    if(!old_scaled.isNull()){
-        QTransform bake =
-              QTransform::fromTranslate(-old_scaled.width()/2.0, -old_scaled.height()/2.0) // raw -> centred
-            * old_disp                                                                     // -> scene
-            * draw_disp_inv                                                                // -> new canvas, centred
-            * QTransform::fromTranslate(D/2.0, D/2.0);                                      // -> new canvas, raw
-        QPainter cp(canvas);
-        cp.setRenderHint(QPainter::SmoothPixmapTransform);
-        cp.setTransform(bake);
-        cp.drawImage(0, 0, old_scaled);
-        cp.end();
+    // Bake each layer's old appearance (positioned in SCENE space by old_disp) into a new canvas
+    // of its own. Four QTransform stages chained with operator* into one matrix — for `A * B`, a
+    // point is mapped by A first, then B, so reading left-to-right below IS the pipeline order:
+    //   old pixel scaled to its painted size -> centred on its own middle -> placed in the scene
+    //   (old_disp) -> back into the new canvas's centred pixel space (draw_disp_inv, the exact
+    //   inverse of draw_disp above) -> shifted from centred to the canvas's raw top-left addressing.
+    for(FreehandLayer &layer : stick->freehand_layers){
+        QImage canvas(D, D, QImage::Format_ARGB32_Premultiplied);
+        canvas.fill(Qt::transparent);
+        if(!old_size.isEmpty() && !layer.image.isNull()){
+            const QImage old_scaled = layer.image.scaled(old_size.width(), old_size.height()); // CalcImg()'s scaling
+            QTransform bake =
+                  QTransform::fromTranslate(-old_scaled.width()/2.0, -old_scaled.height()/2.0) // raw -> centred
+                * old_disp                                                                     // -> scene
+                * draw_disp_inv                                                                // -> new canvas, centred
+                * QTransform::fromTranslate(D/2.0, D/2.0);                                      // -> new canvas, raw
+            QPainter cp(&canvas);
+            cp.setRenderHint(QPainter::SmoothPixmapTransform);
+            cp.setTransform(bake);
+            cp.drawImage(0, 0, old_scaled);
+            cp.end();
+        }
+        layer.image = canvas;
     }
-
-    qDeleteAll(stick->stick_img_list);
-    stick->stick_img_list.clear();
-    stick->img_name_list.clear();
-    stick->stick_img_list.append(canvas);
-    stick->img_name_list.append("freehand");
-    stick->stick_img = canvas;
-    draw_canvas = canvas;
+    // the composite only has to have the canvas size during the session (CalcImgSize()):
+    // paint() draws the layers, and the working canvas for the active one
+    stick->RebuildFreehandComposite();
+    draw_layer = stick->freehand_layers.size() - 1; // the top layer; the panel can pick another
+    draw_layer_canvas = stick->freehand_layers[draw_layer].image;
+    draw_canvas = &draw_layer_canvas;
 
     // the stick stays in its real frame (2-click skeleton); the DxD canvas covers the
     // viewport rotated by theta and centred on vc
@@ -1888,6 +2213,7 @@ void MyView::ExitDrawMode()
     if(!draw_mode)
         return;
     DiscardPixelSelection(); // a floating pixel selection is baked into the canvas before cropping
+    SyncDrawCanvas();        // the working canvas back into its layer, before draw_target goes
     StickData *stick = draw_target;
     QImage *canvas = draw_canvas;
     // Clear all draw-mode state BEFORE any callback below runs, so a reentrant SetTool()/
@@ -1899,26 +2225,26 @@ void MyView::ExitDrawMode()
     draw_stroking = false;
     draw_undo.clear();
     draw_undo_idx = -1;
+    draw_layer_canvas = QImage(); // the active layer holds the pixels now (SyncDrawCanvas() above)
     emit DrawModeChanged(false); // keeps the panel's toggle button in sync on every exit path
+    emit FreehandLayersChanged();
 
-    if(!stick || !canvas)
+    if(!stick || !canvas || stick->freehand_layers.isEmpty())
         return;
 
-    QRect bounds = OpaqueBounds(*canvas);
-    // Capture the canvas's dimensions NOW: canvas is the same QImage* as stick->stick_img_list[0],
-    // so the qDeleteAll() below frees it — any read of canvas->width()/height() after that point
-    // would be a use-after-free.
-    double canvas_half_w = canvas->width()/2.0, canvas_half_h = canvas->height()/2.0;
+    // All layers share one pixel grid, so they are cropped to ONE rect: the union of their
+    // painted pixels, hidden layers included (hidden is not deleted).
+    QRect bounds;
+    for(const FreehandLayer &layer : stick->freehand_layers)
+        bounds |= OpaqueBounds(layer.image);
+    const QSize canvas_size = stick->freehand_layers[0].image.size();
+    double canvas_half_w = canvas_size.width()/2.0, canvas_half_h = canvas_size.height()/2.0;
     if(bounds.isEmpty())
         bounds = QRect(int(canvas_half_w), int(canvas_half_h), 1, 1); // nothing was painted: 1x1 invisible placeholder
 
-    QImage *cropped = new QImage(canvas->copy(bounds));
-    qDeleteAll(stick->stick_img_list);
-    stick->stick_img_list.clear();
-    stick->img_name_list.clear();
-    stick->stick_img_list.append(cropped);
-    stick->img_name_list.append("freehand");
-    stick->stick_img = cropped;
+    for(FreehandLayer &layer : stick->freehand_layers)
+        layer.image = layer.image.copy(bounds);
+    stick->RebuildFreehandComposite();
 
     // The drawing is ALREADY sitting in the stick's own rotated frame (that's the whole point of
     // painting in a canvas pre-rotated by EnterDrawMode), so no re-rotation is needed here — just
@@ -2329,12 +2655,23 @@ void MyView::SetDrawTool(int t)
 /// region gesture (rect rubber-band or lasso), replacing the selection, or adding to it with
 /// Shift / subtracting with Alt. The transform tool only transforms the existing selection: a
 /// click on a handle starts scale/rotate and a click inside the box starts a move (both lift
-/// the pixels on first drag); a click outside the box, or with nothing selected, does nothing.
+/// the pixels on first drag); a click outside the box does nothing. With nothing selected, a
+/// click anywhere selects the whole layer (its painted pixels' bounds) and starts a move.
 void MyView::DrawSelPress(const QPointF &scene, Qt::KeyboardModifiers mods)
 {
     if(draw_tool == DT_TRANSFORM){
-        if(draw_selection.isEmpty())
+        if(draw_selection.isEmpty()){
+            const QRect painted = draw_canvas ? OpaqueBounds(*draw_canvas) : QRect();
+            if(painted.isEmpty())
+                return;                                 // an empty layer has nothing to move
+            SetPixelSelection(QRegion(painted), 0);
+            LiftPixelFloat();
+            draw_sel_gesture = 3;
+            draw_sel_t0 = draw_sel_t;
+            draw_sel_p0 = SceneToCanvas(scene);
+            if(viewport()) viewport()->update();        // the gizmo appears at once
             return;
+        }
         int h = HitPixelHandle(scene);
         if(h == 8){                                     // rotation knob
             LiftPixelFloat();
@@ -2677,6 +3014,7 @@ void MyView::ConvertStick(StickData *stick, int new_type, const QImage &image,
     stick->vertex_parents.clear();
     stick->vertex_caps.clear();
     stick->vector_shapes.clear();
+    stick->freehand_layers.clear();
     stick->text.clear();
     stick->img_offset = QPointF(0, 0);
     stick->img_angle_offset = 0;
@@ -7436,11 +7774,7 @@ bool MyView::FlipVectorShapes(const QList<int> &indices, bool horizontal)
     if(valid.isEmpty())
         return false;
     StoreUndo();
-    const QPointF c = box.center();
-    const QTransform mirror = QTransform::fromTranslate(-c.x(), -c.y())
-            * QTransform::fromScale(horizontal ? -1 : 1, horizontal ? 1 : -1)
-            * QTransform::fromTranslate(c.x(), c.y());
-    const QTransform local = to_scene * mirror * to_scene.inverted();
+    const QTransform local = to_scene * ScreenMirror(box.center(), horizontal) * to_scene.inverted();
     for(int idx : valid)
         s->vector_shapes[idx] = MapShape(s->vector_shapes[idx], local);
     VectorEdited(s);
@@ -7491,14 +7825,7 @@ void MyView::RenameVectorShape(int index, const QString &name)
 bool MyView::SetVectorShapeMask(int index, int mask, bool inverted)
 {
     StickData *s = VectorStick();
-    if(s == nullptr || index < 0 || index >= s->vector_shapes.size()
-            || mask < VectorShape::NO_MASK || mask >= s->vector_shapes.size())
-        return false;
-    if(mask == VectorShape::NO_MASK)
-        inverted = false;
-    const VectorShape &shape = s->vector_shapes.at(index);
-    if((shape.mask == mask && shape.mask_inverted == inverted)
-            || (mask >= 0 && MaskChainReaches(s->vector_shapes, mask, index)))
+    if(s == nullptr || !MaskChangeAllowed(s->vector_shapes, index, mask, inverted))
         return false;
     StoreUndo();
     s->vector_shapes[index].mask = mask;
@@ -7531,9 +7858,7 @@ void MyView::SetVectorShapeDepth(const QList<int> &indices, double depth)
     StickData *s = VectorStick();
     if(s == nullptr || indices.isEmpty())
         return;
-    double offset = qBound(double(MINDEPTH), depth, double(MAXDEPTH)) - s->z;
-    if(qAbs(offset) < 0.005)
-        offset = 0;
+    const double offset = DepthOffset(depth, s->z);
     StoreUndo();
     for(int idx : indices)
         if(idx >= 0 && idx < s->vector_shapes.size())
@@ -7585,11 +7910,7 @@ int MyView::CopyVectorShapes(QList<int> indices)
         }
     if(copied.isEmpty())
         return 0; // nothing selected: the previous copy stays
-    for(VectorShape &shape : copied){
-        const int place = sources.indexOf(shape.mask);
-        shape.mask = place >= 0 ? place : VectorShape::NO_MASK; // its mask stayed behind
-        shape.mask_inverted = shape.mask_inverted && place >= 0;
-    }
+    KeepCopiedMasks(copied, sources);
     vector_clipboard = copied;
     return copied.size();
 }

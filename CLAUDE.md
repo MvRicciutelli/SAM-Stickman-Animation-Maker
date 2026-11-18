@@ -89,7 +89,7 @@ void Widget::on_someBtn_clicked(){
   `Extract*Data()`/`PopulateLive*()`.
 - New serialized fields: use `qint32` and explicit `double`, never `int`/`qreal`.
 - Raising a format means raising its `CURRENT_VERSION` (`Animation` 3, `StickFigureData` 2,
-  `StickData` 11). `operator<<` gates newer fields on the record's version; `operator>>` raises an
+  `StickData` 12). `operator<<` gates newer fields on the record's version; `operator>>` raises an
   older record to current at its end.
 - Newer-than-supported files are refused (`RejectNewerVersion()` + `file_load_error`, shown through
   `MyView::ReportRejectedFile()`). A refused load must change nothing: parse into pure data first, and
@@ -142,6 +142,13 @@ void Widget::on_someBtn_clicked(){
 - Shapes at another depth are painted by `VectorShapeLayerItem` helper items: only
   `StickGraphicsItem::SyncShapeLayers()` may create, destroy or scene-add them, and shape painting goes
   through `PaintVectorShapes()`. Never assume one scene item per stick.
+
+**Freehand layers** (`docs/ARCH_FREEHAND_LAYERS.md`)
+- `MyView::draw_canvas` points at the MyView-owned `draw_layer_canvas`, NEVER into `freehand_layers` (shared with undo snapshots and render clones: leaks or dangles). `SyncDrawCanvas()`/`LoadDrawCanvas()` move pixels in and out.
+- `stick_img` of a FREEHAND stick is a DERIVED composite: change a layer, then `RebuildFreehandComposite()`; never edit it directly.
+- All layers of a stick share ONE pixel grid (masks are pixel-wise); resize them together.
+- Mask removal/reorder/copy/load go through the shared templates in `vectorshape.h` (`RemoveVectorShape`, `ReorderVectorShape`, `MaskChainReaches`, `MaskChangeAllowed`, `KeepCopiedMasks`, `BreakBadMasks`), same as VECTOR.
+- Layer edits need draw mode and are `BeginLayerEdit()` -> mutate -> `EndLayerEdit()`; the panel is `BuildLayerSection<Layer>()`, shared with the vector panel.
 
 **Fill, stroke, texture, opacity, brush border, layout** (`docs/ARCH_STYLE_PAINT.md`)
 - `pen`/`brush` are whole `QPen`/`QBrush`: patterns, images and gradients need no new fields.
