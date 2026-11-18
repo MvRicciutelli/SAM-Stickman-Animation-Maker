@@ -585,8 +585,11 @@ static double JitteredAngle(const BrushStroke &brush)
 /// @details Extracted verbatim from MyView::StampBrush(), which is now one of its two callers —
 /// the other being a stick's brush BORDER. Tinting through CompositionMode_SourceIn is what lets
 /// a grayscale .abr tip be painted in any colour.
+/// A freehand drag stamps the same dab dozens of times per mouse event; with @p cache the tip is
+/// scaled, tinted and rotated only when the pressure changes its pixel size (or the brush
+/// changes). The random draws happen in the same order with or without it.
 QImage BrushDab(const BrushStroke &brush, double size_factor, double opacity_factor,
-                qreal *out_opacity)
+                qreal *out_opacity, DabCache *cache)
 {
     if(out_opacity != nullptr)
         *out_opacity = qBound(0.0, brush.opacity * opacity_factor
@@ -594,7 +597,20 @@ QImage BrushDab(const BrushStroke &brush, double size_factor, double opacity_fac
     if(brush.stamp.isNull())
         return QImage();
     const int s = qMax(1, int(brush.size * size_factor * JitterDown(brush.size_jitter) + 0.5));
-    return Rotated(TintedStamp(brush.stamp, brush.color, s), JitteredAngle(brush));
+    const double angle = JitteredAngle(brush);
+    const bool cacheable = cache != nullptr && brush.size_jitter <= 0 && brush.angle_jitter <= 0;
+    if(cacheable && !cache->dab.isNull() && cache->stamp_key == brush.stamp.cacheKey()
+            && cache->color == brush.color.rgb() && cache->size == s && cache->angle == angle)
+        return cache->dab;
+    const QImage dab = Rotated(TintedStamp(brush.stamp, brush.color, s), angle);
+    if(cacheable){
+        cache->stamp_key = brush.stamp.cacheKey();
+        cache->color = brush.color.rgb();
+        cache->size = s;
+        cache->angle = angle;
+        cache->dab = dab;
+    }
+    return dab;
 }
 
 /// @details The border counterpart of MyView::PaintStrokeSegment(): that one walks a live drag

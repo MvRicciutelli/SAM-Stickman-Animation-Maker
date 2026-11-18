@@ -401,6 +401,10 @@ public:
      *        switches to a gray pen and grayscale images. One render at a time exists
      *        app-wide, hence static — formerly the free global `onion_render`
      *        (stick.cpp), now scoped to the class whose paint() reads it.
+     *        ponytail: shared with the ImageExport worker thread, so an export rendering while
+     *        the UI thread draws onion skins can paint a frame grey. `static thread_local`
+     *        crashed the MinGW 11.2 test build (segfault in a brush-border render); the fix is
+     *        a per-view flag set on the onion render views instead of a static.
      */
     static bool onion_render;
     bool highlight = false;          ///< visual emphasis when the owning figure is selected
@@ -439,6 +443,13 @@ public:
      * The one seam through which every shape reuses the stick's whole fill/stroke machinery.
      */
     const VectorShape *paint_shape = nullptr;
+
+    /// @brief TAPER outline cache for paint(): QPainterPath::simplified() is a boolean operation,
+    ///        too slow to repeat on every repaint. Valid while taper_key matches the inputs.
+    QPainterPath taper_path;
+    /// @brief The inputs taper_path was built from: img_w_scale, img_h_scale, line length,
+    ///        hard_bottom, hard_top (bools as 0/1). Empty = nothing cached.
+    QVector<double> taper_key;
 
     /**
      * @brief The extra scene items that paint this VECTOR stick's shapes having a depth of their

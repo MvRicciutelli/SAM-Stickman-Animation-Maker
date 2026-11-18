@@ -7096,6 +7096,31 @@ private slots:
         QCOMPARE(alpha_at(QPointF(300, 200) + QPointF(40, 0)), 0);
     }
 
+    // The onion ghost is cached on its Frame (Frame::onion_pixmap): showing the onion skins again
+    // reuses it, and only leaving the frame (the only one an edit can reach) renders it again, so
+    // the ghost follows an edit made while that frame was current.
+    void OnionSkinGhostIsCachedUntilItsFrameIsLeft()
+    {
+        struct Restore { ~Restore(){ onion_skin_sb->setValue(0); } } restore;
+        AddFrame();
+        Frame *ghost_frame = view->my_animation->current_frame;
+        DrawStick(QPointF(300, 150), QPointF(300, 250));
+        AddFrame();
+        onion_skin_sb->setValue(1);
+        view->UpdateOnionSkins();
+        QVERIFY(!ghost_frame->onion_dirty);
+        QVERIFY(!ghost_frame->onion_pixmap.isNull());
+        const qint64 first = ghost_frame->onion_pixmap.cacheKey();
+        view->UpdateOnionSkins();
+        QCOMPARE(ghost_frame->onion_pixmap.cacheKey(), first); // reused, not rendered again
+
+        view->MoveToFrame(ghost_frame);
+        DrawStick(QPointF(500, 150), QPointF(500, 250));
+        view->MoveToFrame(view->my_animation->frame_list.last()); // back to the last frame
+        QVERIFY2(ghost_frame->onion_pixmap.cacheKey() != first, "the edited frame's ghost was reused");
+        QVERIFY2(ghost_frame->onion_pixmap.width() > 150, "the ghost misses the stick drawn later");
+    }
+
     // The view-only navigation tools (ROTATEVIEW/PANVIEW) and ResetView(), driven by real mouse
     // events: they move the VIEW and nothing else — the stick, the undo stack and the scene's own
     // rect (what icons and exports render) stay as they were. The pan runs zoomed out, where the

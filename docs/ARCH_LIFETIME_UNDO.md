@@ -270,3 +270,36 @@ current frame as new layers. That merge is the only way to fold one frame's
 figures into another, so unifying the two would remove a feature rather
 than tidy one up.
 
+### Frame switch cost: onion cache, queued thumbnails, foreground overlays
+
+A rendering-performance pass cut what a frame switch and a mouse move redo.
+
+**Onion skin ghosts are cached on the `Frame`** (`onion_pixmap`, `onion_offset`,
+`onion_scene_rect`, `onion_dirty`, `frame.h`). `MyView::UpdateOnionSkins()` renders a ghost
+(`MyView::RenderOnionSkin(Frame*)`) only when `onion_dirty` is set or the scene rect differs from
+`onion_scene_rect`, so a switch usually renders one ghost (the frame just left) instead of N.
+Frames outside the shown range drop their pixmap, so the cache is bounded by the spinbox, not the
+animation length. `RenderOnionSkin()` still clones through `CloneForRender()` and clears its scene
+before `qDeleteAll()`.
+
+*Invalidation rule*: every edit happens on the CURRENT frame, so `MyView::MoveToFrame()` sets
+`onion_dirty` on the frame it leaves (the current one on entry, which is also the frame an
+undo/redo restore passes through). Code that edits a frame that is NOT current must set
+`onion_dirty = true` itself; the REPOSCALE/REPO loops of `MyView::SizeChange()` do. Forget it and
+the ghost shows the old drawing. Pinned by `OnionSkinGhostIsCachedUntilItsFrameIsLeft`.
+
+**`MoveToFrame()` no longer calls `Frame::Refresh(0)`**: that remove/re-add of every view
+duplicated the attach loop just above it. It calls `StickFigure::Refresh(0)` per figure, then
+`Frame::SyncLayerEffects()`. Thumbnails are not rendered inline: `MyView::QueueFrameIcons()` queues
+one pass per event-loop turn on whatever frame is current then, so scrubbing renders the frame it
+stops on, not every frame it passes (same pattern as `QueueLayerSync()`).
+
+**Foreground overlays repaint only their own area.** `MyView::OverlayBounds()` is the union of
+what `drawForeground()` paints outside draw mode (IK markers, lasso/band, vector and selection
+boxes, displace handles, texture arrows). `MyView::UpdateOverlay()` updates previous ∪ current
+bounds, and `drawForeground()` records `last_overlay_bounds`. Per-mouse-move paths use
+`UpdateOverlay()`, never `viewport()->update()`: a full repaint makes every `LayerEffect`
+re-render its source. A new overlay in `drawForeground()` needs its geometry in `OverlayBounds()`,
+or its old pixels are never erased. `mouseMoveEvent()` calls `UpdateIkOverlay()` only when
+`FrameHasIkChain()`.
+

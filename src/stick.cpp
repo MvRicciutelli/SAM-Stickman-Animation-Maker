@@ -810,7 +810,11 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         QVector <QPointF>pVect = {points[0],points[1],points[2],points[3]};
         QPolygonF poly(pVect);
         QPainterPath shape;
-        if(data->stick_type == StickData::TAPER){
+        const QVector<double> key = { double(data->img_w_scale), double(data->img_h_scale), double(data->my_line.length()), data->hard_bottom ? 1.0 : 0.0, data->hard_top ? 1.0 : 0.0 };
+        if(data->stick_type == StickData::TAPER && key == taper_key){
+            shape = taper_path; // cache hit: simplified() is too slow to repeat on every paint
+        }
+        else if(data->stick_type == StickData::TAPER){
 
             QPainterPath totalPath;
             totalPath.setFillRule(Qt::WindingFill);
@@ -831,7 +835,9 @@ void StickGraphicsItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
                 piePath.closeSubpath();
                 totalPath.addPath(piePath);
             }
-            shape = totalPath.simplified();
+            taper_path = totalPath.simplified();
+            taper_key = key;
+            shape = taper_path;
         }
         else{
             shape.addPolygon(poly);

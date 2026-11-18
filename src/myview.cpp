@@ -1513,37 +1513,45 @@ BrushStroke MyView::DrawBrush() const
 /// each read pen pressure only when their own checkbox (draw_pressure_size /
 /// draw_pressure_opacity) is on — the two are independent, so e.g. pressure can drive size
 /// while opacity stays fixed at the dialled-in value, or vice versa.
-void MyView::StampBrush(const QPointF &canvas_px)
+QRect MyView::StampBrush(QPainter &canvas_painter, const QPointF &canvas_px)
 {
-    if(!draw_canvas)
-        return;
     qreal dab_opacity = 1.0;
     QImage dab = BrushDab(DrawBrush(),
                                 draw_pressure_size    ? PressureFactor() : 1.0,
                                 draw_pressure_opacity ? PressureFactor() : 1.0,
-                                &dab_opacity);
+                                &dab_opacity, &draw_dab_cache);
     if(dab.isNull())
-        return;
+        return QRect();
 
     // eraser softness: the dab's alpha times a round feather (hardness = 100 - softness) over
     // the dab's square, so any tip, .abr ones included, erases with a soft rim.
     // ponytail: the feather is fitted to the dab's bounding square, which a rotated tip enlarges,
-    // so a tilted tip feathers a little less; the 128 px mask is rebuilt per dab, cache it if a
-    // big eraser ever drags.
+    // so a tilted tip feathers a little less.
+    // The mask is rebuilt only when the softness changes, and the feathered dab only when the
+    // dab itself does (a cached dab keeps its cacheKey()).
     if(draw_eraser && draw_eraser_softness > 0){
-        QPainter sp(&dab);
-        sp.setRenderHint(QPainter::SmoothPixmapTransform);
-        sp.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-        sp.drawImage(dab.rect(), MakeRoundBrush(128, 100 - draw_eraser_softness, 100));
+        if(draw_feather_softness != draw_eraser_softness){
+            draw_feather_mask = MakeRoundBrush(128, 100 - draw_eraser_softness, 100);
+            draw_feather_softness = draw_eraser_softness;
+            draw_feathered_from = 0;
+        }
+        if(draw_feathered_from != dab.cacheKey() || draw_feathered_dab.isNull()){
+            draw_feathered_from = dab.cacheKey();
+            QPainter sp(&dab);
+            sp.setRenderHint(QPainter::SmoothPixmapTransform);
+            sp.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+            sp.drawImage(dab.rect(), draw_feather_mask);
+            sp.end();
+            draw_feathered_dab = dab;
+        }
+        dab = draw_feathered_dab;
     }
 
-    QPainter p(draw_canvas);
-    p.setOpacity(dab_opacity);
-    if(draw_eraser)
-        p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
+    canvas_painter.setOpacity(dab_opacity);
     // the rotated dab is larger than s: centre it on its actual dimensions, not on s
-    p.drawImage(QPointF(canvas_px.x() - dab.width()/2.0, canvas_px.y() - dab.height()/2.0), dab);
-    p.end();
+    const QPointF top_left(canvas_px.x() - dab.width()/2.0, canvas_px.y() - dab.height()/2.0);
+    canvas_painter.drawImage(top_left, dab);
+    return QRectF(top_left, QSizeF(dab.size())).toAlignedRect();
 }
 
 /// @details Stamps the brush along a scene-space segment, spaced by draw_brush_spacing (a
@@ -1569,17 +1577,26 @@ void MyView::PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_sce
     double size_factor = draw_pressure_size ? PressureFactor() : 1.0;
     // spacing tracks the actual (pressured) dab size, scaled by the user's spacing percentage
     double spacing = qMax(1.0, draw_brush_size * size_factor * (draw_brush_spacing / 100.0));
-    if(dist <= 0.0){
-        StampBrush(a);          // stroke start (single click): first dab, the run restarts from here
-        draw_dab_carry = 0.0;
-    } else {
-        for(double d = spacing - draw_dab_carry; d <= dist; d += spacing)
-            StampBrush(a + (b - a) * (d / dist));
-        draw_dab_carry = fmod(draw_dab_carry + dist, spacing);
+    QRect dirty; // canvas pixels the dabs of this segment touched
+    {
+        QPainter p(draw_canvas); // one painter for the whole segment, not one per dab
+        if(draw_eraser)
+            p.setCompositionMode(QPainter::CompositionMode_DestinationOut);
+        if(dist <= 0.0){
+            dirty = StampBrush(p, a); // stroke start (single click): first dab, the run restarts from here
+            draw_dab_carry = 0.0;
+        } else {
+            for(double d = spacing - draw_dab_carry; d <= dist; d += spacing)
+                dirty |= StampBrush(p, a + (b - a) * (d / dist));
+            draw_dab_carry = fmod(draw_dab_carry + dist, spacing);
+        }
     }
-    if(draw_target && draw_target->view){
-        draw_target->view->Refresh(0);
-        draw_target->view->update();
+    // only the touched part is repainted: the canvas covers the whole viewport, and repainting
+    // all of it (plus every item and layer effect under it) on each mouse move made the stroke lag.
+    // No Refresh(): the canvas geometry is fixed from EnterDrawMode() to ExitDrawMode()
+    if(!dirty.isEmpty() && draw_target && draw_target->view){
+        const QTransform pix_to_scene = QTransform::fromTranslate(-half.x(), -half.y()) * draw_disp;
+        draw_target->view->update(pix_to_scene.mapRect(QRectF(dirty)).adjusted(-2, -2, 2, 2));
     }
 }
 
@@ -2831,13 +2848,72 @@ StickData *MyView::IkPendingStart()
  * this only matters when nothing but StickData geometry changed (e.g. a FABRIK drag). Also
  * called by the IK-properties toggle in widget.cpp.
  */
+/// @details The same test drawForeground() applies before painting a marker.
+bool MyView::FrameHasIkChain() const
+{
+    if(my_animation == nullptr || my_animation->current_frame == nullptr)
+        return false;
+    for(StickFigure *S : my_animation->current_frame->stick_figures)
+        for(StickData *s : S->stick_list)
+            if(s->ik_role == StickData::IK_START && s->ik_target != nullptr)
+                return true;
+    return false;
+}
+
 void MyView::UpdateIkOverlay()
 {
     // the markers are drawn in drawForeground() (redrawn on every repaint of the
     // viewport); here it is enough to force a repaint for the cases where only the
     // data geometry changed (e.g. a FABRIK drag) without otherwise dirtying the viewport
-    if(viewport() != nullptr)
-        viewport()->update();
+    UpdateOverlay();
+}
+
+/// @details Mirrors what drawForeground() paints outside draw mode, piece by piece; the draw-mode
+/// overlays are left out because their callers repaint the whole viewport.
+QRectF MyView::OverlayBounds() const
+{
+    QPolygonF points;
+    if(my_animation == nullptr || my_animation->current_frame == nullptr)
+        return QRectF();
+    for(StickFigure *S : my_animation->current_frame->stick_figures)
+        for(StickData *s : S->stick_list)
+            if(s->ik_role == StickData::IK_START && s->ik_target != nullptr)
+                points << s->my_line.p1() << s->ik_target->my_line.p2();
+    points << vec_lasso;
+    if(band_dragging && band_is_lasso)
+        points << band_poly;
+    QPointF box[9];
+    if(VectorTransformHandles(box))
+        for(const QPointF &p : box) points << p;
+    if(SelectionHandlesActive()){
+        SelectionHandles(box);
+        for(const QPointF &p : box) points << p;
+    }
+    QPointF a, b;
+    if(DisplaceHandles(&a, &b))
+        points << a << b;
+    for(bool for_fill : { true, false })
+        if(TextureArrowPoints(for_fill, &a, &b))
+            points << a << b;
+    if(points.isEmpty())
+        return QRectF();
+    const double m = handle_size * 1.5; // the IK cross is handle_size * 1.1 in scene units
+    return points.boundingRect().adjusted(-m, -m, m, m);
+}
+
+/// @details Repaints only where the overlay was last painted and where it is now: a full viewport
+/// update per mouse move repainted every item and recomposed every layer effect.
+void MyView::UpdateOverlay()
+{
+    if(viewport() == nullptr)
+        return;
+    const QRectF now = OverlayBounds();
+    QRectF dirty = now | last_overlay_bounds;
+    last_overlay_bounds = now;
+    if(dirty.isEmpty())
+        return;
+    const int pad = handle_size + 4; // screen-constant handles, cosmetic pens
+    viewport()->update(mapFromScene(dirty).boundingRect().adjusted(-pad, -pad, pad, pad));
 }
 
 /**
@@ -2851,6 +2927,7 @@ void MyView::drawForeground(QPainter *painter, const QRectF &rect)
     QGraphicsView::drawForeground(painter, rect);
     if(my_animation == nullptr || my_animation->current_frame == nullptr)
         return;
+    last_overlay_bounds = OverlayBounds(); // what UpdateOverlay() must erase next time
     // IK chain markers: like the handles, always visible in the editor and NEVER in
     // exports/renders (which draw a separate render scene, not this view). Drawn here (the
     // view's foreground) instead of with a scene item, so they are as reliable as the handles:
@@ -3423,7 +3500,7 @@ void MyView::UpdateSelectionDecorations(bool recenter_pivot)
     // the transformation box's handles/box are a drawForeground overlay: on a selection
     // change they must be redrawn explicitly, otherwise those of the previous selection
     // stay as "ghosts" in the areas not invalidated by moving just the scene items (spec).
-    if(viewport()) viewport()->update();
+    UpdateOverlay();
 }
 
 /**
@@ -3766,7 +3843,7 @@ void MyView::DragTextureArrow(const QPointF &scene)
     }
     if(stick->view)
         stick->view->Refresh(0);
-    if(viewport()) viewport()->update(); // the arrow itself is drawn in the foreground
+    if(viewport()) UpdateOverlay(); // the arrow itself is drawn in the foreground
 }
 
 // ===== DISPLACE tool ==================================================================
@@ -3867,7 +3944,7 @@ void MyView::DragDisplace(const QPointF &scene)
                 s->view->Refresh(1);
     if(refresh_transform_panel)
         refresh_transform_panel(stick);
-    if(viewport()) viewport()->update(); // the handles are drawn in the foreground
+    if(viewport()) UpdateOverlay(); // the handles are drawn in the foreground
 }
 
 /// @details The transformation box is active/grabbable only with the select tool (NOTOOL) and a
@@ -3952,7 +4029,7 @@ void MyView::ApplySelectionRotate()
     }
     if(single) UpdateSelectionDecorations(false);
     else       UpdateMultiSelectionUI();
-    if(viewport()) viewport()->update(); // redraws the box handles that follow the selection
+    if(viewport()) UpdateOverlay(); // redraws the box handles that follow the selection
 }
 
 /// @details Scale body, extracted from the SCALE case of mouseMove: absolute factor
@@ -3983,7 +4060,7 @@ void MyView::ApplySelectionScale()
     }
     if(single) UpdateSelectionDecorations(false);
     else       UpdateMultiSelectionUI();
-    if(viewport()) viewport()->update();
+    if(viewport()) UpdateOverlay();
 }
 
 /**
@@ -4544,7 +4621,7 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                             }
                         }
                     }
-                    if(viewport()) viewport()->update(); // the lasso is drawn in drawForeground
+                    if(viewport()) UpdateOverlay(); // the lasso is drawn in drawForeground
                 } else if(selection_band != nullptr){
                     QRectF band = QRectF(starting_coord, coord).normalized();
                     selection_band->setRect(band);
@@ -4715,7 +4792,6 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                 if(my_animation->CurrentFrame()->CurrentStickFigure()->draw_count > 0)
                 {
                     my_animation->CurrentFrame()->CurrentStickFigure()->PreviewDrawing(&coord);
-                    qDebug("coord = %f, %f",coord.x(),coord.y());
                 }
             }
             else
@@ -4984,7 +5060,9 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
         zoom_lvl = zoom_lvl_buf;
     }
     prev_coord = coord;
-    if(is_pressed) // only during a drag: an edit can move the IK start/target
+    // only during a drag, and only when there is a marker to move: UpdateIkOverlay() repaints the
+    // whole viewport, which on every move of every drag also made each layer effect re-render
+    if(is_pressed && FrameHasIkChain())
         UpdateIkOverlay();
     QGraphicsView::mouseMoveEvent(event);
 }
@@ -5104,16 +5182,19 @@ void MyView::MoveToFrame(Frame* frame){
     // remove all the sticks from the scene
     auto current_scene = scene();
     if(my_animation->frame_list.count()>=1){
+        // every edit happens on the current frame, so the frame being left (or restored, on an
+        // undo/redo) is the one whose cached onion ghost may be stale
+        my_animation->current_frame->onion_dirty = true;
         for(StickFigure *S:my_animation->current_frame->stick_figures){
             RemoveHandles(S);
             // the layer group leaves with its frame (Frame::Refresh() below re-syncs the new one's)
             if(S->layer_group != nullptr && S->layer_group->scene() == current_scene)
                 current_scene->removeItem(S->layer_group);
             for(StickData * s: S->stick_list){
-               if(s->view && scene()->items().contains(s->view)){
+               // scene() of the item, not scene()->items().contains(): that built and sorted the
+               // list of every item in the scene once per stick
+               if(s->view && s->view->scene() == current_scene)
                     current_scene->removeItem(s->view);
-
-               }
             }
 
 
@@ -5150,8 +5231,7 @@ void MyView::MoveToFrame(Frame* frame){
         // add to the scene
         if(!play_back){
             S->UpdateBoundingRects();
-            S->UpdateIcon();
-            AddHandles(S);
+            AddHandles(S); // the icons are rendered by QueueFrameIcons() below
         }
     }
     current_scene->clearSelection();
@@ -5191,13 +5271,34 @@ void MyView::MoveToFrame(Frame* frame){
         // no guard on stick_figures.isEmpty(): UpdateIcon() already handles an empty
         // frame correctly (fills it with white), without it a newly created frame was left without a
         // preview instead of showing a white canvas
-        if(!my_animation->frame_list.isEmpty()){
-            my_animation->current_frame->UpdateIcon();
-        }
+        if(!my_animation->frame_list.isEmpty())
+            QueueFrameIcons();
         UpdateSelectionDecorations(true); // handle + bounding box of the current figure
     }
-    my_animation->CurrentFrame()->Refresh(0);
+    // not Frame::Refresh(): its remove/re-add of every view, done to restack them in total_sticks
+    // order, is what the attach loop above has just done
+    for(StickFigure *S : frame->stick_figures)
+        S->Refresh(0);
+    frame->SyncLayerEffects();
     UpdateIkOverlay(); // the new frame may have its own IK chains to mark
+}
+/// @details Queued like QueueLayerSync(): scrubbing through frames (a held arrow key, a drag
+/// along the frame list) renders the thumbnails of the frame it stops on, not of every frame it
+/// passes. Whatever frame is current when the event loop gets here is the one rendered.
+void MyView::QueueFrameIcons()
+{
+    if(frame_icons_queued)
+        return;
+    frame_icons_queued = true;
+    QMetaObject::invokeMethod(this, [this](){
+        frame_icons_queued = false;
+        Frame *frame = my_animation->current_frame;
+        if(frame == nullptr || my_animation->frame_list.isEmpty() || play_back)
+            return;
+        for(StickFigure *S : frame->stick_figures)
+            S->UpdateIcon();
+        frame->UpdateIcon();
+    }, Qt::QueuedConnection);
 }
 /// @details Queued, so the views added by one gesture or refresh are grouped together, once.
 void MyView::QueueLayerSync()
@@ -5236,12 +5337,11 @@ void MyView::paintEvent(QPaintEvent *event)
 /**
  * @details Rebuilds the faded "ghosts" of the frames before the current one. Old onion
  * pixmaps are removed and freed, then the previous N frames (N = onion_skin_sb spinbox,
- * capped at frame_number) are each rendered onto a pixmap whose opacity grows towards
- * the current frame. Each ghost is drawn from Clone()d StickData wrapped in throwaway
- * views on a private scene, and the render scene is cleared BEFORE the clones are freed
- * so ~StickGraphicsItem() doesn't read a deleted data->view — same rule as
- * StickFigure::UpdateIcon() (see CLAUDE.md "Data model"). `onion_render` marks this
- * special path for code that must behave differently while rendering.
+ * capped at frame_number) are each shown as a pixmap whose opacity grows towards
+ * the current frame. The pixmap is cached on the Frame and rendered again (RenderOnionSkin())
+ * only when Frame::onion_dirty is set or the scene rect changed, so a frame switch usually
+ * renders one ghost (the frame just left) instead of N. Frames outside the shown range drop
+ * their cache.
  */
 void MyView::UpdateOnionSkins(){
     // empty the old image buffers (present in the scene) stored in the previous for loop
@@ -5252,10 +5352,6 @@ void MyView::UpdateOnionSkins(){
     onion_skins.clear();
     if(onion_skin_sb->value()==0 || my_animation->current_frame->frame_number == 0)
         return;
-    // set the flag for special routines
-    StickGraphicsItem::onion_render = true;
-    QGraphicsScene render_scene; // dummy scene to render the onion skins on
-    render_scene.setSceneRect(scene()->sceneRect());
     // read from the spinbox the number of onion skins needed
     int skin_num = onion_skin_sb->value();
     float opacity_val = 0;
@@ -5263,41 +5359,68 @@ void MyView::UpdateOnionSkins(){
     {
         skin_num = my_animation->current_frame->frame_number;
     }
-    // draw on the dummy scene the stickfigures of the frames to onion-skin, starting from the current frame minus the number of computable skins
-    for(int i = my_animation->current_frame->frame_number-skin_num; i<my_animation->current_frame->frame_number; i++){
-        // todo instead of copying stickfigure by stickfigure, copy the whole scene
-        // these sticks are LIVE (they already have a view on frame i): cloning their data before
-        // wrapping them keeps the stick constructor from stealing the data->view back-pointer from the
-        // real view (see StickFigure::UpdateIcon for the same pattern)
-        // ...and with the parent relinked, which is where an ancestor's global transform comes from
-        QList<StickData*> render_clones = CloneForRender(my_animation->frame_list[i]->total_sticks);
-        for(StickData *clone : render_clones)
-            render_scene.addItem(new StickGraphicsItem(clone));
+    const int first = my_animation->current_frame->frame_number-skin_num;
+    const int last = my_animation->current_frame->frame_number; // exclusive
+    // only the frames on show keep a ghost: a cache on every visited frame would grow with the
+    // animation (up to a canvas-sized pixmap per frame)
+    for(int i = 0; i < my_animation->frame_list.count(); i++){
+        Frame *f = my_animation->frame_list[i];
+        if((i < first || i >= last) && !f->onion_pixmap.isNull()){
+            f->onion_pixmap = QPixmap();
+            f->onion_dirty = true;
+        }
+    }
+    for(int i = first; i < last; i++){
+        Frame *ghost = my_animation->frame_list[i];
+        // the previous frames rarely change between two frame switches: only a dirty one (see
+        // Frame::onion_dirty) is rendered again
+        if(ghost->onion_dirty || ghost->onion_scene_rect != scene()->sceneRect())
+            RenderOnionSkin(ghost);
         // the older the onion skin the more transparent, the closer to the current frame the more opaque
         opacity_val += 0.5/skin_num;
-        // only the figures' footprint, not the whole scene: a ghost used to cost 1.44x the canvas
-        // (12 MB at 1080p) on every frame change, now it costs as much as the figures it shows
-        QRect bounds = render_scene.itemsBoundingRect().intersected(render_scene.sceneRect()).toAlignedRect();
-        if(!bounds.isEmpty()){
-            // premultiplied: it is the format the raster engine paints in, plain ARGB32
-            // sent every span through a conversion (and QPixmap::fromImage did another one)
-            QImage render_img(bounds.size(), QImage::Format_ARGB32_Premultiplied);
-            render_img.fill(Qt::transparent);
-            QPainter painter(&render_img);
-            render_scene.render(&painter, QRectF(), bounds);
-            painter.end();
-            // transfer the rendered scene
-            QGraphicsPixmapItem* item = new QGraphicsPixmapItem(QPixmap::fromImage(std::move(render_img)));
-            item->setOffset(bounds.topLeft());
-            item->setOpacity(opacity_val);
-            item->setZValue(0);
-            onion_skins.append(item);
-            scene()->addItem(item);
-        }
-        render_scene.clear(); // destroy the rendering views BEFORE freeing the cloned data
-        qDeleteAll(render_clones);
+        if(ghost->onion_pixmap.isNull())
+            continue;
+        QGraphicsPixmapItem* item = new QGraphicsPixmapItem(ghost->onion_pixmap);
+        item->setOffset(ghost->onion_offset);
+        item->setOpacity(opacity_val);
+        item->setZValue(0);
+        onion_skins.append(item);
+        scene()->addItem(item);
     }
+}
 
+/**
+ * @details Draws the frame from Clone()d StickData wrapped in throwaway views on a private
+ * scene (these sticks are LIVE when the frame was visited: wrapping the data itself would steal
+ * the real view's back-pointer, see StickFigure::UpdateIcon()), with the parent relinked, which is
+ * where an ancestor's global transform comes from. Only the figures' footprint is rendered, not
+ * the whole scene. The render scene is cleared BEFORE the clones are freed (~StickGraphicsItem()
+ * reads data->view).
+ */
+void MyView::RenderOnionSkin(Frame *frame){
+    StickGraphicsItem::onion_render = true; // grey pen, grayscale images
+    QGraphicsScene render_scene; // dummy scene to render the onion skin on
+    render_scene.setSceneRect(scene()->sceneRect());
+    QList<StickData*> render_clones = CloneForRender(frame->total_sticks);
+    for(StickData *clone : render_clones)
+        render_scene.addItem(new StickGraphicsItem(clone));
+    frame->onion_pixmap = QPixmap();
+    QRect bounds = render_scene.itemsBoundingRect().intersected(render_scene.sceneRect()).toAlignedRect();
+    if(!bounds.isEmpty()){
+        // premultiplied: it is the format the raster engine paints in, plain ARGB32
+        // sent every span through a conversion (and QPixmap::fromImage did another one)
+        QImage render_img(bounds.size(), QImage::Format_ARGB32_Premultiplied);
+        render_img.fill(Qt::transparent);
+        QPainter painter(&render_img);
+        render_scene.render(&painter, QRectF(), bounds);
+        painter.end();
+        frame->onion_pixmap = QPixmap::fromImage(std::move(render_img));
+    }
+    frame->onion_offset = bounds.topLeft();
+    frame->onion_scene_rect = scene()->sceneRect();
+    frame->onion_dirty = false;
+    render_scene.clear(); // destroy the rendering views BEFORE freeing the cloned data
+    qDeleteAll(render_clones);
     StickGraphicsItem::onion_render = false;
 }
 /**
@@ -6155,6 +6278,7 @@ void MyView::SizeChange(int option){
         case REPOSCALE:
         {
             for(Frame*F:my_animation->frame_list){
+                F->onion_dirty = true; // edits frames that are not current
                 ScaleFrame(F,amount,old_rect);
                 for(StickFigure* S: F->stick_figures){
                     S->Traslate(dx,dy);
@@ -6166,6 +6290,7 @@ void MyView::SizeChange(int option){
         case REPO:
         {
             for(Frame*F:my_animation->frame_list){
+                F->onion_dirty = true; // edits frames that are not current
                 for(StickFigure* S: F->stick_figures){
                     S->Traslate(dx,dy);
                 }
@@ -6913,7 +7038,7 @@ bool MyView::VectorMouseMove(QMouseEvent *event)
             else
                 vec_lasso << coord;
             if(viewport())
-                viewport()->update();
+                UpdateOverlay();
             return true;
         }
         if(vec_needs_undo){
@@ -6974,7 +7099,7 @@ bool MyView::VectorMouseMove(QMouseEvent *event)
         vec_last = coord;
         s->view->Refresh(1);
         if(vector_tool == VT_TRANSFORM && viewport())
-            viewport()->update(); // the box is drawn in the foreground
+            UpdateOverlay(); // the box is drawn in the foreground
         return true;
     }
     if(vector_tool == VT_PEN && s != nullptr){

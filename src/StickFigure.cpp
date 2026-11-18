@@ -905,7 +905,6 @@ void StickFigure::Scale(QPointF *coord){
         if(s->view)
             s->view->Scale(scale);
     }
-    qDebug("scale = %f \r\n",scale);
 }
 void StickFigure::Traslate(qreal dx, qreal dy){
     for(StickData*s:stick_list){

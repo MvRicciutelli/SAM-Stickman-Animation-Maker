@@ -556,6 +556,13 @@ public:
      */
     void QueueLayerSync();
     bool layer_sync_queued = false; ///< a QueueLayerSync() pass is pending
+    /**
+     * @brief Renders the current frame's layer and frame thumbnails on the next event-loop pass.
+     *
+     * Used by MoveToFrame(): several frame switches before the loop runs render once.
+     */
+    void QueueFrameIcons();
+    bool frame_icons_queued = false; ///< a QueueFrameIcons() pass is pending
 
     /**
      * @brief Ends the "Fast move" pause: layer effects are composed again on the next repaint.
@@ -571,12 +578,16 @@ public:
     /**
      * @brief Rebuilds the semi-transparent "ghosts" of the previous frames.
      *
-     * Clears the old onion pixmaps, then renders the N frames before the current one
-     * (N = onion_skin_sb spinbox) onto faded pixmaps. Works on Clone()d StickData so it
-     * never steals a live stick's `view` back-pointer (same pattern as
-     * StickFigure::UpdateIcon()). Skipped during playback.
+     * Clears the old onion pixmaps, then shows the N frames before the current one
+     * (N = onion_skin_sb spinbox) as faded pixmaps, reusing each frame's cached ghost
+     * (Frame::onion_pixmap) unless it is dirty. Skipped during playback.
      */
     void UpdateOnionSkins();
+    /**
+     * @brief Renders @p frame's grey ghost into its onion cache and marks it clean.
+     * @param frame the frame to render; its live sticks are cloned, never wrapped.
+     */
+    void RenderOnionSkin(Frame *frame);
     QList<QGraphicsPixmapItem*> onion_skins; ///< pixmaps currently drawn as onion skins (owned while shown)
 
     /**
@@ -1003,6 +1014,24 @@ public:
      * viewport. Public because the IK-properties toggle (widget.cpp) also calls it.
      */
     void UpdateIkOverlay();
+    /**
+     * @brief Whether the current frame has at least one IK chain marker to draw.
+     * @return true when some stick is an IK_START with a target.
+     */
+    bool FrameHasIkChain() const;
+    /**
+     * @brief Scene rect of the foreground overlays drawForeground() paints outside draw mode
+     *        (IK markers, selection and vector boxes, lassos, displace handles, texture arrows).
+     * @return the padded bounds, or an empty rect when there is no overlay.
+     */
+    QRectF OverlayBounds() const;
+    /**
+     * @brief Repaints the overlay's previous and current area instead of the whole viewport.
+     *
+     * For the per-mouse-move paths; one-shot changes may keep a full viewport()->update().
+     */
+    void UpdateOverlay();
+    QRectF last_overlay_bounds; ///< OverlayBounds() as of the last drawForeground()
 
     /**
      * @brief Removes a figure's endpoint handles from the scene (without deleting them).
@@ -1621,8 +1650,18 @@ private:
     double PressureFactor() const;
     /** @brief The loose draw_brush_* fields gathered into the BrushStroke that BrushDab() takes. */
     BrushStroke DrawBrush() const;
-    /** @brief Stamps one brush dab (tinted/eraser) onto draw_canvas at a canvas-pixel point. */
-    void StampBrush(const QPointF &canvas_px);
+    DabCache draw_dab_cache;          ///< last dab built by StampBrush() (see BrushDab())
+    QImage draw_feather_mask;         ///< eraser feather tip, built for draw_feather_softness
+    int draw_feather_softness = -1;   ///< softness draw_feather_mask was built for (-1 = none)
+    qint64 draw_feathered_from = 0;   ///< cacheKey() of the dab draw_feathered_dab was cut from
+    QImage draw_feathered_dab;        ///< that dab with the eraser feather applied
+    /**
+     * @brief Stamps one brush dab (tinted/eraser) onto draw_canvas at a canvas-pixel point.
+     * @param canvas_painter an active painter on draw_canvas, shared by the dabs of one segment.
+     * @param canvas_px dab centre in canvas pixels.
+     * @return the canvas-pixel rect the dab covered (empty when nothing was stamped).
+     */
+    QRect StampBrush(QPainter &canvas_painter, const QPointF &canvas_px);
     /** @brief Stamps the brush along a scene-space segment (interpolated by brush spacing). */
     void PaintStrokeSegment(const QPointF &from_scene, const QPointF &to_scene);
     /** @brief Truncates any redo tail and pushes a copy of the current canvas onto draw_undo. */

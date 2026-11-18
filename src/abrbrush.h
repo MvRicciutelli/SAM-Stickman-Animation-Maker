@@ -104,12 +104,28 @@ struct BrushStroke {
 };
 
 /**
+ * @brief The last dab BrushDab() built, kept by a caller that stamps many dabs in a row.
+ *
+ * Only used when neither size nor angle jitter varies the dab; the key is everything else the
+ * image depends on (the tint's alpha is ignored, as TintedStamp() ignores it).
+ */
+struct DabCache {
+    qint64 stamp_key = 0; ///< QImage::cacheKey() of the tip
+    QRgb color = 0;       ///< tint, alpha dropped
+    int size = 0;         ///< dab diameter in pixels
+    double angle = 0;     ///< tip rotation in degrees
+    QImage dab;           ///< the dab built for that key; null = empty cache
+};
+
+/**
  * @brief Builds one tinted, jittered dab image.
  * @param brush the brush; only stamp/color/size/angle and the three jitters are read.
  * @param size_factor extra multiplier on the diameter (pen pressure in draw mode, 1.0 elsewhere).
  * @param opacity_factor extra multiplier on the opacity (same).
  * @param out_opacity receives the opacity 0..1 this dab must be painted at — jitter included, so
  *        the caller cannot forget it. May be null.
+ * @param cache when not null and the brush has no size/angle jitter, a dab equal to the cached
+ *        one is returned from it (no rescale, tint or rotation) and a new one is stored in it.
  * @return an ARGB image already tinted; a rotated dab is LARGER than @p size, so centre it on the
  *         returned image's own dimensions, never on the requested diameter.
  *
@@ -117,7 +133,7 @@ struct BrushStroke {
  * the angle and the angle jitter work on an imported .abr tip as well as on a generated round one.
  */
 QImage BrushDab(const BrushStroke &brush, double size_factor = 1.0, double opacity_factor = 1.0,
-                qreal *out_opacity = nullptr);
+                qreal *out_opacity = nullptr, DabCache *cache = nullptr);
 
 /**
  * @brief Stamps a brush along a path, at the brush's own spacing.

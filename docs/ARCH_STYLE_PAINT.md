@@ -684,3 +684,17 @@ warning. `.stck` is the *native* single-figure path and keeps everything.
 `InterpolateStickData()` is deliberately untouched: its `brush.setColor()` is
 that same no-op, so a gradient fill simply doesn't tween between keyframes.
 
+### Paint-cost caches: freehand strokes and the TAPER outline
+
+`MyView::PaintStrokeSegment()` uses ONE `QPainter` per segment (not per dab), repaints only the
+dabs' dirty rect mapped through `draw_disp` (`draw_target->view->update(rect)`), and does not call
+`Refresh()`: the canvas geometry is fixed between `EnterDrawMode()` and `ExitDrawMode()`.
+`BrushDab()` (`abrbrush.cpp`) takes an optional `DabCache*` and reuses the last dab when there is
+no size/angle jitter (`draw_dab_cache` in `MyView`). The eraser's feather mask and feathered dab
+are cached in `MyView` (`draw_feather_mask`, `draw_feather_softness`; rebuilt when the softness
+changes).
+
+`StickGraphicsItem::taper_path`/`taper_key` cache the `QPainterPath::simplified()` result of the
+TAPER outline in `paint()`; the key is the geometry inputs, so a new input of the shape must be
+added to it or the outline goes stale. The brush border's dab is still rebuilt every `paint()`.
+
