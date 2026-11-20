@@ -297,6 +297,12 @@ private slots:
 
     void on_splitStick_clicked();
 
+    /// @brief Activates the freeze tool: clicked sticks become frozen (StickData::frozen).
+    void on_freezeStickBtn_clicked();
+
+    /// @brief Activates the unfreeze tool: clicked sticks are unfrozen.
+    void on_unfreezeStickBtn_clicked();
+
 
     void on_setMasterNodeBtn_clicked();
 

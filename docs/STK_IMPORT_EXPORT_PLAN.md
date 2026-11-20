@@ -242,7 +242,7 @@ don't map are still consumed at their exact size (READ+SKIP):
 | 1 | connector prefix: `local_x` f32, `local_y` f32, `percent` f32, [b≥44: `percent_default` f32], `value` f32, `method` i32, `reversed` u8, [b≥65: `smart_stretch_ancestral_value` f32] | — | v≥403 ∧ b>38 ∧ this child was flagged as connector by its parent (field 26) | skip; count for warning |
 | 2 | `node_type` | i8 | | map (table §4b) |
 | 3 | `draw_order_index` | i32 | | → z-order |
-| 4 | `is_static` | u8 | | warning (→ §9.1 later) |
+| 4 | `is_static` | u8 | | → `StickData::frozen` (§9.1) |
 | 5 | `is_stretchy` | u8 | | skip; count for warning |
 | 6 | `is_floaty` | u8 | v≥403 ∧ b≥48 | skip |
 | 7 | `is_smart_stretch` | u8 | v≥248 | skip |
@@ -373,7 +373,7 @@ Then, per segment k (1-based), create one `StickData`:
 | `thickness > 0` | `pen.setWidthF(thickness)` |
 | `thickness == 0` | `pen.setStyle(Qt::NoPen)` (invisible handle-carrier segments; do NOT abuse `is_linker`, which has merge-GC semantics) |
 | `color` + `opacity` | `QColor(r, g, b, opacity == 0 ? 255 : 255 − opacity)` into pen (and brush for type 3) |
-| `static = 1` | no local equivalent — import as normal stick; ONE summary warning *"N static segments imported as normal sticks (they will get handles)"* (future: §9.1) |
+| `static = 1` | `StickData::frozen = true` (§9.1); no warning |
 | section A | skip silently (future: §9.1) |
 | polyfills | skip + warning *"N polygon fills ignored (not supported)"* (future: §9.2) |
 | draw order | `z = base-independent increasing value per draw position`: stick drawn p-th gets `z = p/100.0`; without section C use file order. Append to `stick_list` in **file order** (parents must precede children for `PopulateLiveStickFigure`), set z separately |
@@ -433,8 +433,7 @@ node is a pure origin joint with no segment. So: **every non-root node ⇒ one
 | 7 polygon | `LINE` + warning *"polygon segment imported as plain stick"* |
 | unknown | `LINE` + warning |
 
-Ignored with ONE summary warning each (counts, not per-node spam): statics
-(§9.1), stretchy/smart-stretch/floaty, curved segments (`segment_curve_radius ≠
+Ignored with ONE summary warning each (counts, not per-node spam): stretchy/smart-stretch/floaty, curved segments (`segment_curve_radius ≠
 0`), gradients, angle/drag locks, connectors (their geometry still imports via
 local_x/y — only the elastic behavior is lost), polyfill section (§9.2 shares the
 solution), `is_stretchy`/`use_segment_scale` refinements.
@@ -474,12 +473,12 @@ Per stick:
 | TRAPEZOID | type 6, thickness = `(img_w_scale + img_h_scale)/2` + warning |
 | IMAGE | type 0, thickness = `pen.widthF()` + warning *"image stick exported as plain stick"* |
 | color | shape types: brush color if brush ≠ NoBrush, else pen color; LINE: pen color. RGB bytes + opacity byte = `255 − alpha` (0 when opaque) |
-| `static` | never written as 1 (no local concept; future: §9.1) |
+| `static` | `frozen` ⇒ 1 (§9.1): flags bit 1 cleared and a per-segment byte after the type byte, written only when at least one segment is static |
 
 Header `flags` — minimize like Pivot does (observed bytes reproduced exactly):
 start from `0xBF`; clear bit 0 if any type ≠ 0; clear bit 2 if any color ≠ opaque
-black; clear bit 3 if any alpha ≠ 255. Bits 1 and 4 stay set (no statics, no
-polyfills ⇒ no section C). Trailer: `count_a = 0` (u16), `poly_count = 0` (u16).
+black; clear bit 3 if any alpha ≠ 255; clear bit 1 if any stick is frozen (§9.1).
+Bits 1 (no frozen sticks) and 4 stay set (no polyfills ⇒ no section C). Trailer: `count_a = 0` (u16), `poly_count = 0` (u16).
 Compress with zlib level 9, prepend `'z'`.
 
 ### 5.2 Legacy v2 output — "Stick Nodes compatible"
@@ -487,7 +486,7 @@ Compress with zlib level 9, prepend `'z'`.
 Same emission order and geometry, written into the §2.8 layout (uncompressed,
 `0x01`, u8 count, 24-byte records: `parent_joint` u8, sequential u16 `id`, 0, f32
 length, f64 angle **normalized to [0, 2π)**, f32 thickness, u8 type, u8 static
-(0 until §9.1 lands), u16 0). Additional degradations on top of the §5.1 table,
+(`frozen`, §9.1), u16 0). Additional degradations on top of the §5.1 table,
 each with a warning, since v2 has no color/caps/fills:
 
 | local | v2 STK |
@@ -600,13 +599,12 @@ Copy the 10 `basic\*.stk` samples into `tests/data/stk/`, the 5 v2 samples from
    must produce a decompressed payload byte-identical to `single stick.stk`'s
    (header `BF 01 00 00 00`, 16-byte segment, `00 00 00 00` trailer) — pins the
    writer to the observed format.
-7. `ImportStaticSampleWarns` (modern *three consecutive sticks…* sample, flags
-   `0xB9`): 3 sticks chained P2→P2, one warning naming 1 static segment. Becomes
-   the acceptance test for §9.1 later (assert `is_static` on stick 2 instead of
-   the warning).
+7. `StkImportStaticSampleFreezes` (modern *three consecutive sticks…* sample, flags
+   `0xB9`): 3 sticks chained P2→P2, `frozen` on stick 2 and no warning (was
+   `ImportStaticSampleWarns`; §9.1 implemented).
 8. `ImportV2Files`: for each v2 sample assert count/types/parents — stickman:
    parents {0,1,1,1,0,0}, seg 4 is the CIRCLE head at the neck joint, legs are
-   stepchildren; 3-stick chain: parents 0,1,2 + static warning on the middle one;
+   stepchildren; 3-stick chain: parents 0,1,2 + `frozen` on the middle one;
    circles/sticks: thickness 5/15, angle 3π/2 normalized to the same direction as
    the modern −π/2 samples.
 9. `ImportRejectsCorruptV2`: size not equal to `2 + 24·count`, non-sequential id,
@@ -619,7 +617,7 @@ Copy the 10 `basic\*.stk` samples into `tests/data/stk/`, the 5 v2 samples from
     root's first child, root's other 2 direct children are stepchildren; every
     stick's `my_line` length = 1.5 × the node's stored length (header scale);
     exactly one CIRCLE; 10 TRAPEZOIDs (triangles); z values follow the
-    draw_order permutation; warnings mention 72 static and 33 stretchy nodes;
+    draw_order permutation; 72 sticks are `frozen`; warnings mention 33 stretchy nodes;
     dark-gray figure color inherited where `use_segment_color = 0`.
 12. `ImportRejectsCorruptNodes`: truncated mid-node, negative `child_count`,
     node-count bomb (child_count huge), version 9999 (⇒ compressed path ⇒ zlib
@@ -679,6 +677,12 @@ converter can be upgraded incrementally without rework.
 
 ### 9.1 Static segments
 
+**Status: implemented** as `StickData::frozen` (not `is_static`), `StickData`
+version 14 (see CLAUDE.md "Data model"). Tests: `StkImportStaticSampleFreezes`,
+the v2 chain and Zed-Stickman import tests, `FrozenStickRoundTripsEveryFormat`,
+`FrozenStickResistsTheDragTools`. The text below is the original plan; where it
+differs (field name, version, UI), the implementation wins.
+
 - **Pivot / Stick Nodes**: a segment marked *static* has no endpoint handle in the
   animator and moves rigidly with its parent. Heavily used by community figures to
   make complex shapes act as one piece (Chuck: 113 of 122 segments; Hippie Van:
@@ -689,8 +693,8 @@ converter can be upgraded incrementally without rework.
   `v2\three consecutive sticks…`. Note: section A is unrelated to statics (the
   modern static sample has `count_a = 0`), so this item does NOT need to decode it
   — export keeps writing `count_a = 0`.
-- **First pass degrades to**: normal sticks with handles + summary warning;
-  never exported.
+- **First pass degraded to** (superseded): normal sticks with handles + summary
+  warning; never exported.
 - **Full implementation**:
   1. `StickData`: new `bool is_static` field. Serialize it in
      `stickdata.cpp` `operator<<`/`operator>>` — new trailing field, so bump
@@ -802,8 +806,8 @@ version switches, matching what current Stick Nodes itself produces. Key decisio
 - Covered by `NodesExportRoundTrip` and `NodesExportZedRoundTrip` (91-stick
   figure, endpoint drift < 0.75 px). Remaining manual check: open one export in
   real Stick Nodes (§7.13).
-- Still the natural home for exporting statics once §9.1 lands, and polyfills
-  (v≥230 section) once §9.2 lands.
+- Statics are exported as `is_static` (§9.1); polyfills (v≥230 section) come
+  once §9.2 lands.
 
 ### Suggested order
 

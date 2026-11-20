@@ -1377,6 +1377,16 @@ Widget::Widget(QWidget *parent)
     connect(ui->fastMoveCheckBox, &QCheckBox::toggled, this, [this](bool on){
         view->fast_move_effects = on;
     });
+    // "Frozen handles": every frozen stick's view, current frame or not (visited frames keep their
+    // views off-scene). Only frozen ones: the box changes nothing else, and draw mode's hidden
+    // handles must stay hidden
+    connect(ui->frozenHandlesCheckBox, &QCheckBox::toggled, this, [this](bool on){
+        StickGraphicsItem::show_frozen_handles = on;
+        for(Frame *frame : view->my_animation->frame_list)
+            for(StickData *s : frame->total_sticks)
+                if(s->frozen && s->view && s != view->draw_target)
+                    s->view->SyncHandleVisibility();
+    });
     //json read
     if(!QFile::exists(lib_folder.path()+"/defaultLib.samlib")){
         view->SaveLibrary(lib_folder.path()+"/defaultLib.samlib");
@@ -3464,6 +3474,18 @@ void Widget::on_splitStick_clicked()
     StickData* added = view->my_animation->CurrentFrame()->CurrentStickFigure()->Chop(view->my_animation->CurrentFrame()->CurrentStick());
     view->AddHandles(view->my_animation->CurrentFrame()->CurrentStickFigure());
     view->my_animation->CurrentFrame()->total_sticks.append(added);
+}
+
+/// @details Switches to the freeze tool (MyView's FREEZE): every stick clicked becomes frozen.
+void Widget::on_freezeStickBtn_clicked()
+{
+    view->SetTool(FREEZE);
+}
+
+/// @details Switches to the unfreeze tool (MyView's UNFREEZE): every stick clicked is unfrozen.
+void Widget::on_unfreezeStickBtn_clicked()
+{
+    view->SetTool(UNFREEZE);
 }
 
 

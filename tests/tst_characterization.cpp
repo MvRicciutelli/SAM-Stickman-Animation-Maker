@@ -4001,6 +4001,82 @@ private slots:
         QVERIFY(figure->stick_list[figure->stick_list.count() - 3]->local_xf.IsIdentity());
     }
 
+    // A frozen stick through real mouse events: its handles hide (unless "Frozen handles"), a drag
+    // with select/clamp/plastic move/elongate/displace still selects it but moves nothing, its
+    // unfrozen parent still rotates and carries it rigidly, and an undo restore keeps it frozen
+    void FrozenStickResistsTheDragTools()
+    {
+        struct Restore {
+            MyView *v;
+            ~Restore() { v->SetTool(NOTOOL); StickGraphicsItem::show_frozen_handles = false; }
+        } restore{view};
+        AddFrame();
+        view->resize(800, 600);
+        StickData *parent = DrawStick(QPointF(300, 100), QPointF(300, 300));
+        StickData *child = DrawStick(QPointF(300, 300), QPointF(420, 300));
+        QCOMPARE(child->parent, parent);
+        auto at = [this](QPointF scene) { return view->mapFromScene(scene); };
+        // the FREEZE tool: a click on empty canvas freezes nothing, a click on the child freezes
+        // it (one undo step), a second click changes nothing (no step)
+        QSignalSpy pushes(&view->undo_stack, &QUndoStack::indexChanged);
+        view->SetTool(FREEZE);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(600, 500)));
+        QVERIFY(!child->frozen && !parent->frozen);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(380, 300)));
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(380, 300)));
+        QVERIFY(child->frozen && !parent->frozen);
+        QCOMPARE(pushes.count(), 1);
+        // UNFREEZE, then FREEZE again
+        view->SetTool(UNFREEZE);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(380, 300)));
+        QVERIFY(!child->frozen);
+        QVERIFY(child->view->stick_handle[0]->isVisible());
+        view->SetTool(FREEZE);
+        QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(QPointF(380, 300)));
+        QVERIFY(child->frozen);
+        QVERIFY(!child->view->stick_handle[0]->isVisible() && !child->view->stick_handle[1]->isVisible());
+        QVERIFY(parent->view->stick_handle[1]->isVisible());
+        StickGraphicsItem::show_frozen_handles = true;
+        child->view->SyncHandleVisibility();
+        QVERIFY(child->view->stick_handle[0]->isVisible() && child->view->stick_handle[1]->isVisible());
+        StickGraphicsItem::show_frozen_handles = false;
+        child->view->SyncHandleVisibility();
+
+        auto drag = [&](QPointF from, QPointF to) {
+            QTest::mousePress(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(from));
+            for (int i = 1; i <= 4; i++) {
+                const QPoint p = at(from + (to - from) * i / 4.0);
+                QMouseEvent ev(QEvent::MouseMove, QPointF(p), QPointF(view->viewport()->mapToGlobal(p)),
+                               Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+                QApplication::sendEvent(view->viewport(), &ev);
+            }
+            QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, at(to));
+        };
+        const QLineF child_line = child->my_line;
+        // pressed on the child's free end: a stick end always wins over the selection box handles
+        for (int t : { NOTOOL, CLAMP, MANIPULATE, ELONGATE, DISPLACE }) {
+            view->SetTool(t);
+            drag(QPointF(420, 300), QPointF(380, 380));
+            QVERIFY2(CurrentFrame()->CurrentStick() == child, qPrintable(QString("tool %1 did not select").arg(t)));
+            QVERIFY2(child->my_line == child_line, qPrintable(QString("tool %1 moved it").arg(t)));
+            QVERIFY(child->local_xf.IsIdentity() && child->global_xf.IsIdentity());
+        }
+
+        // the parent (the master), pressed near its free end so it rotates instead of translating
+        view->SetTool(NOTOOL);
+        const QLineF parent_line = parent->my_line;
+        drag(QPointF(300, 260), QPointF(380, 240));
+        QVERIFY(parent->my_line != parent_line);
+        QVERIFY(QLineF(child->my_line.p1(), parent->my_line.p2()).length() < 0.05); // float angles
+        QVERIFY(qAbs(child->my_line.length() - child_line.length()) < 0.05);
+        QVERIFY(child->my_line != child_line);
+
+        view->undo_stack.undo(); // the parent drag: rebuilds the figure and its views
+        StickData *restored = CurrentStickFigure()->stick_list.last();
+        QVERIFY(restored->frozen);
+        QVERIFY(restored->view && !restored->view->stick_handle[0]->isVisible());
+    }
+
     // Group D bug 3: the scale tool must scale a MULTILINE's per-vertex thickness
     // (vertex_widths) along with its shape, and a POLYGON's outline pen. Replicates the
     // buffers mousePressEvent's SCALE case caches, then calls StickGraphicsItem::Scale().
@@ -5509,7 +5585,8 @@ private slots:
         QVERIFY(warnings.join(" ").contains("multi-line"));
     }
 
-    void StkImportStaticSampleWarns()
+    // a Pivot "static" segment imports as a frozen stick, with no warning (plan §9.1)
+    void StkImportStaticSampleFreezes()
     {
         QStringList warnings;
         QString error;
@@ -5520,8 +5597,87 @@ private slots:
         QCOMPARE(figure->stick_list.count(), 3);
         QCOMPARE(figure->stick_list[1]->parent, figure->stick_list[0]);
         QCOMPARE(figure->stick_list[2]->parent, figure->stick_list[1]);
-        QVERIFY(warnings.join(" ").contains("1 static"));
+        QVERIFY(!figure->stick_list[0]->frozen);
+        QVERIFY(figure->stick_list[1]->frozen);
+        QVERIFY(!figure->stick_list[2]->frozen);
+        QVERIFY(!warnings.join(" ").contains("static"));
         delete figure;
+    }
+
+    // StickData::frozen survives the native record (and its version gate), Clone(), and the three
+    // foreign writers: Pivot 5 (flags bit 1 + a byte per segment), Pivot 2 (offset 21) and .nodes
+    void FrozenStickRoundTripsEveryFormat()
+    {
+        StickData stick;
+        stick.frozen = true;
+        QByteArray bytes;
+        {
+            QDataStream out(&bytes, QIODevice::WriteOnly);
+            out << stick;
+        }
+        StickData loaded;
+        {
+            QDataStream in(bytes);
+            in >> loaded;
+        }
+        QVERIFY(loaded.frozen);
+        StickData *clone = stick.Clone();
+        QVERIFY(clone->frozen);
+        delete clone;
+
+        // a v13 record has no flag: it loads unfrozen, raised to the current version
+        stick.version = 13;
+        QByteArray old_bytes;
+        {
+            QDataStream out(&old_bytes, QIODevice::WriteOnly);
+            out << stick;
+        }
+        QVERIFY(old_bytes.size() < bytes.size());
+        StickData old_loaded;
+        {
+            QDataStream in(old_bytes);
+            in >> old_loaded;
+        }
+        QVERIFY(!old_loaded.frozen);
+        QCOMPARE(old_loaded.version, StickData::CURRENT_VERSION);
+
+        // master -> frozen middle -> tip, z ascending so every writer keeps this order
+        StickFigureData figure;
+        QLineF lines[3] = { QLineF(100, 100, 100, 52), QLineF(100, 52, 140, 30), QLineF(140, 30, 180, 30) };
+        for (int i = 0; i < 3; i++) {
+            StickData *s = new StickData();
+            s->my_line = lines[i];
+            s->pen = QPen(QColor(0, 0, 0));
+            s->pen.setWidthF(5.0);
+            s->pen.setCapStyle(Qt::RoundCap);
+            s->z = i / 100.0;
+            s->frozen = (i == 1);
+            s->parent = i > 0 ? figure.stick_list[i - 1] : nullptr;
+            for (StickData *a = s->parent; a; a = a->parent)
+                a->children.append(s);
+            figure.stick_list.append(s);
+        }
+        figure.master_stick = figure.stick_list[0];
+
+        auto check = [](StickFigureData *back, const QString &what) {
+            QVERIFY2(back, qPrintable(what));
+            QCOMPARE(back->stick_list.count(), 3);
+            QVERIFY2(!back->stick_list[0]->frozen && back->stick_list[1]->frozen && !back->stick_list[2]->frozen,
+                     qPrintable(what));
+            delete back;
+        };
+        QStringList warnings;
+        QString error;
+        const QString pivot5 = stk_temp_dir.filePath("frozen5.stk");
+        QVERIFY2(StkFormat::ExportStk(pivot5, figure, StkFormat::PIVOT5, &warnings, &error), qPrintable(error));
+        QCOMPARE(quint8(InflateZlib(ReadFileBytes(pivot5).mid(1)).at(0)) & 0x02, 0); // static field present
+        check(StkFormat::ImportStk(pivot5, QPointF(0, 0), &warnings, &error), "pivot 5: " + error);
+        const QString pivot2 = stk_temp_dir.filePath("frozen2.stk");
+        QVERIFY2(StkFormat::ExportStk(pivot2, figure, StkFormat::PIVOT2, &warnings, &error), qPrintable(error));
+        check(StkFormat::ImportStk(pivot2, QPointF(0, 0), &warnings, &error), "pivot 2: " + error);
+        const QString nodes = stk_temp_dir.filePath("frozen.nodes");
+        QVERIFY2(StkFormat::ExportNodes(nodes, figure, &warnings, &error), qPrintable(error));
+        check(StkFormat::ImportNodes(nodes, QPointF(0, 0), &warnings, &error), "nodes: " + error);
     }
 
     void StkImportRejectsCorruptFiles()
@@ -5781,7 +5937,7 @@ private slots:
         QVERIFY2(chain, qPrintable(error));
         QCOMPARE(chain->stick_list.count(), 3);
         QCOMPARE(chain->stick_list[2]->parent, chain->stick_list[1]);
-        QVERIFY(warnings.join(" ").contains("1 static"));
+        QVERIFY(chain->stick_list[1]->frozen && !chain->stick_list[0]->frozen && !chain->stick_list[2]->frozen);
         delete chain;
     }
 
@@ -5869,8 +6025,13 @@ private slots:
         QVERIFY(qAbs(figure->master_stick->my_line.length() - 132.7297 * 1.5) < 0.5);
         QVERIFY(qAbs(figure->master_stick->pen.widthF() - 50 * 1.5) < 1e-6);
 
+        int frozen = 0;
+        for (StickData *stick : figure->stick_list)
+            frozen += stick->frozen ? 1 : 0;
+        QCOMPARE(frozen, 72); // the static nodes
+
         QString joined = warnings.join(" ");
-        QVERIFY(joined.contains("72 static"));
+        QVERIFY(!joined.contains("static"));
         QVERIFY(joined.contains("33 stretchy"));
         delete figure;
     }

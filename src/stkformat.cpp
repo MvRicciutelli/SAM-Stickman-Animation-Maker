@@ -276,7 +276,6 @@ StickFigureData *BuildFigure(const QList<StkSegment> &segments,
     StickFigureData *figure = new StickFigureData();
     figure->name = name;
     int unknown_types = 0;
-    int static_count = 0;
     for (int i = 0; i < segments.count(); i++) {
         const StkSegment &seg = segments[i];
         StickData *stick = new StickData();
@@ -296,9 +295,8 @@ StickFigureData *BuildFigure(const QList<StkSegment> &segments,
             stick->stepchild = stick->parent->stepchild; // children of a stepchild are stepchildren
         }
         AppendToAncestors(stick);
+        stick->frozen = seg.is_static;
         figure->stick_list.append(stick);
-        if (seg.is_static)
-            static_count++;
     }
     figure->current_stick = figure->master_stick;
 
@@ -329,9 +327,6 @@ StickFigureData *BuildFigure(const QList<StkSegment> &segments,
         warnings->append(QObject::tr("%1 polygon fill(s) imported as polygon sticks (each attached to one joint; it moves rigidly with it instead of deforming).")
                          .arg(poly_imported));
 
-    if (static_count > 0)
-        warnings->append(QObject::tr("%1 static segment(s) imported as normal sticks (they will have handles).")
-                         .arg(static_count));
     if (unknown_types > 0)
         warnings->append(QObject::tr("%1 segment(s) of unknown type imported as plain sticks.")
                          .arg(unknown_types));
@@ -508,6 +503,7 @@ struct ExportSegment
     double angle = 0;
     double thickness = 0;
     int type = 0;
+    bool is_static = false;   ///< the stick is frozen (StickData::frozen)
     QColor color = QColor(0, 0, 0, 255);
 };
 
@@ -632,6 +628,7 @@ bool ResolveExportSegments(const StickFigureData &figure, QList<ExportSegment> *
     bool ellipse_warned = false;
     for (StickData *stick : order) {
         ExportSegment seg;
+        seg.is_static = stick->frozen;
         QLineF line = stick->my_line;
         seg.length = line.length();
         seg.angle = qAtan2(line.dy(), line.dx());
@@ -697,6 +694,7 @@ bool ResolveExportSegments(const StickFigureData &figure, QList<ExportSegment> *
                 link.length = edge.length();
                 link.angle = qAtan2(edge.dy(), edge.dx());
                 link.type = 0;
+                link.is_static = stick->frozen; // the chain is the stick: frozen as a whole
                 link.color = pen_color;
                 double width_a = stick->vertex_widths.value(parents[v], pen_width);
                 double width_b = stick->vertex_widths.value(v, pen_width);
@@ -792,8 +790,9 @@ bool ResolveExportSegments(const StickFigureData &figure, QList<ExportSegment> *
             carrier.parent_joint = joint_of.value(stick);
             carrier.length = to_vertex.length();
             carrier.angle = qAtan2(to_vertex.dy(), to_vertex.dx());
-            carrier.thickness = 0; // invisibile: esiste solo per creare il joint
+            carrier.thickness = 0; // invisible: it only exists to create the joint
             carrier.type = 0;
+            carrier.is_static = stick->frozen;
             segments->append(carrier);
             poly.joint_ids.append(segments->count()); // 1-based: l'id del carrier appena scritto
         }
@@ -821,14 +820,16 @@ bool ResolveExportSegments(const StickFigureData &figure, QList<ExportSegment> *
 QByteArray WriteModernPayload(const QList<ExportSegment> &segments,
                               const QList<ExportPolyfill> &polyfills)
 {
-    bool any_type = false, any_color = false, any_alpha = false;
+    bool any_type = false, any_static = false, any_color = false, any_alpha = false;
     for (const ExportSegment &seg : segments) {
         any_type |= seg.type != 0;
+        any_static |= seg.is_static;
         any_color |= seg.color.red() || seg.color.green() || seg.color.blue();
         any_alpha |= seg.color.alpha() != 255;
     }
     quint8 flags = 0xBF;
     if (any_type)  flags &= ~0x01;
+    if (any_static) flags &= ~0x02;
     if (any_color) flags &= ~0x04;
     if (any_alpha) flags &= ~0x08;
     if (!polyfills.isEmpty()) flags &= ~0x10; // polyfill feature ⇒ section C required
@@ -845,6 +846,8 @@ QByteArray WriteModernPayload(const QList<ExportSegment> &segments,
         writer.F32(float(seg.thickness));
         if (any_type)
             writer.U8(quint8(seg.type));
+        if (any_static)
+            writer.U8(seg.is_static ? 1 : 0);
         if (any_color) {
             writer.U8(quint8(seg.color.red()));
             writer.U8(quint8(seg.color.green()));
@@ -908,7 +911,7 @@ QByteArray WriteV2Payload(const QList<ExportSegment> &segments, QStringList *war
         writer.F64(angle);
         writer.F32(float(seg.thickness));
         writer.U8(is_circle ? 1 : 0);
-        writer.U8(0); // static: no local concept yet (plan §9.1)
+        writer.U8(seg.is_static ? 1 : 0);
         writer.U16(0);
     }
     if (any_color)
@@ -1147,6 +1150,7 @@ struct NodeExport
     QColor color;                 ///< main node color
     QColor outline_color;         ///< circle outline
     bool hollow = false;
+    bool is_static = false;       ///< the stick is frozen (StickData::frozen)
     QList<int> children;          ///< indices into the NodeExport list
 };
 
@@ -1162,7 +1166,7 @@ double NormalizeDegrees(double degrees)
 /**
  * @brief Serializes one v403/b72 node record — every field of that build, in the
  *        exact stream order of §2.9, with neutral values for the features
- *        SAM has no data for (no statics/stretch/curves/locks/gradients;
+ *        SAM has no data for (no stretch/curves/locks/gradients;
  *        multipliers written as their NEUTRAL value, not 0, so a reader that applies
  *        them anyway cannot zero the figure out).
  */
@@ -1170,7 +1174,7 @@ void WriteNodeRecord(ByteWriter &w, const NodeExport &node)
 {
     w.U8(quint8(qint8(node.type)));
     w.I32(node.draw_index);
-    w.U8(0);                                  // is_static
+    w.U8(node.is_static ? 1 : 0);             // is_static
     w.U8(0);                                  // is_stretchy
     w.U8(0);                                  // is_floaty            (b>=48)
     w.U8(0);                                  // is_smart_stretch     (v>=248)
@@ -1317,7 +1321,7 @@ StickFigureData *StkFormat::ImportNodes(const QString &path, const QPointF &targ
     QVector<QPointF> positions;   // slot 0 = root joint
     QVector<StickData *> sticks;  // parallel to positions; nullptr for the root
     QHash<qint32, int> slot_of_draw_index; // the polyfill trailer references nodes by draw index
-    int static_count = 0, stretchy_count = 0, curved_count = 0, gradient_count = 0;
+    int stretchy_count = 0, curved_count = 0, gradient_count = 0;
     int locked_count = 0, connector_count = 0, approximations = 0;
 
     NodeFields root = ReadNode(cur, version, build, false);
@@ -1362,6 +1366,7 @@ StickFigureData *StkFormat::ImportNodes(const QString &path, const QPointF &targ
         ApplyNodeStyle(stick, node, effective, double(node.thickness) * figure_scale,
                        &approximations);
         stick->z = node.draw_index / 100.0;
+        stick->frozen = node.is_static;
         StickData *parent_stick = sticks[parent_slot];
         if (!parent_stick && figure->master_stick == nullptr) {
             stick->parent = nullptr; // the root's first child is the master
@@ -1378,7 +1383,6 @@ StickFigureData *StkFormat::ImportNodes(const QString &path, const QPointF &targ
         positions.append(pos);
         sticks.append(stick);
         slot_of_draw_index.insert(node.draw_index, positions.count() - 1);
-        if (node.is_static) static_count++;
         if (node.is_stretchy) stretchy_count++;
         if (node.curve != 0) curved_count++;
         if (node.gradient) gradient_count++;
@@ -1452,8 +1456,6 @@ StickFigureData *StkFormat::ImportNodes(const QString &path, const QPointF &targ
     if (!cur.AtEnd() && !cur.Failed())
         warnings->append(QObject::tr("Trailing data (connectors or newer sections) ignored."));
 
-    if (static_count > 0)
-        warnings->append(QObject::tr("%1 static segment(s) imported as normal sticks (they will have handles).").arg(static_count));
     if (stretchy_count > 0)
         warnings->append(QObject::tr("%1 stretchy segment(s) imported as rigid sticks.").arg(stretchy_count));
     if (curved_count > 0)
@@ -1588,6 +1590,7 @@ bool StkFormat::ExportNodes(const QString &path, const StickFigureData &figure,
         NodeExport node;
         node.stick = stick;
         node.draw_index = draw_rank[i];
+        node.is_static = stick->frozen;
 
         // parent node: the master and its origin-attached stepchildren hang off the
         // root joint; everyone else off their parent stick's (last) node
@@ -1659,6 +1662,7 @@ bool StkFormat::ExportNodes(const QString &path, const StickFigureData &figure,
                 int up = parents[v];
                 NodeExport link;
                 link.type = 0;
+                link.is_static = stick->frozen; // the chain is the stick: frozen as a whole
                 link.draw_index = (v == 1) ? draw_rank[i] : next_draw++;
                 QPointF from = (up == 0) ? parent_pos : verts[up];
                 QPointF off = verts[v] - from;
@@ -1759,7 +1763,8 @@ bool StkFormat::ExportNodes(const QString &path, const StickFigureData &figure,
             carrier.length = QLineF(QPointF(0, 0), offset).length();
             carrier.global_angle_deg = (carrier.length > 0)
                     ? NormalizeDegrees(qAtan2(offset.y(), offset.x()) * 180.0 / M_PI) : 0.0;
-            carrier.thickness = 0; // invisibile: esiste solo per portare il vertice
+            carrier.is_static = stick->frozen;
+            carrier.thickness = 0; // invisible: it only exists to carry the vertex
             carrier.color = QColor(0, 0, 0, 0);
             carrier.outline_color = carrier.color;
             poly.attached.append(carrier.draw_index);

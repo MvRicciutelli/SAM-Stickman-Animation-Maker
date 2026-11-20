@@ -301,6 +301,7 @@ void StickData::CopyFrom(const StickData &source)
     version = source.version;
     stick_type = source.stick_type;
     is_linker = source.is_linker;
+    frozen = source.frozen;
     z = source.z;
     stepchild = source.stepchild;
     my_line = source.my_line;
@@ -1476,6 +1477,8 @@ QDataStream &operator<<(QDataStream &stream, const StickData &stick_data)
         WriteXfBody(stream, stick_data.global_xf);
         WriteXfFlips(stream, stick_data.global_xf);
     }
+    if (stick_data.version >= 14)
+        stream << stick_data.frozen; // every type has it, like the Stick Transform above
     // A FREEHAND from v13 on is written cropped to its painted pixels (CroppedFreehand(), on a copy:
     // a save during a draw session leaves the session alone) and without its composite, which the
     // reader rebuilds from the layers. The image block's size slot then carries the grid.
@@ -1608,6 +1611,8 @@ QDataStream &operator>>(QDataStream &stream, StickData &stick_data)
         ReadXfBody(stream, stick_data.global_xf);
         ReadXfFlips(stream, stick_data.global_xf);
     }
+    if (stick_data.version >= 14)
+        stream >> stick_data.frozen;
     if (stick_data.IsImageType() || (stick_data.stick_type == StickData::CIRCLE) || (stick_data.stick_type == StickData::RECT) || (stick_data.stick_type == StickData::TRAPEZOID) || (stick_data.stick_type == StickData::TAPER) || (stick_data.stick_type == StickData::POLYGON) || (stick_data.stick_type == StickData::MULTILINE) || (stick_data.stick_type == StickData::TEXT) || (stick_data.stick_type == StickData::VECTOR)) {
         QSize mysize;
         if (stick_data.IsImageType()) {

@@ -344,5 +344,11 @@
         <file>resources/stick_paste_o_00001.png</file>
         <file>resources/stick_paste_o_00002.png</file>
         <file>resources/stick_paste_o_00003.png</file>
+        <file>resources/freeze_stick_00001.png</file>
+        <file>resources/freeze_stick_00002.png</file>
+        <file>resources/freeze_stick_00003.png</file>
+        <file>resources/unfreeze_stick_00001.png</file>
+        <file>resources/unfreeze_stick_00002.png</file>
+        <file>resources/unfreeze_stick_00003.png</file>
     </qresource>
 </RCC>

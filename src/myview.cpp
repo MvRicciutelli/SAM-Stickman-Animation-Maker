@@ -707,6 +707,27 @@ void MyView::mousePressEvent(QMouseEvent *event)
 
                 break;
             }
+            case(FREEZE):
+            case(UNFREEZE):
+            {
+                // only a click on a figure: ArrowSelection() alone would pick the nearest stick
+                // from anywhere on the canvas
+                if(FigureAtPoint(coord) == nullptr)
+                    break;
+                ArrowSelection();
+                Frame *frame = my_animation->CurrentFrame();
+                if(frame->CurrentStickFigure() == nullptr || frame->CurrentStick() == nullptr)
+                    break;
+                StickData *stick = frame->CurrentStick();
+                const bool frozen = (tool == FREEZE);
+                if(stick->frozen == frozen)
+                    break; // no change, no undo step
+                StoreUndo();
+                stick->frozen = frozen;
+                if(stick->view)
+                    stick->view->SyncHandleVisibility();
+                break;
+            }
             case(ELONGATE):
             {
                 StoreUndo();
@@ -2300,8 +2321,7 @@ void MyView::ExitDrawMode()
     stick->CropFreehandLayers();
 
     if(stick->view){
-        stick->view->stick_handle[0]->show();
-        stick->view->stick_handle[1]->show();
+        stick->view->SyncHandleVisibility(); // back on, unless the stick is frozen
         stick->view->Refresh(0);
         stick->view->update();
     }
@@ -4293,8 +4313,8 @@ void MyView::BeginDisplace(int gesture)
 void MyView::DragDisplace(const QPointF &scene)
 {
     StickData *stick = TextureArrowStick();
-    if(stick == nullptr)
-        return;
+    if(stick == nullptr || stick->frozen)
+        return; // frozen: never displaced (before the deferred StoreUndo(), so no empty step)
     if(!displace_undo_taken){
         if((mapFromScene(scene) - mapFromScene(displace_press)).manhattanLength()
                 < QApplication::startDragDistance())
@@ -5105,6 +5125,14 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                         StickData *picked = my_animation->CurrentFrame()->CurrentStick();
                         StickData *ik_chain_start = IkChainStart(picked);
                         bool picked_is_master = (picked == my_animation->CurrentFrame()->CurrentStickFigure()->master_stick);
+                        // a frozen stick is selected but never rotated. A frozen master's origin
+                        // still drags the whole figure (RotateStickFigure()'s translation test)
+                        if(picked->frozen){
+                            const bool grabs_origin = tool != CLAMP && picked_is_master
+                                    && QLineF(coord, picked->my_line.p1()).length() < QLineF(coord, picked->my_line.p2()).length();
+                            if(!grabs_origin)
+                                break;
+                        }
                         // the master ALWAYS moves/rotates the whole figure, even when it belongs
                         // to an IK chain (spec): blocking the normal rotation applies only to the
                         // chain's other members, not to the master
@@ -5181,6 +5209,8 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
             {
                 if(is_pressed){
                     StickData *stick = my_animation->CurrentFrame()->CurrentStick();
+                    if(stick->frozen)
+                        break; // selected, never manipulated
                     // Alt: only the handle moves, the drawn shape stays where it was when Alt went
                     // down (latched then, so pressing it mid-drag works and nothing drifts). Not
                     // for the plain skeleton types (spec): there Alt is a normal Plastic Move.
@@ -5410,7 +5440,7 @@ void MyView::mouseMoveEvent(QMouseEvent *event)
                 break;
             if(my_animation->CurrentFrame()->CurrentStick() == nullptr)
                 break;
-            if(is_pressed){
+            if(is_pressed && !my_animation->CurrentFrame()->CurrentStick()->frozen){
                 QLineF new_end_point(my_animation->CurrentFrame()->CurrentStick()->my_line.p1(),coord);
                 length_buffer = new_end_point.length();
                 my_animation->CurrentFrame()->CurrentStickFigure()->Elongate(coord,my_animation->CurrentFrame()->CurrentStick());

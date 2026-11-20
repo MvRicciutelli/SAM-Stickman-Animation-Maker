@@ -59,7 +59,9 @@
 #define ZOOMVIEW 28     ///< drag to zoom the VIEW: right/up = in, left/down = out (Shift: 10% steps)
 #define DISPLACE 29     ///< select like NOTOOL, then move/turn the current stick's drawn shape with its
                         ///< handles: edits its Stick Transform (local_xf, or global_xf when displace_global)
-#define DRAW_IK 23      ///< creates/edits inverse-kinematics chains (StickData::IK_START/
+#define FREEZE 31       ///< click a stick to freeze it (StickData::frozen), one undo step per change
+#define UNFREEZE 32     ///< click a stick to unfreeze it
+#define DRAW_IK 23     ///< creates/edits inverse-kinematics chains (StickData::IK_START/
                         ///< IK_NODE/IK_TARGET_ON/IK_TARGET_OFF): first click on an eligible
                         ///< stick's start handle begins a chain, second click on a
                         ///< descendant stick commits it; clicking an existing target

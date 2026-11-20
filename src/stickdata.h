@@ -253,7 +253,7 @@ public:
     /// The newest record format this build reads AND writes; operator>> refuses anything above
     /// it (RejectNewerVersion()), because a newer record's extra fields would be read as the
     /// start of the next record and desync the whole stream.
-    static constexpr qint32 CURRENT_VERSION = 13;
+    static constexpr qint32 CURRENT_VERSION = 14;
     /// The formats of a VECTOR stick's shape list, each named after the fields it added: the read
     /// and write gates compare against these, never against a bare number.
     enum VectorShapesFormat : qint32 {
@@ -280,7 +280,7 @@ public:
                                      ///< global_xf, 11 the VECTOR type (vector_shapes), 12 a FREEHAND's
                                      ///< freehand_layers, 13 a FREEHAND written cropped and without its
                                      ///< composite (rebuilt on load; the image block's size is the
-                                     ///< grid) — all gated in operator<</operator>> so files saved before
+                                     ///< grid), 14 adds frozen — all gated in operator<</operator>> so files saved before
                                      ///< those fields existed still load (and operator>> then
                                      ///< raises the record to CURRENT_VERSION)
     qint32 stick_type = StickType::LINE;///< StickType value; drives painting and serialization
@@ -293,7 +293,16 @@ public:
      * endpoint handles, re-added by MyView::AddHandles()) behind forever.
      */
     bool is_linker = false;
-    qreal z = 0;                    ///< depth used for scene z-ordering between sticks; streamed as an
+    /**
+     * @brief A frozen stick is still selectable, but the canvas tools never rotate, stretch or
+     *        displace it, and its endpoint handles are hidden unless
+     *        StickGraphicsItem::show_frozen_handles is on. It still moves rigidly with its parent.
+     *
+     * The local name of the "static" segment of Pivot (.stk) and Stick Nodes (.nodes), which the
+     * importers and exporters map onto this flag.
+     */
+    bool frozen = false;
+    qreal z = 0;                   ///< depth used for scene z-ordering between sticks; streamed as an
                                      ///< explicit double (qreal itself can be float or double depending
                                      ///< on how Qt was built, so the field's own width isn't stable)
     bool stepchild = false;         ///< true when attached to the parent's origin (P1) instead of its free end

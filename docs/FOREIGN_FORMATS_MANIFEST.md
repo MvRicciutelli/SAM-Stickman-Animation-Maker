@@ -119,7 +119,7 @@ gate table is STK_IMPORT_EXPORT_PLAN.md §2.9. The fields the converter USES:
 ┌───────────┬────────────┬────────┬───────────┬─────────────┬───────────┬─────────┐
 │ node_type │ draw_order │ static │ local_x/y │ thickness   │ colors    │ child_  │
 │ i8        │ i32        │ u8     │ f32×2     │ i32         │ ABGR u8×4 │ count   │
-│ −1 root   │ →z-order   │ →warn  │ offset    │ (int!)      │ + circle  │ i32     │
+│ −1 root   │ →z-order   │ →froz  │ offset    │ (int!)      │ + circle  │ i32     │
 │ 0/1 line  │            │        │ from      │             │ outline   │         │
 │ 2/4 circle│            │        │ parent    │             │ color     │         │
 │ 3/6 trap. │            │        │           │             │           │         │
@@ -187,7 +187,7 @@ BuildFigure():  joints by forward kinematics (angles are ABSOLUTE, no chain):
                   children appended to EVERY ancestor (flattened invariant)
                   type/pen/brush via mapping table; thickness 0 ⇒ Qt::NoPen
                   z = draw_position / 100.0
-                statics counted → ONE summary warning
+                static → StickData::frozen (no warning; written back on export)
                 polyfills → one StickData::POLYGON stick each (MakePolygonStick()):
                   vertices = the referenced joints' positions at import time, stored
                   in the stick's normalized-local polygon_points; base line from the
@@ -235,7 +235,7 @@ trailing sections parsed TOLERANTLY (any inconsistency stops the section, keeps 
     positions via the walk's draw-index→slot map; same MakePolygonStick() mapping as
     STK (anchor node = parent, z just behind it); unresolvable references → skip+warn
     connectors → "trailing data ignored" warning
-summary warnings: statics, stretchy, curved, gradients, locks, connectors, shapes
+summary warnings: stretchy, curved, gradients, locks, connectors, shapes
 RecenterFigure() as above
 ```
 
@@ -359,7 +359,6 @@ guards: non-empty; ≤65535 sticks
 
 | trigger | direction |
 |---|---|
-| N static segments → normal sticks | import (all formats) |
 | N polygon fills imported as polygon sticks (rigid, one-joint attach) | import (STK modern, .nodes) |
 | N polygon fills skipped (unresolvable node references) | import (.nodes) |
 | N stretchy / curved / gradient / locked / connector nodes degraded | import (.nodes) |

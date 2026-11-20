@@ -45,6 +45,8 @@ must go through `->view->` with a null check.
   `data->view`.
 - `StickData::is_linker`: invisible `NoPen` bridge stick made by `MergeStickFigures()`;
   `SplitStickFigures()` deletes linkers left childless (walking up chained linkers).
+- `StickData::frozen` (Pivot/Stick Nodes "static"): selectable, but the stick tools never drag it (a frozen
+  master's origin still moves the figure); handles hidden via `SyncHandleVisibility()` unless `show_frozen_handles`.
 
 `QGraphicsScene::addItem()` transfers ownership to the scene. A `QGraphicsItem` destructor detaches
 itself from its scene, so never assume `removeItem()` must precede `delete`.
@@ -89,7 +91,7 @@ void Widget::on_someBtn_clicked(){
   `Extract*Data()`/`PopulateLive*()`.
 - New serialized fields: use `qint32` and explicit `double`, never `int`/`qreal`.
 - Raising a format means raising its `CURRENT_VERSION` (`Animation` 3, `StickFigureData` 2,
-  `StickData` 13). `operator<<` gates newer fields on the record's version; `operator>>` raises an
+  `StickData` 14). `operator<<` gates newer fields on the record's version; `operator>>` raises an
   older record to current at its end.
 - Newer-than-supported files are refused (`RejectNewerVersion()` + `file_load_error`, shown through
   `MyView::ReportRejectedFile()`). A refused load must change nothing: parse into pure data first, and

@@ -2748,6 +2748,119 @@ QPushButton:pressed{
                            </widget>
                           </item>
                           <item>
+                           <widget class="QGroupBox" name="freezeStickBox">
+                            <property name="maximumSize">
+                             <size>
+                              <width>16777215</width>
+                              <height>55</height>
+                             </size>
+                            </property>
+                            <property name="title">
+                             <string/>
+                            </property>
+                            <layout class="QHBoxLayout" name="freezeStickLayout">
+                             <property name="leftMargin">
+                              <number>0</number>
+                             </property>
+                             <property name="topMargin">
+                              <number>0</number>
+                             </property>
+                             <property name="rightMargin">
+                              <number>0</number>
+                             </property>
+                             <property name="bottomMargin">
+                              <number>0</number>
+                             </property>
+                             <item>
+                              <widget class="QPushButton" name="freezeStickBtn">
+                               <property name="minimumSize">
+                                <size>
+                                 <width>25</width>
+                                 <height>25</height>
+                                </size>
+                               </property>
+                               <property name="maximumSize">
+                                <size>
+                                 <width>50</width>
+                                 <height>50</height>
+                                </size>
+                               </property>
+                               <property name="toolTip">
+                                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Freeze tool:&lt;/p&gt;&lt;p&gt;click sticks to freeze them. A frozen stick can still be selected, but the select, clamp, plastic move, elongate and displace tools do not move it, and its handles are hidden unless &amp;quot;Frozen handles&amp;quot; is checked. It still follows its parent.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                               </property>
+                               <property name="styleSheet">
+                                <string notr="true">QPushButton {
+    qproperty-icon: url(&quot; &quot;); /* empty image */
+    qproperty-iconSize: 16px 16px; /* space for the background image */
+    image: url(:/resources/freeze_stick_00001.png);
+    width: 50px;
+    height: 50px;
+    background-repeat: no-repeat;
+	border: 0px solid #5A5A5A;
+}
+QPushButton:hover{
+    image: url(:/resources/freeze_stick_00002.png);
+    background-repeat: no-repeat;
+	background-color: rgb(25, 25, 25)
+}
+QPushButton:pressed{
+    image: url(:/resources/freeze_stick_00003.png);
+    background-repeat: no-repeat;
+}
+</string>
+                               </property>
+                               <property name="text">
+                                <string/>
+                               </property>
+                              </widget>
+                             </item>
+                             <item>
+                              <widget class="QPushButton" name="unfreezeStickBtn">
+                               <property name="minimumSize">
+                                <size>
+                                 <width>25</width>
+                                 <height>25</height>
+                                </size>
+                               </property>
+                               <property name="maximumSize">
+                                <size>
+                                 <width>50</width>
+                                 <height>50</height>
+                                </size>
+                               </property>
+                               <property name="toolTip">
+                                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Unfreeze tool:&lt;/p&gt;&lt;p&gt;click sticks to unfreeze them: their handles come back and the tools move them again.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                               </property>
+                               <property name="styleSheet">
+                                <string notr="true">QPushButton {
+    qproperty-icon: url(&quot; &quot;); /* empty image */
+    qproperty-iconSize: 16px 16px; /* space for the background image */
+    image: url(:/resources/unfreeze_stick_00001.png);
+    width: 50px;
+    height: 50px;
+    background-repeat: no-repeat;
+	border: 0px solid #5A5A5A;
+}
+QPushButton:hover{
+    image: url(:/resources/unfreeze_stick_00002.png);
+    background-repeat: no-repeat;
+	background-color: rgb(25, 25, 25)
+}
+QPushButton:pressed{
+    image: url(:/resources/unfreeze_stick_00003.png);
+    background-repeat: no-repeat;
+}
+</string>
+                               </property>
+                               <property name="text">
+                                <string/>
+                               </property>
+                              </widget>
+                             </item>
+                            </layout>
+                           </widget>
+                          </item>
+                          <item>
                            <widget class="QFrame" name="frame_33">
                             <property name="maximumSize">
                              <size>
@@ -6037,6 +6150,16 @@ QPushButton:pressed{
                </property>
                <property name="text">
                 <string>Fast move</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QCheckBox" name="frozenHandlesCheckBox">
+               <property name="toolTip">
+                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Frozen handles&lt;/span&gt;&lt;/p&gt;&lt;p&gt;Shows the handles of frozen sticks too. Frozen sticks still cannot be moved with the tools.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+               </property>
+               <property name="text">
+                <string>Frozen handles</string>
                </property>
               </widget>
              </item>

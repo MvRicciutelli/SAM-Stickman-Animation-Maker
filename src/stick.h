@@ -416,7 +416,19 @@ public:
      *        a per-view flag set on the onion render views instead of a static.
      */
     static bool onion_render;
-    bool highlight = false;          ///< visual emphasis when the owning figure is selected
+    /**
+     * @brief The "Frozen handles" check box: when false (the default) a frozen stick's endpoint
+     *        handles are hidden. App-wide UI state, not saved; read only by SyncHandleVisibility().
+     */
+    static bool show_frozen_handles;
+    /**
+     * @brief Shows or hides both endpoint handles from data->frozen and show_frozen_handles.
+     *
+     * Call it after either input changes. The constructor calls it, so every new view (undo
+     * restore, frame load, paste) starts right.
+     */
+    void SyncHandleVisibility();
+    bool highlight = false;         ///< visual emphasis when the owning figure is selected
     bool selected = false;           ///< yellow endpoint markers when this is the current stick
     int rotation_spinbox_buffer = 0;   ///< last value pushed to the rotation spinbox (UI echo suppression)
     int scale_spin_box_buffer = 100;    ///< last value pushed to the scale spinbox (UI echo suppression)

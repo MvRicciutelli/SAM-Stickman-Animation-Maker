@@ -13,6 +13,7 @@
 #include <StickFigure.h>
 #include <myview.h> // MyView::QueueLayerSync()
 bool StickGraphicsItem::onion_render = false;
+bool StickGraphicsItem::show_frozen_handles = false;
 // `offscreen_render` era write-only da quando il marcatore IK si dipinge in
 // MyView::drawForeground() (mai nelle render scene): rimosso
 extern QGraphicsRectItem* my_rect;
@@ -41,7 +42,20 @@ StickGraphicsItem::StickGraphicsItem(StickData *stick_data)
     stick_handle[0]->setZValue(100);stick_handle[1]->setZValue(100);
     stick_handle[0]->setBrush(QBrush(Qt::red));
     stick_handle[1]->setBrush(QBrush(Qt::red));
+    SyncHandleVisibility();
     br = UpdateBr(0);
+}
+
+/**
+ * @details A hidden handle is skipped by MyView::drawForeground()'s selection redraw too (it
+ * checks isVisible()), so this is the only switch. Picking does not use the handles: a frozen
+ * stick stays selectable with its handles hidden.
+ */
+void StickGraphicsItem::SyncHandleVisibility()
+{
+    const bool show = !data->frozen || show_frozen_handles;
+    stick_handle[0]->setVisible(show);
+    stick_handle[1]->setVisible(show);
 }
 /**
  * @details Frees only what this object owns: the endpoint handles. `data` is
